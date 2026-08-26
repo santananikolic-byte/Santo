@@ -223,18 +223,24 @@ def pruefung_buchhaltung(agent):
 def pruefung_vertrieb(agent):
     abschnitt("Kundengespräche")
     analyse = agent.tools.call_analysis
-    for daten in (
-        {"kunde": "Berger", "datum": "2026-08-20", "punktzahl": 45, "ergebnis": "offen",
-         "volumen": 14400, "einwaende": ["Preis zu hoch"],
-         "offene_einwaende": ["Preis zu hoch"],
-         "schwaechen": ["Bodenbelag und Quadratmeter nie erfasst"],
-         "naechster_schritt": "Angebot mit Quadratmeterpreis schicken"},
-        {"kunde": "Huber", "datum": "2026-08-22", "punktzahl": 80,
-         "ergebnis": "gewonnen", "volumen": 9000, "einwaende": ["Preis zu hoch"]},
-        {"kunde": "Wolf", "datum": "2026-08-24", "punktzahl": 30, "ergebnis": "verloren",
-         "volumen": 0, "einwaende": ["Preis zu hoch"]},
+    # Die Einzelbewertung gehoert dazu - Claude liefert sie bei jedem Gespraech mit.
+    for daten, bewertung in (
+        ({"kunde": "Berger", "datum": "2026-08-20", "punktzahl": 45, "ergebnis": "offen",
+          "volumen": 14400, "einwaende": ["Preis zu hoch"],
+          "offene_einwaende": ["Preis zu hoch"],
+          "schwaechen": ["Bodenbelag und Quadratmeter nie erfasst"],
+          "naechster_schritt": "Angebot mit Quadratmeterpreis schicken"},
+         {"bedarf_erfasst": 4, "objekt_verstanden": 3, "preis_begruendet": 2,
+          "einwaende_behandelt": 6, "abschluss_gesucht": 8}),
+        ({"kunde": "Huber", "datum": "2026-08-22", "punktzahl": 80,
+          "ergebnis": "gewonnen", "volumen": 9000, "einwaende": ["Preis zu hoch"]},
+         {"bedarf_erfasst": 8, "objekt_verstanden": 9, "preis_begruendet": 7,
+          "einwaende_behandelt": 8, "abschluss_gesucht": 9}),
+        ({"kunde": "Wolf", "datum": "2026-08-24", "punktzahl": 30,
+          "ergebnis": "verloren", "volumen": 0, "einwaende": ["Preis zu hoch"]},
+         {}),
     ):
-        analyse._ablegen(daten, "Testbericht", {})
+        analyse._ablegen(daten, "Testbericht", bewertung)
 
     leads = analyse.offene_leads()
     muster = analyse.verkaufsmuster()
@@ -244,6 +250,13 @@ def pruefung_vertrieb(agent):
             muster["abschlussquote"] == 50.0
             and muster["wiederkehrende_einwaende"][0]["anzahl"] == 4,
             muster["text"])
+
+    schnitt = analyse.dimensionen_schnitt()
+    pruefen("Einzelbewertungen werden gemittelt und die schwächste benannt",
+            schnitt["schwaechste"]["schluessel"] == "preis_begruendet"
+            and schnitt["bewertete_gespraeche"] == 2,
+            "schwächste: %s mit %.1f" % (schnitt["schwaechste"]["name"],
+                                         schnitt["schwaechste"]["wert"]))
 
 
 def pruefung_routinen(agent):
@@ -301,6 +314,107 @@ def pruefung_dashboard(agent):
     pruefen("Dashboard wird erzeugt und enthält die Kennzahlen",
             ergebnis.get("ok") and "1.069,60" in inhalt and "178,27" in inhalt
             and "refresh" in inhalt, "%d Zeichen" % len(inhalt))
+
+
+def pruefung_ansichten(agent):
+    """Command Center, Sales-Analyse und Landingpage - wirklich erzeugen und ansehen."""
+    abschnitt("Oberflächen")
+
+    ergebnis = agent.tools.dashboard.bauen()
+    inhalt = ""
+    if ergebnis.get("ok"):
+        with open(ergebnis["datei"], encoding="utf-8") as datei:
+            inhalt = datei.read()
+    pruefen("Command Center enthält die Kennzahlen",
+            ergebnis.get("ok") and "1.069,60" in inhalt and "178,27" in inhalt
+            and "refresh" in inhalt, "%d Zeichen" % len(inhalt))
+    pruefen("Command Center zeichnet Ring, Verlauf und Balken",
+            "stroke-dasharray" in inhalt and "<polyline" in inhalt
+            and "balkenzeile" in inhalt, "alles als eigenes SVG, ohne Fremdpaket")
+
+    # Die Belegquote muss aus den echten Buchungen kommen, nicht geraten sein.
+    quote = agent.tools.bookkeeping.belegquote()
+    pruefen("Belegquote wird aus echten Buchungen gerechnet",
+            quote["quote"] == 0.0 and quote["gesamt"] == 130.40,
+            "%s von %s belegt" % (quote["belegt"], quote["gesamt"]))
+
+    sales = ergebnis.get("sales", "")
+    sales_inhalt = ""
+    if sales and os.path.exists(sales):
+        with open(sales, encoding="utf-8") as datei:
+            sales_inhalt = datei.read()
+    dimensionen = ["Bedarf erfasst", "Objekt verstanden", "Preis begründet",
+                   "Einwände behandelt", "Abschluss gesucht"]
+    pruefen("Sales-Analyse wird mitgebaut", bool(sales_inhalt),
+            sales or "nicht erzeugt")
+    pruefen("Sales-Analyse zeigt alle fünf Einzelbewertungen",
+            all(d in sales_inhalt for d in dimensionen),
+            ", ".join(d for d in dimensionen if d not in sales_inhalt) or "alle fünf")
+    pruefen("Sales-Analyse nennt den nächsten Schritt",
+            "Angebot mit Quadratmeterpreis schicken" in sales_inhalt)
+    pruefen("Gespräch ohne Einzelbewertung wird als solches gekennzeichnet",
+            "ohne Einzelbewertung abgelegt" in sales_inhalt,
+            "Wolf hat keine Bewertung - das steht auch da")
+
+    # Ohne Gespräche muss die Seite ehrlich leer sein, nicht mit Nullen füllen.
+    from modules.sales_view import Verkaufsansicht
+    leer_pfad = os.path.join(ARBEITSVERZEICHNIS, "leer.html")
+    leer = Verkaufsansicht(None, None).bauen(ziel=leer_pfad)
+    leer_inhalt = ""
+    if leer.get("ok"):
+        with open(leer_pfad, encoding="utf-8") as datei:
+            leer_inhalt = datei.read()
+    pruefen("Sales-Analyse ohne Daten bleibt ehrlich leer",
+            "noch kein Kundengespräch festgehalten" in leer_inhalt,
+            "kein erfundener Nullwert")
+
+    # Landingpage
+    landung = os.path.join(WURZEL, "landing", "index.html")
+    roh = ""
+    if os.path.exists(landung):
+        with open(landung, encoding="utf-8") as datei:
+            roh = datei.read()
+    pruefen("Landingpage vorhanden", bool(roh), "%d Zeichen" % len(roh))
+    if roh:
+        import re as _re
+        extern = _re.findall(r'(?:src|href)="(https?://[^"]+)"', roh)
+        pruefen("Landingpage lädt nichts aus dem Netz nach", not extern,
+                ", ".join(extern) or "vollständig eigenständig")
+        pruefen("Landingpage verspricht kein Löschen von Mails",
+                "Löschen" not in roh and "löscht nie" in roh,
+                "Jarvis löscht keine Mail - das steht auch so da")
+
+        class _Pruefer(__import__("html.parser", fromlist=["parser"]).HTMLParser):
+            LEER = {"meta", "link", "br", "img", "hr", "input", "rect", "line",
+                    "circle", "ellipse", "path", "polyline", "polygon", "stop",
+                    "use", "fegaussianblur", "femergenode", "femerge"}
+
+            def __init__(self):
+                super().__init__()
+                self.stapel = []
+                self.fehler = []
+
+            def handle_starttag(self, tag, attrs):
+                if tag.lower() not in self.LEER:
+                    self.stapel.append(tag)
+
+            def handle_endtag(self, tag):
+                if tag.lower() in self.LEER:
+                    return
+                if not self.stapel or self.stapel[-1] != tag:
+                    self.fehler.append(tag)
+                    if tag in self.stapel:
+                        while self.stapel and self.stapel.pop() != tag:
+                            pass
+                else:
+                    self.stapel.pop()
+
+        pruefer = _Pruefer()
+        pruefer.feed(roh)
+        pruefen("Landingpage ist wohlgeformtes HTML",
+                not pruefer.fehler and not pruefer.stapel,
+                ("offen: %s" % (pruefer.stapel + pruefer.fehler)[:3])
+                if (pruefer.stapel or pruefer.fehler) else "alle Tags geschlossen")
 
 
 def pruefung_sicherheit(agent):
@@ -408,7 +522,8 @@ def pruefung_einzeldatei():
     klassen = ["Memory", "Recall", "Stimme", "Sprecherprofil", "Mail", "Kalender",
                "Telegram", "Bookkeeping", "CallAnalysis", "Routines", "Kamera",
                "MCPServer", "MCPClient", "Welt", "Messenger", "Bildschirm",
-               "Dashboard", "Scheduler", "Einrichtung", "Werkzeuge", "JarvisAgent"]
+               "Dashboard", "Verkaufsansicht", "Scheduler", "Einrichtung",
+               "Werkzeuge", "JarvisAgent"]
     fehlend = [k for k in klassen if inhalt.count("\nclass %s" % k) != 1]
     pruefen("Einzeldatei enthält alle Klassen genau einmal", not fehlend,
             ", ".join(fehlend) or "%d Klassen" % len(klassen))
@@ -439,6 +554,7 @@ def main() -> int:
     pruefung_zeitplan()
     pruefung_kalender()
     pruefung_dashboard(agent)
+    pruefung_ansichten(agent)
     pruefung_sicherheit(agent)
     pruefung_freigaben()
     pruefung_mcp()

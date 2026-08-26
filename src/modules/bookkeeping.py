@@ -11,7 +11,7 @@ import base64
 import csv
 import json
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import config
 from modules.memory import Memory, db_schema_anlegen, heute_datum, zeitstempel
@@ -37,6 +37,9 @@ CREATE INDEX IF NOT EXISTS idx_buchungen_datum ON buchungen(datum);
 """
 
 # Kategorien, wie sie in der Gebäudereinigung tatsächlich anfallen.
+MONATSKUERZEL = ["Jan", "Feb", "Mär", "Apr", "Mai", "Jun",
+                 "Jul", "Aug", "Sep", "Okt", "Nov", "Dez"]
+
 KATEGORIEN = [
     "Reinigungsmittel", "Arbeitsmaterial", "Fahrzeug", "Kraftstoff",
     "Versicherung", "Miete", "Telefon und Internet", "Werbung", "Fortbildung",
@@ -287,6 +290,73 @@ class Bookkeeping:
                        max(ohne, key=lambda e: e["betrag"])["datum"]))
         return {"ok": True, "anzahl": len(ohne), "summe": summe, "buchungen": ohne,
                 "text": text}
+
+    def tagesverlauf(self, tage: int = 30, bis: str = "") -> dict:
+        """Einnahmen und Ausgaben je Tag - die Datenreihe hinter den Sparklines.
+
+        Tage ohne Buchung werden als null geführt, nicht ausgelassen. Sonst
+        würde eine Lücke im Verlauf wie ein Anstieg aussehen.
+        """
+        endtag = datetime.strptime(bis, "%Y-%m-%d") if bis else datetime.now()
+        starttag = endtag - timedelta(days=max(1, int(tage)) - 1)
+        zeilen = self.buchungen(starttag.strftime("%Y-%m-%d"),
+                                endtag.strftime("%Y-%m-%d"), limit=100000)
+        einnahmen, ausgaben = {}, {}
+        for zeile in zeilen:
+            ziel = einnahmen if zeile["art"] == "einnahme" else ausgaben
+            ziel[zeile["datum"]] = ziel.get(zeile["datum"], 0.0) + zeile["betrag_brutto"]
+        tagesliste, reihe_ein, reihe_aus = [], [], []
+        for versatz in range(max(1, int(tage))):
+            tag = (starttag + timedelta(days=versatz)).strftime("%Y-%m-%d")
+            tagesliste.append(tag)
+            reihe_ein.append(round(einnahmen.get(tag, 0.0), 2))
+            reihe_aus.append(round(ausgaben.get(tag, 0.0), 2))
+        return {"tage": tagesliste, "einnahmen": reihe_ein, "ausgaben": reihe_aus,
+                "summe_einnahmen": round(sum(reihe_ein), 2),
+                "summe_ausgaben": round(sum(reihe_aus), 2)}
+
+    def monatsverlauf(self, monate: int = 6) -> dict:
+        """Ergebnis je Monat - für den Balkenvergleich."""
+        jetzt = datetime.now()
+        namen, werte, umsaetze = [], [], []
+        for rueckwaerts in range(max(1, int(monate)) - 1, -1, -1):
+            jahr = jetzt.year
+            monat = jetzt.month - rueckwaerts
+            while monat <= 0:
+                monat += 12
+                jahr -= 1
+            erster = "%04d-%02d-01" % (jahr, monat)
+            if monat == 12:
+                letzter = "%04d-12-31" % jahr
+            else:
+                letzter = (datetime(jahr, monat + 1, 1) -
+                           timedelta(days=1)).strftime("%Y-%m-%d")
+            zeilen = self.buchungen(erster, letzter, limit=100000)
+            ein = sum(z["betrag_brutto"] for z in zeilen if z["art"] == "einnahme")
+            aus = sum(z["betrag_brutto"] for z in zeilen if z["art"] == "ausgabe")
+            namen.append(MONATSKUERZEL[monat - 1])
+            werte.append(round(ein - aus, 2))
+            umsaetze.append(round(ein, 2))
+        return {"monate": namen, "ergebnis": werte, "einnahmen": umsaetze}
+
+    def belegquote(self, von: str = "", bis: str = "") -> dict:
+        """Anteil der Ausgaben, zu denen ein Belegfoto vorliegt.
+
+        Das ist die Zahl, die beim Steuerberater zählt - nicht die Anzahl der
+        Buchungen, sondern wie viel Geld belegt ist.
+        """
+        zeilen = self.buchungen(von, bis, art="ausgabe", limit=100000)
+        if not zeilen:
+            return {"quote": None, "belegt": 0.0, "gesamt": 0.0, "anzahl": 0,
+                    "text": "Noch keine Ausgaben erfasst."}
+        gesamt = sum(z["betrag_brutto"] for z in zeilen)
+        belegt = sum(z["betrag_brutto"] for z in zeilen
+                     if (z["beleg_pfad"] or "").strip()
+                     and os.path.exists(z["beleg_pfad"]))
+        quote = (100.0 * belegt / gesamt) if gesamt else 0.0
+        return {"quote": round(quote, 1), "belegt": round(belegt, 2),
+                "gesamt": round(gesamt, 2), "anzahl": len(zeilen),
+                "text": "%.0f Prozent der Ausgaben sind belegt." % quote}
 
     # -- Export -------------------------------------------------------------
 

@@ -10,6 +10,7 @@ jarvis_memory.db-wal
 jarvis_memory.db-shm
 dashboard/data.json
 dashboard/dashboard.html
+dashboard/sales.html
 belege/
 profil/
 export/

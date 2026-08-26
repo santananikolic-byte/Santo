@@ -32,6 +32,7 @@ import html
 import imaplib
 import io
 import json
+import math
 import os
 import queue
 import re
@@ -2341,6 +2342,9 @@ CREATE INDEX IF NOT EXISTS idx_buchungen_datum ON buchungen(datum);
 """
 
 # Kategorien, wie sie in der Gebäudereinigung tatsächlich anfallen.
+MONATSKUERZEL = ["Jan", "Feb", "Mär", "Apr", "Mai", "Jun",
+                 "Jul", "Aug", "Sep", "Okt", "Nov", "Dez"]
+
 KATEGORIEN = [
     "Reinigungsmittel", "Arbeitsmaterial", "Fahrzeug", "Kraftstoff",
     "Versicherung", "Miete", "Telefon und Internet", "Werbung", "Fortbildung",
@@ -2592,6 +2596,73 @@ class Bookkeeping:
         return {"ok": True, "anzahl": len(ohne), "summe": summe, "buchungen": ohne,
                 "text": text}
 
+    def tagesverlauf(self, tage: int = 30, bis: str = "") -> dict:
+        """Einnahmen und Ausgaben je Tag - die Datenreihe hinter den Sparklines.
+
+        Tage ohne Buchung werden als null geführt, nicht ausgelassen. Sonst
+        würde eine Lücke im Verlauf wie ein Anstieg aussehen.
+        """
+        endtag = datetime.strptime(bis, "%Y-%m-%d") if bis else datetime.now()
+        starttag = endtag - timedelta(days=max(1, int(tage)) - 1)
+        zeilen = self.buchungen(starttag.strftime("%Y-%m-%d"),
+                                endtag.strftime("%Y-%m-%d"), limit=100000)
+        einnahmen, ausgaben = {}, {}
+        for zeile in zeilen:
+            ziel = einnahmen if zeile["art"] == "einnahme" else ausgaben
+            ziel[zeile["datum"]] = ziel.get(zeile["datum"], 0.0) + zeile["betrag_brutto"]
+        tagesliste, reihe_ein, reihe_aus = [], [], []
+        for versatz in range(max(1, int(tage))):
+            tag = (starttag + timedelta(days=versatz)).strftime("%Y-%m-%d")
+            tagesliste.append(tag)
+            reihe_ein.append(round(einnahmen.get(tag, 0.0), 2))
+            reihe_aus.append(round(ausgaben.get(tag, 0.0), 2))
+        return {"tage": tagesliste, "einnahmen": reihe_ein, "ausgaben": reihe_aus,
+                "summe_einnahmen": round(sum(reihe_ein), 2),
+                "summe_ausgaben": round(sum(reihe_aus), 2)}
+
+    def monatsverlauf(self, monate: int = 6) -> dict:
+        """Ergebnis je Monat - für den Balkenvergleich."""
+        jetzt = datetime.now()
+        namen, werte, umsaetze = [], [], []
+        for rueckwaerts in range(max(1, int(monate)) - 1, -1, -1):
+            jahr = jetzt.year
+            monat = jetzt.month - rueckwaerts
+            while monat <= 0:
+                monat += 12
+                jahr -= 1
+            erster = "%04d-%02d-01" % (jahr, monat)
+            if monat == 12:
+                letzter = "%04d-12-31" % jahr
+            else:
+                letzter = (datetime(jahr, monat + 1, 1) -
+                           timedelta(days=1)).strftime("%Y-%m-%d")
+            zeilen = self.buchungen(erster, letzter, limit=100000)
+            ein = sum(z["betrag_brutto"] for z in zeilen if z["art"] == "einnahme")
+            aus = sum(z["betrag_brutto"] for z in zeilen if z["art"] == "ausgabe")
+            namen.append(MONATSKUERZEL[monat - 1])
+            werte.append(round(ein - aus, 2))
+            umsaetze.append(round(ein, 2))
+        return {"monate": namen, "ergebnis": werte, "einnahmen": umsaetze}
+
+    def belegquote(self, von: str = "", bis: str = "") -> dict:
+        """Anteil der Ausgaben, zu denen ein Belegfoto vorliegt.
+
+        Das ist die Zahl, die beim Steuerberater zählt - nicht die Anzahl der
+        Buchungen, sondern wie viel Geld belegt ist.
+        """
+        zeilen = self.buchungen(von, bis, art="ausgabe", limit=100000)
+        if not zeilen:
+            return {"quote": None, "belegt": 0.0, "gesamt": 0.0, "anzahl": 0,
+                    "text": "Noch keine Ausgaben erfasst."}
+        gesamt = sum(z["betrag_brutto"] for z in zeilen)
+        belegt = sum(z["betrag_brutto"] for z in zeilen
+                     if (z["beleg_pfad"] or "").strip()
+                     and os.path.exists(z["beleg_pfad"]))
+        quote = (100.0 * belegt / gesamt) if gesamt else 0.0
+        return {"quote": round(quote, 1), "belegt": round(belegt, 2),
+                "gesamt": round(gesamt, 2), "anzahl": len(zeilen),
+                "text": "%.0f Prozent der Ausgaben sind belegt." % quote}
+
     # -- Export -------------------------------------------------------------
 
     def csv_export(self, von: str = "", bis: str = "", ziel: str = "") -> dict:
@@ -2825,6 +2896,49 @@ class CallAnalysis:
                        groesster["naechster_schritt"] or "steht noch nicht fest"))
         return {"ok": True, "anzahl": len(leads), "volumen_offen": summe,
                 "leads": leads, "text": text}
+
+    DIMENSIONEN = [("bedarf_erfasst", "Bedarf erfasst"),
+                   ("objekt_verstanden", "Objekt verstanden"),
+                   ("preis_begruendet", "Preis begründet"),
+                   ("einwaende_behandelt", "Einwände behandelt"),
+                   ("abschluss_gesucht", "Abschluss gesucht")]
+
+    def bewertung_lesen(self, zeile) -> dict:
+        """Holt die Einzelbewertung eines Gesprächs aus der Datenbank."""
+        try:
+            daten = json.loads(zeile["bewertung"] or "{}")
+        except (ValueError, TypeError):
+            return {}
+        ergebnis = {}
+        for schluessel, beschriftung in self.DIMENSIONEN:
+            if schluessel in daten:
+                try:
+                    ergebnis[schluessel] = max(0.0, min(10.0, float(daten[schluessel])))
+                except (TypeError, ValueError):
+                    continue
+        del beschriftung
+        return ergebnis
+
+    def dimensionen_schnitt(self, tage: int = 90) -> dict:
+        """Durchschnitt je Bewertungsdimension - zeigt die eigene schwächste Stelle."""
+        grenze = (datetime.now() - timedelta(days=tage)).strftime("%Y-%m-%d")
+        zeilen = self.memory._lesen(
+            "SELECT * FROM gespraeche WHERE datum>=?", (grenze,))
+        gesammelt = {}
+        for zeile in zeilen:
+            for schluessel, wert in self.bewertung_lesen(zeile).items():
+                gesammelt.setdefault(schluessel, []).append(wert)
+        schnitt = []
+        for schluessel, beschriftung in self.DIMENSIONEN:
+            werte = gesammelt.get(schluessel) or []
+            schnitt.append({"schluessel": schluessel, "name": beschriftung,
+                            "wert": round(sum(werte) / len(werte), 1) if werte else None,
+                            "anzahl": len(werte)})
+        vorhanden = [e for e in schnitt if e["wert"] is not None]
+        schwaechste = min(vorhanden, key=lambda e: e["wert"]) if vorhanden else None
+        return {"dimensionen": schnitt, "schwaechste": schwaechste,
+                "bewertete_gespraeche": len([z for z in zeilen
+                                             if self.bewertung_lesen(z)])}
 
     def verkaufsmuster(self, tage: int = 90) -> dict:
         """Abschlussquote, Durchschnittspunktzahl und wiederkehrende Einwände.
@@ -4278,12 +4392,346 @@ class Bildschirm:
 
 
 # =========================================================================
+# dashboard_teile  -  Bausteine für die Oberflächen - Farben, Zahlenformate und SVG-Grafiken.
+# 
+# Hier liegt alles, was Command Center und Sales-Ansicht gemeinsam benutzen.
+# Die Grafiken sind handgeschriebenes SVG: keine Fremdbibliothek, kein
+# Nachladen aus dem Netz. Die Seiten funktionieren dadurch auch offline und
+# öffnen sich mit einem Doppelklick, ohne dass ein Server läuft.
+# =========================================================================
+
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+
+# Farben des Cockpits
+FARBE_HINTERGRUND = "#08090B"
+FARBE_PANEL = "#0F1113"
+FARBE_KACHEL = "#121517"
+FARBE_RAND = "#1C1F23"
+FARBE_AKZENT = "#E8622C"
+FARBE_TEXT = "#E6E8EA"
+FARBE_GRAU = "#6E767D"
+FARBE_GUT = "#4CC38A"
+FARBE_WARNUNG = "#E8A33C"
+FARBE_SCHLECHT = "#E5484D"
+
+WOCHENTAGE = ["Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag",
+              "Samstag", "Sonntag"]
+
+# Ein einziges Stylesheet für beide Seiten. Bewusst als schlichter Text und
+# nicht als Formatvorlage - sonst müsste jedes Prozentzeichen in CSS verdoppelt
+# werden, und genau das wird beim Bearbeiten irgendwann vergessen.
+CSS = """
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  background: #08090B; color: #E6E8EA; min-height: 100vh; padding-bottom: 48px;
+  font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+a { color: #E8622C; text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+.ticker {
+  background: linear-gradient(90deg, rgba(232,98,44,.16), rgba(232,98,44,.02) 60%, transparent);
+  border-bottom: 1px solid rgba(232,98,44,.34);
+  padding: 9px 20px; font-size: 11px; letter-spacing: .1em; text-transform: uppercase;
+  display: flex; gap: 26px; flex-wrap: wrap; align-items: center; color: #8A9096;
+}
+.ticker b { color: #E8622C; text-shadow: 0 0 12px rgba(232,98,44,.55); font-weight: 600; }
+.ticker .rot { color: #E5484D; text-shadow: 0 0 12px rgba(229,72,77,.5); }
+
+header { padding: 26px 20px 6px; display: flex; justify-content: space-between;
+         align-items: flex-end; flex-wrap: wrap; gap: 12px; }
+header h1 { font-size: 15px; font-weight: 600; letter-spacing: .22em;
+            text-transform: uppercase; color: #E6E8EA; }
+header h1 span { color: #E8622C; }
+header p { color: #6E767D; font-size: 13px; margin-top: 5px; }
+nav { display: flex; gap: 8px; }
+nav a { font-size: 11px; letter-spacing: .12em; text-transform: uppercase;
+        border: 1px solid #1C1F23; border-radius: 6px; padding: 7px 13px;
+        color: #8A9096; }
+nav a.aktiv { border-color: rgba(232,98,44,.5); color: #E8622C;
+              background: rgba(232,98,44,.07); }
+nav a:hover { text-decoration: none; border-color: rgba(232,98,44,.5); color: #E8622C; }
+
+.raster { display: grid; gap: 13px; padding: 14px 20px;
+          grid-template-columns: repeat(12, 1fr); align-items: start; }
+.panel { background: #0F1113; border: 1px solid #1C1F23; border-radius: 10px;
+         padding: 15px 17px; grid-column: span 4; min-width: 0; }
+.panel.breit { grid-column: span 8; }
+.panel.voll { grid-column: span 12; }
+.panel.schmal { grid-column: span 3; }
+@media (max-width: 1100px) { .panel, .panel.breit, .panel.schmal { grid-column: span 6; } }
+@media (max-width: 700px)  { .panel, .panel.breit, .panel.schmal, .panel.voll { grid-column: span 12; } }
+
+.panel h2 { font-size: 10px; text-transform: uppercase; letter-spacing: .16em;
+            color: #6E767D; margin-bottom: 12px; font-weight: 600;
+            display: flex; justify-content: space-between; align-items: center; }
+.panel h2 em { font-style: normal; color: #3E454B; letter-spacing: .08em; }
+
+.kacheln { display: grid; grid-template-columns: repeat(auto-fit, minmax(118px, 1fr));
+           gap: 9px; }
+.kachel { background: #121517; border: 1px solid #1C1F23; border-radius: 8px;
+          padding: 11px 13px; }
+.kachel .wert { font-size: 21px; font-weight: 600; color: #F2F4F6;
+                font-variant-numeric: tabular-nums; letter-spacing: -.01em; }
+.kachel .wert.akzent { color: #E8622C; text-shadow: 0 0 16px rgba(232,98,44,.4); }
+.kachel .wert.gut { color: #4CC38A; }
+.kachel .wert.warn { color: #E8A33C; }
+.kachel .wert.schlecht { color: #E5484D; }
+.kachel .name { font-size: 9.5px; color: #6E767D; text-transform: uppercase;
+                letter-spacing: .1em; margin-top: 5px; }
+
+ul { list-style: none; }
+li { padding: 7px 0; border-bottom: 1px solid #17191C; font-size: 13px; line-height: 1.5; }
+li:last-child { border-bottom: none; }
+.zeit { color: #E8622C; font-variant-numeric: tabular-nums; margin-right: 8px;
+        font-size: 12px; }
+.grau { color: #6E767D; font-size: 12px; }
+.warnung { color: #E5484D; }
+.achtung { color: #E8A33C; }
+.ok { color: #4CC38A; }
+.leer { color: #3E454B; font-style: italic; font-size: 12.5px; padding: 6px 0; }
+
+.status { display: inline-block; width: 7px; height: 7px; border-radius: 50%;
+          margin-right: 8px; vertical-align: middle; }
+.an { background: #4CC38A; box-shadow: 0 0 8px #4CC38A; }
+.aus { background: #2A3036; }
+
+.balkenzeile { margin-bottom: 9px; }
+.balkenkopf { display: flex; justify-content: space-between; font-size: 12px;
+              margin-bottom: 4px; }
+.balkenkopf span:last-child { color: #6E767D; font-variant-numeric: tabular-nums; }
+.balken { height: 5px; background: #17191C; border-radius: 3px; overflow: hidden; }
+.balken i { display: block; height: 100%; border-radius: 3px; }
+
+.ringfeld { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+.ringtext { flex: 1; min-width: 130px; }
+.ringtext .gross { font-size: 26px; font-weight: 600; color: #F2F4F6;
+                   font-variant-numeric: tabular-nums; }
+.ringtext .klein { font-size: 12px; color: #6E767D; line-height: 1.5; margin-top: 5px; }
+
+.verlauf { display: flex; align-items: flex-end; gap: 14px; flex-wrap: wrap; }
+.verlaufblock { flex: 1; min-width: 150px; }
+.verlaufkopf { font-size: 10px; text-transform: uppercase; letter-spacing: .1em;
+               color: #6E767D; margin-bottom: 6px; display: flex;
+               justify-content: space-between; }
+.verlaufkopf b { color: #E6E8EA; font-variant-numeric: tabular-nums; }
+
+footer { padding: 18px 20px; color: #3E454B; font-size: 11.5px; line-height: 1.7; }
+"""
+
+
+def sicher(text) -> str:
+    """Macht Text HTML-sicher - ein Kundenname darf die Seite nicht aufbrechen."""
+    return html.escape(str(text if text is not None else ""))
+
+
+def euro(betrag) -> str:
+    """Formatiert einen Betrag deutsch: 1.234,56 Euro-Zeichen."""
+    try:
+        betrag = float(betrag)
+    except (TypeError, ValueError):
+        betrag = 0.0
+    text = "{:,.2f}".format(betrag).replace(",", "#").replace(".", ",").replace("#", ".")
+    return text + " €"
+
+
+def euro_kurz(betrag) -> str:
+    """Kurzform für enge Kacheln: 71,3k statt 71.300,00."""
+    try:
+        betrag = float(betrag)
+    except (TypeError, ValueError):
+        betrag = 0.0
+    if abs(betrag) >= 10000:
+        return ("%.1fk" % (betrag / 1000.0)).replace(".", ",") + " €"
+    return euro(betrag)
+
+
+def prozent(teil, ganzes) -> float:
+    """Anteil in Prozent, ohne Division durch null."""
+    try:
+        ganzes = float(ganzes)
+        if ganzes <= 0:
+            return 0.0
+        return max(0.0, min(100.0, 100.0 * float(teil) / ganzes))
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def ampelfarbe(wert: float, gut_ab: float = 70, mittel_ab: float = 40) -> str:
+    """Grün, Gelb oder Rot - je nachdem, wie gut der Wert ist."""
+    if wert >= gut_ab:
+        return FARBE_GUT
+    if wert >= mittel_ab:
+        return FARBE_WARNUNG
+    return FARBE_SCHLECHT
+
+
+# ---------------------------------------------------------------------------
+# Grafiken
+# ---------------------------------------------------------------------------
+
+def ring(anteil, beschriftung: str = "", groesse: int = 132,
+         farbe: str = FARBE_AKZENT, dicke: int = 9) -> str:
+    """Runde Fortschrittsanzeige als SVG.
+
+    ``anteil`` ist ein Prozentwert. ``None`` heißt: es gibt noch keine Daten -
+    dann wird ein leerer Ring mit einem Strich gezeigt, keine erfundene Null.
+    """
+    radius = (groesse / 2.0) - dicke - 3
+    umfang = 2 * math.pi * radius
+    mitte = groesse / 2.0
+    hat_daten = anteil is not None
+    wert = max(0.0, min(100.0, float(anteil))) if hat_daten else 0.0
+    gefuellt = umfang * wert / 100.0
+    anzeige = ("%d%%" % round(wert)) if hat_daten else "–"
+
+    return "".join([
+        '<svg viewBox="0 0 %d %d" width="%d" height="%d" role="img">' % (
+            groesse, groesse, groesse, groesse),
+        '<defs><filter id="gl%d" x="-50%%" y="-50%%" width="200%%" height="200%%">'
+        '<feGaussianBlur stdDeviation="3.5" result="b"/>'
+        '<feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>'
+        '</filter></defs>' % groesse,
+        '<circle cx="%.1f" cy="%.1f" r="%.1f" fill="none" stroke="%s" '
+        'stroke-width="%d"/>' % (mitte, mitte, radius, FARBE_RAND, dicke),
+        ('<circle cx="%.1f" cy="%.1f" r="%.1f" fill="none" stroke="%s" '
+         'stroke-width="%d" stroke-linecap="round" stroke-dasharray="%.2f %.2f" '
+         'transform="rotate(-90 %.1f %.1f)" filter="url(#gl%d)"/>'
+         % (mitte, mitte, radius, farbe, dicke, gefuellt, umfang - gefuellt,
+            mitte, mitte, groesse)) if hat_daten and wert > 0 else "",
+        '<text x="%.1f" y="%.1f" text-anchor="middle" fill="%s" '
+        'font-size="%d" font-weight="600" font-family="inherit">%s</text>'
+        % (mitte, mitte + 3, FARBE_TEXT if hat_daten else FARBE_GRAU,
+           int(groesse * 0.23), anzeige),
+        ('<text x="%.1f" y="%.1f" text-anchor="middle" fill="%s" font-size="%d" '
+         'letter-spacing="1.4" font-family="inherit">%s</text>'
+         % (mitte, mitte + int(groesse * 0.19), FARBE_GRAU, int(groesse * 0.085),
+            sicher(beschriftung.upper()))) if beschriftung else "",
+        '</svg>'])
+
+
+def sparkline(werte: list, breite: int = 240, hoehe: int = 44,
+              farbe: str = FARBE_AKZENT, fuellen: bool = True) -> str:
+    """Kleiner Verlaufsgraph als SVG.
+
+    Weniger als zwei Werte ergeben keinen Verlauf - dann kommt ein Hinweis
+    statt einer Linie, die etwas vortäuscht.
+    """
+    zahlen = []
+    for wert in werte or []:
+        try:
+            zahlen.append(float(wert))
+        except (TypeError, ValueError):
+            zahlen.append(0.0)
+    if len(zahlen) < 2:
+        return ('<div class="leer" style="height:%dpx;display:flex;'
+                'align-items:center">noch kein Verlauf</div>' % hoehe)
+
+    kleinster, groesster = min(zahlen), max(zahlen)
+    spanne = (groesster - kleinster) or 1.0
+    rand = 3
+    schritt = breite / float(len(zahlen) - 1)
+    punkte = []
+    for index, zahl in enumerate(zahlen):
+        x = index * schritt
+        y = hoehe - rand - ((zahl - kleinster) / spanne) * (hoehe - 2 * rand)
+        punkte.append("%.1f,%.1f" % (x, y))
+
+    kennung = abs(hash((tuple(zahlen[:6]), farbe, breite))) % 100000
+    flaeche = ""
+    if fuellen:
+        flaeche = ('<polygon points="0,%d %s %d,%d" fill="url(#fl%d)"/>'
+                   % (hoehe, " ".join(punkte), breite, hoehe, kennung))
+    return "".join([
+        '<svg viewBox="0 0 %d %d" width="100%%" height="%d" '
+        'preserveAspectRatio="none" role="img">' % (breite, hoehe, hoehe),
+        '<defs><linearGradient id="fl%d" x1="0" y1="0" x2="0" y2="1">' % kennung,
+        '<stop offset="0%%" stop-color="%s" stop-opacity=".30"/>' % farbe,
+        '<stop offset="100%%" stop-color="%s" stop-opacity="0"/>' % farbe,
+        '</linearGradient></defs>',
+        flaeche,
+        '<polyline points="%s" fill="none" stroke="%s" stroke-width="1.6" '
+        'stroke-linejoin="round" stroke-linecap="round" '
+        'vector-effect="non-scaling-stroke"/>' % (" ".join(punkte), farbe),
+        '</svg>'])
+
+
+def saeulen(werte: list, beschriftungen: list = None, hoehe: int = 60,
+            farbe: str = FARBE_AKZENT) -> str:
+    """Balkenreihe für Monatsvergleiche. Negative Werte werden rot."""
+    zahlen = []
+    for wert in werte or []:
+        try:
+            zahlen.append(float(wert))
+        except (TypeError, ValueError):
+            zahlen.append(0.0)
+    if not zahlen:
+        return '<div class="leer">noch keine Monate erfasst</div>'
+    groesster = max([abs(z) for z in zahlen]) or 1.0
+    stuecke = []
+    for index, zahl in enumerate(zahlen):
+        anteil = abs(zahl) / groesster
+        # Ein Monat ohne Buchung bekommt einen matten Strich, keinen farbigen
+        # Balken - sonst sieht die Nulllinie aus wie ein kleiner Umsatz.
+        farbe_balken = (FARBE_RAND if zahl == 0
+                        else (farbe if zahl > 0 else FARBE_SCHLECHT))
+        beschriftung = ""
+        if beschriftungen and index < len(beschriftungen):
+            beschriftung = ('<div style="font-size:9px;color:%s;text-align:center;'
+                            'margin-top:4px">%s</div>'
+                            % (FARBE_GRAU, sicher(beschriftungen[index])))
+        stuecke.append(
+            '<div style="flex:1;display:flex;flex-direction:column;'
+            'justify-content:flex-end;align-items:center">'
+            '<div style="width:100%%;height:%dpx;display:flex;align-items:flex-end">'
+            '<div title="%s" style="width:100%%;height:%.1f%%;background:%s;'
+            'border-radius:2px 2px 0 0;min-height:2px"></div></div>%s</div>'
+            % (hoehe, sicher(euro(zahl)), max(2.0, anteil * 100),
+               farbe_balken, beschriftung))
+    return ('<div style="display:flex;gap:4px;align-items:flex-end">%s</div>'
+            % "".join(stuecke))
+
+
+def balken(name: str, wert: float, maximum: float, zusatz: str = "",
+           farbe: str = FARBE_AKZENT) -> str:
+    """Waagrechter Fortschrittsbalken mit Beschriftung."""
+    anteil = prozent(wert, maximum)
+    return ('<div class="balkenzeile"><div class="balkenkopf">'
+            '<span>%s</span><span>%s</span></div>'
+            '<div class="balken"><i style="width:%.1f%%;background:%s"></i></div></div>'
+            % (sicher(name), sicher(zusatz), anteil, farbe))
+
+
+def seite_bauen(titel: str, ticker: str, kopf_links: str, kopf_rechts: str,
+                inhalt: str, fusszeile: str) -> str:
+    """Setzt eine vollständige HTML-Seite zusammen."""
+    return "".join([
+        '<!DOCTYPE html>\n<html lang="de">\n<head>\n',
+        '<meta charset="utf-8">\n',
+        '<meta name="viewport" content="width=device-width, initial-scale=1">\n',
+        '<meta http-equiv="refresh" content="60">\n',
+        '<title>%s</title>\n<style>%s</style>\n</head>\n<body>\n' % (sicher(titel), CSS),
+        '<div class="ticker">%s</div>\n' % ticker,
+        '<header>%s%s</header>\n' % (kopf_links, kopf_rechts),
+        inhalt,
+        '<footer>%s</footer>\n</body>\n</html>\n' % fusszeile])
+
+
+# =========================================================================
 # dashboard  -  Command Center - erzeugt ``dashboard/dashboard.html`` und ``data.json``.
 # 
 # Der Nutzer soll auf einen Blick sehen, wie sein Betrieb steht: Zahlen des
-# Monats, Termine, Posteingang, offene Leads, Notizen und - besonders wichtig -
-# was Jarvis zuletzt getan hat. Jede ausgeführte Aktion steht dort. Ein
-# Assistent, der handelt, muss nachprüfbar sein.
+# Monats, Verlauf, Termine, Posteingang, offene Leads, Notizen und - besonders
+# wichtig - was Jarvis zuletzt getan hat. Jede ausgeführte Aktion steht dort.
+# Ein Assistent, der handelt, muss nachprüfbar sein.
+# 
+# **Es wird nur gezeigt, was wirklich in der Datenbank steht.** Ein Bereich ohne
+# Daten bleibt sichtbar leer und sagt das auch. Eine Kennzahl, die nach etwas
+# aussieht, aber auf nichts beruht, wäre schlimmer als eine leere Fläche - der
+# Nutzer trifft danach Entscheidungen.
 # 
 # Die Seite lädt sich alle 60 Sekunden selbst neu und braucht keinen Server.
 # =========================================================================
@@ -4292,108 +4740,6 @@ class Bildschirm:
 # -*- coding: utf-8 -*-
 
 
-
-# Farben des Cockpits
-FARBE_HINTERGRUND = "#08090B"
-FARBE_PANEL = "#0F1113"
-FARBE_AKZENT = "#E8622C"
-
-WOCHENTAGE = ["Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag",
-              "Samstag", "Sonntag"]
-
-SEITE = """<!DOCTYPE html>
-<html lang="de">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<meta http-equiv="refresh" content="60">
-<title>Jarvis Command Center</title>
-<style>
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  body {
-    background: %(bg)s; color: #E6E8EA; min-height: 100vh;
-    font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
-    padding-bottom: 40px;
-  }
-  .ticker {
-    background: linear-gradient(90deg, %(akzent)s22, transparent);
-    border-bottom: 1px solid %(akzent)s55; padding: 10px 20px;
-    font-size: 13px; letter-spacing: .06em; text-transform: uppercase;
-    display: flex; gap: 28px; flex-wrap: wrap; align-items: center;
-  }
-  .ticker b { color: %(akzent)s; text-shadow: 0 0 12px %(akzent)s88; }
-  header { padding: 26px 20px 10px; }
-  header h1 {
-    font-size: 26px; font-weight: 600; letter-spacing: .02em;
-    color: %(akzent)s; text-shadow: 0 0 22px %(akzent)s55;
-  }
-  header p { color: #8A9096; font-size: 14px; margin-top: 4px; }
-  .raster {
-    display: grid; gap: 14px; padding: 14px 20px;
-    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-  }
-  .panel {
-    background: %(panel)s; border: 1px solid #1C1F23; border-radius: 10px;
-    padding: 16px 18px;
-  }
-  .panel h2 {
-    font-size: 11px; text-transform: uppercase; letter-spacing: .14em;
-    color: #6E767D; margin-bottom: 12px; font-weight: 600;
-  }
-  .kacheln { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px,1fr)); gap: 10px; }
-  .kachel {
-    background: #121517; border: 1px solid #1C1F23; border-radius: 8px;
-    padding: 12px 14px;
-  }
-  .kachel .wert { font-size: 22px; font-weight: 600; color: #F2F4F6; }
-  .kachel .wert.akzent { color: %(akzent)s; text-shadow: 0 0 16px %(akzent)s66; }
-  .kachel .wert.gut { color: #4CC38A; }
-  .kachel .wert.schlecht { color: #E5484D; }
-  .kachel .name { font-size: 11px; color: #6E767D; text-transform: uppercase;
-                  letter-spacing: .08em; margin-top: 4px; }
-  ul { list-style: none; }
-  li { padding: 8px 0; border-bottom: 1px solid #17191C; font-size: 14px; line-height: 1.45; }
-  li:last-child { border-bottom: none; }
-  .zeit { color: %(akzent)s; font-variant-numeric: tabular-nums; margin-right: 8px; }
-  .grau { color: #6E767D; font-size: 12px; }
-  .warnung { color: #E5484D; }
-  .ok { color: #4CC38A; }
-  .leer { color: #4A5157; font-style: italic; font-size: 13px; }
-  .status { display: inline-block; width: 7px; height: 7px; border-radius: 50%%;
-            margin-right: 7px; }
-  .an { background: #4CC38A; box-shadow: 0 0 8px #4CC38A; }
-  .aus { background: #3A4046; }
-  footer { padding: 16px 20px; color: #4A5157; font-size: 12px; }
-</style>
-</head>
-<body>
-<div class="ticker">%(ticker)s</div>
-<header>
-  <h1>Jarvis Command Center</h1>
-  <p>%(wochentag)s, %(datum)s &middot; Stand %(uhrzeit)s Uhr &middot; %(firma)s</p>
-</header>
-<div class="raster">
-%(panels)s
-</div>
-<footer>Diese Seite aktualisiert sich alle 60 Sekunden von selbst.
-Alle Daten liegen lokal auf diesem Rechner.</footer>
-</body>
-</html>
-"""
-
-
-def sicher(text) -> str:
-    """Macht Text HTML-sicher - Kundennamen dürfen die Seite nicht aufbrechen."""
-    return html.escape(str(text if text is not None else ""))
-
-
-def euro(betrag) -> str:
-    """Formatiert einen Betrag deutsch mit Euro-Zeichen."""
-    try:
-        betrag = float(betrag)
-    except (TypeError, ValueError):
-        betrag = 0.0
-    return "{:,.2f}".format(betrag).replace(",", "#").replace(".", ",").replace("#", ".") + " €"
 
 
 class Dashboard:
@@ -4411,6 +4757,9 @@ class Dashboard:
         self.routines = routines
         self.scheduler = scheduler
         self.mcp = mcp
+        # Die Sales-Analyse ist eine eigene Seite, wird aber immer mitgebaut -
+        # sonst zeigt der Verweis im Kopf auf eine Datei, die es nicht gibt.
+        self.verkaufsansicht = Verkaufsansicht(call_analysis, memory)
 
     # -- Daten sammeln ------------------------------------------------------
 
@@ -4432,6 +4781,10 @@ class Dashboard:
                 daten["monat"] = self.bookkeeping.auswertung(
                     jetzt.strftime("%Y-%m-01"), heute_datum())
                 daten["belege"] = self.bookkeeping.fehlende_belege()
+                daten["belegquote"] = self.bookkeeping.belegquote(
+                    jetzt.strftime("%Y-%m-01"), heute_datum())
+                daten["verlauf"] = self.bookkeeping.tagesverlauf(30)
+                daten["monate"] = self.bookkeeping.monatsverlauf(6)
             except Exception as fehler:
                 daten["monat_fehler"] = str(fehler)
 
@@ -4439,6 +4792,7 @@ class Dashboard:
             try:
                 daten["leads"] = self.call_analysis.offene_leads()
                 daten["muster"] = self.call_analysis.verkaufsmuster()
+                daten["dimensionen"] = self.call_analysis.dimensionen_schnitt()
             except Exception as fehler:
                 daten["leads_fehler"] = str(fehler)
 
@@ -4446,7 +4800,7 @@ class Dashboard:
             try:
                 daten["notizen"] = self.memory.notizen_letzte(8)
                 daten["punkte"] = self.memory.punkte_offen()
-                daten["protokoll"] = self.memory.protokoll(14)
+                daten["protokoll"] = self.memory.protokoll(16)
                 daten["statistik"] = self.memory.statistik()
             except Exception as fehler:
                 daten["memory_fehler"] = str(fehler)
@@ -4483,50 +4837,155 @@ class Dashboard:
                 daten["mcp"] = {}
         return daten
 
-    # -- Panels -------------------------------------------------------------
+    # -- Bausteine ----------------------------------------------------------
 
     @staticmethod
-    def _panel(titel: str, inhalt: str) -> str:
-        return '<section class="panel"><h2>%s</h2>%s</section>' % (sicher(titel), inhalt)
+    def _panel(titel: str, inhalt: str, breite: str = "", zusatz: str = "") -> str:
+        """Ein Kasten mit Überschrift."""
+        klasse = ("panel " + breite).strip()
+        kopf = sicher(titel)
+        if zusatz:
+            kopf += "<em>%s</em>" % sicher(zusatz)
+        return '<section class="%s"><h2>%s</h2>%s</section>' % (klasse, kopf, inhalt)
 
     @staticmethod
     def _liste(eintraege: list, leer_text: str) -> str:
+        """Eine Aufzählung, oder ein ehrlicher Hinweis, dass nichts da ist."""
         if not eintraege:
             return '<p class="leer">%s</p>' % sicher(leer_text)
         return "<ul>%s</ul>" % "".join("<li>%s</li>" % eintrag for eintrag in eintraege)
 
+    @staticmethod
+    def _kacheln(eintraege: list) -> str:
+        """Ein Raster aus Kennzahlen-Kacheln."""
+        return '<div class="kacheln">%s</div>' % "".join(
+            '<div class="kachel"><div class="wert %s">%s</div>'
+            '<div class="name">%s</div></div>'
+            % (klasse, sicher(wert), sicher(name)) for name, wert, klasse in eintraege)
+
+    # -- Panels -------------------------------------------------------------
+
+    def _panel_belegquote(self, daten: dict) -> str:
+        """Die wichtigste einzelne Zahl: Wie viel Geld ist belegt?"""
+        quote = (daten.get("belegquote") or {})
+        wert = quote.get("quote")
+        farbe = ampelfarbe(wert if wert is not None else 0, 90, 60)
+        if wert is None:
+            text = ('<div class="klein">Noch keine Ausgaben erfasst. Sobald du '
+                    'Belege buchst, siehst du hier, wie viel davon belegt ist.</div>')
+        else:
+            text = ('<div class="gross">%s</div>'
+                    '<div class="klein">von %s Ausgaben sind belegt.<br>'
+                    'Genau das fehlt sonst beim Steuerberater.</div>'
+                    % (euro(quote.get("belegt", 0)), euro(quote.get("gesamt", 0))))
+        inhalt = ('<div class="ringfeld">%s<div class="ringtext">%s</div></div>'
+                  % (ring(wert, "belegt", 132, farbe), text))
+        return self._panel("Belegquote", inhalt, "", "laufender Monat")
+
     def _panel_zahlen(self, daten: dict) -> str:
+        """Die Zahlen des laufenden Monats."""
         monat = daten.get("monat")
         if not monat:
-            return self._panel("Monat", '<p class="leer">Keine Buchhaltungsdaten.</p>')
-        ergebnis_klasse = "gut" if monat["ergebnis"] >= 0 else "schlecht"
+            return self._panel("Laufender Monat",
+                               '<p class="leer">Keine Buchhaltungsdaten.</p>', "breit")
+        leads = daten.get("leads") or {}
         kacheln = [
             ("Einnahmen", euro(monat["einnahmen"]), "gut"),
             ("Ausgaben", euro(monat["ausgaben"]), ""),
-            ("Ergebnis", euro(monat["ergebnis"]), ergebnis_klasse),
+            ("Ergebnis", euro(monat["ergebnis"]),
+             "gut" if monat["ergebnis"] >= 0 else "schlecht"),
             ("Zahllast", euro(monat["zahllast"]), "akzent"),
             ("Vorsteuer", euro(monat["vorsteuer"]), ""),
+            ("Umsatzsteuer", euro(monat["umsatzsteuer"]), ""),
             ("Buchungen", str(monat["anzahl"]), ""),
+            ("Offenes Volumen", euro_kurz(leads.get("volumen_offen", 0)), "akzent"),
         ]
-        inhalt = '<div class="kacheln">%s</div>' % "".join(
-            '<div class="kachel"><div class="wert %s">%s</div><div class="name">%s</div></div>'
-            % (klasse, sicher(wert), sicher(name)) for name, wert, klasse in kacheln)
-        return self._panel("Laufender Monat", inhalt)
+        return self._panel("Laufender Monat", self._kacheln(kacheln), "breit",
+                           "%s bis %s" % (monat["von"], monat["bis"]))
 
-    def _panel_belege(self, daten: dict) -> str:
-        belege = daten.get("belege")
-        if not belege:
-            return ""
-        if belege["anzahl"] == 0:
-            inhalt = '<p class="ok">Zu allen Ausgaben liegt ein Beleg vor.</p>'
+    def _panel_verlauf(self, daten: dict) -> str:
+        """Sparklines der letzten 30 Tage und die Monatsbilanz."""
+        verlauf = daten.get("verlauf") or {}
+        monate = daten.get("monate") or {}
+        einnahmen = verlauf.get("einnahmen") or []
+        ausgaben = verlauf.get("ausgaben") or []
+
+        if not any(einnahmen) and not any(ausgaben):
+            inhalt = ('<p class="leer">In den letzten 30 Tagen ist noch nichts '
+                      'gebucht worden.</p>')
         else:
-            zeilen = ['<span class="zeit">%s</span>%s <span class="grau">%s</span>'
-                      % (sicher(e["datum"]), sicher(e["haendler"] or "unbekannt"),
-                         euro(e["betrag"])) for e in belege["buchungen"][:8]]
-            inhalt = ('<p class="warnung">%d Ausgaben ohne Beleg, zusammen %s.</p>%s'
-                      % (belege["anzahl"], euro(belege["summe"]),
-                         self._liste(zeilen, "")))
-        return self._panel("Fehlende Belege", inhalt)
+            inhalt = (
+                '<div class="verlauf">'
+                '<div class="verlaufblock"><div class="verlaufkopf">'
+                '<span>Einnahmen 30 Tage</span><b>%s</b></div>%s</div>'
+                '<div class="verlaufblock"><div class="verlaufkopf">'
+                '<span>Ausgaben 30 Tage</span><b>%s</b></div>%s</div>'
+                '</div>'
+                % (euro(verlauf.get("summe_einnahmen", 0)),
+                   sparkline(einnahmen, farbe=FARBE_GUT),
+                   euro(verlauf.get("summe_ausgaben", 0)),
+                   sparkline(ausgaben, farbe=FARBE_AKZENT)))
+
+        if monate.get("ergebnis"):
+            inhalt += ('<div style="margin-top:14px"><div class="verlaufkopf">'
+                       '<span>Ergebnis je Monat</span><b>%s</b></div>%s</div>'
+                       % (euro(monate["ergebnis"][-1]),
+                          saeulen(monate["ergebnis"], monate.get("monate"))))
+        return self._panel("Verlauf", inhalt, "breit")
+
+    def _panel_vertrieb(self, daten: dict) -> str:
+        """Abschlussquote und die eigene schwächste Stelle im Gespräch."""
+        muster = daten.get("muster") or {}
+        dimensionen = daten.get("dimensionen") or {}
+        if not muster.get("anzahl"):
+            return self._panel(
+                "Vertrieb",
+                '<p class="leer">Noch kein Gespräch festgehalten. Erzähl Jarvis von '
+                'einem Kundentermin, dann bewertet er ihn.</p>')
+
+        quote = muster.get("abschlussquote", 0)
+        inhalt = ('<div class="ringfeld">%s<div class="ringtext">'
+                  '<div class="gross">%s</div>'
+                  '<div class="klein">%d Gespräche, Durchschnitt %s Punkte.<br>'
+                  '%d gewonnen, %d verloren, %d offen.</div></div></div>'
+                  % (ring(quote, "Abschluss", 116, ampelfarbe(quote, 50, 25)),
+                     euro_kurz((daten.get("leads") or {}).get("volumen_offen", 0)),
+                     muster["anzahl"], muster.get("durchschnitt", 0),
+                     muster.get("gewonnen", 0), muster.get("verloren", 0),
+                     muster.get("offen", 0)))
+
+        zeilen = [e for e in (dimensionen.get("dimensionen") or [])
+                  if e["wert"] is not None]
+        if zeilen:
+            inhalt += '<div style="margin-top:14px">'
+            for eintrag in zeilen:
+                inhalt += balken(eintrag["name"], eintrag["wert"], 10,
+                                 "%.1f / 10" % eintrag["wert"],
+                                 ampelfarbe(eintrag["wert"] * 10, 70, 40))
+            inhalt += '</div>'
+            schwach = dimensionen.get("schwaechste")
+            if schwach:
+                inhalt += ('<p class="achtung" style="font-size:12px;margin-top:6px">'
+                           'Schwächste Stelle: %s mit %.1f von 10.</p>'
+                           % (sicher(schwach["name"]), schwach["wert"]))
+        for einwand in muster.get("wiederkehrende_einwaende", [])[:2]:
+            inhalt += ('<p class="warnung" style="font-size:12px;margin-top:6px">'
+                       'Einwand "%s" kam %d mal.</p>'
+                       % (sicher(einwand["einwand"]), einwand["anzahl"]))
+        return self._panel("Vertrieb", inhalt, "", "letzte 90 Tage")
+
+    def _panel_kategorien(self, daten: dict) -> str:
+        """Wohin das Geld fließt - Ausgaben je Kategorie."""
+        monat = daten.get("monat") or {}
+        nach_kategorie = monat.get("nach_kategorie") or {}
+        if not nach_kategorie:
+            return self._panel("Ausgaben je Kategorie",
+                               '<p class="leer">Noch keine Ausgaben gebucht.</p>')
+        groesster = max(nach_kategorie.values())
+        inhalt = "".join(
+            balken(name, betrag, groesster, euro(betrag))
+            for name, betrag in list(nach_kategorie.items())[:8])
+        return self._panel("Ausgaben je Kategorie", inhalt)
 
     def _panel_termine(self, daten: dict) -> str:
         kalender = daten.get("kalender")
@@ -4539,11 +4998,11 @@ class Dashboard:
         zeilen = ['<span class="zeit">%s %s</span>%s%s'
                   % (sicher(t["tag"]), sicher(t["uhrzeit"]), sicher(t["titel"]),
                      (' <span class="grau">%s</span>' % sicher(t["ort"])) if t["ort"] else "")
-                  for t in kalender.get("termine", [])[:10]]
+                  for t in kalender.get("termine", [])[:9]]
         inhalt = self._liste(zeilen, "Nichts eingetragen.")
         for konflikt in kalender.get("konflikte", [])[:3]:
             inhalt += '<p class="warnung">%s</p>' % sicher(konflikt["text"])
-        return self._panel("Termine", inhalt)
+        return self._panel("Termine", inhalt, "", "nächste 3 Tage")
 
     def _panel_mail(self, daten: dict) -> str:
         mail = daten.get("mail")
@@ -4554,38 +5013,15 @@ class Dashboard:
             return self._panel("Posteingang", '<p class="warnung">%s</p>'
                                % sicher(mail.get("fehler", "nicht erreichbar")))
         zeilen = []
-        for eintrag in mail.get("wichtig", [])[:5] + mail.get("spaeter", [])[:5]:
+        for eintrag in mail.get("wichtig", [])[:5] + mail.get("spaeter", [])[:4]:
             marke = "warnung" if eintrag["einstufung"] == "wichtig" else "grau"
-            zeilen.append('<span class="%s">%s</span> %s<br><span class="grau">%s</span>'
+            zeilen.append('<span class="%s">%s</span> %s<br>'
+                          '<span class="grau">%s</span>'
                           % (marke, sicher(eintrag["einstufung"]),
                              sicher(eintrag["betreff"]),
                              sicher(eintrag["absender"][:60])))
-        return self._panel("Posteingang (%d ungelesen)" % mail.get("anzahl", 0),
-                           self._liste(zeilen, "Nichts Ungelesenes."))
-
-    def _panel_leads(self, daten: dict) -> str:
-        leads = daten.get("leads")
-        if not leads:
-            return ""
-        zeilen = ['<span class="zeit">%s</span>%s <span class="grau">%s &middot; %d Punkte</span>'
-                  % (sicher(l["datum"]), sicher(l["kunde"] or "ohne Namen"),
-                     euro(l["volumen"]), l["punktzahl"])
-                  for l in leads.get("leads", [])[:8]]
-        inhalt = ('<div class="kacheln"><div class="kachel">'
-                  '<div class="wert akzent">%s</div>'
-                  '<div class="name">Offenes Volumen</div></div>'
-                  '<div class="kachel"><div class="wert">%d</div>'
-                  '<div class="name">Offene Leads</div></div></div>'
-                  % (euro(leads.get("volumen_offen", 0)), leads.get("anzahl", 0)))
-        inhalt += self._liste(zeilen, "Kein Lead offen.")
-        muster = daten.get("muster") or {}
-        if muster.get("anzahl"):
-            inhalt += ('<p class="grau">Abschlussquote %.1f Prozent bei %d Gesprächen.</p>'
-                       % (muster.get("abschlussquote", 0), muster["anzahl"]))
-            for einwand in muster.get("wiederkehrende_einwaende", [])[:2]:
-                inhalt += ('<p class="warnung">Einwand "%s" kam %d mal.</p>'
-                           % (sicher(einwand["einwand"]), einwand["anzahl"]))
-        return self._panel("Vertrieb", inhalt)
+        return self._panel("Posteingang", self._liste(zeilen, "Nichts Ungelesenes."),
+                           "", "%d ungelesen" % mail.get("anzahl", 0))
 
     def _panel_offen(self, daten: dict) -> str:
         punkte = daten.get("punkte") or []
@@ -4593,7 +5029,38 @@ class Dashboard:
                             (' <span class="grau">bis %s</span>' % sicher(p["faellig"]))
                             if p["faellig"] else "")
                   for p in punkte[:12]]
-        return self._panel("Noch offen", self._liste(zeilen, "Nichts offen."))
+        return self._panel("Noch offen", self._liste(zeilen, "Nichts offen."), "",
+                           "%d" % len(punkte) if punkte else "")
+
+    def _panel_belege(self, daten: dict) -> str:
+        belege = daten.get("belege")
+        if not belege:
+            return ""
+        if belege["anzahl"] == 0:
+            inhalt = '<p class="ok">Zu allen Ausgaben liegt ein Beleg vor.</p>'
+        else:
+            zeilen = ['<span class="zeit">%s</span>%s <span class="grau">%s</span>'
+                      % (sicher(e["datum"]), sicher(e["haendler"] or "unbekannt"),
+                         euro(e["betrag"])) for e in belege["buchungen"][:8]]
+            inhalt = ('<p class="warnung" style="margin-bottom:8px">%d Ausgaben ohne '
+                      'Beleg, zusammen %s.</p>%s'
+                      % (belege["anzahl"], euro(belege["summe"]),
+                         self._liste(zeilen, "")))
+        return self._panel("Fehlende Belege", inhalt)
+
+    def _panel_leads(self, daten: dict) -> str:
+        leads = daten.get("leads")
+        if not leads or not leads.get("leads"):
+            return self._panel("Offene Leads",
+                               '<p class="leer">Kein Lead offen.</p>')
+        zeilen = ['<span class="zeit">%s</span>%s <span class="grau">%s · %d Punkte</span>'
+                  '<br><span class="grau">%s</span>'
+                  % (sicher(l["datum"]), sicher(l["kunde"] or "ohne Namen"),
+                     euro(l["volumen"]), l["punktzahl"],
+                     sicher(l["naechster_schritt"] or "kein nächster Schritt vereinbart"))
+                  for l in leads["leads"][:6]]
+        return self._panel("Offene Leads", self._liste(zeilen, ""), "",
+                           euro_kurz(leads.get("volumen_offen", 0)))
 
     def _panel_notizen(self, daten: dict) -> str:
         notizen = daten.get("notizen") or []
@@ -4606,14 +5073,14 @@ class Dashboard:
         protokoll = daten.get("protokoll") or []
         zeilen = []
         for eintrag in protokoll:
-            klasse = "ok" if eintrag["status"] == "ok" else "warnung"
+            klasse = {"ok": "ok", "abgelehnt": "achtung"}.get(eintrag["status"], "warnung")
             zeilen.append('<span class="zeit">%s</span><span class="%s">%s</span> '
                           '<span class="grau">%s</span>'
                           % (sicher(eintrag["zeit"][11:16]), klasse,
                              sicher(eintrag["werkzeug"]),
-                             sicher((eintrag["ergebnis"] or "")[:80])))
+                             sicher((eintrag["ergebnis"] or "")[:90])))
         return self._panel("Was Jarvis getan hat",
-                           self._liste(zeilen, "Noch nichts ausgeführt."))
+                           self._liste(zeilen, "Noch nichts ausgeführt."), "breit")
 
     def _panel_zeitplan(self, daten: dict) -> str:
         eintraege = daten.get("zeitplan") or []
@@ -4623,8 +5090,9 @@ class Dashboard:
         routinen = daten.get("routinen") or {}
         inhalt = self._liste(zeilen, "Nichts geplant.")
         if routinen.get("anzahl"):
-            inhalt += ('<p class="grau">%d Routinen hinterlegt: %s</p>'
-                       % (routinen["anzahl"], sicher(", ".join(routinen.get("namen", [])))))
+            inhalt += ('<p class="grau" style="margin-top:8px">%d Routinen: %s</p>'
+                       % (routinen["anzahl"],
+                          sicher(", ".join(routinen.get("namen", [])))))
         return self._panel("Zeitplan", inhalt)
 
     def _panel_dienste(self, daten: dict) -> str:
@@ -4640,24 +5108,43 @@ class Dashboard:
                              angaben.get("werkzeuge", 0)))
         return self._panel("Dienste", self._liste(zeilen, "Nichts eingerichtet."))
 
+    # -- Kopfleiste ---------------------------------------------------------
+
     def _ticker(self, daten: dict) -> str:
+        """Die Laufleiste ganz oben - nur echte Zahlen."""
         teile = []
         monat = daten.get("monat")
         if monat:
             teile.append("Ergebnis Monat <b>%s</b>" % euro(monat["ergebnis"]))
             teile.append("Zahllast <b>%s</b>" % euro(monat["zahllast"]))
+        quote = (daten.get("belegquote") or {}).get("quote")
+        if quote is not None:
+            marke = "b" if quote >= 90 else "b class=\"rot\""
+            teile.append("Belegquote <%s>%d%%</b>" % (marke, round(quote)))
         leads = daten.get("leads")
-        if leads:
+        if leads and leads.get("anzahl"):
             teile.append("Offene Leads <b>%d</b> über <b>%s</b>"
-                         % (leads.get("anzahl", 0), euro(leads.get("volumen_offen", 0))))
+                         % (leads["anzahl"], euro(leads.get("volumen_offen", 0))))
         belege = daten.get("belege")
         if belege and belege.get("anzahl"):
-            teile.append("Belege fehlen <b>%d</b>" % belege["anzahl"])
+            teile.append('Belege fehlen <b class="rot">%d</b>' % belege["anzahl"])
         punkte = daten.get("punkte") or []
         teile.append("Offene Punkte <b>%d</b>" % len(punkte))
         if not teile:
             teile.append("Jarvis ist bereit")
         return "".join("<span>%s</span>" % teil for teil in teile)
+
+    def _kopf(self, daten: dict, seite: str = "cockpit") -> tuple:
+        """Überschrift links, Navigation rechts."""
+        links = ('<div><h1>Jarvis <span>// Command Center</span></h1>'
+                 '<p>%s, %s &middot; Stand %s Uhr &middot; %s</p></div>'
+                 % (sicher(daten["wochentag"]), sicher(daten["datum"]),
+                    sicher(daten["uhrzeit"]), sicher(daten["firma"])))
+        rechts = ('<nav><a class="%s" href="dashboard.html">Cockpit</a>'
+                  '<a class="%s" href="sales.html">Sales-Analyse</a></nav>'
+                  % ("aktiv" if seite == "cockpit" else "",
+                     "aktiv" if seite == "sales" else ""))
+        return links, rechts
 
     # -- Bauen --------------------------------------------------------------
 
@@ -4665,24 +5152,31 @@ class Dashboard:
         """Erzeugt ``dashboard.html`` und ``data.json``."""
         daten = self.daten_sammeln(mit_netz)
         panels = "".join(teil for teil in [
+            self._panel_belegquote(daten),
             self._panel_zahlen(daten),
-            self._panel_termine(daten),
+            self._panel_verlauf(daten),
+            self._panel_vertrieb(daten),
             self._panel_leads(daten),
+            self._panel_termine(daten),
             self._panel_offen(daten),
-            self._panel_mail(daten),
             self._panel_belege(daten),
+            self._panel_kategorien(daten),
+            self._panel_mail(daten),
             self._panel_notizen(daten),
-            self._panel_zeitplan(daten),
             self._panel_protokoll(daten),
+            self._panel_zeitplan(daten),
             self._panel_dienste(daten),
         ] if teil)
 
-        seite = SEITE % {"bg": FARBE_HINTERGRUND, "panel": FARBE_PANEL,
-                         "akzent": FARBE_AKZENT, "ticker": self._ticker(daten),
-                         "wochentag": sicher(daten["wochentag"]),
-                         "datum": sicher(daten["datum"]),
-                         "uhrzeit": sicher(daten["uhrzeit"]),
-                         "firma": sicher(daten["firma"]), "panels": panels}
+        links, rechts = self._kopf(daten, "cockpit")
+        seite = seite_bauen(
+            "Jarvis Command Center", self._ticker(daten), links, rechts,
+            '<div class="raster">%s</div>' % panels,
+            "Diese Seite aktualisiert sich alle 60 Sekunden von selbst. "
+            "Gezeigt wird ausschließlich, was wirklich erfasst ist - "
+            "leere Bereiche sind leer, nicht geschätzt.<br>"
+            "Alle Daten liegen lokal auf diesem Rechner.")
+
         try:
             DASHBOARD_VERZEICHNIS.mkdir(parents=True, exist_ok=True)
             html_pfad = DASHBOARD_VERZEICHNIS / "dashboard.html"
@@ -4693,8 +5187,264 @@ class Dashboard:
         except OSError as fehler:
             return {"ok": False,
                     "fehler": "Das Dashboard ließ sich nicht schreiben: %s" % fehler}
+        sales = self.verkaufsansicht.bauen()
+        if not sales.get("ok"):
+            print("[dashboard] Sales-Analyse: %s" % sales.get("fehler"))
+
         return {"ok": True, "datei": str(html_pfad), "daten": str(json_pfad),
-                "text": "Das Command Center ist gebaut: %s" % html_pfad}
+                "sales": sales.get("datei", ""),
+                "text": "Das Command Center ist gebaut: %s%s"
+                        % (html_pfad,
+                           ("  Sales-Analyse: %s" % sales["datei"])
+                           if sales.get("ok") else "")}
+
+
+# =========================================================================
+# sales_view  -  Sales-Analyse - erzeugt ``dashboard/sales.html``.
+# 
+# Eine Seite je Kundengespräch: Punktzahl, die fünf Einzelbewertungen als
+# Balken, Einwände, Stärken, Schwächen und der nächste Schritt. Links die Liste
+# aller Gespräche, rechts das ausgewählte.
+# 
+# Die Seite kommt ohne Server aus. Umgeschaltet wird mit ein paar Zeilen
+# JavaScript, die nur Sichtbarkeiten umschalten - alle Gespräche stecken schon
+# in der Datei. Damit funktioniert sie auch offline und per Doppelklick.
+# 
+# **Es wird nichts geschätzt.** Ein Gespräch ohne Einzelbewertung zeigt seine
+# Balken nicht, sondern sagt, dass es ohne Bewertung abgelegt wurde.
+# =========================================================================
+
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+
+
+# Wie ein Ergebnis eingefärbt wird.
+ERGEBNIS_FARBE = {"gewonnen": FARBE_GUT, "verloren": FARBE_SCHLECHT,
+                  "offen": FARBE_WARNUNG, "unklar": FARBE_AKZENT}
+
+UMSCHALTER = """
+function zeigeGespraech(kennung) {
+  var alle = document.querySelectorAll('.gespraech');
+  for (var i = 0; i < alle.length; i++) {
+    alle[i].style.display = (alle[i].id === 'g' + kennung) ? 'block' : 'none';
+  }
+  var knoepfe = document.querySelectorAll('.gwahl');
+  for (var j = 0; j < knoepfe.length; j++) {
+    knoepfe[j].className = 'gwahl' +
+      (knoepfe[j].getAttribute('data-id') === String(kennung) ? ' gewaehlt' : '');
+  }
+}
+"""
+
+ZUSATZ_CSS = """
+.gwahl { display: block; width: 100%; text-align: left; cursor: pointer;
+         background: #121517; border: 1px solid #1C1F23; border-radius: 8px;
+         padding: 10px 12px; margin-bottom: 7px; color: #E6E8EA;
+         font-family: inherit; font-size: 13px; }
+.gwahl:hover { border-color: rgba(232,98,44,.45); }
+.gwahl.gewaehlt { border-color: #E8622C; background: rgba(232,98,44,.09); }
+.gwahl .kopf { display: flex; justify-content: space-between; align-items: baseline;
+               gap: 8px; }
+.gwahl .punkte { font-variant-numeric: tabular-nums; font-weight: 600; }
+.gwahl .unten { font-size: 11px; color: #6E767D; margin-top: 3px;
+                display: flex; justify-content: space-between; }
+.marke { font-size: 9.5px; text-transform: uppercase; letter-spacing: .1em;
+         border-radius: 4px; padding: 2px 7px; border: 1px solid; }
+.zitat { background: #121517; border-left: 2px solid #1C1F23; border-radius: 0 6px 6px 0;
+         padding: 10px 13px; font-size: 12.5px; color: #8A9096; line-height: 1.65;
+         white-space: pre-wrap; max-height: 220px; overflow-y: auto; }
+.spalten { display: grid; grid-template-columns: 1fr 1fr; gap: 13px; }
+@media (max-width: 760px) { .spalten { grid-template-columns: 1fr; } }
+"""
+
+
+class Verkaufsansicht:
+    """Baut die Sales-Analyse als einzelne HTML-Datei."""
+
+    def __init__(self, call_analysis=None, memory=None):
+        self.call_analysis = call_analysis
+        self.memory = memory
+
+    # -- Bausteine ----------------------------------------------------------
+
+    @staticmethod
+    def _marke(ergebnis: str) -> str:
+        """Farbige Markierung für gewonnen, verloren, offen, unklar."""
+        farbe = ERGEBNIS_FARBE.get(ergebnis, FARBE_AKZENT)
+        return ('<span class="marke" style="color:%s;border-color:%s">%s</span>'
+                % (farbe, farbe, sicher(ergebnis)))
+
+    def _wahlknopf(self, zeile, gewaehlt: bool) -> str:
+        """Ein Eintrag in der Gesprächsliste links."""
+        return ('<button class="gwahl%s" data-id="%d" onclick="zeigeGespraech(%d)">'
+                '<div class="kopf"><span>%s</span>'
+                '<span class="punkte" style="color:%s">%d</span></div>'
+                '<div class="unten"><span>%s</span><span>%s</span></div></button>'
+                % (" gewaehlt" if gewaehlt else "", zeile["id"], zeile["id"],
+                   sicher(zeile["kunde"] or "ohne Namen"),
+                   ampelfarbe(zeile["punktzahl"], 70, 45), zeile["punktzahl"],
+                   sicher(zeile["datum"]),
+                   euro_kurz(zeile["volumen"]) if zeile["volumen"] else "–"))
+
+    @staticmethod
+    def _liste(titel: str, eintraege: list, farbe: str, leer: str) -> str:
+        """Eine beschriftete Aufzählung, oder ein Hinweis, dass nichts erfasst ist."""
+        if not eintraege:
+            inhalt = '<p class="leer">%s</p>' % sicher(leer)
+        else:
+            inhalt = "<ul>%s</ul>" % "".join(
+                '<li><span style="color:%s">▸</span> %s</li>' % (farbe, sicher(e))
+                for e in eintraege)
+        return ('<section class="panel"><h2>%s</h2>%s</section>'
+                % (sicher(titel), inhalt))
+
+    def _detail(self, zeile, sichtbar: bool) -> str:
+        """Die ausführliche Ansicht eines Gesprächs."""
+        bewertung = {}
+        if self.call_analysis is not None:
+            bewertung = self.call_analysis.bewertung_lesen(zeile)
+
+        einwaende = _text_zu_liste(zeile["einwaende"])
+        offene = _text_zu_liste(zeile["offene_einwaende"])
+        staerken = _text_zu_liste(zeile["staerken"])
+        schwaechen = _text_zu_liste(zeile["schwaechen"])
+
+        kacheln = [
+            ("Punktzahl", "%d / 100" % zeile["punktzahl"], ""),
+            ("Volumen", euro(zeile["volumen"]) if zeile["volumen"] else "nicht beziffert",
+             "akzent" if zeile["volumen"] else ""),
+            ("Einwände", str(len(einwaende)), ""),
+            ("davon offen", str(len(offene)),
+             "schlecht" if offene else "gut"),
+        ]
+        kachelblock = '<div class="kacheln">%s</div>' % "".join(
+            '<div class="kachel"><div class="wert %s">%s</div>'
+            '<div class="name">%s</div></div>' % (k, sicher(w), sicher(n))
+            for n, w, k in kacheln)
+
+        # Ring und Einzelbewertungen
+        if bewertung and self.call_analysis is not None:
+            balkenblock = ""
+            for schluessel, beschriftung in self.call_analysis.DIMENSIONEN:
+                if schluessel not in bewertung:
+                    continue
+                wert = bewertung[schluessel]
+                balkenblock += balken(beschriftung, wert, 10, "%.0f / 10" % wert,
+                                      ampelfarbe(wert * 10, 70, 40))
+        else:
+            balkenblock = ('<p class="leer">Dieses Gespräch wurde ohne '
+                           'Einzelbewertung abgelegt - dazu gibt es keine Balken.</p>')
+
+        kopfteil = (
+            '<section class="panel breit"><h2>%s<em>%s</em></h2>'
+            '<div class="ringfeld">%s<div class="ringtext">'
+            '<div class="gross">%s %s</div>'
+            '<div class="klein">%s</div></div></div>'
+            '<div style="margin-top:14px">%s</div></section>'
+            % (sicher(zeile["kunde"] or "Gespräch ohne Namen"), sicher(zeile["datum"]),
+               ring(zeile["punktzahl"], "Punkte", 132,
+                    ampelfarbe(zeile["punktzahl"], 70, 45)),
+               self._marke(zeile["ergebnis"]),
+               euro_kurz(zeile["volumen"]) if zeile["volumen"] else "",
+               sicher(zeile["naechster_schritt"] or
+                      "Es ist kein nächster Schritt vereinbart worden."),
+               kachelblock))
+
+        bewertungsteil = ('<section class="panel"><h2>Einzelbewertung</h2>%s</section>'
+                          % balkenblock)
+
+        teile = [kopfteil, bewertungsteil,
+                 self._liste("Das lief gut", staerken, FARBE_GUT,
+                             "Nichts als Stärke festgehalten."),
+                 self._liste("Das fehlte", schwaechen, FARBE_SCHLECHT,
+                             "Keine Schwächen festgehalten."),
+                 self._liste("Einwände", einwaende, FARBE_WARNUNG,
+                             "Es kamen keine Einwände."),
+                 self._liste("Unbeantwortet geblieben", offene, FARBE_SCHLECHT,
+                             "Alle Einwände wurden behandelt.")]
+
+        if (zeile["rohtext"] or "").strip():
+            teile.append('<section class="panel voll"><h2>So hat er es erzählt</h2>'
+                         '<div class="zitat">%s</div></section>'
+                         % sicher(zeile["rohtext"]))
+
+        return ('<div class="gespraech" id="g%d" style="display:%s">'
+                '<div class="raster" style="padding:0">%s</div></div>'
+                % (zeile["id"], "block" if sichtbar else "none", "".join(teile)))
+
+    # -- Bauen --------------------------------------------------------------
+
+    def bauen(self, ziel=None, grenze: int = 40) -> dict:
+        """Erzeugt ``sales.html``."""
+        jetzt = datetime.now()
+        zeilen = []
+        if self.call_analysis is not None:
+            try:
+                zeilen = self.call_analysis.gespraeche(grenze)
+            except Exception as fehler:
+                return {"ok": False,
+                        "fehler": "Die Gespräche ließen sich nicht lesen: %s" % fehler}
+
+        muster = {}
+        if self.call_analysis is not None and zeilen:
+            try:
+                muster = self.call_analysis.verkaufsmuster()
+            except Exception:
+                muster = {}
+
+        if not zeilen:
+            inhalt = ('<div class="raster"><section class="panel voll">'
+                      '<h2>Sales-Analyse</h2>'
+                      '<p class="leer">Es ist noch kein Kundengespräch festgehalten. '
+                      'Erzähl Jarvis, wie ein Termin gelaufen ist - er bewertet ihn '
+                      'und legt ihn hier ab.</p></section></div>')
+            ticker = "<span>Noch keine Gespräche erfasst</span>"
+        else:
+            liste = "".join(self._wahlknopf(z, index == 0)
+                            for index, z in enumerate(zeilen))
+            details = "".join(self._detail(z, index == 0)
+                              for index, z in enumerate(zeilen))
+            inhalt = ('<div class="raster">'
+                      '<section class="panel schmal"><h2>Gespräche<em>%d</em></h2>%s</section>'
+                      '<div style="grid-column:span 9;min-width:0">%s</div>'
+                      '</div>' % (len(zeilen), liste, details))
+
+            teile = ["Gespräche <b>%d</b>" % len(zeilen)]
+            if muster.get("anzahl"):
+                teile.append("Abschlussquote <b>%.0f%%</b>"
+                             % muster.get("abschlussquote", 0))
+                teile.append("Durchschnitt <b>%.1f</b> Punkte"
+                             % muster.get("durchschnitt", 0))
+                for einwand in muster.get("wiederkehrende_einwaende", [])[:1]:
+                    teile.append('Einwand "%s" <b class="rot">%dx</b>'
+                                 % (sicher(einwand["einwand"]), einwand["anzahl"]))
+            ticker = "".join("<span>%s</span>" % t for t in teile)
+
+        links = ('<div><h1>Jarvis <span>// Sales-Analyse</span></h1>'
+                 '<p>%s, %s &middot; Stand %s Uhr &middot; %s</p></div>'
+                 % (WOCHENTAGE[jetzt.weekday()], jetzt.strftime("%d.%m.%Y"),
+                    jetzt.strftime("%H:%M"), sicher(FIRMA)))
+        rechts = ('<nav><a href="dashboard.html">Cockpit</a>'
+                  '<a class="aktiv" href="sales.html">Sales-Analyse</a></nav>')
+
+        seite = seite_bauen("Jarvis Sales-Analyse", ticker, links, rechts, inhalt,
+                            "Streng bewertet: ein freundliches Gespräch ohne Ergebnis "
+                            "ist kein gutes Gespräch.<br>"
+                            "Gezeigt wird nur, was wirklich erfasst wurde.")
+        seite = seite.replace("</style>", ZUSATZ_CSS + "</style>")
+        seite = seite.replace("</body>", "<script>%s</script>\n</body>" % UMSCHALTER)
+
+        try:
+            DASHBOARD_VERZEICHNIS.mkdir(parents=True, exist_ok=True)
+            pfad = ziel or (DASHBOARD_VERZEICHNIS / "sales.html")
+            with open(str(pfad), "w", encoding="utf-8") as datei:
+                datei.write(seite)
+        except OSError as fehler:
+            return {"ok": False,
+                    "fehler": "Die Sales-Analyse ließ sich nicht schreiben: %s" % fehler}
+        return {"ok": True, "datei": str(pfad), "anzahl": len(zeilen),
+                "text": "Die Sales-Analyse ist gebaut: %s" % pfad}
 
 
 # =========================================================================

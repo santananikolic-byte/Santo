@@ -85,9 +85,18 @@ Termine samt Überschneidungen, echtes Wetter, ein Blick durch die Kamera, und
 auf Wunsch Bedienung des Bildschirms — Schritt für Schritt, jeder einzeln
 bestätigt.
 
-**Command Center.** `dashboard/dashboard.html` zeigt Monatszahlen, Termine,
+**Command Center.** `dashboard/dashboard.html` zeigt Monatszahlen mit
+30-Tage-Verlauf, die Belegquote als Ring, Ausgaben je Kategorie, Termine,
 Posteingang, offene Leads, Notizen und jede Aktion, die Jarvis ausgeführt hat.
 Die Seite aktualisiert sich alle 60 Sekunden selbst.
+
+**Sales-Analyse.** `dashboard/sales.html` zeigt jedes Kundengespräch einzeln:
+Punktzahl, die fünf Einzelbewertungen als Balken, Einwände, was fehlte und der
+nächste Schritt. Beide Seiten entstehen gemeinsam beim Dashboard-Bau.
+
+Beide zeigen **nur, was wirklich erfasst ist**. Ein Bereich ohne Daten bleibt
+sichtbar leer und sagt das auch — eine Kennzahl, die nach etwas aussieht, aber
+auf nichts beruht, wäre schlimmer als eine leere Fläche.
 
 ---
 
@@ -169,6 +178,8 @@ src/config.py              liest config/.env
 src/agent.py               Claude-Schleife mit Werkzeugaufrufen
 src/run.py                 Betriebsarten
 src/modules/               ein Modul je Aufgabe
+src/modules/dashboard_teile.py  Farben, Zahlenformate, SVG-Grafiken
+landing/index.html         Verkaufsseite, eigenständig, ohne externe Anfragen
 tests/abnahme.py           führt die Abnahmeliste wirklich aus
 tests/mcp_testserver.py    MCP-Server zum Prüfen der Freigabelogik
 config/mcp_servers.json    externe Dienste (wird beim ersten Start angelegt)

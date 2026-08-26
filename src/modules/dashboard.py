@@ -3,121 +3,28 @@
 """Command Center - erzeugt ``dashboard/dashboard.html`` und ``data.json``.
 
 Der Nutzer soll auf einen Blick sehen, wie sein Betrieb steht: Zahlen des
-Monats, Termine, Posteingang, offene Leads, Notizen und - besonders wichtig -
-was Jarvis zuletzt getan hat. Jede ausgeführte Aktion steht dort. Ein
-Assistent, der handelt, muss nachprüfbar sein.
+Monats, Verlauf, Termine, Posteingang, offene Leads, Notizen und - besonders
+wichtig - was Jarvis zuletzt getan hat. Jede ausgeführte Aktion steht dort.
+Ein Assistent, der handelt, muss nachprüfbar sein.
+
+**Es wird nur gezeigt, was wirklich in der Datenbank steht.** Ein Bereich ohne
+Daten bleibt sichtbar leer und sagt das auch. Eine Kennzahl, die nach etwas
+aussieht, aber auf nichts beruht, wäre schlimmer als eine leere Fläche - der
+Nutzer trifft danach Entscheidungen.
 
 Die Seite lädt sich alle 60 Sekunden selbst neu und braucht keinen Server.
 """
 
-import html
 import json
 from datetime import datetime
 
 import config
+from modules.dashboard_teile import (FARBE_AKZENT, FARBE_GRAU, FARBE_GUT,
+                                     FARBE_SCHLECHT, FARBE_WARNUNG, WOCHENTAGE,
+                                     ampelfarbe, balken, euro, euro_kurz, prozent,
+                                     ring, saeulen, seite_bauen, sicher, sparkline)
 from modules.memory import heute_datum
-
-# Farben des Cockpits
-FARBE_HINTERGRUND = "#08090B"
-FARBE_PANEL = "#0F1113"
-FARBE_AKZENT = "#E8622C"
-
-WOCHENTAGE = ["Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag",
-              "Samstag", "Sonntag"]
-
-SEITE = """<!DOCTYPE html>
-<html lang="de">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<meta http-equiv="refresh" content="60">
-<title>Jarvis Command Center</title>
-<style>
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  body {
-    background: %(bg)s; color: #E6E8EA; min-height: 100vh;
-    font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
-    padding-bottom: 40px;
-  }
-  .ticker {
-    background: linear-gradient(90deg, %(akzent)s22, transparent);
-    border-bottom: 1px solid %(akzent)s55; padding: 10px 20px;
-    font-size: 13px; letter-spacing: .06em; text-transform: uppercase;
-    display: flex; gap: 28px; flex-wrap: wrap; align-items: center;
-  }
-  .ticker b { color: %(akzent)s; text-shadow: 0 0 12px %(akzent)s88; }
-  header { padding: 26px 20px 10px; }
-  header h1 {
-    font-size: 26px; font-weight: 600; letter-spacing: .02em;
-    color: %(akzent)s; text-shadow: 0 0 22px %(akzent)s55;
-  }
-  header p { color: #8A9096; font-size: 14px; margin-top: 4px; }
-  .raster {
-    display: grid; gap: 14px; padding: 14px 20px;
-    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-  }
-  .panel {
-    background: %(panel)s; border: 1px solid #1C1F23; border-radius: 10px;
-    padding: 16px 18px;
-  }
-  .panel h2 {
-    font-size: 11px; text-transform: uppercase; letter-spacing: .14em;
-    color: #6E767D; margin-bottom: 12px; font-weight: 600;
-  }
-  .kacheln { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px,1fr)); gap: 10px; }
-  .kachel {
-    background: #121517; border: 1px solid #1C1F23; border-radius: 8px;
-    padding: 12px 14px;
-  }
-  .kachel .wert { font-size: 22px; font-weight: 600; color: #F2F4F6; }
-  .kachel .wert.akzent { color: %(akzent)s; text-shadow: 0 0 16px %(akzent)s66; }
-  .kachel .wert.gut { color: #4CC38A; }
-  .kachel .wert.schlecht { color: #E5484D; }
-  .kachel .name { font-size: 11px; color: #6E767D; text-transform: uppercase;
-                  letter-spacing: .08em; margin-top: 4px; }
-  ul { list-style: none; }
-  li { padding: 8px 0; border-bottom: 1px solid #17191C; font-size: 14px; line-height: 1.45; }
-  li:last-child { border-bottom: none; }
-  .zeit { color: %(akzent)s; font-variant-numeric: tabular-nums; margin-right: 8px; }
-  .grau { color: #6E767D; font-size: 12px; }
-  .warnung { color: #E5484D; }
-  .ok { color: #4CC38A; }
-  .leer { color: #4A5157; font-style: italic; font-size: 13px; }
-  .status { display: inline-block; width: 7px; height: 7px; border-radius: 50%%;
-            margin-right: 7px; }
-  .an { background: #4CC38A; box-shadow: 0 0 8px #4CC38A; }
-  .aus { background: #3A4046; }
-  footer { padding: 16px 20px; color: #4A5157; font-size: 12px; }
-</style>
-</head>
-<body>
-<div class="ticker">%(ticker)s</div>
-<header>
-  <h1>Jarvis Command Center</h1>
-  <p>%(wochentag)s, %(datum)s &middot; Stand %(uhrzeit)s Uhr &middot; %(firma)s</p>
-</header>
-<div class="raster">
-%(panels)s
-</div>
-<footer>Diese Seite aktualisiert sich alle 60 Sekunden von selbst.
-Alle Daten liegen lokal auf diesem Rechner.</footer>
-</body>
-</html>
-"""
-
-
-def sicher(text) -> str:
-    """Macht Text HTML-sicher - Kundennamen dürfen die Seite nicht aufbrechen."""
-    return html.escape(str(text if text is not None else ""))
-
-
-def euro(betrag) -> str:
-    """Formatiert einen Betrag deutsch mit Euro-Zeichen."""
-    try:
-        betrag = float(betrag)
-    except (TypeError, ValueError):
-        betrag = 0.0
-    return "{:,.2f}".format(betrag).replace(",", "#").replace(".", ",").replace("#", ".") + " €"
+from modules.sales_view import Verkaufsansicht
 
 
 class Dashboard:
@@ -135,6 +42,9 @@ class Dashboard:
         self.routines = routines
         self.scheduler = scheduler
         self.mcp = mcp
+        # Die Sales-Analyse ist eine eigene Seite, wird aber immer mitgebaut -
+        # sonst zeigt der Verweis im Kopf auf eine Datei, die es nicht gibt.
+        self.verkaufsansicht = Verkaufsansicht(call_analysis, memory)
 
     # -- Daten sammeln ------------------------------------------------------
 
@@ -156,6 +66,10 @@ class Dashboard:
                 daten["monat"] = self.bookkeeping.auswertung(
                     jetzt.strftime("%Y-%m-01"), heute_datum())
                 daten["belege"] = self.bookkeeping.fehlende_belege()
+                daten["belegquote"] = self.bookkeeping.belegquote(
+                    jetzt.strftime("%Y-%m-01"), heute_datum())
+                daten["verlauf"] = self.bookkeeping.tagesverlauf(30)
+                daten["monate"] = self.bookkeeping.monatsverlauf(6)
             except Exception as fehler:
                 daten["monat_fehler"] = str(fehler)
 
@@ -163,6 +77,7 @@ class Dashboard:
             try:
                 daten["leads"] = self.call_analysis.offene_leads()
                 daten["muster"] = self.call_analysis.verkaufsmuster()
+                daten["dimensionen"] = self.call_analysis.dimensionen_schnitt()
             except Exception as fehler:
                 daten["leads_fehler"] = str(fehler)
 
@@ -170,7 +85,7 @@ class Dashboard:
             try:
                 daten["notizen"] = self.memory.notizen_letzte(8)
                 daten["punkte"] = self.memory.punkte_offen()
-                daten["protokoll"] = self.memory.protokoll(14)
+                daten["protokoll"] = self.memory.protokoll(16)
                 daten["statistik"] = self.memory.statistik()
             except Exception as fehler:
                 daten["memory_fehler"] = str(fehler)
@@ -207,50 +122,155 @@ class Dashboard:
                 daten["mcp"] = {}
         return daten
 
-    # -- Panels -------------------------------------------------------------
+    # -- Bausteine ----------------------------------------------------------
 
     @staticmethod
-    def _panel(titel: str, inhalt: str) -> str:
-        return '<section class="panel"><h2>%s</h2>%s</section>' % (sicher(titel), inhalt)
+    def _panel(titel: str, inhalt: str, breite: str = "", zusatz: str = "") -> str:
+        """Ein Kasten mit Überschrift."""
+        klasse = ("panel " + breite).strip()
+        kopf = sicher(titel)
+        if zusatz:
+            kopf += "<em>%s</em>" % sicher(zusatz)
+        return '<section class="%s"><h2>%s</h2>%s</section>' % (klasse, kopf, inhalt)
 
     @staticmethod
     def _liste(eintraege: list, leer_text: str) -> str:
+        """Eine Aufzählung, oder ein ehrlicher Hinweis, dass nichts da ist."""
         if not eintraege:
             return '<p class="leer">%s</p>' % sicher(leer_text)
         return "<ul>%s</ul>" % "".join("<li>%s</li>" % eintrag for eintrag in eintraege)
 
+    @staticmethod
+    def _kacheln(eintraege: list) -> str:
+        """Ein Raster aus Kennzahlen-Kacheln."""
+        return '<div class="kacheln">%s</div>' % "".join(
+            '<div class="kachel"><div class="wert %s">%s</div>'
+            '<div class="name">%s</div></div>'
+            % (klasse, sicher(wert), sicher(name)) for name, wert, klasse in eintraege)
+
+    # -- Panels -------------------------------------------------------------
+
+    def _panel_belegquote(self, daten: dict) -> str:
+        """Die wichtigste einzelne Zahl: Wie viel Geld ist belegt?"""
+        quote = (daten.get("belegquote") or {})
+        wert = quote.get("quote")
+        farbe = ampelfarbe(wert if wert is not None else 0, 90, 60)
+        if wert is None:
+            text = ('<div class="klein">Noch keine Ausgaben erfasst. Sobald du '
+                    'Belege buchst, siehst du hier, wie viel davon belegt ist.</div>')
+        else:
+            text = ('<div class="gross">%s</div>'
+                    '<div class="klein">von %s Ausgaben sind belegt.<br>'
+                    'Genau das fehlt sonst beim Steuerberater.</div>'
+                    % (euro(quote.get("belegt", 0)), euro(quote.get("gesamt", 0))))
+        inhalt = ('<div class="ringfeld">%s<div class="ringtext">%s</div></div>'
+                  % (ring(wert, "belegt", 132, farbe), text))
+        return self._panel("Belegquote", inhalt, "", "laufender Monat")
+
     def _panel_zahlen(self, daten: dict) -> str:
+        """Die Zahlen des laufenden Monats."""
         monat = daten.get("monat")
         if not monat:
-            return self._panel("Monat", '<p class="leer">Keine Buchhaltungsdaten.</p>')
-        ergebnis_klasse = "gut" if monat["ergebnis"] >= 0 else "schlecht"
+            return self._panel("Laufender Monat",
+                               '<p class="leer">Keine Buchhaltungsdaten.</p>', "breit")
+        leads = daten.get("leads") or {}
         kacheln = [
             ("Einnahmen", euro(monat["einnahmen"]), "gut"),
             ("Ausgaben", euro(monat["ausgaben"]), ""),
-            ("Ergebnis", euro(monat["ergebnis"]), ergebnis_klasse),
+            ("Ergebnis", euro(monat["ergebnis"]),
+             "gut" if monat["ergebnis"] >= 0 else "schlecht"),
             ("Zahllast", euro(monat["zahllast"]), "akzent"),
             ("Vorsteuer", euro(monat["vorsteuer"]), ""),
+            ("Umsatzsteuer", euro(monat["umsatzsteuer"]), ""),
             ("Buchungen", str(monat["anzahl"]), ""),
+            ("Offenes Volumen", euro_kurz(leads.get("volumen_offen", 0)), "akzent"),
         ]
-        inhalt = '<div class="kacheln">%s</div>' % "".join(
-            '<div class="kachel"><div class="wert %s">%s</div><div class="name">%s</div></div>'
-            % (klasse, sicher(wert), sicher(name)) for name, wert, klasse in kacheln)
-        return self._panel("Laufender Monat", inhalt)
+        return self._panel("Laufender Monat", self._kacheln(kacheln), "breit",
+                           "%s bis %s" % (monat["von"], monat["bis"]))
 
-    def _panel_belege(self, daten: dict) -> str:
-        belege = daten.get("belege")
-        if not belege:
-            return ""
-        if belege["anzahl"] == 0:
-            inhalt = '<p class="ok">Zu allen Ausgaben liegt ein Beleg vor.</p>'
+    def _panel_verlauf(self, daten: dict) -> str:
+        """Sparklines der letzten 30 Tage und die Monatsbilanz."""
+        verlauf = daten.get("verlauf") or {}
+        monate = daten.get("monate") or {}
+        einnahmen = verlauf.get("einnahmen") or []
+        ausgaben = verlauf.get("ausgaben") or []
+
+        if not any(einnahmen) and not any(ausgaben):
+            inhalt = ('<p class="leer">In den letzten 30 Tagen ist noch nichts '
+                      'gebucht worden.</p>')
         else:
-            zeilen = ['<span class="zeit">%s</span>%s <span class="grau">%s</span>'
-                      % (sicher(e["datum"]), sicher(e["haendler"] or "unbekannt"),
-                         euro(e["betrag"])) for e in belege["buchungen"][:8]]
-            inhalt = ('<p class="warnung">%d Ausgaben ohne Beleg, zusammen %s.</p>%s'
-                      % (belege["anzahl"], euro(belege["summe"]),
-                         self._liste(zeilen, "")))
-        return self._panel("Fehlende Belege", inhalt)
+            inhalt = (
+                '<div class="verlauf">'
+                '<div class="verlaufblock"><div class="verlaufkopf">'
+                '<span>Einnahmen 30 Tage</span><b>%s</b></div>%s</div>'
+                '<div class="verlaufblock"><div class="verlaufkopf">'
+                '<span>Ausgaben 30 Tage</span><b>%s</b></div>%s</div>'
+                '</div>'
+                % (euro(verlauf.get("summe_einnahmen", 0)),
+                   sparkline(einnahmen, farbe=FARBE_GUT),
+                   euro(verlauf.get("summe_ausgaben", 0)),
+                   sparkline(ausgaben, farbe=FARBE_AKZENT)))
+
+        if monate.get("ergebnis"):
+            inhalt += ('<div style="margin-top:14px"><div class="verlaufkopf">'
+                       '<span>Ergebnis je Monat</span><b>%s</b></div>%s</div>'
+                       % (euro(monate["ergebnis"][-1]),
+                          saeulen(monate["ergebnis"], monate.get("monate"))))
+        return self._panel("Verlauf", inhalt, "breit")
+
+    def _panel_vertrieb(self, daten: dict) -> str:
+        """Abschlussquote und die eigene schwächste Stelle im Gespräch."""
+        muster = daten.get("muster") or {}
+        dimensionen = daten.get("dimensionen") or {}
+        if not muster.get("anzahl"):
+            return self._panel(
+                "Vertrieb",
+                '<p class="leer">Noch kein Gespräch festgehalten. Erzähl Jarvis von '
+                'einem Kundentermin, dann bewertet er ihn.</p>')
+
+        quote = muster.get("abschlussquote", 0)
+        inhalt = ('<div class="ringfeld">%s<div class="ringtext">'
+                  '<div class="gross">%s</div>'
+                  '<div class="klein">%d Gespräche, Durchschnitt %s Punkte.<br>'
+                  '%d gewonnen, %d verloren, %d offen.</div></div></div>'
+                  % (ring(quote, "Abschluss", 116, ampelfarbe(quote, 50, 25)),
+                     euro_kurz((daten.get("leads") or {}).get("volumen_offen", 0)),
+                     muster["anzahl"], muster.get("durchschnitt", 0),
+                     muster.get("gewonnen", 0), muster.get("verloren", 0),
+                     muster.get("offen", 0)))
+
+        zeilen = [e for e in (dimensionen.get("dimensionen") or [])
+                  if e["wert"] is not None]
+        if zeilen:
+            inhalt += '<div style="margin-top:14px">'
+            for eintrag in zeilen:
+                inhalt += balken(eintrag["name"], eintrag["wert"], 10,
+                                 "%.1f / 10" % eintrag["wert"],
+                                 ampelfarbe(eintrag["wert"] * 10, 70, 40))
+            inhalt += '</div>'
+            schwach = dimensionen.get("schwaechste")
+            if schwach:
+                inhalt += ('<p class="achtung" style="font-size:12px;margin-top:6px">'
+                           'Schwächste Stelle: %s mit %.1f von 10.</p>'
+                           % (sicher(schwach["name"]), schwach["wert"]))
+        for einwand in muster.get("wiederkehrende_einwaende", [])[:2]:
+            inhalt += ('<p class="warnung" style="font-size:12px;margin-top:6px">'
+                       'Einwand "%s" kam %d mal.</p>'
+                       % (sicher(einwand["einwand"]), einwand["anzahl"]))
+        return self._panel("Vertrieb", inhalt, "", "letzte 90 Tage")
+
+    def _panel_kategorien(self, daten: dict) -> str:
+        """Wohin das Geld fließt - Ausgaben je Kategorie."""
+        monat = daten.get("monat") or {}
+        nach_kategorie = monat.get("nach_kategorie") or {}
+        if not nach_kategorie:
+            return self._panel("Ausgaben je Kategorie",
+                               '<p class="leer">Noch keine Ausgaben gebucht.</p>')
+        groesster = max(nach_kategorie.values())
+        inhalt = "".join(
+            balken(name, betrag, groesster, euro(betrag))
+            for name, betrag in list(nach_kategorie.items())[:8])
+        return self._panel("Ausgaben je Kategorie", inhalt)
 
     def _panel_termine(self, daten: dict) -> str:
         kalender = daten.get("kalender")
@@ -263,11 +283,11 @@ class Dashboard:
         zeilen = ['<span class="zeit">%s %s</span>%s%s'
                   % (sicher(t["tag"]), sicher(t["uhrzeit"]), sicher(t["titel"]),
                      (' <span class="grau">%s</span>' % sicher(t["ort"])) if t["ort"] else "")
-                  for t in kalender.get("termine", [])[:10]]
+                  for t in kalender.get("termine", [])[:9]]
         inhalt = self._liste(zeilen, "Nichts eingetragen.")
         for konflikt in kalender.get("konflikte", [])[:3]:
             inhalt += '<p class="warnung">%s</p>' % sicher(konflikt["text"])
-        return self._panel("Termine", inhalt)
+        return self._panel("Termine", inhalt, "", "nächste 3 Tage")
 
     def _panel_mail(self, daten: dict) -> str:
         mail = daten.get("mail")
@@ -278,38 +298,15 @@ class Dashboard:
             return self._panel("Posteingang", '<p class="warnung">%s</p>'
                                % sicher(mail.get("fehler", "nicht erreichbar")))
         zeilen = []
-        for eintrag in mail.get("wichtig", [])[:5] + mail.get("spaeter", [])[:5]:
+        for eintrag in mail.get("wichtig", [])[:5] + mail.get("spaeter", [])[:4]:
             marke = "warnung" if eintrag["einstufung"] == "wichtig" else "grau"
-            zeilen.append('<span class="%s">%s</span> %s<br><span class="grau">%s</span>'
+            zeilen.append('<span class="%s">%s</span> %s<br>'
+                          '<span class="grau">%s</span>'
                           % (marke, sicher(eintrag["einstufung"]),
                              sicher(eintrag["betreff"]),
                              sicher(eintrag["absender"][:60])))
-        return self._panel("Posteingang (%d ungelesen)" % mail.get("anzahl", 0),
-                           self._liste(zeilen, "Nichts Ungelesenes."))
-
-    def _panel_leads(self, daten: dict) -> str:
-        leads = daten.get("leads")
-        if not leads:
-            return ""
-        zeilen = ['<span class="zeit">%s</span>%s <span class="grau">%s &middot; %d Punkte</span>'
-                  % (sicher(l["datum"]), sicher(l["kunde"] or "ohne Namen"),
-                     euro(l["volumen"]), l["punktzahl"])
-                  for l in leads.get("leads", [])[:8]]
-        inhalt = ('<div class="kacheln"><div class="kachel">'
-                  '<div class="wert akzent">%s</div>'
-                  '<div class="name">Offenes Volumen</div></div>'
-                  '<div class="kachel"><div class="wert">%d</div>'
-                  '<div class="name">Offene Leads</div></div></div>'
-                  % (euro(leads.get("volumen_offen", 0)), leads.get("anzahl", 0)))
-        inhalt += self._liste(zeilen, "Kein Lead offen.")
-        muster = daten.get("muster") or {}
-        if muster.get("anzahl"):
-            inhalt += ('<p class="grau">Abschlussquote %.1f Prozent bei %d Gesprächen.</p>'
-                       % (muster.get("abschlussquote", 0), muster["anzahl"]))
-            for einwand in muster.get("wiederkehrende_einwaende", [])[:2]:
-                inhalt += ('<p class="warnung">Einwand "%s" kam %d mal.</p>'
-                           % (sicher(einwand["einwand"]), einwand["anzahl"]))
-        return self._panel("Vertrieb", inhalt)
+        return self._panel("Posteingang", self._liste(zeilen, "Nichts Ungelesenes."),
+                           "", "%d ungelesen" % mail.get("anzahl", 0))
 
     def _panel_offen(self, daten: dict) -> str:
         punkte = daten.get("punkte") or []
@@ -317,7 +314,38 @@ class Dashboard:
                             (' <span class="grau">bis %s</span>' % sicher(p["faellig"]))
                             if p["faellig"] else "")
                   for p in punkte[:12]]
-        return self._panel("Noch offen", self._liste(zeilen, "Nichts offen."))
+        return self._panel("Noch offen", self._liste(zeilen, "Nichts offen."), "",
+                           "%d" % len(punkte) if punkte else "")
+
+    def _panel_belege(self, daten: dict) -> str:
+        belege = daten.get("belege")
+        if not belege:
+            return ""
+        if belege["anzahl"] == 0:
+            inhalt = '<p class="ok">Zu allen Ausgaben liegt ein Beleg vor.</p>'
+        else:
+            zeilen = ['<span class="zeit">%s</span>%s <span class="grau">%s</span>'
+                      % (sicher(e["datum"]), sicher(e["haendler"] or "unbekannt"),
+                         euro(e["betrag"])) for e in belege["buchungen"][:8]]
+            inhalt = ('<p class="warnung" style="margin-bottom:8px">%d Ausgaben ohne '
+                      'Beleg, zusammen %s.</p>%s'
+                      % (belege["anzahl"], euro(belege["summe"]),
+                         self._liste(zeilen, "")))
+        return self._panel("Fehlende Belege", inhalt)
+
+    def _panel_leads(self, daten: dict) -> str:
+        leads = daten.get("leads")
+        if not leads or not leads.get("leads"):
+            return self._panel("Offene Leads",
+                               '<p class="leer">Kein Lead offen.</p>')
+        zeilen = ['<span class="zeit">%s</span>%s <span class="grau">%s · %d Punkte</span>'
+                  '<br><span class="grau">%s</span>'
+                  % (sicher(l["datum"]), sicher(l["kunde"] or "ohne Namen"),
+                     euro(l["volumen"]), l["punktzahl"],
+                     sicher(l["naechster_schritt"] or "kein nächster Schritt vereinbart"))
+                  for l in leads["leads"][:6]]
+        return self._panel("Offene Leads", self._liste(zeilen, ""), "",
+                           euro_kurz(leads.get("volumen_offen", 0)))
 
     def _panel_notizen(self, daten: dict) -> str:
         notizen = daten.get("notizen") or []
@@ -330,14 +358,14 @@ class Dashboard:
         protokoll = daten.get("protokoll") or []
         zeilen = []
         for eintrag in protokoll:
-            klasse = "ok" if eintrag["status"] == "ok" else "warnung"
+            klasse = {"ok": "ok", "abgelehnt": "achtung"}.get(eintrag["status"], "warnung")
             zeilen.append('<span class="zeit">%s</span><span class="%s">%s</span> '
                           '<span class="grau">%s</span>'
                           % (sicher(eintrag["zeit"][11:16]), klasse,
                              sicher(eintrag["werkzeug"]),
-                             sicher((eintrag["ergebnis"] or "")[:80])))
+                             sicher((eintrag["ergebnis"] or "")[:90])))
         return self._panel("Was Jarvis getan hat",
-                           self._liste(zeilen, "Noch nichts ausgeführt."))
+                           self._liste(zeilen, "Noch nichts ausgeführt."), "breit")
 
     def _panel_zeitplan(self, daten: dict) -> str:
         eintraege = daten.get("zeitplan") or []
@@ -347,8 +375,9 @@ class Dashboard:
         routinen = daten.get("routinen") or {}
         inhalt = self._liste(zeilen, "Nichts geplant.")
         if routinen.get("anzahl"):
-            inhalt += ('<p class="grau">%d Routinen hinterlegt: %s</p>'
-                       % (routinen["anzahl"], sicher(", ".join(routinen.get("namen", [])))))
+            inhalt += ('<p class="grau" style="margin-top:8px">%d Routinen: %s</p>'
+                       % (routinen["anzahl"],
+                          sicher(", ".join(routinen.get("namen", [])))))
         return self._panel("Zeitplan", inhalt)
 
     def _panel_dienste(self, daten: dict) -> str:
@@ -364,24 +393,43 @@ class Dashboard:
                              angaben.get("werkzeuge", 0)))
         return self._panel("Dienste", self._liste(zeilen, "Nichts eingerichtet."))
 
+    # -- Kopfleiste ---------------------------------------------------------
+
     def _ticker(self, daten: dict) -> str:
+        """Die Laufleiste ganz oben - nur echte Zahlen."""
         teile = []
         monat = daten.get("monat")
         if monat:
             teile.append("Ergebnis Monat <b>%s</b>" % euro(monat["ergebnis"]))
             teile.append("Zahllast <b>%s</b>" % euro(monat["zahllast"]))
+        quote = (daten.get("belegquote") or {}).get("quote")
+        if quote is not None:
+            marke = "b" if quote >= 90 else "b class=\"rot\""
+            teile.append("Belegquote <%s>%d%%</b>" % (marke, round(quote)))
         leads = daten.get("leads")
-        if leads:
+        if leads and leads.get("anzahl"):
             teile.append("Offene Leads <b>%d</b> über <b>%s</b>"
-                         % (leads.get("anzahl", 0), euro(leads.get("volumen_offen", 0))))
+                         % (leads["anzahl"], euro(leads.get("volumen_offen", 0))))
         belege = daten.get("belege")
         if belege and belege.get("anzahl"):
-            teile.append("Belege fehlen <b>%d</b>" % belege["anzahl"])
+            teile.append('Belege fehlen <b class="rot">%d</b>' % belege["anzahl"])
         punkte = daten.get("punkte") or []
         teile.append("Offene Punkte <b>%d</b>" % len(punkte))
         if not teile:
             teile.append("Jarvis ist bereit")
         return "".join("<span>%s</span>" % teil for teil in teile)
+
+    def _kopf(self, daten: dict, seite: str = "cockpit") -> tuple:
+        """Überschrift links, Navigation rechts."""
+        links = ('<div><h1>Jarvis <span>// Command Center</span></h1>'
+                 '<p>%s, %s &middot; Stand %s Uhr &middot; %s</p></div>'
+                 % (sicher(daten["wochentag"]), sicher(daten["datum"]),
+                    sicher(daten["uhrzeit"]), sicher(daten["firma"])))
+        rechts = ('<nav><a class="%s" href="dashboard.html">Cockpit</a>'
+                  '<a class="%s" href="sales.html">Sales-Analyse</a></nav>'
+                  % ("aktiv" if seite == "cockpit" else "",
+                     "aktiv" if seite == "sales" else ""))
+        return links, rechts
 
     # -- Bauen --------------------------------------------------------------
 
@@ -389,24 +437,31 @@ class Dashboard:
         """Erzeugt ``dashboard.html`` und ``data.json``."""
         daten = self.daten_sammeln(mit_netz)
         panels = "".join(teil for teil in [
+            self._panel_belegquote(daten),
             self._panel_zahlen(daten),
-            self._panel_termine(daten),
+            self._panel_verlauf(daten),
+            self._panel_vertrieb(daten),
             self._panel_leads(daten),
+            self._panel_termine(daten),
             self._panel_offen(daten),
-            self._panel_mail(daten),
             self._panel_belege(daten),
+            self._panel_kategorien(daten),
+            self._panel_mail(daten),
             self._panel_notizen(daten),
-            self._panel_zeitplan(daten),
             self._panel_protokoll(daten),
+            self._panel_zeitplan(daten),
             self._panel_dienste(daten),
         ] if teil)
 
-        seite = SEITE % {"bg": FARBE_HINTERGRUND, "panel": FARBE_PANEL,
-                         "akzent": FARBE_AKZENT, "ticker": self._ticker(daten),
-                         "wochentag": sicher(daten["wochentag"]),
-                         "datum": sicher(daten["datum"]),
-                         "uhrzeit": sicher(daten["uhrzeit"]),
-                         "firma": sicher(daten["firma"]), "panels": panels}
+        links, rechts = self._kopf(daten, "cockpit")
+        seite = seite_bauen(
+            "Jarvis Command Center", self._ticker(daten), links, rechts,
+            '<div class="raster">%s</div>' % panels,
+            "Diese Seite aktualisiert sich alle 60 Sekunden von selbst. "
+            "Gezeigt wird ausschließlich, was wirklich erfasst ist - "
+            "leere Bereiche sind leer, nicht geschätzt.<br>"
+            "Alle Daten liegen lokal auf diesem Rechner.")
+
         try:
             config.DASHBOARD_VERZEICHNIS.mkdir(parents=True, exist_ok=True)
             html_pfad = config.DASHBOARD_VERZEICHNIS / "dashboard.html"
@@ -417,5 +472,13 @@ class Dashboard:
         except OSError as fehler:
             return {"ok": False,
                     "fehler": "Das Dashboard ließ sich nicht schreiben: %s" % fehler}
+        sales = self.verkaufsansicht.bauen()
+        if not sales.get("ok"):
+            print("[dashboard] Sales-Analyse: %s" % sales.get("fehler"))
+
         return {"ok": True, "datei": str(html_pfad), "daten": str(json_pfad),
-                "text": "Das Command Center ist gebaut: %s" % html_pfad}
+                "sales": sales.get("datei", ""),
+                "text": "Das Command Center ist gebaut: %s%s"
+                        % (html_pfad,
+                           ("  Sales-Analyse: %s" % sales["datei"])
+                           if sales.get("ok") else "")}

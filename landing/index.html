@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Jarvis — Dein zweites Gehirn, das nie schläft</title>
+<meta name="description" content="Jarvis ist kein Tool. Jarvis ist ein Betriebssystem für deinen Kopf.">
+<style>
+  :root {
+    --bg: #08090B; --tief: #0A0D14; --panel: #0F1113; --rand: #1C1F23;
+    --akzent: #E8622C; --hell: #F0A882; --text: #F2EFEA; --grau: #8A9096;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html { scroll-behavior: smooth; }
+  body {
+    background: var(--bg); color: var(--text); overflow-x: hidden;
+    font-family: "Helvetica Neue", -apple-system, BlinkMacSystemFont, Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  .huelle { max-width: 1180px; margin: 0 auto; padding: 0 24px; }
+
+  .augenbraue {
+    font-size: 11px; letter-spacing: .3em; text-transform: uppercase;
+    color: var(--akzent); text-align: center; margin-bottom: 28px; font-weight: 600;
+  }
+  h1, h2 { font-weight: 800; letter-spacing: -.02em; line-height: 1.04; text-align: center; }
+  h1 { font-size: clamp(64px, 13vw, 150px); }
+  h2 { font-size: clamp(34px, 5.6vw, 66px); }
+  h2 .akzent { color: var(--akzent); }
+  .unterzeile {
+    text-align: center; color: var(--grau); font-size: clamp(16px, 2vw, 22px);
+    margin-top: 20px; line-height: 1.55;
+  }
+
+  /* --- Abschnitt 1: Eisberg --- */
+  .held {
+    min-height: 100vh; padding: 60px 0 40px;
+    background: radial-gradient(ellipse 80% 60% at 50% 100%, #0E1524 0%, var(--bg) 70%);
+    display: flex; flex-direction: column; justify-content: center;
+  }
+  .eisberg { width: 100%; max-width: 1080px; margin: 34px auto 0; display: block; }
+  .scroll {
+    text-align: center; font-size: 10px; letter-spacing: .34em; color: #4A5157;
+    margin-top: 28px; animation: sinken 2.4s ease-in-out infinite;
+  }
+  @keyframes sinken { 0%,100% { transform: translateY(0); opacity:.5 }
+                      50% { transform: translateY(7px); opacity:1 } }
+
+  /* --- Abschnitt 2: Morgen --- */
+  .morgen { padding: 130px 0 120px; }
+  .zeitstrahl { max-width: 720px; margin: 80px auto 0; position: relative; }
+  .zeitstrahl::before {
+    content: ""; position: absolute; left: 88px; top: 8px; bottom: 8px; width: 1px;
+    background: linear-gradient(180deg, var(--akzent), rgba(232,98,44,.15));
+  }
+  .halt { display: flex; gap: 26px; padding: 15px 0 30px; position: relative; }
+  .halt .uhr {
+    width: 74px; flex: none; text-align: right; font-size: 19px; font-weight: 700;
+    color: var(--akzent); font-variant-numeric: tabular-nums; padding-top: 1px;
+  }
+  .halt .punkt {
+    position: absolute; left: 84px; top: 22px; width: 9px; height: 9px;
+    border-radius: 50%; background: var(--akzent);
+    box-shadow: 0 0 0 4px rgba(232,98,44,.14);
+  }
+  .halt .inhalt { padding-left: 26px; }
+  .halt h3 { font-size: 17px; font-weight: 700; margin-bottom: 6px; }
+  .halt p { color: var(--grau); font-size: 14.5px; line-height: 1.6; }
+
+  /* --- Abschnitt 3: System --- */
+  .system { padding: 120px 0 130px; }
+  .karten {
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px;
+    background: var(--rand); border: 1px solid var(--rand); border-radius: 12px;
+    overflow: hidden; margin-top: 66px;
+  }
+  .karte {
+    background: #0B0C0E; padding: 34px 30px 40px;
+    transition: background .25s ease;
+  }
+  .karte:hover { background: #121417; }
+  .karte .nr {
+    font-size: 11px; color: var(--akzent); font-weight: 700; letter-spacing: .1em;
+    margin-bottom: 20px;
+  }
+  .karte h3 { font-size: 23px; font-weight: 700; margin-bottom: 11px; }
+  .karte p { color: var(--grau); font-size: 14.5px; line-height: 1.62; }
+  .nachsatz {
+    text-align: center; color: #5A6167; font-size: 14px; margin-top: 42px;
+    line-height: 1.7;
+  }
+  .nachsatz b { color: var(--grau); font-weight: 500; }
+
+  /* --- Abschluss --- */
+  .abschluss {
+    padding: 110px 0 130px; border-top: 1px solid var(--rand);
+    background: radial-gradient(ellipse 70% 100% at 50% 0%, rgba(232,98,44,.07), transparent 70%);
+  }
+  .schritte {
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px;
+    max-width: 900px; margin: 56px auto 0;
+  }
+  .schritt {
+    background: var(--panel); border: 1px solid var(--rand); border-radius: 10px;
+    padding: 26px 24px;
+  }
+  .schritt .nr {
+    font-size: 11px; letter-spacing: .16em; color: var(--akzent); font-weight: 700;
+    margin-bottom: 14px; text-transform: uppercase;
+  }
+  .schritt h3 { font-size: 16px; margin-bottom: 9px; font-weight: 700; }
+  .schritt p { color: var(--grau); font-size: 13.5px; line-height: 1.6; }
+  code {
+    display: block; background: #05060700; border: 1px solid var(--rand);
+    border-radius: 6px; padding: 9px 11px; margin-top: 12px; font-size: 12.5px;
+    color: var(--hell); font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    overflow-x: auto;
+  }
+  footer {
+    border-top: 1px solid var(--rand); padding: 34px 0 46px; text-align: center;
+    color: #4A5157; font-size: 12.5px; line-height: 1.8;
+  }
+  @media (max-width: 860px) {
+    .karten, .schritte { grid-template-columns: 1fr; }
+    .zeitstrahl::before { left: 60px; }
+    .halt .uhr { width: 50px; font-size: 16px; }
+    .halt .punkt { left: 56px; }
+  }
+</style>
+</head>
+<body>
+
+<!-- ================= Eisberg ================= -->
+<section class="held">
+  <div class="huelle">
+    <p class="augenbraue">Was du im Reel gesehen hast. Und was drunter liegt.</p>
+    <h1>Jarvis.</h1>
+    <p class="unterzeile">Dein zweites Gehirn, das nie schläft.</p>
+
+    <svg class="eisberg" viewBox="0 0 1200 880" role="img"
+         aria-label="Eisberg: über Wasser das Morning Briefing, darunter Telegram, Email, Daily Notes, Kalender, WhatsApp und das Second Brain">
+      <defs>
+        <linearGradient id="spitze" x1="0" y1="0" x2="1" y2="0">
+          <stop offset="0%" stop-color="#F3B593"/>
+          <stop offset="50%" stop-color="#D9764B"/>
+          <stop offset="100%" stop-color="#A34F2C"/>
+        </linearGradient>
+        <linearGradient id="koerper" x1="0" y1="0" x2="1" y2="0">
+          <stop offset="0%" stop-color="#B4643C"/>
+          <stop offset="48%" stop-color="#8E4B2C"/>
+          <stop offset="100%" stop-color="#5E3020"/>
+        </linearGradient>
+        <!-- Radial statt linear: sonst bekommt das Wasser links und rechts
+             eine sichtbare Rechteckkante. -->
+        <radialGradient id="wasser" cx="50%" cy="0%" r="78%">
+          <stop offset="0%" stop-color="#121D33" stop-opacity=".92"/>
+          <stop offset="55%" stop-color="#0C1220" stop-opacity=".45"/>
+          <stop offset="100%" stop-color="#08090B" stop-opacity="0"/>
+        </radialGradient>
+        <filter id="schein" x="-40%" y="-40%" width="180%" height="180%">
+          <feGaussianBlur stdDeviation="16" result="b"/>
+          <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+        </filter>
+      </defs>
+
+      <!-- Wasser -->
+      <rect x="0" y="430" width="1200" height="450" fill="url(#wasser)"/>
+      <line x1="60" y1="430" x2="1140" y2="430" stroke="#E8622C" stroke-opacity=".30"
+            stroke-width="1.1"/>
+      <line x1="330" y1="430" x2="870" y2="430" stroke="#E8622C" stroke-opacity=".45"
+            stroke-width="1.3"/>
+
+      <!-- Beschriftung der Spitze -->
+      <text x="600" y="66" text-anchor="middle" fill="#F2EFEA" font-size="24"
+            font-weight="700" font-family="inherit">Morning Briefing</text>
+      <text x="600" y="88" text-anchor="middle" fill="#6E767D" font-size="11"
+            letter-spacing="3.6" font-family="inherit">DIE SPITZE</text>
+
+      <!-- Spitze über Wasser -->
+      <path d="M600 118 C 636 210, 660 340, 664 430 L 536 430 C 540 340, 564 210, 600 118 Z"
+            fill="url(#spitze)" filter="url(#schein)"/>
+      <path d="M600 118 C 636 210, 660 340, 664 430 L 600 430 Z"
+            fill="#000" fill-opacity=".14"/>
+
+      <!-- Körper unter Wasser -->
+      <path d="M472 430 L 728 430 C 748 500, 762 570, 748 650 C 734 736, 686 812, 600 866
+               C 514 812, 466 736, 452 650 C 438 570, 452 500, 472 430 Z"
+            fill="url(#koerper)"/>
+      <path d="M600 430 L 728 430 C 748 500, 762 570, 748 650 C 734 736, 686 812, 600 866 Z"
+            fill="#000" fill-opacity=".16"/>
+      <!-- Bruchkanten -->
+      <path d="M470 545 L 736 545" stroke="#000" stroke-opacity=".18" stroke-width="1.6"/>
+      <path d="M456 660 L 746 660" stroke="#000" stroke-opacity=".18" stroke-width="1.6"/>
+      <ellipse cx="524" cy="500" rx="15" ry="9" fill="#000" fill-opacity=".13"/>
+      <ellipse cx="676" cy="592" rx="13" ry="8" fill="#000" fill-opacity=".13"/>
+      <ellipse cx="548" cy="712" rx="17" ry="10" fill="#000" fill-opacity=".13"/>
+      <ellipse cx="662" cy="756" rx="12" ry="7" fill="#000" fill-opacity=".13"/>
+
+      <!-- Beschriftungen links -->
+      <g font-family="inherit" font-size="17" fill="#D8DBDE">
+        <line x1="302" y1="500" x2="466" y2="512" stroke="#E8622C" stroke-opacity=".32"/>
+        <rect x="132" y="481" width="170" height="38" rx="19" fill="#0F1113" stroke="#2A3036"/>
+        <text x="217" y="506" text-anchor="middle">Telegram</text>
+        <line x1="302" y1="600" x2="452" y2="612" stroke="#E8622C" stroke-opacity=".32"/>
+        <rect x="132" y="581" width="170" height="38" rx="19" fill="#0F1113" stroke="#2A3036"/>
+        <text x="217" y="606" text-anchor="middle">Email</text>
+        <line x1="302" y1="700" x2="474" y2="712" stroke="#E8622C" stroke-opacity=".32"/>
+        <rect x="132" y="681" width="170" height="38" rx="19" fill="#0F1113" stroke="#2A3036"/>
+        <text x="217" y="706" text-anchor="middle">Daily Notes</text>
+      </g>
+
+      <!-- Beschriftungen rechts -->
+      <g font-family="inherit" font-size="17" fill="#D8DBDE">
+        <line x1="898" y1="500" x2="734" y2="512" stroke="#E8622C" stroke-opacity=".32"/>
+        <rect x="898" y="481" width="170" height="38" rx="19" fill="#0F1113" stroke="#2A3036"/>
+        <text x="983" y="506" text-anchor="middle">Kalender</text>
+        <line x1="898" y1="600" x2="748" y2="612" stroke="#E8622C" stroke-opacity=".32"/>
+        <rect x="898" y="581" width="170" height="38" rx="19" fill="#0F1113" stroke="#2A3036"/>
+        <text x="983" y="606" text-anchor="middle">WhatsApp</text>
+        <line x1="898" y1="700" x2="726" y2="712" stroke="#E8622C" stroke-opacity=".32"/>
+        <rect x="898" y="681" width="170" height="38" rx="19" fill="#0F1113" stroke="#2A3036"/>
+        <text x="983" y="706" text-anchor="middle">Second Brain</text>
+      </g>
+
+    </svg>
+
+    <p class="scroll">SCROLL</p>
+  </div>
+</section>
+
+<!-- ================= Ein normaler Morgen ================= -->
+<section class="morgen">
+  <div class="huelle">
+    <p class="augenbraue">Ein normaler Morgen</p>
+    <h2>Bevor du am <span class="akzent">Schreibtisch</span> sitzt,<br>
+        hat Jarvis schon gearbeitet.</h2>
+
+    <div class="zeitstrahl">
+      <div class="halt">
+        <div class="uhr">06:45</div><div class="punkt"></div>
+        <div class="inhalt">
+          <h3>Jarvis wacht auf</h3>
+          <p>Holt die ungelesenen Mails der Nacht. Sortiert vor in Wichtig,
+             Später und Rauschen.</p>
+        </div>
+      </div>
+      <div class="halt">
+        <div class="uhr">07:00</div><div class="punkt"></div>
+        <div class="inhalt">
+          <h3>Kalender-Check</h3>
+          <p>Überschneidungen erkannt. Zu jedem Termin der Kundenkontext aus
+             dem Gedächtnis.</p>
+        </div>
+      </div>
+      <div class="halt">
+        <div class="uhr">07:15</div><div class="punkt"></div>
+        <div class="inhalt">
+          <h3>Nachrichten-Sync</h3>
+          <p>WhatsApp und Telegram durchgesehen. Offene Entscheidungen
+             herausgezogen.</p>
+        </div>
+      </div>
+      <div class="halt">
+        <div class="uhr">07:30</div><div class="punkt"></div>
+        <div class="inhalt">
+          <h3>Morning Briefing</h3>
+          <p>Er sagt es dir. Gesprochen, in vier Sätzen. Wenn du unterwegs bist,
+             kommt es per Telegram.</p>
+        </div>
+      </div>
+      <div class="halt">
+        <div class="uhr">08:00</div><div class="punkt"></div>
+        <div class="inhalt">
+          <h3>Du startest</h3>
+          <p>Mit Klarheit statt Inbox-Panik.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= Das volle System ================= -->
+<section class="system">
+  <div class="huelle">
+    <p class="augenbraue">Das volle System</p>
+    <h2>Das Reel war <span class="akzent">die Spitze.</span><br>
+        Das hier ist der Rest.</h2>
+    <p class="unterzeile">Jarvis ist kein Tool. Jarvis ist ein Betriebssystem
+       für deinen Kopf.</p>
+
+    <div class="karten">
+      <div class="karte"><div class="nr">01</div>
+        <h3>Morning Briefing</h3>
+        <p>Mails vorsortiert, Kalender geprüft, Offenes gesammelt. Um 6:45,
+           ohne dass du fragst.</p></div>
+      <div class="karte"><div class="nr">02</div>
+        <h3>Telegram</h3>
+        <p>Sprich eine Nachricht ein. Jarvis führt aus — und fragt vorher nach,
+           wenn etwas nach außen geht.</p></div>
+      <div class="karte"><div class="nr">03</div>
+        <h3>Email</h3>
+        <p>Liest, stuft ein, formuliert Antworten. Er löscht nie etwas von
+           selbst.</p></div>
+      <div class="karte"><div class="nr">04</div>
+        <h3>Kalender</h3>
+        <p>Überschneidungen erkannt, Termine angelegt, Kundenkontext vor jedem
+           Objektbesuch.</p></div>
+      <div class="karte"><div class="nr">05</div>
+        <h3>WhatsApp</h3>
+        <p>Chaos rein. Entscheidungen raus.</p></div>
+      <div class="karte"><div class="nr">06</div>
+        <h3>Second Brain</h3>
+        <p>Tagesberichte, Kontakte, Notizen — alles vernetzt und durchsuchbar.
+           Er vergisst nichts.</p></div>
+    </div>
+
+    <p class="nachsatz">
+      <b>Und mehr:</b> Belege per Kamera erfassen, Buchhaltung vorbereiten,
+      Kundengespräche bewerten, recherchieren, den Mac bedienen.<br>
+      WhatsApp und die Websuche laufen über Zusatzdienste, die du einmal
+      einschaltest. Alles andere läuft sofort.
+    </p>
+  </div>
+</section>
+
+<!-- ================= So baust du ihn ================= -->
+<section class="abschluss">
+  <div class="huelle">
+    <p class="augenbraue">In drei Schritten</p>
+    <h2>Du baust ihn dir <span class="akzent">selbst.</span></h2>
+    <p class="unterzeile">Mit Claude Code. Auf deinem Mac. Deine Daten bleiben
+       bei dir.</p>
+
+    <div class="schritte">
+      <div class="schritt"><div class="nr">Schritt 1</div>
+        <h3>Ordner anlegen</h3>
+        <p>Terminal öffnen, Ordner erstellen, den Bauauftrag hineinlegen.</p>
+        <code>mkdir jarvis &amp;&amp; cd jarvis</code></div>
+      <div class="schritt"><div class="nr">Schritt 2</div>
+        <h3>Auftrag geben</h3>
+        <p>Claude Code starten und den Bauauftrag lesen lassen. Es schreibt,
+           installiert und prüft sich selbst.</p>
+        <code>claude</code></div>
+      <div class="schritt"><div class="nr">Schritt 3</div>
+        <h3>Starten</h3>
+        <p>Doppelklick. Beim ersten Mal richtet er sich selbst ein und liest
+           dir jeden Schritt vor.</p>
+        <code>JARVIS.command</code></div>
+    </div>
+  </div>
+</section>
+
+<footer>
+  Alles läuft lokal auf deinem Rechner. Nichts geht nach außen ohne dein Ja.<br>
+  Jarvis ist ein privates Werkzeug, kein Produkt und keine Dienstleistung.
+</footer>
+
+</body>
+</html>

@@ -20,7 +20,7 @@ while true; do
     echo "  ============================================================"
     echo ""
     echo "   1  Selbsttest - prüft jeden Baustein"
-    echo "   2  Command Center bauen und öffnen"
+    echo "   2  Command Center und Sales-Analyse bauen und öffnen"
     echo "   3  Briefing sofort sprechen"
     echo "   4  Abendrückblick sofort sprechen"
     echo "   5  Tippbetrieb statt Sprache"

@@ -74,6 +74,9 @@ Recht fehlt.
 - **Gedächtnis** — er vergisst nichts, durchsucht alles Frühere
 - **Dein Mac** — mit Bestätigung Dinge bedienen, sortieren
 - **Reden** — er hört zu und antwortet gesprochen, ernst und ruhig
+- **Zwei Übersichten** — ein Command Center mit deinen Zahlen und eine
+  Sales-Analyse, die jedes Kundengespräch einzeln aufschlüsselt. Beide öffnest
+  du über `EXTRAS.command`, Punkt 2.
 
 ---
 

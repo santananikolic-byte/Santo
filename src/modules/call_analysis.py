@@ -195,6 +195,49 @@ class CallAnalysis:
         return {"ok": True, "anzahl": len(leads), "volumen_offen": summe,
                 "leads": leads, "text": text}
 
+    DIMENSIONEN = [("bedarf_erfasst", "Bedarf erfasst"),
+                   ("objekt_verstanden", "Objekt verstanden"),
+                   ("preis_begruendet", "Preis begründet"),
+                   ("einwaende_behandelt", "Einwände behandelt"),
+                   ("abschluss_gesucht", "Abschluss gesucht")]
+
+    def bewertung_lesen(self, zeile) -> dict:
+        """Holt die Einzelbewertung eines Gesprächs aus der Datenbank."""
+        try:
+            daten = json.loads(zeile["bewertung"] or "{}")
+        except (ValueError, TypeError):
+            return {}
+        ergebnis = {}
+        for schluessel, beschriftung in self.DIMENSIONEN:
+            if schluessel in daten:
+                try:
+                    ergebnis[schluessel] = max(0.0, min(10.0, float(daten[schluessel])))
+                except (TypeError, ValueError):
+                    continue
+        del beschriftung
+        return ergebnis
+
+    def dimensionen_schnitt(self, tage: int = 90) -> dict:
+        """Durchschnitt je Bewertungsdimension - zeigt die eigene schwächste Stelle."""
+        grenze = (datetime.now() - timedelta(days=tage)).strftime("%Y-%m-%d")
+        zeilen = self.memory._lesen(
+            "SELECT * FROM gespraeche WHERE datum>=?", (grenze,))
+        gesammelt = {}
+        for zeile in zeilen:
+            for schluessel, wert in self.bewertung_lesen(zeile).items():
+                gesammelt.setdefault(schluessel, []).append(wert)
+        schnitt = []
+        for schluessel, beschriftung in self.DIMENSIONEN:
+            werte = gesammelt.get(schluessel) or []
+            schnitt.append({"schluessel": schluessel, "name": beschriftung,
+                            "wert": round(sum(werte) / len(werte), 1) if werte else None,
+                            "anzahl": len(werte)})
+        vorhanden = [e for e in schnitt if e["wert"] is not None]
+        schwaechste = min(vorhanden, key=lambda e: e["wert"]) if vorhanden else None
+        return {"dimensionen": schnitt, "schwaechste": schwaechste,
+                "bewertete_gespraeche": len([z for z in zeilen
+                                             if self.bewertung_lesen(z)])}
+
     def verkaufsmuster(self, tage: int = 90) -> dict:
         """Abschlussquote, Durchschnittspunktzahl und wiederkehrende Einwände.
 
