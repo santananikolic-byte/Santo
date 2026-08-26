@@ -1,0 +1,17 @@
+__pycache__/
+*.pyc
+*.pyo
+jarvis.kaputt.py
+
+# Alles, was beim Laufen entsteht und lokal bleibt
+config/.env
+jarvis_memory.db
+jarvis_memory.db-wal
+jarvis_memory.db-shm
+dashboard/data.json
+dashboard/dashboard.html
+belege/
+profil/
+export/
+sprachnachrichten/
+config/mcp_servers.json

@@ -1,0 +1,532 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""Werkzeugkatalog - alles, was Claude tatsächlich tun kann.
+
+Zwei Sicherheitsentscheidungen stecken in diesem Modul, und sie sind nicht
+verhandelbar.
+
+**Keine freie Kommandozeile.** Eine Blockliste gefährlicher Befehle wäre
+wertlos: ``rm -rf`` lässt sich als ``rm  -rf`` oder ``rm -fr`` schreiben und
+rutscht durch. Stattdessen gibt es eine *Allowlist* registrierter Aktionen mit
+festen Argumenten. Was nicht registriert ist, läuft nicht. Jeder Aufruf geht über
+``subprocess.run([...])`` mit abgeschalteter Shell - eine Shell wird im ganzen
+Projekt an keiner Stelle eingeschaltet.
+
+**Kein Vollzug ohne klares Ja.** Alles mit Wirkung nach außen fragt vorher nach.
+Timeout oder ausbleibende Antwort gelten als Ablehnung.
+"""
+
+import json
+import os
+import re
+import subprocess
+
+import config
+from modules.bookkeeping import Bookkeeping, KATEGORIEN
+from modules.calendar_mod import Kalender
+from modules.call_analysis import CallAnalysis
+from modules.camera import Kamera
+from modules.computer_use import Bildschirm
+from modules.dashboard import Dashboard
+from modules.mail import Mail
+from modules.mcp_client import MCPClient
+from modules.memory import Memory, heute_datum
+from modules.messenger import Messenger
+from modules.recall import Recall
+from modules.routines import Routines
+from modules.telegram_mod import Telegram
+from modules.world import Welt
+
+# Zeichen, die in eingesetzten Parametern nichts zu suchen haben. Weil überall
+# ``shell=False`` gilt, wären sie ohnehin harmlos - abgelehnt werden sie
+# trotzdem, damit ein späterer Umbau nicht plötzlich eine Lücke aufreißt.
+GEFAEHRLICHE_ZEICHEN = set(";|&$`\n<>")
+
+# Registrierte Aktionen ohne Parameter. Der Name ist der einzige Schlüssel -
+# alles andere steht fest im Code.
+SYSTEM_AKTIONEN = {
+    "datum": (["date", "+%A, %d.%m.%Y, %H:%M"], "Datum und Uhrzeit"),
+    "speicherplatz": (["df", "-h", "/"], "freier Speicherplatz"),
+    "rechnername": (["hostname"], "Name des Rechners"),
+    "laufzeit": (["uptime"], "wie lange der Rechner läuft"),
+    "arbeitsspeicher": (["vm_stat"], "Arbeitsspeicher"),
+    "batterie": (["pmset", "-g", "batt"], "Ladezustand des Akkus"),
+    "netzwerk": (["ifconfig", "en0"], "Netzwerkverbindung"),
+    "wlan": (["networksetup", "-getairportnetwork", "en0"], "verbundenes WLAN"),
+    "programme": (["ps", "-A", "-o", "comm"], "laufende Programme"),
+    "lautstaerke": (["osascript", "-e", "output volume of (get volume settings)"],
+                    "Lautstärke"),
+}
+
+# Registrierte Aktionen mit genau einem geprüften Parameter.
+PARAMETER_AKTIONEN = {
+    "ordner_zeigen": (["ls", "-la", "{pfad}"], "pfad", "Inhalt eines Ordners"),
+    "programm_oeffnen": (["open", "-a", "{programm}"], "programm", "Programm starten"),
+    "datei_oeffnen": (["open", "{pfad}"], "pfad", "Datei öffnen"),
+}
+
+# Alles hier drin fragt vor der Ausführung nach einer Freigabe.
+FREIGABE_PFLICHTIG = {"mail_senden", "termin_anlegen", "bildschirm_bedienen",
+                      "nachricht_senden"}
+
+
+def parameter_pruefen(wert: str):
+    """Prüft einen eingesetzten Parameter. Gibt ``(ok, meldung)`` zurück."""
+    text = str(wert if wert is not None else "")
+    if not text.strip():
+        return False, "Der Wert ist leer."
+    if len(text) > 500:
+        return False, "Der Wert ist zu lang."
+    treffer = sorted({z for z in text if z in GEFAEHRLICHE_ZEICHEN})
+    if treffer:
+        sichtbar = ", ".join(repr(z) for z in treffer)
+        return False, ("Der Wert enthält die Zeichen %s. Solche Werte führe ich "
+                       "grundsätzlich nicht aus." % sichtbar)
+    return True, ""
+
+
+class Werkzeuge:
+    """Der Katalog: Beschreibungen für Claude und die Ausführung dahinter."""
+
+    def __init__(self, agent=None, db_pfad: str = None):
+        self.agent = agent
+        self.memory = Memory(db_pfad)
+        self.recall = Recall(self.memory)
+        self.bookkeeping = Bookkeeping(self.memory)
+        self.call_analysis = CallAnalysis(self.memory)
+        self.routines = Routines(self.memory)
+        self.mail = Mail()
+        self.kalender = Kalender()
+        self.telegram = Telegram()
+        self.kamera = Kamera()
+        self.mcp = MCPClient()
+        self.welt = Welt(self.mcp)
+        self.bildschirm = Bildschirm(agent)
+        self.messenger = Messenger(self.telegram, self.mail, self.mcp, None)
+        self.dashboard = Dashboard(memory=self.memory, bookkeeping=self.bookkeeping,
+                                   call_analysis=self.call_analysis, recall=self.recall,
+                                   kalender=self.kalender, mail=self.mail,
+                                   routines=self.routines, mcp=self.mcp)
+        self.stimme = None
+
+    def stimme_setzen(self, stimme):
+        """Reicht die Sprachausgabe durch - für Sprachnachrichten."""
+        self.stimme = stimme
+        self.messenger.stimme = stimme
+
+    def agent_setzen(self, agent):
+        """Verknüpft den Katalog mit dem Agenten, damit Werkzeuge Claude nutzen können."""
+        self.agent = agent
+        self.bildschirm.agent = agent
+
+    # -- Katalog für Claude -------------------------------------------------
+
+    def katalog(self) -> list:
+        """Alle Werkzeuge im Format der Claude-Schnittstelle."""
+        def werkzeug(name, beschreibung, eigenschaften=None, pflicht=None):
+            return {"name": name, "description": beschreibung,
+                    "input_schema": {"type": "object",
+                                     "properties": eigenschaften or {},
+                                     "required": pflicht or []}}
+
+        text = {"type": "string"}
+        zahl = {"type": "number"}
+        ganz = {"type": "integer"}
+        wahr = {"type": "boolean"}
+
+        eigene = [
+            # -- Gedächtnis --
+            werkzeug("notiz_speichern",
+                     "Hält etwas Wichtiges fest, das er nebenbei erwähnt: eine "
+                     "Kundeninformation, eine Entscheidung, eine Zahl.",
+                     {"text": text, "kategorie": text}, ["text"]),
+            werkzeug("notizen_suchen", "Sucht in gespeicherten Notizen.",
+                     {"begriff": text}, ["begriff"]),
+            werkzeug("kontakt_anlegen",
+                     "Legt einen Kunden oder Lieferanten an oder ergänzt ihn.",
+                     {"name": text, "firma": text, "telefon": text, "email": text,
+                      "adresse": text, "notiz": text}, ["name"]),
+            werkzeug("kontakt_suchen", "Sucht einen Kontakt.",
+                     {"begriff": text}, ["begriff"]),
+            werkzeug("punkt_anlegen",
+                     "Merkt sich etwas, das noch zu erledigen ist.",
+                     {"text": text, "faellig": text}, ["text"]),
+            werkzeug("punkte_offen", "Zeigt, was noch offen ist.", {}),
+            werkzeug("punkt_erledigen", "Hakt einen offenen Punkt ab.",
+                     {"id": ganz}, ["id"]),
+            werkzeug("kennzahl_setzen", "Hält eine Kennzahl mit Datum fest.",
+                     {"name": text, "wert": zahl, "einheit": text}, ["name", "wert"]),
+            werkzeug("gedaechtnis_durchsuchen",
+                     "Sucht in Notizen, Kontakten, Tagesberichten und früheren "
+                     "Gesprächen nach einem Thema.",
+                     {"frage": text}, ["frage"]),
+            werkzeug("tagesbericht_speichern",
+                     "Legt die Zusammenfassung eines Tages ab.",
+                     {"zusammenfassung": text, "entscheidungen": text, "offen": text,
+                      "datum": text}, ["zusammenfassung"]),
+            werkzeug("rueckblick", "Gibt die Tagesberichte der letzten Tage zurück.",
+                     {"tage": ganz}),
+
+            # -- Buchhaltung --
+            werkzeug("buchung_eintragen",
+                     "Trägt eine Einnahme oder Ausgabe ein. Beträge nie schätzen - "
+                     "ist etwas unklar, vorher nachfragen.",
+                     {"art": {"type": "string", "enum": ["einnahme", "ausgabe"]},
+                      "datum": text, "betrag": zahl, "haendler": text,
+                      "kategorie": {"type": "string", "enum": KATEGORIEN},
+                      "mwst_satz": zahl, "mwst_betrag": zahl, "zahlungsart": text,
+                      "notiz": text},
+                     ["art", "datum", "betrag"]),
+            werkzeug("beleg_erfassen",
+                     "Liest einen Beleg von einem Foto und trägt ihn ein.",
+                     {"bildpfad": text}, ["bildpfad"]),
+            werkzeug("auswertung",
+                     "Einnahmen, Ausgaben, Ergebnis, Vorsteuer, Umsatzsteuer und "
+                     "Zahllast für einen Zeitraum.",
+                     {"von": text, "bis": text}),
+            werkzeug("fehlende_belege",
+                     "Zeigt Ausgaben ohne hinterlegtes Belegfoto - genau die fehlen "
+                     "beim Steuerberater.", {"von": text, "bis": text}),
+            werkzeug("csv_export", "Exportiert die Buchungen als CSV für den Steuerberater.",
+                     {"von": text, "bis": text}),
+
+            # -- Kundengespräche --
+            werkzeug("gespraech_festhalten",
+                     "Bewertet ein Kundengespräch und legt es ab. Nutze das immer "
+                     "ungefragt, wenn er von einem Kundentermin erzählt.",
+                     {"bericht": text, "kunde": text}, ["bericht"]),
+            werkzeug("offene_leads", "Zeigt offene Leads samt offenem Volumen.", {}),
+            werkzeug("verkaufsmuster",
+                     "Abschlussquote, Durchschnittspunktzahl und wiederkehrende Einwände.",
+                     {"tage": ganz}),
+
+            # -- Routinen --
+            werkzeug("routine_anlegen",
+                     "Legt einen gespeicherten Ablauf an. Mit Uhrzeit läuft er täglich "
+                     "von selbst.",
+                     {"name": text, "anweisung": text, "uhrzeit": text},
+                     ["name", "anweisung"]),
+            werkzeug("routine_ausfuehren", "Führt eine gespeicherte Routine aus.",
+                     {"name": text}, ["name"]),
+            werkzeug("routinen_liste", "Zeigt alle gespeicherten Routinen.", {}),
+
+            # -- Kommunikation --
+            werkzeug("mails_lesen",
+                     "Holt ungelesene Mails und sortiert sie vor.", {"limit": ganz}),
+            werkzeug("mail_senden",
+                     "Verschickt eine E-Mail. Braucht eine Freigabe.",
+                     {"an": text, "betreff": text, "text": text},
+                     ["an", "betreff", "text"]),
+            werkzeug("nachricht_senden",
+                     "Verschickt eine Nachricht über telegram, mail, imessage oder "
+                     "whatsapp. Braucht eine Freigabe.",
+                     {"kanal": {"type": "string",
+                                "enum": ["telegram", "mail", "imessage", "whatsapp"]},
+                      "an": text, "text": text, "als_sprache": wahr, "betreff": text},
+                     ["kanal", "text"]),
+
+            # -- Kalender --
+            werkzeug("termine_lesen",
+                     "Termine der nächsten Tage samt Überschneidungen.", {"tage": ganz}),
+            werkzeug("termin_anlegen",
+                     "Trägt einen Termin ein. Braucht eine Freigabe.",
+                     {"titel": text, "beginn": text, "dauer_minuten": ganz,
+                      "ort": text, "beschreibung": text}, ["titel", "beginn"]),
+
+            # -- Welt --
+            werkzeug("wetter", "Aktuelles Wetter und Vorhersage für einen Ort.",
+                     {"ort": text}),
+            werkzeug("recherche", "Sucht etwas im Internet.", {"frage": text}, ["frage"]),
+            werkzeug("flug_suchen",
+                     "Sucht Flugverbindungen und nennt sie. Bucht nichts.",
+                     {"von": text, "nach": text, "wann": text}, ["von", "nach"]),
+            werkzeug("umschauen",
+                     "Nimmt ein Einzelbild der Kamera auf und beschreibt, was zu sehen "
+                     "ist. Kein Dauervideo.",
+                     {"frage": text, "behalten": wahr}),
+
+            # -- Bildschirm --
+            werkzeug("bildschirm_bedienen",
+                     "Bedient den Mac über Screenshots, Schritt für Schritt. Braucht "
+                     "eine Freigabe und bestätigt jeden Schritt einzeln.",
+                     {"ziel": text}, ["ziel"]),
+
+            # -- System --
+            werkzeug("systeminfo",
+                     "Fragt eine registrierte Systeminformation ab. Erlaubt sind "
+                     "ausschließlich: %s." % ", ".join(sorted(SYSTEM_AKTIONEN)),
+                     {"was": {"type": "string", "enum": sorted(SYSTEM_AKTIONEN)}},
+                     ["was"]),
+            werkzeug("ordner_zeigen", "Listet den Inhalt eines Ordners auf.",
+                     {"pfad": text}, ["pfad"]),
+            werkzeug("programm_oeffnen", "Startet ein Programm auf dem Mac.",
+                     {"programm": text}, ["programm"]),
+            werkzeug("dashboard_bauen", "Baut das Command Center neu.", {}),
+        ]
+        return eigene + self.mcp.alle_werkzeuge()
+
+    def namen(self) -> list:
+        """Alle Werkzeugnamen."""
+        return [w["name"] for w in self.katalog()]
+
+    # -- Freigabe -----------------------------------------------------------
+
+    def braucht_freigabe(self, name: str) -> bool:
+        """Muss vor diesem Werkzeug gefragt werden?"""
+        if self.mcp.ist_mcp_werkzeug(name):
+            return self.mcp.braucht_freigabe(name)
+        return name in FREIGABE_PFLICHTIG
+
+    def _freigabe(self, name: str, argumente: dict) -> dict:
+        """Holt die Freigabe ein. Ohne klares Ja wird nichts ausgeführt."""
+        try:
+            details = json.dumps(argumente or {}, ensure_ascii=False)[:600]
+        except (TypeError, ValueError):
+            details = str(argumente)[:600]
+        return self.telegram.freigabe_einholen(name, details)
+
+    # -- Ausführung ---------------------------------------------------------
+
+    def run(self, name: str, argumente: dict = None) -> dict:
+        """Führt ein Werkzeug aus - mit Freigabeprüfung und Protokoll."""
+        argumente = argumente or {}
+        if name not in self.namen():
+            ergebnis = {"ok": False,
+                        "fehler": "Das Werkzeug '%s' gibt es nicht." % name}
+            self.memory.aktion_protokollieren(name, argumente, ergebnis["fehler"],
+                                              "unbekannt")
+            return ergebnis
+
+        if self.braucht_freigabe(name):
+            entscheidung = self._freigabe(name, argumente)
+            if not entscheidung.get("erlaubt"):
+                ergebnis = {"ok": False, "abgebrochen": True,
+                            "text": "Abgebrochen. %s" % entscheidung.get("grund", "")}
+                self.memory.aktion_protokollieren(
+                    name, argumente, "Abgebrochen: %s" % entscheidung.get("grund", ""),
+                    "abgelehnt")
+                return ergebnis
+
+        try:
+            ergebnis = self._ausfuehren(name, argumente)
+        except Exception as fehler:
+            ergebnis = {"ok": False,
+                        "fehler": "Das Werkzeug %s ist fehlgeschlagen: %s" % (name, fehler)}
+
+        if not isinstance(ergebnis, dict):
+            ergebnis = {"ok": True, "text": str(ergebnis)}
+        kurz = str(ergebnis.get("text") or ergebnis.get("fehler") or "")[:400]
+        self.memory.aktion_protokollieren(
+            name, argumente, kurz, "ok" if ergebnis.get("ok") else "fehler")
+        return ergebnis
+
+    def _ausfuehren(self, name: str, a: dict) -> dict:
+        """Die eigentliche Zuordnung von Namen zu Funktionen."""
+        if self.mcp.ist_mcp_werkzeug(name):
+            return self.mcp.aufrufen(name, a)
+
+        # -- Gedächtnis --
+        if name == "notiz_speichern":
+            return self.memory.notiz_speichern(a.get("text"), a.get("kategorie", "allgemein"))
+        if name == "notizen_suchen":
+            treffer = self.memory.notizen_suchen(a.get("begriff"))
+            return {"ok": True, "anzahl": len(treffer),
+                    "notizen": [{"id": n["id"], "text": n["text"],
+                                 "datum": n["angelegt"][:10]} for n in treffer],
+                    "text": ("%d Notizen gefunden." % len(treffer)) if treffer
+                            else "Dazu habe ich nichts gespeichert."}
+        if name == "kontakt_anlegen":
+            return self.memory.kontakt_anlegen(
+                a.get("name"), a.get("firma", ""), a.get("telefon", ""),
+                a.get("email", ""), a.get("adresse", ""), a.get("notiz", ""))
+        if name == "kontakt_suchen":
+            treffer = self.memory.kontakt_suchen(a.get("begriff"))
+            return {"ok": True, "anzahl": len(treffer),
+                    "kontakte": [{k: z[k] for k in ("id", "name", "firma", "telefon",
+                                                    "email", "notiz")} for z in treffer],
+                    "text": ("%d Kontakte gefunden." % len(treffer)) if treffer
+                            else "Den Kontakt kenne ich nicht."}
+        if name == "punkt_anlegen":
+            return self.memory.punkt_anlegen(a.get("text"), a.get("faellig", ""))
+        if name == "punkte_offen":
+            punkte = self.memory.punkte_offen()
+            return {"ok": True, "anzahl": len(punkte),
+                    "punkte": [{"id": p["id"], "text": p["text"],
+                                "faellig": p["faellig"]} for p in punkte],
+                    "text": ("%d Punkte offen." % len(punkte)) if punkte
+                            else "Es ist nichts offen."}
+        if name == "punkt_erledigen":
+            erledigt = self.memory.punkt_erledigen(a.get("id"))
+            return {"ok": erledigt,
+                    "text": "Erledigt." if erledigt
+                            else "Einen offenen Punkt mit dieser Nummer gibt es nicht."}
+        if name == "kennzahl_setzen":
+            return self.memory.kennzahl_setzen(a.get("name"), a.get("wert"),
+                                               a.get("einheit", ""))
+        if name == "gedaechtnis_durchsuchen":
+            treffer = self.recall.nachschlagen(a.get("frage", ""))
+            anzahl = sum(len(treffer[s]) for s in
+                         ("notizen", "kontakte", "berichte", "aeusserungen"))
+            return {"ok": True, "treffer": {
+                        "notizen": [n["text"] for n in treffer["notizen"]],
+                        "kontakte": [k["name"] for k in treffer["kontakte"]],
+                        "berichte": [("%s: %s" % (b["datum"], b["zusammenfassung"]))
+                                     for b in treffer["berichte"]],
+                        "aeusserungen": [z["text"][:200] for z in treffer["aeusserungen"]]},
+                    "text": ("%d Treffer im Gedächtnis." % anzahl) if anzahl
+                            else "Dazu finde ich nichts."}
+        if name == "tagesbericht_speichern":
+            return self.recall.tagesbericht_speichern(
+                a.get("zusammenfassung"), a.get("entscheidungen", ""),
+                a.get("offen", ""), a.get("datum", ""))
+        if name == "rueckblick":
+            return {"ok": True, "text": self.recall.rueckblick(int(a.get("tage") or 7))}
+
+        # -- Buchhaltung --
+        if name == "buchung_eintragen":
+            return self.bookkeeping.buchung_eintragen(
+                a.get("art"), a.get("datum"), a.get("betrag"), a.get("haendler", ""),
+                a.get("kategorie", "Sonstiges"), a.get("mwst_satz"),
+                a.get("mwst_betrag"), a.get("zahlungsart", ""), None, "",
+                a.get("notiz", ""))
+        if name == "beleg_erfassen":
+            return self.bookkeeping.beleg_erfassen(a.get("bildpfad"), self.agent)
+        if name == "auswertung":
+            return self.bookkeeping.auswertung(a.get("von", ""), a.get("bis", ""))
+        if name == "fehlende_belege":
+            return self.bookkeeping.fehlende_belege(a.get("von", ""), a.get("bis", ""))
+        if name == "csv_export":
+            return self.bookkeeping.csv_export(a.get("von", ""), a.get("bis", ""))
+
+        # -- Kundengespräche --
+        if name == "gespraech_festhalten":
+            return self.call_analysis.gespraech_festhalten(
+                a.get("bericht"), self.agent, a.get("kunde", ""))
+        if name == "offene_leads":
+            return self.call_analysis.offene_leads()
+        if name == "verkaufsmuster":
+            return self.call_analysis.verkaufsmuster(int(a.get("tage") or 90))
+
+        # -- Routinen --
+        if name == "routine_anlegen":
+            return self.routines.routine_anlegen(a.get("name"), a.get("anweisung"),
+                                                 a.get("uhrzeit", ""))
+        if name == "routine_ausfuehren":
+            return self.routines.routine_ausfuehren(a.get("name"), self.agent)
+        if name == "routinen_liste":
+            liste = self.routines.routinen_liste()
+            return {"ok": True, "anzahl": len(liste),
+                    "routinen": [{"name": z["name"], "uhrzeit": z["uhrzeit"],
+                                  "anweisung": z["anweisung"][:200]} for z in liste],
+                    "text": ("Gespeicherte Routinen: %s."
+                             % ", ".join(z["name"] for z in liste)) if liste
+                            else "Es ist noch keine Routine angelegt."}
+
+        # -- Kommunikation --
+        if name == "mails_lesen":
+            return self.mail.ungelesene(int(a.get("limit") or 15))
+        if name == "mail_senden":
+            return self.mail.senden(a.get("an"), a.get("betreff"), a.get("text"))
+        if name == "nachricht_senden":
+            return self.messenger.nachricht_senden(
+                a.get("kanal"), a.get("an", ""), a.get("text"),
+                bool(a.get("als_sprache")), a.get("betreff", ""))
+
+        # -- Kalender --
+        if name == "termine_lesen":
+            return self.kalender.termine(int(a.get("tage") or 7))
+        if name == "termin_anlegen":
+            return self.kalender.termin_anlegen(
+                a.get("titel"), a.get("beginn"), int(a.get("dauer_minuten") or 60),
+                a.get("ort", ""), a.get("beschreibung", ""))
+
+        # -- Welt --
+        if name == "wetter":
+            return self.welt.wetter(a.get("ort", ""))
+        if name == "recherche":
+            return self.welt.recherche(a.get("frage"))
+        if name == "flug_suchen":
+            return self.welt.flug_suchen(a.get("von"), a.get("nach"), a.get("wann", ""))
+        if name == "umschauen":
+            return self.kamera.umschauen(a.get("frage", ""), self.agent,
+                                         bool(a.get("behalten")))
+
+        # -- Bildschirm --
+        if name == "bildschirm_bedienen":
+            return self.bildschirm.bedienen(a.get("ziel", ""))
+
+        # -- System --
+        if name == "systeminfo":
+            return self.systeminfo(a.get("was", ""))
+        if name in PARAMETER_AKTIONEN:
+            return self.parameter_aktion(name, a)
+        if name == "dashboard_bauen":
+            return self.dashboard.bauen(mit_netz=True)
+
+        return {"ok": False, "fehler": "Für '%s' fehlt die Umsetzung." % name}
+
+    # -- Die Allowlist ------------------------------------------------------
+
+    def systeminfo(self, was: str) -> dict:
+        """Führt eine registrierte Systemabfrage aus.
+
+        Nur die Namen aus :data:`SYSTEM_AKTIONEN` sind zulässig. Ein übergebener
+        Befehlstext wird nie ausgeführt - er ist schlicht kein gültiger Name.
+        """
+        schluessel = str(was or "").strip().lower()
+        if schluessel not in SYSTEM_AKTIONEN:
+            return {"ok": False,
+                    "fehler": "'%s' ist keine registrierte Abfrage. Ich führe nur "
+                              "diese aus: %s." % (was, ", ".join(sorted(SYSTEM_AKTIONEN)))}
+        befehl, beschreibung = SYSTEM_AKTIONEN[schluessel]
+        return self._befehl_ausfuehren(befehl, beschreibung)
+
+    def parameter_aktion(self, name: str, argumente: dict) -> dict:
+        """Führt eine registrierte Aktion mit genau einem geprüften Parameter aus."""
+        vorlage, parametername, beschreibung = PARAMETER_AKTIONEN[name]
+        wert = argumente.get(parametername, "")
+        ok, meldung = parameter_pruefen(wert)
+        if not ok:
+            return {"ok": False,
+                    "fehler": "Der Wert für %s ist nicht zulässig. %s"
+                              % (parametername, meldung)}
+        if parametername == "pfad":
+            wert = os.path.expanduser(str(wert))
+        befehl = [teil.replace("{%s}" % parametername, str(wert)) for teil in vorlage]
+        return self._befehl_ausfuehren(befehl, beschreibung)
+
+    @staticmethod
+    def _befehl_ausfuehren(befehl: list, beschreibung: str) -> dict:
+        """Führt einen fest registrierten Befehl aus - immer ohne Shell."""
+        try:
+            ergebnis = subprocess.run(befehl, capture_output=True, text=True,
+                                      timeout=25, shell=False)
+        except FileNotFoundError:
+            return {"ok": False,
+                    "fehler": "Das Programm '%s' gibt es auf diesem Rechner nicht. "
+                              "Diese Abfrage funktioniert nur auf einem Mac." % befehl[0]}
+        except (OSError, subprocess.SubprocessError) as fehler:
+            return {"ok": False, "fehler": "Die Abfrage ist fehlgeschlagen: %s" % fehler}
+        ausgabe = (ergebnis.stdout or ergebnis.stderr or "").strip()
+        if ergebnis.returncode != 0 and not ergebnis.stdout:
+            return {"ok": False,
+                    "fehler": "Die Abfrage '%s' hat nicht funktioniert: %s"
+                              % (beschreibung, ausgabe[:300])}
+        return {"ok": True, "was": beschreibung, "text": ausgabe[:3000]}
+
+    # -- Übersicht ----------------------------------------------------------
+
+    def zustand(self) -> dict:
+        """Was ist einsatzbereit - für den Selbsttest und das Dashboard."""
+        return {
+            "werkzeuge": len(self.namen()),
+            "mcp_werkzeuge": len(self.mcp.alle_werkzeuge()),
+            "freigabepflichtig": sorted(FREIGABE_PFLICHTIG),
+            "systemaktionen": sorted(SYSTEM_AKTIONEN),
+            "mail": self.mail.zustand(),
+            "kalender": self.kalender.zustand(),
+            "telegram": self.telegram.verfuegbar(),
+            "kamera": self.kamera.zustand(),
+            "bildschirm": self.bildschirm.zustand(),
+            "versand": self.messenger.zustand(),
+        }

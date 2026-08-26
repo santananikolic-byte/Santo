@@ -1,0 +1,6921 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""Jarvis - persönlicher Sprachassistent für die Gebäudereinigung.
+
+Diese Datei ist erzeugt. Bearbeite die Module unter src/ und baue neu mit:
+
+    python3 build_single.py
+
+Betriebsarten:
+
+    python3 jarvis.py             Dauerbetrieb: hört zu und meldet sich von selbst
+    python3 jarvis.py chat        tippen statt sprechen
+    python3 jarvis.py telegram    vom Handy aus
+    python3 jarvis.py briefing    Briefing sofort
+    python3 jarvis.py abend       Abendrückblick sofort
+    python3 jarvis.py dashboard   Dashboard bauen
+    python3 jarvis.py stimme      Stimmprofil einlernen
+    python3 jarvis.py stimmen     ElevenLabs-Stimme aussuchen
+    python3 jarvis.py test        Selbsttest
+    python3 jarvis.py einrichten  geführte Ersteinrichtung
+
+Alle Daten bleiben lokal auf diesem Rechner.
+"""
+
+
+import base64
+import csv
+import email
+import email.header
+import email.utils
+import html
+import imaplib
+import io
+import json
+import os
+import queue
+import re
+import select
+import shutil
+import smtplib
+import sqlite3
+import ssl
+import subprocess
+import sys
+import tempfile
+import threading
+import time
+import traceback
+import urllib.error
+import urllib.parse
+import urllib.request
+import uuid
+import wave
+from datetime import datetime, timedelta
+from email.message import EmailMessage
+from pathlib import Path
+
+
+
+# ---------------------------------------------------------------------------
+# Optionale Abhängigkeiten. Fehlt eine, fällt nur das
+# betroffene Werkzeug aus - nie das ganze Programm.
+# ---------------------------------------------------------------------------
+
+try:
+    import numpy as np
+except ImportError:
+    np = None
+
+try:
+    import sounddevice as sd
+except (ImportError, OSError):
+    sd = None
+
+try:
+    from faster_whisper import WhisperModel
+except ImportError:
+    WhisperModel = None
+
+try:
+    from resemblyzer import VoiceEncoder, preprocess_wav
+except ImportError:
+    VoiceEncoder = None
+    preprocess_wav = None
+
+try:
+    import pyautogui
+except Exception:
+    # Ohne Bildschirm (etwa auf einem Server) wirft pyautogui beim Import.
+    pyautogui = None
+
+try:
+    from PIL import Image
+except ImportError:
+    Image = None
+
+
+
+
+# =========================================================================
+# config  -  Konfiguration - liest ``config/.env`` und stellt alle Einstellungen bereit.
+# 
+# Alle Einstellungen liegen als Modul-Globals vor. Die anderen Module lesen sie
+# über ``config.NAME``. Beim Zusammenführen zur Einzeldatei ersetzt
+# ``build_single.py`` das Präfix ``config.`` durch den blanken Namen, damit in
+# ``jarvis.py`` weiterhin ``NAME`` gelesen wird. Deshalb müssen alle Namen in
+# diesem Modul projektweit eindeutig sein.
+# =========================================================================
+
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+
+
+def _basis_ermitteln() -> Path:
+    """Findet die Projektwurzel - sowohl aus ``src/`` als auch aus ``jarvis.py``."""
+    hier = Path(__file__).resolve().parent
+    if hier.name == "src":
+        return hier.parent
+    if hier.name == "modules":
+        return hier.parent.parent
+    return hier
+
+
+BASIS = _basis_ermitteln()
+CONFIG_VERZEICHNIS = BASIS / "config"
+ENV_DATEI = CONFIG_VERZEICHNIS / ".env"
+MCP_DATEI = CONFIG_VERZEICHNIS / "mcp_servers.json"
+DASHBOARD_VERZEICHNIS = BASIS / "dashboard"
+BELEGE_VERZEICHNIS = BASIS / "belege"
+PROFIL_VERZEICHNIS = BASIS / "profil"
+EXPORT_VERZEICHNIS = BASIS / "export"
+DB_PFAD = str(BASIS / "jarvis_memory.db")
+
+# ---------------------------------------------------------------------------
+# .env einlesen
+# ---------------------------------------------------------------------------
+
+_ROHWERTE = {}
+
+
+def env_neu_laden():
+    """Liest ``config/.env`` neu ein. Fehlt die Datei, bleibt alles leer."""
+    _ROHWERTE.clear()
+    try:
+        if ENV_DATEI.exists():
+            for zeile in ENV_DATEI.read_text(encoding="utf-8").splitlines():
+                zeile = zeile.strip()
+                if not zeile or zeile.startswith("#") or "=" not in zeile:
+                    continue
+                schluessel, _, wert = zeile.partition("=")
+                wert = wert.strip()
+                if len(wert) >= 2 and wert[0] == wert[-1] and wert[0] in "\"'":
+                    wert = wert[1:-1]
+                _ROHWERTE[schluessel.strip()] = wert
+    except OSError as fehler:
+        print("[konfig] .env konnte nicht gelesen werden: %s" % fehler)
+    return dict(_ROHWERTE)
+
+
+def _text(name, standard=""):
+    wert = _ROHWERTE.get(name)
+    if wert is None or wert == "":
+        wert = os.environ.get(name, standard)
+    return (wert or "").strip()
+
+
+def _zahl(name, standard):
+    try:
+        roh = _text(name, "")
+        return float(roh) if roh else float(standard)
+    except (TypeError, ValueError):
+        return float(standard)
+
+
+def _ganzzahl(name, standard):
+    try:
+        roh = _text(name, "")
+        return int(float(roh)) if roh else int(standard)
+    except (TypeError, ValueError):
+        return int(standard)
+
+
+def _wahrheit(name, standard=False):
+    roh = _text(name, "").lower()
+    if roh in ("1", "ja", "true", "yes", "an", "on"):
+        return True
+    if roh in ("0", "nein", "false", "no", "aus", "off"):
+        return False
+    return bool(standard)
+
+
+env_neu_laden()
+
+# ---------------------------------------------------------------------------
+# Einstellungen
+# ---------------------------------------------------------------------------
+
+# Claude
+ANTHROPIC_API_KEY = _text("ANTHROPIC_API_KEY")
+CLAUDE_MODEL = _text("CLAUDE_MODEL", "claude-sonnet-4-6")
+CLAUDE_MAX_TOKENS = _ganzzahl("CLAUDE_MAX_TOKENS", 2000)
+
+# Nutzer
+NUTZER_NAME = _text("NUTZER_NAME", "Chef")
+FIRMA = _text("FIRMA", "Gebäudereinigung")
+
+# Sprachausgabe
+ELEVENLABS_API_KEY = _text("ELEVENLABS_API_KEY")
+ELEVENLABS_VOICE_ID = _text("ELEVENLABS_VOICE_ID", "21m00Tcm4TlvDq8ikWAM")
+ELEVENLABS_MODEL = _text("ELEVENLABS_MODEL", "eleven_multilingual_v2")
+SPEECH_RATE = _ganzzahl("SPEECH_RATE", 185)
+MACOS_STIMME = _text("MACOS_STIMME", "")
+
+# Spracherkennung
+OPENAI_API_KEY = _text("OPENAI_API_KEY")
+WHISPER_MODELL = _text("WHISPER_MODELL", "base")
+STIMM_SCHWELLE = _zahl("STIMM_SCHWELLE", 0.75)
+STIMMPRUEFUNG_AN = _wahrheit("STIMMPRUEFUNG_AN", False)
+
+# Telegram
+TELEGRAM_BOT_TOKEN = _text("TELEGRAM_BOT_TOKEN")
+TELEGRAM_CHAT_ID = _text("TELEGRAM_CHAT_ID")
+FREIGABE_TIMEOUT = _ganzzahl("FREIGABE_TIMEOUT", 120)
+
+# E-Mail
+IMAP_HOST = _text("IMAP_HOST")
+IMAP_PORT = _ganzzahl("IMAP_PORT", 993)
+IMAP_USER = _text("IMAP_USER")
+IMAP_PASSWORT = _text("IMAP_PASSWORT")
+SMTP_HOST = _text("SMTP_HOST")
+SMTP_PORT = _ganzzahl("SMTP_PORT", 587)
+SMTP_USER = _text("SMTP_USER")
+SMTP_PASSWORT = _text("SMTP_PASSWORT")
+SMTP_ABSENDER = _text("SMTP_ABSENDER") or _text("SMTP_USER")
+
+# Kalender
+CALDAV_URL = _text("CALDAV_URL")
+CALDAV_USER = _text("CALDAV_USER")
+CALDAV_PASSWORT = _text("CALDAV_PASSWORT")
+CALDAV_KALENDER = _text("CALDAV_KALENDER")
+
+# Briefings
+BRIEFING_MORGENS = _text("BRIEFING_MORGENS", "06:45")
+BRIEFING_ABENDS = _text("BRIEFING_ABENDS", "19:30")
+
+# Buchhaltung
+STANDARD_MWST = _zahl("STANDARD_MWST", 20.0)
+WAEHRUNG = _text("WAEHRUNG", "EUR")
+
+# Welt
+WETTER_ORT = _text("WETTER_ORT", "Wien")
+
+# Supabase (optional, nur Spiegelung - die Wahrheit liegt immer lokal)
+SUPABASE_URL = _text("SUPABASE_URL")
+SUPABASE_KEY = _text("SUPABASE_KEY")
+
+# Ersteinrichtung abgeschlossen?
+EINRICHTUNG_FERTIG = _wahrheit("EINRICHTUNG_FERTIG", False)
+
+
+def env_setzen(schluessel: str, wert) -> bool:
+    """Schreibt einen Wert nach ``config/.env`` und aktualisiert ihn sofort."""
+    schluessel = str(schluessel).strip()
+    if not schluessel:
+        return False
+    _ROHWERTE[schluessel] = "" if wert is None else str(wert)
+    ok = env_schreiben()
+    # Live-Wert im laufenden Prozess nachziehen
+    globalraum = globals()
+    if schluessel in globalraum:
+        alt = globalraum[schluessel]
+        try:
+            if isinstance(alt, bool):
+                globalraum[schluessel] = _wahrheit(schluessel, alt)
+            elif isinstance(alt, int):
+                globalraum[schluessel] = _ganzzahl(schluessel, alt)
+            elif isinstance(alt, float):
+                globalraum[schluessel] = _zahl(schluessel, alt)
+            else:
+                globalraum[schluessel] = _text(schluessel, "")
+        except Exception:
+            globalraum[schluessel] = _text(schluessel, "")
+    else:
+        globalraum[schluessel] = _text(schluessel, "")
+    return ok
+
+
+def env_schreiben() -> bool:
+    """Speichert alle bekannten Werte in ``config/.env`` (nur für den Nutzer lesbar)."""
+    try:
+        CONFIG_VERZEICHNIS.mkdir(parents=True, exist_ok=True)
+        zeilen = ["# Jarvis - Einstellungen. Eine Zeile pro Wert: NAME=wert", ""]
+        for name in sorted(_ROHWERTE):
+            zeilen.append("%s=%s" % (name, _ROHWERTE[name]))
+        ENV_DATEI.write_text("\n".join(zeilen) + "\n", encoding="utf-8")
+        try:
+            os.chmod(str(ENV_DATEI), 0o600)
+        except OSError:
+            pass
+        return True
+    except OSError as fehler:
+        print("[konfig] .env konnte nicht geschrieben werden: %s" % fehler)
+        return False
+
+
+def verzeichnisse_anlegen():
+    """Legt alle Arbeitsverzeichnisse an, falls sie fehlen."""
+    for pfad in (CONFIG_VERZEICHNIS, DASHBOARD_VERZEICHNIS, BELEGE_VERZEICHNIS,
+                 PROFIL_VERZEICHNIS, EXPORT_VERZEICHNIS):
+        try:
+            pfad.mkdir(parents=True, exist_ok=True)
+        except OSError as fehler:
+            print("[konfig] Verzeichnis %s nicht anlegbar: %s" % (pfad, fehler))
+
+
+def konfig_uebersicht() -> dict:
+    """Zeigt an, welche Dienste eingerichtet sind - ohne Geheimnisse preiszugeben."""
+    return {
+        "Claude": bool(ANTHROPIC_API_KEY),
+        "ElevenLabs": bool(ELEVENLABS_API_KEY),
+        "Whisper-API": bool(OPENAI_API_KEY),
+        "Telegram": bool(TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID),
+        "E-Mail lesen": bool(IMAP_HOST and IMAP_USER),
+        "E-Mail senden": bool(SMTP_HOST and SMTP_USER),
+        "Kalender": bool(CALDAV_URL),
+        "Supabase": bool(SUPABASE_URL and SUPABASE_KEY),
+    }
+
+
+verzeichnisse_anlegen()
+
+
+# =========================================================================
+# memory  -  Gedächtnis, Ebene 0 - Notizen, Kontakte, Kennzahlen, offene Punkte, Protokoll.
+# 
+# Alles liegt lokal in einer SQLite-Datei. Supabase wird, falls konfiguriert,
+# nur zusätzlich gespiegelt: Die Wahrheit steht immer auf dem Rechner des Nutzers.
+# =========================================================================
+
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+
+
+_DB_SPERRE = threading.Lock()
+
+SCHEMA_MEMORY = """
+CREATE TABLE IF NOT EXISTS notizen (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    text TEXT NOT NULL,
+    kategorie TEXT DEFAULT 'allgemein',
+    angelegt TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS kontakte (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    firma TEXT DEFAULT '',
+    telefon TEXT DEFAULT '',
+    email TEXT DEFAULT '',
+    adresse TEXT DEFAULT '',
+    notiz TEXT DEFAULT '',
+    angelegt TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS kennzahlen (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    wert REAL NOT NULL,
+    einheit TEXT DEFAULT '',
+    datum TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS offene_punkte (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    text TEXT NOT NULL,
+    faellig TEXT DEFAULT '',
+    erledigt INTEGER DEFAULT 0,
+    angelegt TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS aktionen (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    werkzeug TEXT NOT NULL,
+    argumente TEXT DEFAULT '',
+    ergebnis TEXT DEFAULT '',
+    status TEXT DEFAULT 'ok',
+    zeit TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS verlauf (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    rolle TEXT NOT NULL,
+    text TEXT NOT NULL,
+    zeit TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_notizen_text ON notizen(text);
+CREATE INDEX IF NOT EXISTS idx_verlauf_zeit ON verlauf(zeit);
+"""
+
+
+def zeitstempel() -> str:
+    """Aktuelle Zeit als ``JJJJ-MM-TT HH:MM:SS``."""
+    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+
+def heute_datum() -> str:
+    """Heutiges Datum als ``JJJJ-MM-TT``."""
+    return datetime.now().strftime("%Y-%m-%d")
+
+
+def db_verbindung(pfad: str = None) -> sqlite3.Connection:
+    """Öffnet eine SQLite-Verbindung mit Zeilen-Zugriff über Spaltennamen."""
+    verbindung = sqlite3.connect(pfad or DB_PFAD, timeout=15,
+                                 check_same_thread=False)
+    verbindung.row_factory = sqlite3.Row
+    verbindung.execute("PRAGMA journal_mode=WAL")
+    return verbindung
+
+
+def db_schema_anlegen(schema: str, pfad: str = None):
+    """Legt die Tabellen eines Moduls an, falls sie noch fehlen."""
+    with _DB_SPERRE:
+        verbindung = db_verbindung(pfad)
+        try:
+            verbindung.executescript(schema)
+            verbindung.commit()
+        finally:
+            verbindung.close()
+
+
+def zeilen_zu_liste(zeilen) -> list:
+    """Wandelt SQLite-Zeilen in gewöhnliche Wörterbücher um."""
+    return [dict(zeile) for zeile in zeilen]
+
+
+class Memory:
+    """Das Kurzzeit- und Sachgedächtnis: Notizen, Kontakte, Zahlen, Protokoll."""
+
+    def __init__(self, db_pfad: str = None):
+        self.db_pfad = db_pfad or DB_PFAD
+        db_schema_anlegen(SCHEMA_MEMORY, self.db_pfad)
+
+    # -- Grundlagen ---------------------------------------------------------
+
+    def _schreiben(self, sql: str, werte: tuple = ()) -> int:
+        with _DB_SPERRE:
+            verbindung = db_verbindung(self.db_pfad)
+            try:
+                zeiger = verbindung.execute(sql, werte)
+                verbindung.commit()
+                return zeiger.lastrowid
+            finally:
+                verbindung.close()
+
+    def _lesen(self, sql: str, werte: tuple = ()) -> list:
+        verbindung = db_verbindung(self.db_pfad)
+        try:
+            return zeilen_zu_liste(verbindung.execute(sql, werte).fetchall())
+        finally:
+            verbindung.close()
+
+    # -- Notizen ------------------------------------------------------------
+
+    def notiz_speichern(self, text: str, kategorie: str = "allgemein") -> dict:
+        """Hält eine Notiz fest und gibt sie mit ihrer Nummer zurück."""
+        text = (text or "").strip()
+        if not text:
+            return {"ok": False, "fehler": "Die Notiz ist leer."}
+        nummer = self._schreiben(
+            "INSERT INTO notizen (text, kategorie, angelegt) VALUES (?,?,?)",
+            (text, kategorie or "allgemein", zeitstempel()))
+        self._spiegeln("notizen", {"text": text, "kategorie": kategorie})
+        return {"ok": True, "id": nummer, "text": text, "kategorie": kategorie}
+
+    def notizen_suchen(self, begriff: str, limit: int = 20) -> list:
+        """Sucht Notizen, deren Text den Begriff enthält."""
+        begriff = (begriff or "").strip()
+        if not begriff:
+            return self.notizen_letzte(limit)
+        return self._lesen(
+            "SELECT * FROM notizen WHERE text LIKE ? OR kategorie LIKE ? "
+            "ORDER BY id DESC LIMIT ?",
+            ("%%%s%%" % begriff, "%%%s%%" % begriff, limit))
+
+    def notizen_letzte(self, limit: int = 10) -> list:
+        """Die zuletzt angelegten Notizen."""
+        return self._lesen("SELECT * FROM notizen ORDER BY id DESC LIMIT ?", (limit,))
+
+    def notiz_loeschen(self, nummer: int) -> bool:
+        """Löscht eine Notiz anhand ihrer Nummer."""
+        vorher = self._lesen("SELECT id FROM notizen WHERE id=?", (nummer,))
+        if not vorher:
+            return False
+        self._schreiben("DELETE FROM notizen WHERE id=?", (nummer,))
+        return True
+
+    # -- Kontakte -----------------------------------------------------------
+
+    def kontakt_anlegen(self, name: str, firma: str = "", telefon: str = "",
+                        email: str = "", adresse: str = "", notiz: str = "") -> dict:
+        """Legt einen Kontakt an oder ergänzt einen bereits vorhandenen."""
+        name = (name or "").strip()
+        if not name:
+            return {"ok": False, "fehler": "Ohne Namen kann ich keinen Kontakt anlegen."}
+        vorhanden = self._lesen(
+            "SELECT * FROM kontakte WHERE lower(name)=lower(?) LIMIT 1", (name,))
+        if vorhanden:
+            alt = vorhanden[0]
+            neu = {
+                "firma": firma or alt["firma"],
+                "telefon": telefon or alt["telefon"],
+                "email": email or alt["email"],
+                "adresse": adresse or alt["adresse"],
+                "notiz": (alt["notiz"] + " | " + notiz).strip(" |") if notiz else alt["notiz"],
+            }
+            self._schreiben(
+                "UPDATE kontakte SET firma=?, telefon=?, email=?, adresse=?, notiz=? "
+                "WHERE id=?",
+                (neu["firma"], neu["telefon"], neu["email"], neu["adresse"],
+                 neu["notiz"], alt["id"]))
+            return {"ok": True, "id": alt["id"], "name": name, "aktualisiert": True}
+        nummer = self._schreiben(
+            "INSERT INTO kontakte (name, firma, telefon, email, adresse, notiz, angelegt) "
+            "VALUES (?,?,?,?,?,?,?)",
+            (name, firma, telefon, email, adresse, notiz, zeitstempel()))
+        self._spiegeln("kontakte", {"name": name, "firma": firma})
+        return {"ok": True, "id": nummer, "name": name, "aktualisiert": False}
+
+    def kontakt_suchen(self, begriff: str, limit: int = 20) -> list:
+        """Sucht Kontakte über Name, Firma, Telefon, E-Mail oder Notiz."""
+        begriff = (begriff or "").strip()
+        if not begriff:
+            return self._lesen("SELECT * FROM kontakte ORDER BY name LIMIT ?", (limit,))
+        muster = "%%%s%%" % begriff
+        return self._lesen(
+            "SELECT * FROM kontakte WHERE name LIKE ? OR firma LIKE ? OR telefon LIKE ? "
+            "OR email LIKE ? OR notiz LIKE ? ORDER BY name LIMIT ?",
+            (muster, muster, muster, muster, muster, limit))
+
+    def kontakte_alle(self) -> list:
+        """Alle Kontakte, alphabetisch."""
+        return self._lesen("SELECT * FROM kontakte ORDER BY name")
+
+    # -- Kennzahlen ---------------------------------------------------------
+
+    def kennzahl_setzen(self, name: str, wert: float, einheit: str = "") -> dict:
+        """Hält eine Kennzahl mit Datum fest (Verlauf bleibt erhalten)."""
+        try:
+            wert = float(wert)
+        except (TypeError, ValueError):
+            return {"ok": False, "fehler": "Der Wert ist keine Zahl."}
+        nummer = self._schreiben(
+            "INSERT INTO kennzahlen (name, wert, einheit, datum) VALUES (?,?,?,?)",
+            (name, wert, einheit, heute_datum()))
+        return {"ok": True, "id": nummer, "name": name, "wert": wert, "einheit": einheit}
+
+    def kennzahlen(self, limit: int = 30) -> list:
+        """Der jeweils jüngste Stand jeder Kennzahl."""
+        return self._lesen(
+            "SELECT name, wert, einheit, datum FROM kennzahlen k WHERE id = "
+            "(SELECT max(id) FROM kennzahlen WHERE name = k.name) "
+            "ORDER BY name LIMIT ?", (limit,))
+
+    # -- Offene Punkte ------------------------------------------------------
+
+    def punkt_anlegen(self, text: str, faellig: str = "") -> dict:
+        """Merkt sich etwas, das noch zu erledigen ist."""
+        text = (text or "").strip()
+        if not text:
+            return {"ok": False, "fehler": "Der offene Punkt ist leer."}
+        nummer = self._schreiben(
+            "INSERT INTO offene_punkte (text, faellig, erledigt, angelegt) VALUES (?,?,0,?)",
+            (text, faellig, zeitstempel()))
+        return {"ok": True, "id": nummer, "text": text, "faellig": faellig}
+
+    def punkte_offen(self, tage: int = 14, limit: int = 25) -> list:
+        """Offene Punkte der letzten ``tage`` Tage."""
+        grenze = (datetime.now() - timedelta(days=tage)).strftime("%Y-%m-%d 00:00:00")
+        return self._lesen(
+            "SELECT * FROM offene_punkte WHERE erledigt=0 AND angelegt>=? "
+            "ORDER BY id DESC LIMIT ?", (grenze, limit))
+
+    def punkt_erledigen(self, nummer: int) -> bool:
+        """Hakt einen offenen Punkt ab."""
+        vorher = self._lesen("SELECT id FROM offene_punkte WHERE id=? AND erledigt=0",
+                             (nummer,))
+        if not vorher:
+            return False
+        self._schreiben("UPDATE offene_punkte SET erledigt=1 WHERE id=?", (nummer,))
+        return True
+
+    # -- Protokoll ----------------------------------------------------------
+
+    def aktion_protokollieren(self, werkzeug: str, argumente=None, ergebnis: str = "",
+                              status: str = "ok") -> int:
+        """Schreibt jede ausgeführte Aktion mit - Grundlage für das Dashboard."""
+        try:
+            argument_text = json.dumps(argumente, ensure_ascii=False)[:2000]
+        except (TypeError, ValueError):
+            argument_text = str(argumente)[:2000]
+        return self._schreiben(
+            "INSERT INTO aktionen (werkzeug, argumente, ergebnis, status, zeit) "
+            "VALUES (?,?,?,?,?)",
+            (werkzeug, argument_text, str(ergebnis)[:2000], status, zeitstempel()))
+
+    def protokoll(self, limit: int = 30) -> list:
+        """Die zuletzt ausgeführten Aktionen."""
+        return self._lesen("SELECT * FROM aktionen ORDER BY id DESC LIMIT ?", (limit,))
+
+    # -- Gesprächsverlauf ---------------------------------------------------
+
+    def verlauf_anhaengen(self, rolle: str, text: str) -> int:
+        """Hängt eine Äußerung an den dauerhaften Verlauf an."""
+        return self._schreiben(
+            "INSERT INTO verlauf (rolle, text, zeit) VALUES (?,?,?)",
+            (rolle, (text or "")[:8000], zeitstempel()))
+
+    def verlauf_letzte(self, limit: int = 20) -> list:
+        """Die letzten Äußerungen, in zeitlicher Reihenfolge."""
+        zeilen = self._lesen("SELECT * FROM verlauf ORDER BY id DESC LIMIT ?", (limit,))
+        return list(reversed(zeilen))
+
+    def aeusserungen_suchen(self, begriff: str, limit: int = 8) -> list:
+        """Sucht in früheren Äußerungen des Nutzers."""
+        begriff = (begriff or "").strip()
+        if not begriff:
+            return []
+        return self._lesen(
+            "SELECT * FROM verlauf WHERE rolle='user' AND text LIKE ? "
+            "ORDER BY id DESC LIMIT ?", ("%%%s%%" % begriff, limit))
+
+    # -- Übersicht ----------------------------------------------------------
+
+    def statistik(self) -> dict:
+        """Zählt, was im Gedächtnis liegt."""
+        ergebnis = {}
+        for tabelle in ("notizen", "kontakte", "kennzahlen", "aktionen", "verlauf"):
+            try:
+                zeilen = self._lesen("SELECT count(*) AS n FROM %s" % tabelle)
+                ergebnis[tabelle] = zeilen[0]["n"] if zeilen else 0
+            except sqlite3.Error:
+                ergebnis[tabelle] = 0
+        ergebnis["offene_punkte"] = len(self.punkte_offen())
+        return ergebnis
+
+    # -- Optionale Spiegelung ----------------------------------------------
+
+    def _spiegeln(self, tabelle: str, daten: dict):
+        """Spiegelt einen Datensatz nach Supabase - scheitert lautlos, nie blockierend."""
+        if not (SUPABASE_URL and SUPABASE_KEY):
+            return
+        try:
+            ziel = "%s/rest/v1/%s" % (SUPABASE_URL.rstrip("/"), tabelle)
+            anfrage = urllib.request.Request(
+                ziel, data=json.dumps(daten).encode("utf-8"), method="POST",
+                headers={
+                    "apikey": SUPABASE_KEY,
+                    "Authorization": "Bearer %s" % SUPABASE_KEY,
+                    "Content-Type": "application/json",
+                    "Prefer": "return=minimal",
+                })
+            urllib.request.urlopen(anfrage, timeout=5).read()
+        except (urllib.error.URLError, OSError, ValueError):
+            pass
+
+
+# =========================================================================
+# recall  -  Gedächtnis, Ebene 1 und 2 - Tagesberichte und gezieltes Nachschlagen.
+# 
+# Warum zwei Ebenen? Ein Verlauf von Monaten passt in kein Kontextfenster und
+# macht jede Antwort langsam und teuer. Deshalb:
+# 
+# * Ebene 1: Abends fasst Jarvis den Tag in wenigen Sätzen zusammen. Viele
+#   solcher Berichte passen gleichzeitig in den Systemprompt.
+# * Ebene 2: Vor jeder Antwort werden die tragenden Wörter der Frage in Notizen,
+#   Kontakten, Tagesberichten und früheren Äußerungen nachgeschlagen. Nur die
+#   Treffer werden beigelegt.
+# =========================================================================
+
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+
+
+SCHEMA_RECALL = """
+CREATE TABLE IF NOT EXISTS tagesberichte (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    datum TEXT NOT NULL,
+    zusammenfassung TEXT NOT NULL,
+    entscheidungen TEXT DEFAULT '',
+    offen TEXT DEFAULT '',
+    angelegt TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_berichte_datum ON tagesberichte(datum);
+"""
+
+# Wörter, die in fast jedem Satz vorkommen und deshalb nichts einengen.
+STOPPWOERTER = {
+    "aber", "alle", "allem", "allen", "aller", "alles", "also", "andere", "auch",
+    "auf", "aus", "bei", "beim", "bin", "bis", "bist", "dann", "dass", "dein",
+    "deine", "dem", "den", "denn", "der", "des", "dich", "die", "dies", "diese",
+    "diesem", "diesen", "dieser", "dieses", "dir", "doch", "dort", "durch",
+    "ein", "eine", "einem", "einen", "einer", "eines", "einfach", "etwas",
+    "euch", "euer", "eure", "für", "fuer", "gegen", "gewesen", "hab", "habe",
+    "haben", "hat", "hatte", "hatten", "hier", "hin", "ich", "ihm", "ihn",
+    "ihnen", "ihr", "ihre", "immer", "ist", "jede", "jedem", "jeden", "jeder",
+    "jetzt", "kann", "kannst", "können", "koennen", "machen", "mehr", "mein",
+    "meine", "mich", "mir", "mit", "muss", "musst", "müssen", "muessen", "nach",
+    "nicht", "noch", "nun", "nur", "oben", "oder", "ohne", "schon", "sehr",
+    "sein", "seine", "seit", "sich", "sie", "sind", "soll", "sollen", "sondern",
+    "sonst", "über", "ueber", "und", "uns", "unser", "unter", "vom", "von",
+    "vor", "war", "waren", "warum", "was", "weg", "weil", "weiter", "welche",
+    "wenn", "werde", "werden", "wie", "wieder", "will", "wir", "wird", "wirst",
+    "wo", "wollen", "wurde", "wurden", "zum", "zur", "zwar", "zwischen",
+    "steht", "gibt", "geht", "mach", "sage", "sagen", "bitte", "danke", "jarvis",
+}
+
+
+def schluesselwoerter(text: str, mindestlaenge: int = 4) -> list:
+    """Zerlegt einen Satz in seine tragenden Wörter (ab 4 Zeichen, ohne Stoppwörter)."""
+    if not text:
+        return []
+    roh = re.findall(r"[0-9A-Za-zÄÖÜäöüß_-]+", str(text).lower())
+    treffer = []
+    for wort in roh:
+        if len(wort) < mindestlaenge:
+            continue
+        if wort in STOPPWOERTER:
+            continue
+        if wort not in treffer:
+            treffer.append(wort)
+    return treffer[:12]
+
+
+class Recall:
+    """Langzeitgedächtnis: schreibt Tagesberichte und schlägt gezielt nach."""
+
+    def __init__(self, memory: Memory = None):
+        self.memory = memory or Memory()
+        db_schema_anlegen(SCHEMA_RECALL, self.memory.db_pfad)
+
+    # -- Ebene 1: Tagesberichte --------------------------------------------
+
+    def tagesbericht_speichern(self, zusammenfassung: str, entscheidungen: str = "",
+                               offen: str = "", datum: str = "") -> dict:
+        """Legt den Bericht eines Tages ab (ein Bericht pro Datum)."""
+        zusammenfassung = (zusammenfassung or "").strip()
+        if not zusammenfassung:
+            return {"ok": False, "fehler": "Der Tagesbericht ist leer."}
+        datum = (datum or heute_datum()).strip()
+        vorhanden = self.memory._lesen(
+            "SELECT id FROM tagesberichte WHERE datum=? LIMIT 1", (datum,))
+        if vorhanden:
+            self.memory._schreiben(
+                "UPDATE tagesberichte SET zusammenfassung=?, entscheidungen=?, offen=?, "
+                "angelegt=? WHERE id=?",
+                (zusammenfassung, entscheidungen, offen, zeitstempel(), vorhanden[0]["id"]))
+            return {"ok": True, "id": vorhanden[0]["id"], "datum": datum, "ersetzt": True}
+        nummer = self.memory._schreiben(
+            "INSERT INTO tagesberichte (datum, zusammenfassung, entscheidungen, offen, angelegt) "
+            "VALUES (?,?,?,?,?)",
+            (datum, zusammenfassung, entscheidungen, offen, zeitstempel()))
+        return {"ok": True, "id": nummer, "datum": datum, "ersetzt": False}
+
+    def tagesberichte_letzte(self, anzahl: int = 7) -> list:
+        """Die jüngsten Tagesberichte, neuester zuerst."""
+        return self.memory._lesen(
+            "SELECT * FROM tagesberichte ORDER BY datum DESC, id DESC LIMIT ?", (anzahl,))
+
+    def tagesberichte_suchen(self, begriff: str, limit: int = 6) -> list:
+        """Sucht in Tagesberichten nach einem Begriff."""
+        begriff = (begriff or "").strip()
+        if not begriff:
+            return []
+        muster = "%%%s%%" % begriff
+        return self.memory._lesen(
+            "SELECT * FROM tagesberichte WHERE zusammenfassung LIKE ? OR entscheidungen LIKE ? "
+            "OR offen LIKE ? ORDER BY datum DESC LIMIT ?", (muster, muster, muster, limit))
+
+    # -- Ebene 2: Nachschlagen ---------------------------------------------
+
+    def nachschlagen(self, frage: str, pro_quelle: int = 4) -> dict:
+        """Sucht die tragenden Wörter einer Frage in allen Gedächtnisquellen."""
+        woerter = schluesselwoerter(frage)
+        gefunden = {"woerter": woerter, "notizen": [], "kontakte": [],
+                    "berichte": [], "aeusserungen": []}
+        if not woerter:
+            return gefunden
+        gesehen = {"notizen": set(), "kontakte": set(), "berichte": set(),
+                   "aeusserungen": set()}
+        for wort in woerter:
+            for notiz in self.memory.notizen_suchen(wort, pro_quelle):
+                if notiz["id"] not in gesehen["notizen"]:
+                    gesehen["notizen"].add(notiz["id"])
+                    gefunden["notizen"].append(notiz)
+            for kontakt in self.memory.kontakt_suchen(wort, pro_quelle):
+                if kontakt["id"] not in gesehen["kontakte"]:
+                    gesehen["kontakte"].add(kontakt["id"])
+                    gefunden["kontakte"].append(kontakt)
+            for bericht in self.tagesberichte_suchen(wort, pro_quelle):
+                if bericht["id"] not in gesehen["berichte"]:
+                    gesehen["berichte"].add(bericht["id"])
+                    gefunden["berichte"].append(bericht)
+            for zeile in self.memory.aeusserungen_suchen(wort, pro_quelle):
+                if zeile["id"] not in gesehen["aeusserungen"]:
+                    gesehen["aeusserungen"].add(zeile["id"])
+                    gefunden["aeusserungen"].append(zeile)
+        for schluessel in ("notizen", "kontakte", "berichte", "aeusserungen"):
+            gefunden[schluessel] = gefunden[schluessel][:8]
+        return gefunden
+
+    def gedaechtnis_block(self, frage: str = "") -> str:
+        """Baut den Gedächtnisteil des Systemprompts.
+
+        Enthält immer die offenen Punkte der letzten 14 Tage und die letzten
+        Tagesberichte, dazu die zur Frage passenden Treffer.
+        """
+        teile = []
+
+        punkte = self.memory.punkte_offen(tage=14)
+        if punkte:
+            zeilen = ["Offene Punkte der letzten 14 Tage:"]
+            for punkt in punkte[:12]:
+                faellig = (" (fällig %s)" % punkt["faellig"]) if punkt["faellig"] else ""
+                zeilen.append("- [%d] %s%s" % (punkt["id"], punkt["text"], faellig))
+            teile.append("\n".join(zeilen))
+
+        berichte = self.tagesberichte_letzte(7)
+        if berichte:
+            zeilen = ["Was an den letzten Tagen war:"]
+            for bericht in berichte:
+                satz = "- %s: %s" % (bericht["datum"], bericht["zusammenfassung"])
+                if bericht["offen"]:
+                    satz += " Noch offen: %s" % bericht["offen"]
+                zeilen.append(satz)
+            teile.append("\n".join(zeilen))
+
+        if frage:
+            treffer = self.nachschlagen(frage)
+            zeilen = []
+            for notiz in treffer["notizen"]:
+                zeilen.append("- Notiz vom %s: %s" % (notiz["angelegt"][:10], notiz["text"]))
+            for kontakt in treffer["kontakte"]:
+                beschreibung = ", ".join(
+                    [t for t in (kontakt["firma"], kontakt["telefon"], kontakt["email"],
+                                 kontakt["notiz"]) if t])
+                zeilen.append("- Kontakt %s: %s" % (kontakt["name"], beschreibung or "keine Details"))
+            for bericht in treffer["berichte"]:
+                zeilen.append("- Tagesbericht %s: %s" % (bericht["datum"],
+                                                         bericht["zusammenfassung"]))
+            for zeile in treffer["aeusserungen"]:
+                zeilen.append("- Er sagte am %s: %s" % (zeile["zeit"][:10], zeile["text"][:200]))
+            if zeilen:
+                teile.append("Passend zur aktuellen Frage:\n" + "\n".join(zeilen[:14]))
+
+        if not teile:
+            return ""
+        return "Das weißt du aus früheren Tagen:\n\n" + "\n\n".join(teile)
+
+    # -- Tag zusammenfassen -------------------------------------------------
+
+    def tag_zusammenfassen(self, agent=None, datum: str = "") -> dict:
+        """Fasst den heutigen Tag zusammen - mit Claude, sonst mechanisch."""
+        datum = datum or heute_datum()
+        beginn = "%s 00:00:00" % datum
+        ende = "%s 23:59:59" % datum
+
+        aeusserungen = self.memory._lesen(
+            "SELECT rolle, text, zeit FROM verlauf WHERE zeit BETWEEN ? AND ? ORDER BY id",
+            (beginn, ende))
+        aktionen = self.memory._lesen(
+            "SELECT werkzeug, status, zeit FROM aktionen WHERE zeit BETWEEN ? AND ? ORDER BY id",
+            (beginn, ende))
+        punkte = self.memory.punkte_offen(tage=1)
+
+        if not aeusserungen and not aktionen:
+            bericht = "An diesem Tag ist nichts festgehalten worden."
+            self.tagesbericht_speichern(bericht, "", "", datum)
+            return {"ok": True, "datum": datum, "zusammenfassung": bericht, "quelle": "leer"}
+
+        rohtext = []
+        for zeile in aeusserungen[-60:]:
+            rohtext.append("%s: %s" % ("Er" if zeile["rolle"] == "user" else "Jarvis",
+                                       zeile["text"][:400]))
+        werkzeugliste = ", ".join(sorted({a["werkzeug"] for a in aktionen})) or "keine"
+
+        if agent is not None and getattr(agent, "einsatzbereit", lambda: False)():
+            auftrag = (
+                "Fasse diesen Arbeitstag für dein eigenes Gedächtnis zusammen. "
+                "Antworte als JSON mit den Schlüsseln zusammenfassung, entscheidungen, offen. "
+                "zusammenfassung: drei bis fünf Sätze, worum es ging. "
+                "entscheidungen: was entschieden wurde, ein Satz oder leer. "
+                "offen: was offen blieb, ein Satz oder leer.\n\n"
+                "Gespräche des Tages:\n%s\n\nBenutzte Werkzeuge: %s"
+                % ("\n".join(rohtext) or "keine", werkzeugliste))
+            antwort = agent.json_anfrage(auftrag)
+            if antwort.get("ok"):
+                daten = antwort["daten"]
+                self.tagesbericht_speichern(
+                    str(daten.get("zusammenfassung", "")).strip(),
+                    str(daten.get("entscheidungen", "")).strip(),
+                    str(daten.get("offen", "")).strip(), datum)
+                return {"ok": True, "datum": datum, "quelle": "claude",
+                        "zusammenfassung": daten.get("zusammenfassung", ""),
+                        "entscheidungen": daten.get("entscheidungen", ""),
+                        "offen": daten.get("offen", "")}
+
+        # Rückfallebene ohne Claude: mechanisch, aber ehrlich.
+        themen = []
+        for zeile in aeusserungen:
+            if zeile["rolle"] != "user":
+                continue
+            for wort in schluesselwoerter(zeile["text"])[:3]:
+                if wort not in themen:
+                    themen.append(wort)
+        zusammenfassung = ("%d Gespräche, %d Aktionen. Themen: %s."
+                           % (len([z for z in aeusserungen if z["rolle"] == "user"]),
+                              len(aktionen), ", ".join(themen[:10]) or "keine erkennbaren"))
+        offen_text = "; ".join(p["text"] for p in punkte[:5])
+        self.tagesbericht_speichern(zusammenfassung, "", offen_text, datum)
+        return {"ok": True, "datum": datum, "quelle": "mechanisch",
+                "zusammenfassung": zusammenfassung, "entscheidungen": "", "offen": offen_text}
+
+    def rueckblick(self, tage: int = 7) -> str:
+        """Ein zusammenhängender Text über die letzten Tage - für den Wochenrückblick."""
+        grenze = (datetime.now() - timedelta(days=tage)).strftime("%Y-%m-%d")
+        berichte = self.memory._lesen(
+            "SELECT * FROM tagesberichte WHERE datum>=? ORDER BY datum", (grenze,))
+        if not berichte:
+            return "Für die letzten %d Tage liegen noch keine Tagesberichte vor." % tage
+        zeilen = []
+        for bericht in berichte:
+            zeilen.append("%s: %s" % (bericht["datum"], bericht["zusammenfassung"]))
+            if bericht["entscheidungen"]:
+                zeilen.append("   Entschieden: %s" % bericht["entscheidungen"])
+            if bericht["offen"]:
+                zeilen.append("   Offen: %s" % bericht["offen"])
+        return "\n".join(zeilen)
+
+
+# =========================================================================
+# voice  -  Sprache - Mikrofon rein, Stimme raus.
+# 
+# Beides ist mehrstufig aufgebaut, damit **ein einziger Schlüssel** genügt:
+# 
+#     Stimme raus:  ElevenLabs (falls Schlüssel) -> macOS ``say`` (immer da, gratis)
+#     Sprache rein: faster-whisper lokal (gratis) -> Whisper-API (falls Schlüssel)
+# 
+# Aufgenommen wird bis zur Sprechpause, nicht in festen Blöcken. Feste Blöcke
+# schneiden entweder mitten im Satz ab oder lassen den Nutzer nach dem letzten
+# Wort warten - beides fällt im Alltag sofort unangenehm auf.
+# =========================================================================
+
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+
+
+
+
+
+# Die Spracherkennung schreibt den Namen selten korrekt. Alle diese Formen
+# werden als Weckwort akzeptiert.
+WECKWOERTER = ["hey jarvis", "hey javis", "hey dscharvis", "hey charvis",
+               "hey travis", "hey jervis", "hey dscharvis", "jarvis", "javis"]
+
+# Bevorzugte deutsche Systemstimmen, in dieser Reihenfolge.
+WUNSCHSTIMMEN = ["Markus", "Yannick", "Petra", "Anna", "Viktor"]
+
+# Kurze Signaltöne - der Nutzer hört so, in welchem Zustand Jarvis ist.
+SIGNALTOENE = {
+    "zuhoeren": "/System/Library/Sounds/Tink.aiff",
+    "verstanden": "/System/Library/Sounds/Pop.aiff",
+    "fehler": "/System/Library/Sounds/Basso.aiff",
+}
+
+# Aufnahmeparameter
+ABTASTRATE = 16000
+BLOCK_SEKUNDEN = 0.1
+STILLE_BIS_ENDE = 1.2
+MAX_AUFNAHME = 25.0
+MIN_AUFNAHME = 0.4
+PEGEL_UNTERGRENZE = 0.004
+PEGEL_FAKTOR = 3.5
+
+ELEVENLABS_URL = "https://api.elevenlabs.io/v1"
+WHISPER_URL = "https://api.openai.com/v1/audio/transcriptions"
+
+
+def text_fuers_sprechen(text: str) -> str:
+    """Entfernt alles, was vorgelesen albern klingt: Sternchen, Striche, Überschriften."""
+    if not text:
+        return ""
+    sauber = str(text)
+    sauber = re.sub(r"```.*?```", " ", sauber, flags=re.S)
+    sauber = re.sub(r"[*_`#>]+", " ", sauber)
+    sauber = re.sub(r"^\s*[-•·]\s*", "", sauber, flags=re.M)
+    sauber = re.sub(r"\[([^\]]*)\]\([^)]*\)", r"\1", sauber)
+    sauber = re.sub(r"\s+", " ", sauber)
+    return sauber.strip()
+
+
+def weckwort_pruefen(text: str):
+    """Prüft auf das Weckwort und schneidet es ab.
+
+    Gibt ``(erkannt, restlicher_befehl)`` zurück.
+    """
+    if not text:
+        return False, ""
+    roh = str(text).strip()
+    klein = re.sub(r"[^a-zä-ü0-9 ]+", " ", roh.lower())
+    klein = re.sub(r"\s+", " ", klein).strip()
+    for weckwort in WECKWOERTER:
+        if klein == weckwort:
+            return True, ""
+        if klein.startswith(weckwort + " "):
+            rest = klein[len(weckwort):].strip(" ,.")
+            # Den Rest aus dem Originaltext holen, damit Groß- und Kleinschreibung bleibt.
+            stelle = roh.lower().find(rest[:20].lower()) if rest else -1
+            return True, (roh[stelle:].strip(" ,.") if stelle >= 0 else rest)
+    return False, ""
+
+
+class Stimme:
+    """Sprachausgabe und Spracheingabe mit jeweils zwei Ebenen."""
+
+    def __init__(self):
+        self.macos_stimme = ""
+        self._whisper_modell = None
+        self._temp = tempfile.mkdtemp(prefix="jarvis_audio_")
+        self.letzter_fehler = ""
+        if self.ist_macos():
+            self.macos_stimme = MACOS_STIMME or self.deutsche_stimme_suchen()
+
+    # -- Umgebung -----------------------------------------------------------
+
+    @staticmethod
+    def ist_macos() -> bool:
+        """Läuft das hier auf einem Mac?"""
+        return shutil.which("say") is not None and os.uname().sysname == "Darwin"
+
+    def deutsche_stimme_suchen(self) -> str:
+        """Sucht die beste vorhandene deutsche Systemstimme."""
+        try:
+            ergebnis = subprocess.run(["say", "-v", "?"], capture_output=True,
+                                      text=True, timeout=10, shell=False)
+        except (OSError, subprocess.SubprocessError):
+            return ""
+        if ergebnis.returncode != 0:
+            return ""
+        stimmen = []
+        for zeile in ergebnis.stdout.splitlines():
+            teile = zeile.split()
+            if len(teile) >= 2:
+                stimmen.append((teile[0], teile[1]))
+        vorhandene = {name for name, _ in stimmen}
+        for wunsch in WUNSCHSTIMMEN:
+            if wunsch in vorhandene:
+                return wunsch
+        for name, sprache in stimmen:
+            if sprache in ("de_DE", "de_AT", "de_CH"):
+                return name
+        return ""
+
+    def zustand(self) -> dict:
+        """Was ist verfügbar, was fehlt - für den Selbsttest."""
+        return {
+            "macos_say": self.ist_macos(),
+            "macos_stimme": self.macos_stimme or "keine deutsche gefunden",
+            "elevenlabs": bool(ELEVENLABS_API_KEY),
+            "mikrofon": sd is not None and np is not None,
+            "whisper_lokal": WhisperModel is not None,
+            "whisper_api": bool(OPENAI_API_KEY),
+        }
+
+    # -- Ausgabe ------------------------------------------------------------
+
+    def sprich(self, text: str) -> bool:
+        """Spricht einen Text. ElevenLabs zuerst, sonst die Systemstimme."""
+        sauber = text_fuers_sprechen(text)
+        if not sauber:
+            return False
+        print("Jarvis: %s" % sauber)
+        if ELEVENLABS_API_KEY:
+            if self._elevenlabs_sprechen(sauber):
+                return True
+        return self._systemstimme_sprechen(sauber)
+
+    def _elevenlabs_sprechen(self, text: str) -> bool:
+        """Sprachausgabe über ElevenLabs. Scheitert sie, übernimmt ``say``."""
+        ziel = "%s/text-to-speech/%s" % (ELEVENLABS_URL, ELEVENLABS_VOICE_ID)
+        koerper = json.dumps({
+            "text": text[:4000],
+            "model_id": ELEVENLABS_MODEL,
+            "voice_settings": {"stability": 0.5, "similarity_boost": 0.75},
+        }).encode("utf-8")
+        anfrage = urllib.request.Request(ziel, data=koerper, method="POST", headers={
+            "xi-api-key": ELEVENLABS_API_KEY,
+            "Content-Type": "application/json",
+            "Accept": "audio/mpeg",
+        })
+        try:
+            with urllib.request.urlopen(anfrage, timeout=45) as antwort:
+                daten = antwort.read()
+        except (urllib.error.URLError, OSError) as fehler:
+            self.letzter_fehler = "ElevenLabs nicht erreichbar: %s" % fehler
+            print("[stimme] %s - ich nehme die Systemstimme." % self.letzter_fehler)
+            return False
+        pfad = os.path.join(self._temp, "antwort_%d.mp3" % int(time.time() * 1000))
+        try:
+            with open(pfad, "wb") as datei:
+                datei.write(daten)
+        except OSError:
+            return False
+        erfolg = self.abspielen(pfad)
+        try:
+            os.remove(pfad)
+        except OSError:
+            pass
+        return erfolg
+
+    def _systemstimme_sprechen(self, text: str) -> bool:
+        """Sprachausgabe über das eingebaute ``say`` von macOS."""
+        if not shutil.which("say"):
+            return False
+        befehl = ["say", "-r", str(int(SPEECH_RATE))]
+        if self.macos_stimme:
+            befehl += ["-v", self.macos_stimme]
+        befehl.append(text[:6000])
+        try:
+            subprocess.run(befehl, timeout=180, shell=False,
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            return True
+        except (OSError, subprocess.SubprocessError) as fehler:
+            self.letzter_fehler = "Systemstimme fehlgeschlagen: %s" % fehler
+            return False
+
+    def abspielen(self, pfad: str) -> bool:
+        """Spielt eine Audiodatei ab: afplay, sonst mpg123, sonst ffplay."""
+        if not os.path.exists(pfad):
+            return False
+        varianten = [["afplay", pfad], ["mpg123", "-q", pfad],
+                     ["ffplay", "-nodisp", "-autoexit", "-loglevel", "quiet", pfad]]
+        for befehl in varianten:
+            if not shutil.which(befehl[0]):
+                continue
+            try:
+                ergebnis = subprocess.run(befehl, timeout=300, shell=False,
+                                          stdout=subprocess.DEVNULL,
+                                          stderr=subprocess.DEVNULL)
+                if ergebnis.returncode == 0:
+                    return True
+            except (OSError, subprocess.SubprocessError):
+                continue
+        return False
+
+    def signal(self, name: str):
+        """Spielt einen kurzen Signalton - Zustand hörbar machen."""
+        pfad = SIGNALTOENE.get(name)
+        if not pfad or not os.path.exists(pfad) or not shutil.which("afplay"):
+            return
+        try:
+            subprocess.Popen(["afplay", pfad], shell=False,
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except (OSError, subprocess.SubprocessError):
+            pass
+
+    def sprachdatei_erzeugen(self, text: str, ziel: str = "") -> str:
+        """Erzeugt eine Audiodatei aus Text - für Sprachnachrichten per Telegram."""
+        sauber = text_fuers_sprechen(text)
+        if not sauber or not shutil.which("say"):
+            return ""
+        ziel = ziel or os.path.join(self._temp, "nachricht_%d.m4a" % int(time.time()))
+        befehl = ["say", "-r", str(int(SPEECH_RATE)), "-o", ziel]
+        if self.macos_stimme:
+            befehl += ["-v", self.macos_stimme]
+        befehl.append(sauber[:4000])
+        try:
+            subprocess.run(befehl, timeout=180, shell=False,
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except (OSError, subprocess.SubprocessError):
+            return ""
+        if not os.path.exists(ziel):
+            return ""
+        # Telegram will für Sprachnachrichten OGG/Opus.
+        if shutil.which("ffmpeg"):
+            ogg = os.path.splitext(ziel)[0] + ".ogg"
+            try:
+                subprocess.run(["ffmpeg", "-y", "-i", ziel, "-c:a", "libopus",
+                                "-b:a", "32k", ogg], timeout=120, shell=False,
+                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                if os.path.exists(ogg):
+                    return ogg
+            except (OSError, subprocess.SubprocessError):
+                pass
+        return ziel
+
+    # -- Aufnahme -----------------------------------------------------------
+
+    def mikrofon_bereit(self) -> bool:
+        """Ist eine Aufnahme technisch möglich?"""
+        return sd is not None and np is not None
+
+    def aufnehmen_bis_pause(self, still_signal: bool = False) -> str:
+        """Nimmt auf, bis der Nutzer 1,2 Sekunden nichts mehr sagt.
+
+        Der Raumpegel wird zu Beginn gemessen, damit ein lauter Raum nicht
+        dauernd als Sprache gilt und ein leiser nicht überhört wird.
+        """
+        if not self.mikrofon_bereit():
+            self.letzter_fehler = ("Kein Mikrofonzugriff. Es fehlen die Pakete "
+                                   "sounddevice und numpy.")
+            return ""
+        blockgroesse = int(ABTASTRATE * BLOCK_SEKUNDEN)
+        gesammelt = []
+        raumpegel_proben = []
+        spricht = False
+        stille_seit = 0.0
+        beginn = time.time()
+
+        try:
+            strom = sd.InputStream(samplerate=ABTASTRATE, channels=1, dtype="float32",
+                                   blocksize=blockgroesse)
+        except Exception as fehler:
+            self.letzter_fehler = ("Das Mikrofon lässt sich nicht öffnen: %s. In den "
+                                   "Systemeinstellungen unter Datenschutz das Mikrofon "
+                                   "für das Terminal freigeben." % fehler)
+            return ""
+
+        try:
+            with strom:
+                if not still_signal:
+                    self.signal("zuhoeren")
+                while True:
+                    if time.time() - beginn > MAX_AUFNAHME + 6:
+                        break
+                    block, ueberlauf = strom.read(blockgroesse)
+                    del ueberlauf
+                    pegel = float(np.sqrt(np.mean(np.square(block))))
+
+                    if len(raumpegel_proben) < 8:
+                        raumpegel_proben.append(pegel)
+                        if len(raumpegel_proben) == 8:
+                            grundpegel = float(np.median(raumpegel_proben))
+                            self._schwelle = max(grundpegel * PEGEL_FAKTOR,
+                                                 PEGEL_UNTERGRENZE)
+                        continue
+
+                    if pegel >= self._schwelle:
+                        spricht = True
+                        stille_seit = 0.0
+                        gesammelt.append(block.copy())
+                    elif spricht:
+                        stille_seit += BLOCK_SEKUNDEN
+                        gesammelt.append(block.copy())
+                        if stille_seit >= STILLE_BIS_ENDE:
+                            break
+                    if spricht and (time.time() - beginn) > MAX_AUFNAHME:
+                        break
+        except Exception as fehler:
+            self.letzter_fehler = "Die Aufnahme ist abgebrochen: %s" % fehler
+            return ""
+
+        if not gesammelt:
+            return ""
+        daten = np.concatenate(gesammelt, axis=0)
+        dauer = len(daten) / float(ABTASTRATE)
+        if dauer < MIN_AUFNAHME:
+            return ""  # Zu kurz - das war ein Geräusch, kein Satz.
+
+        pfad = os.path.join(self._temp, "aufnahme_%d.wav" % int(time.time() * 1000))
+        try:
+            ganzzahlen = (np.clip(daten, -1.0, 1.0) * 32767).astype("int16")
+            with wave.open(pfad, "wb") as datei:
+                datei.setnchannels(1)
+                datei.setsampwidth(2)
+                datei.setframerate(ABTASTRATE)
+                datei.writeframes(ganzzahlen.tobytes())
+        except (OSError, ValueError) as fehler:
+            self.letzter_fehler = "Die Aufnahme ließ sich nicht speichern: %s" % fehler
+            return ""
+        return pfad
+
+    # -- Erkennung ----------------------------------------------------------
+
+    def transkribieren(self, wav_pfad: str) -> str:
+        """Wandelt eine Audiodatei in Text - lokal, sonst über die Whisper-API."""
+        if not wav_pfad or not os.path.exists(wav_pfad):
+            return ""
+        text = self._whisper_lokal(wav_pfad)
+        if text:
+            return text
+        return self._whisper_api(wav_pfad)
+
+    def _whisper_lokal(self, wav_pfad: str) -> str:
+        """Spracherkennung mit faster-whisper direkt auf dem Rechner (kostenlos)."""
+        if WhisperModel is None:
+            return ""
+        try:
+            if self._whisper_modell is None:
+                print("[stimme] Lade das Spracherkennungsmodell, das dauert einmalig ...")
+                self._whisper_modell = WhisperModel(
+                    WHISPER_MODELL, device="cpu", compute_type="int8")
+            teile, _ = self._whisper_modell.transcribe(wav_pfad, language="de",
+                                                       beam_size=1, vad_filter=True)
+            return " ".join(teil.text.strip() for teil in teile).strip()
+        except Exception as fehler:
+            self.letzter_fehler = "Lokale Spracherkennung fehlgeschlagen: %s" % fehler
+            print("[stimme] %s" % self.letzter_fehler)
+            return ""
+
+    def _whisper_api(self, wav_pfad: str) -> str:
+        """Rückfallebene: Whisper über die OpenAI-Schnittstelle."""
+        if not OPENAI_API_KEY:
+            return ""
+        grenze = "----jarvis%d" % int(time.time() * 1000)
+        try:
+            with open(wav_pfad, "rb") as datei:
+                audio = datei.read()
+        except OSError:
+            return ""
+        teile = []
+        for name, wert in (("model", "whisper-1"), ("language", "de")):
+            teile.append(("--%s\r\nContent-Disposition: form-data; name=\"%s\"\r\n\r\n%s\r\n"
+                          % (grenze, name, wert)).encode("utf-8"))
+        teile.append(("--%s\r\nContent-Disposition: form-data; name=\"file\"; "
+                      "filename=\"audio.wav\"\r\nContent-Type: audio/wav\r\n\r\n"
+                      % grenze).encode("utf-8"))
+        teile.append(audio)
+        teile.append(("\r\n--%s--\r\n" % grenze).encode("utf-8"))
+
+        anfrage = urllib.request.Request(WHISPER_URL, data=b"".join(teile), method="POST",
+                                         headers={
+                                             "Authorization": "Bearer %s" % OPENAI_API_KEY,
+                                             "Content-Type":
+                                                 "multipart/form-data; boundary=%s" % grenze})
+        try:
+            with urllib.request.urlopen(anfrage, timeout=90) as antwort:
+                return json.loads(antwort.read().decode("utf-8")).get("text", "").strip()
+        except (urllib.error.URLError, OSError, ValueError) as fehler:
+            self.letzter_fehler = "Whisper-API fehlgeschlagen: %s" % fehler
+            return ""
+
+    def zuhoeren(self) -> str:
+        """Einmal aufnehmen und in Text wandeln."""
+        pfad = self.aufnehmen_bis_pause()
+        if not pfad:
+            return ""
+        try:
+            text = self.transkribieren(pfad)
+        finally:
+            try:
+                os.remove(pfad)
+            except OSError:
+                pass
+        if text:
+            print("Du: %s" % text)
+        return text
+
+
+# =========================================================================
+# speaker  -  Stimmprofil - erkennt, ob gerade der Nutzer spricht.
+# 
+# **Ehrliche Einordnung, die auch so in der Anleitung steht:** Das unterscheidet
+# Sprecher im Alltag zuverlässig, ist aber *kein* Schutz gegen eine abgespielte
+# Aufnahme. Wer eine Sprachaufnahme des Nutzers besitzt, kommt hier durch.
+# 
+# Deshalb gilt im ganzen Programm: Die Stimme entscheidet nur, **ob Jarvis
+# zuhört**. Sie gibt niemals eine Mail, eine Buchung oder eine Bildschirmaktion
+# frei - dafür ist ausschließlich die ausdrückliche Freigabe zuständig.
+# =========================================================================
+
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+
+
+
+
+PROFIL_DATEI = "stimmprofil.json"
+PROBEN_ANZAHL = 5
+
+# Sätze, die der Nutzer beim Einlernen nachspricht - unterschiedlich lang und
+# klanglich verschieden, das macht das Profil stabiler.
+LERNSAETZE = [
+    "Hey Jarvis, wie sieht mein Tag aus?",
+    "Ich war heute bei einem Kunden und wir haben über den Preis gesprochen.",
+    "Erfass bitte die Quittung von der Tankstelle.",
+    "Was ist diese Woche noch offen bei mir?",
+    "Feierabend, mach den Abendrückblick.",
+]
+
+
+class Sprecherprofil:
+    """Legt ein Stimmprofil an und vergleicht spätere Aufnahmen damit."""
+
+    def __init__(self, verzeichnis=None):
+        self.verzeichnis = str(verzeichnis or PROFIL_VERZEICHNIS)
+        self.pfad = os.path.join(self.verzeichnis, PROFIL_DATEI)
+        self._encoder = None
+        self.profil = self._profil_laden()
+
+    # -- Verfügbarkeit ------------------------------------------------------
+
+    def verfuegbar(self) -> bool:
+        """Ist die Stimmerkennung technisch nutzbar?"""
+        return VoiceEncoder is not None and np is not None
+
+    def eingelernt(self) -> bool:
+        """Liegt bereits ein Profil vor?"""
+        return bool(self.profil)
+
+    def zustand(self) -> dict:
+        """Kurzer Überblick für den Selbsttest."""
+        return {"paket_da": self.verfuegbar(), "profil_da": self.eingelernt(),
+                "schwelle": STIMM_SCHWELLE, "pfad": self.pfad,
+                "aktiv": bool(STIMMPRUEFUNG_AN)}
+
+    # -- Profil laden und speichern ----------------------------------------
+
+    def _profil_laden(self):
+        """Liest ein vorhandenes Profil von der Platte."""
+        try:
+            if os.path.exists(self.pfad):
+                with open(self.pfad, "r", encoding="utf-8") as datei:
+                    daten = json.load(datei)
+                vektor = daten.get("vektor")
+                if vektor and np is not None:
+                    return np.array(vektor, dtype="float32")
+                return vektor
+        except (OSError, ValueError) as fehler:
+            print("[stimme] Stimmprofil nicht lesbar: %s" % fehler)
+        return None
+
+    def _profil_speichern(self, vektor) -> bool:
+        """Schreibt das Profil auf die Platte."""
+        try:
+            os.makedirs(self.verzeichnis, exist_ok=True)
+            with open(self.pfad, "w", encoding="utf-8") as datei:
+                json.dump({"vektor": [float(wert) for wert in vektor],
+                           "angelegt": time.strftime("%Y-%m-%d %H:%M:%S")},
+                          datei)
+            return True
+        except (OSError, ValueError) as fehler:
+            print("[stimme] Stimmprofil nicht speicherbar: %s" % fehler)
+            return False
+
+    def profil_loeschen(self) -> bool:
+        """Verwirft das Stimmprofil."""
+        self.profil = None
+        try:
+            if os.path.exists(self.pfad):
+                os.remove(self.pfad)
+            return True
+        except OSError:
+            return False
+
+    # -- Einlernen ----------------------------------------------------------
+
+    def _encoder_holen(self):
+        """Lädt das Sprechermodell einmalig."""
+        if self._encoder is None and VoiceEncoder is not None:
+            self._encoder = VoiceEncoder()
+        return self._encoder
+
+    def vektor_aus_datei(self, wav_pfad: str):
+        """Rechnet eine Aufnahme in einen Stimmvektor um."""
+        if not self.verfuegbar() or not wav_pfad or not os.path.exists(wav_pfad):
+            return None
+        try:
+            welle = preprocess_wav(wav_pfad)
+            return self._encoder_holen().embed_utterance(welle)
+        except Exception as fehler:
+            print("[stimme] Aufnahme nicht auswertbar: %s" % fehler)
+            return None
+
+    def einlernen(self, stimme=None) -> dict:
+        """Nimmt fünf Proben auf, mittelt die Vektoren und legt das Profil ab."""
+        if not self.verfuegbar():
+            return {"ok": False,
+                    "fehler": "Für die Stimmerkennung fehlt das Paket resemblyzer. "
+                              "Ohne sie funktioniert alles andere weiter."}
+        if stimme is None:
+            return {"ok": False, "fehler": "Zum Einlernen brauche ich das Mikrofon."}
+        if not stimme.mikrofon_bereit():
+            return {"ok": False,
+                    "fehler": "Das Mikrofon ist nicht verfügbar. Bitte in den "
+                              "Systemeinstellungen unter Datenschutz freigeben."}
+
+        vektoren = []
+        stimme.sprich("Ich lerne jetzt deine Stimme. Sprich mir bitte fünf Sätze nach.")
+        for nummer in range(PROBEN_ANZAHL):
+            satz = LERNSAETZE[nummer % len(LERNSAETZE)]
+            stimme.sprich("Satz %d von %d. %s" % (nummer + 1, PROBEN_ANZAHL, satz))
+            pfad = stimme.aufnehmen_bis_pause()
+            if not pfad:
+                stimme.sprich("Da war nichts zu hören. Ich versuche es noch einmal.")
+                pfad = stimme.aufnehmen_bis_pause()
+            vektor = self.vektor_aus_datei(pfad) if pfad else None
+            if pfad:
+                try:
+                    os.remove(pfad)
+                except OSError:
+                    pass
+            if vektor is None:
+                stimme.sprich("Diese Probe war unbrauchbar, ich überspringe sie.")
+                continue
+            vektoren.append(vektor)
+
+        if len(vektoren) < 3:
+            return {"ok": False,
+                    "fehler": "Ich habe nur %d brauchbare Proben bekommen. Bitte in "
+                              "einer ruhigeren Umgebung noch einmal versuchen."
+                              % len(vektoren)}
+
+        gemittelt = np.mean(np.stack(vektoren), axis=0)
+        gemittelt = gemittelt / (np.linalg.norm(gemittelt) + 1e-9)
+        self.profil = gemittelt
+        gespeichert = self._profil_speichern(gemittelt)
+        return {"ok": gespeichert, "proben": len(vektoren),
+                "text": "Stimmprofil aus %d Proben angelegt. Ab jetzt reagiere ich "
+                        "bevorzugt auf deine Stimme." % len(vektoren)}
+
+    # -- Prüfen -------------------------------------------------------------
+
+    def aehnlichkeit(self, wav_pfad: str):
+        """Kosinus-Ähnlichkeit einer Aufnahme zum Profil, oder ``None``."""
+        if self.profil is None or not self.verfuegbar():
+            return None
+        vektor = self.vektor_aus_datei(wav_pfad)
+        if vektor is None:
+            return None
+        try:
+            a = np.asarray(vektor, dtype="float32")
+            b = np.asarray(self.profil, dtype="float32")
+            wert = float(np.dot(a, b) / ((np.linalg.norm(a) * np.linalg.norm(b)) + 1e-9))
+            return wert
+        except Exception:
+            return None
+
+    def ist_der_nutzer(self, wav_pfad: str) -> dict:
+        """Entscheidet, ob die Aufnahme vom Nutzer stammt.
+
+        Ohne Profil oder ohne Paket lautet die Antwort immer ja - die Prüfung
+        darf niemand aussperren, den sie gar nicht beurteilen kann.
+        """
+        if not STIMMPRUEFUNG_AN or self.profil is None or not self.verfuegbar():
+            return {"erkannt": True, "wert": None, "grund": "Stimmprüfung ist nicht aktiv."}
+        wert = self.aehnlichkeit(wav_pfad)
+        if wert is None:
+            return {"erkannt": True, "wert": None,
+                    "grund": "Die Aufnahme war nicht auswertbar - ich höre trotzdem zu."}
+        erkannt = wert >= float(STIMM_SCHWELLE)
+        return {"erkannt": erkannt, "wert": round(wert, 3),
+                "grund": ("Stimme passt (%.2f)" % wert) if erkannt
+                         else ("Fremde Stimme (%.2f unter Schwelle %.2f)"
+                               % (wert, STIMM_SCHWELLE))}
+
+
+# =========================================================================
+# mail  -  E-Mail - ungelesene Nachrichten holen, vorsortieren und antworten.
+# 
+# Die Vorsortierung hier ist grob und arbeitet nur mit Wortlisten. Das ist
+# Absicht: Sie läuft ohne Netz und ohne Kosten und schafft die Vorauswahl. Die
+# feine Bewertung übernimmt Claude im Briefing, wo er den Zusammenhang kennt.
+# =========================================================================
+
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+
+
+# Grobe Wortlisten für die Vorsortierung.
+WICHTIG_WOERTER = ["dringend", "frist", "mahnung", "rechnung", "angebot", "auftrag",
+                   "kündigung", "kuendigung", "vertrag", "termin", "zahlung",
+                   "überfällig", "ueberfaellig", "reklamation", "beschwerde",
+                   "anfrage", "auftragsbestätigung", "letzte erinnerung"]
+RAUSCHEN_WOERTER = ["newsletter", "unsubscribe", "abmelden", "no-reply", "noreply",
+                    "werbung", "rabatt", "gewinnspiel", "webinar", "sale",
+                    "black friday", "prospekt", "marketing", "digest"]
+
+
+def kopf_dekodieren(roh) -> str:
+    """Macht aus einem kodierten Mail-Kopf lesbaren Text."""
+    if not roh:
+        return ""
+    try:
+        teile = email.header.decode_header(roh)
+    except (ValueError, TypeError):
+        return str(roh)
+    ergebnis = []
+    for inhalt, kodierung in teile:
+        if isinstance(inhalt, bytes):
+            try:
+                ergebnis.append(inhalt.decode(kodierung or "utf-8", errors="replace"))
+            except (LookupError, UnicodeDecodeError):
+                ergebnis.append(inhalt.decode("utf-8", errors="replace"))
+        else:
+            ergebnis.append(str(inhalt))
+    return "".join(ergebnis).strip()
+
+
+def klartext_aus_mail(nachricht) -> str:
+    """Holt den lesbaren Text aus einer Mail, notfalls aus dem HTML-Teil."""
+    if nachricht.is_multipart():
+        for teil in nachricht.walk():
+            if teil.get_content_type() == "text/plain" and \
+                    "attachment" not in str(teil.get("Content-Disposition", "")):
+                try:
+                    return teil.get_payload(decode=True).decode(
+                        teil.get_content_charset() or "utf-8", errors="replace")
+                except (AttributeError, LookupError, UnicodeDecodeError):
+                    continue
+        for teil in nachricht.walk():
+            if teil.get_content_type() == "text/html":
+                try:
+                    roh = teil.get_payload(decode=True).decode(
+                        teil.get_content_charset() or "utf-8", errors="replace")
+                except (AttributeError, LookupError, UnicodeDecodeError):
+                    continue
+                import re as _re_html
+                return _re_html.sub(r"<[^>]+>", " ", roh)
+    else:
+        try:
+            return nachricht.get_payload(decode=True).decode(
+                nachricht.get_content_charset() or "utf-8", errors="replace")
+        except (AttributeError, LookupError, UnicodeDecodeError):
+            return str(nachricht.get_payload())
+    return ""
+
+
+def triage(betreff: str, absender: str, text: str) -> str:
+    """Sortiert eine Mail grob in wichtig, spaeter oder rauschen ein."""
+    zusammen = ("%s %s %s" % (betreff or "", absender or "", (text or "")[:800])).lower()
+    for wort in RAUSCHEN_WOERTER:
+        if wort in zusammen:
+            return "rauschen"
+    for wort in WICHTIG_WOERTER:
+        if wort in zusammen:
+            return "wichtig"
+    return "spaeter"
+
+
+class Mail:
+    """Liest über IMAP und versendet über SMTP."""
+
+    def __init__(self):
+        self.letzter_fehler = ""
+
+    # -- Verfügbarkeit ------------------------------------------------------
+
+    def lesen_moeglich(self) -> bool:
+        """Ist der Posteingang eingerichtet?"""
+        return bool(IMAP_HOST and IMAP_USER and IMAP_PASSWORT)
+
+    def senden_moeglich(self) -> bool:
+        """Ist der Versand eingerichtet?"""
+        return bool(SMTP_HOST and SMTP_USER and SMTP_PASSWORT)
+
+    def zustand(self) -> dict:
+        """Kurzer Überblick für den Selbsttest."""
+        return {"lesen": self.lesen_moeglich(), "senden": self.senden_moeglich(),
+                "imap": IMAP_HOST or "nicht gesetzt",
+                "smtp": SMTP_HOST or "nicht gesetzt"}
+
+    # -- Lesen --------------------------------------------------------------
+
+    def ungelesene(self, limit: int = 15) -> dict:
+        """Holt ungelesene Mails und sortiert sie vor - ohne sie als gelesen zu markieren."""
+        if not self.lesen_moeglich():
+            return {"ok": False,
+                    "fehler": "Der Posteingang ist nicht eingerichtet. In der Einrichtung "
+                              "IMAP-Server, Benutzer und Passwort hinterlegen."}
+        verbindung = None
+        try:
+            kontext = ssl.create_default_context()
+            verbindung = imaplib.IMAP4_SSL(IMAP_HOST, IMAP_PORT,
+                                           ssl_context=kontext)
+            verbindung.login(IMAP_USER, IMAP_PASSWORT)
+            verbindung.select("INBOX")
+            status, daten = verbindung.search(None, "UNSEEN")
+            if status != "OK":
+                return {"ok": False, "fehler": "Der Posteingang antwortet nicht wie erwartet."}
+            nummern = daten[0].split()[-limit:] if daten and daten[0] else []
+            mails = []
+            for nummer in reversed(nummern):
+                # BODY.PEEK lässt die Mail ungelesen - er soll sie selbst noch sehen.
+                status, teil = verbindung.fetch(nummer, "(BODY.PEEK[])")
+                if status != "OK" or not teil or not teil[0]:
+                    continue
+                nachricht = email.message_from_bytes(teil[0][1])
+                betreff = kopf_dekodieren(nachricht.get("Subject"))
+                absender = kopf_dekodieren(nachricht.get("From"))
+                text = klartext_aus_mail(nachricht)
+                mails.append({
+                    "id": nummer.decode("ascii", errors="replace"),
+                    "betreff": betreff or "(ohne Betreff)",
+                    "absender": absender,
+                    "datum": kopf_dekodieren(nachricht.get("Date")),
+                    "auszug": " ".join((text or "").split())[:400],
+                    "einstufung": triage(betreff, absender, text),
+                })
+            return {"ok": True, "anzahl": len(mails), "mails": mails,
+                    "wichtig": [m for m in mails if m["einstufung"] == "wichtig"],
+                    "spaeter": [m for m in mails if m["einstufung"] == "spaeter"],
+                    "rauschen": [m for m in mails if m["einstufung"] == "rauschen"]}
+        except (imaplib.IMAP4.error, ssl.SSLError, OSError) as fehler:
+            self.letzter_fehler = str(fehler)
+            return {"ok": False,
+                    "fehler": "Der Posteingang ist nicht erreichbar: %s" % fehler}
+        finally:
+            if verbindung is not None:
+                try:
+                    verbindung.close()
+                except (imaplib.IMAP4.error, OSError):
+                    pass
+                try:
+                    verbindung.logout()
+                except (imaplib.IMAP4.error, OSError):
+                    pass
+
+    def zusammenfassung(self, limit: int = 15) -> str:
+        """Ein gesprochener Satz über den Posteingang."""
+        ergebnis = self.ungelesene(limit)
+        if not ergebnis.get("ok"):
+            return ergebnis.get("fehler", "Der Posteingang ist nicht erreichbar.")
+        if ergebnis["anzahl"] == 0:
+            return "Im Posteingang ist nichts Ungelesenes."
+        teile = ["%d ungelesene Mails, davon %d wichtig."
+                 % (ergebnis["anzahl"], len(ergebnis["wichtig"]))]
+        for mail in ergebnis["wichtig"][:4]:
+            teile.append("Von %s: %s." % (mail["absender"].split("<")[0].strip(),
+                                          mail["betreff"]))
+        return " ".join(teile)
+
+    # -- Senden -------------------------------------------------------------
+
+    def senden(self, an: str, betreff: str, text: str) -> dict:
+        """Verschickt eine Mail über SMTP mit STARTTLS.
+
+        Achtung: Die Freigabe wird **nicht** hier eingeholt, sondern im
+        Werkzeugkatalog, bevor diese Methode überhaupt aufgerufen wird.
+        """
+        if not self.senden_moeglich():
+            return {"ok": False,
+                    "fehler": "Der Mailversand ist nicht eingerichtet. In der Einrichtung "
+                              "SMTP-Server, Benutzer und Passwort hinterlegen."}
+        an = (an or "").strip()
+        if "@" not in an:
+            return {"ok": False, "fehler": "'%s' ist keine gültige Mailadresse." % an}
+
+        nachricht = EmailMessage()
+        nachricht["From"] = SMTP_ABSENDER or SMTP_USER
+        nachricht["To"] = an
+        nachricht["Subject"] = betreff or "(ohne Betreff)"
+        nachricht["Date"] = email.utils.formatdate(localtime=True)
+        nachricht["Message-ID"] = email.utils.make_msgid()
+        nachricht.set_content(text or "")
+
+        try:
+            kontext = ssl.create_default_context()
+            if int(SMTP_PORT) == 465:
+                server = smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT,
+                                          context=kontext, timeout=30)
+            else:
+                server = smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=30)
+                server.starttls(context=kontext)
+            with server:
+                server.login(SMTP_USER, SMTP_PASSWORT)
+                server.send_message(nachricht)
+        except smtplib.SMTPAuthenticationError:
+            return {"ok": False,
+                    "fehler": "Der Mailserver lehnt Benutzer oder Passwort ab. Bei Gmail "
+                              "und ähnlichen Anbietern braucht es ein App-Passwort."}
+        except (smtplib.SMTPException, ssl.SSLError, OSError) as fehler:
+            return {"ok": False, "fehler": "Die Mail ging nicht raus: %s" % fehler}
+        return {"ok": True, "text": "Mail an %s ist raus." % an}
+
+
+# =========================================================================
+# calendar_mod  -  Kalender über CalDAV - Termine lesen, Konflikte erkennen, Termine anlegen.
+# 
+# Bewusst ohne Fremdpaket: CalDAV ist HTTP mit zwei zusätzlichen Methoden. Das
+# spart eine Abhängigkeit, die sonst bei jeder Installation schiefgehen kann.
+# 
+# Die Konflikterkennung ist der eigentliche Nutzen: Termine nach Beginn sortieren
+# und jeden mit dem Ende des vorherigen vergleichen. Überlappt etwas, sagt Jarvis
+# es von sich aus - bei einem Einzelunternehmer, der selbst zu den Objekten fährt,
+# ist eine Doppelbuchung ein verlorener Tag.
+# =========================================================================
+
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+
+
+CALDAV_ABFRAGE = """<?xml version="1.0" encoding="utf-8" ?>
+<C:calendar-query xmlns:D="DAV:" xmlns:C="urn:ietf:params:xml:ns:caldav">
+  <D:prop><D:getetag/><C:calendar-data/></D:prop>
+  <C:filter>
+    <C:comp-filter name="VCALENDAR">
+      <C:comp-filter name="VEVENT">
+        <C:time-range start="%s" end="%s"/>
+      </C:comp-filter>
+    </C:comp-filter>
+  </C:filter>
+</C:calendar-query>"""
+
+
+def ics_zeit_lesen(wert: str):
+    """Liest eine ICS-Zeitangabe wie ``20260826T090000Z`` oder ``20260826``."""
+    if not wert:
+        return None
+    roh = wert.strip()
+    if roh.endswith("Z"):
+        roh = roh[:-1]
+    for muster in ("%Y%m%dT%H%M%S", "%Y%m%d"):
+        try:
+            return datetime.strptime(roh, muster)
+        except ValueError:
+            continue
+    return None
+
+
+def ics_zeit_schreiben(zeitpunkt: datetime) -> str:
+    """Schreibt einen Zeitpunkt im ICS-Format."""
+    return zeitpunkt.strftime("%Y%m%dT%H%M%S")
+
+
+def ics_entfalten(rohtext: str) -> list:
+    """Setzt umgebrochene ICS-Zeilen wieder zusammen (Fortsetzung beginnt mit Leerzeichen)."""
+    zeilen = []
+    for zeile in (rohtext or "").replace("\r\n", "\n").split("\n"):
+        if zeile[:1] in (" ", "\t") and zeilen:
+            zeilen[-1] += zeile[1:]
+        else:
+            zeilen.append(zeile)
+    return zeilen
+
+
+def ics_termine_lesen(rohtext: str) -> list:
+    """Zieht alle VEVENT-Blöcke aus einem ICS-Text."""
+    termine = []
+    aktuell = None
+    for zeile in ics_entfalten(rohtext):
+        blank = zeile.strip()
+        if blank == "BEGIN:VEVENT":
+            aktuell = {"titel": "", "ort": "", "beginn": None, "ende": None,
+                       "beschreibung": "", "uid": ""}
+            continue
+        if blank == "END:VEVENT":
+            if aktuell and aktuell["beginn"]:
+                termine.append(aktuell)
+            aktuell = None
+            continue
+        if aktuell is None or ":" not in blank:
+            continue
+        name, _, wert = blank.partition(":")
+        schluessel = name.split(";")[0].upper()
+        wert = wert.replace("\\,", ",").replace("\\n", " ").replace("\;", ";")
+        if schluessel == "SUMMARY":
+            aktuell["titel"] = wert
+        elif schluessel == "LOCATION":
+            aktuell["ort"] = wert
+        elif schluessel == "DESCRIPTION":
+            aktuell["beschreibung"] = wert
+        elif schluessel == "UID":
+            aktuell["uid"] = wert
+        elif schluessel == "DTSTART":
+            aktuell["beginn"] = ics_zeit_lesen(wert)
+        elif schluessel == "DTEND":
+            aktuell["ende"] = ics_zeit_lesen(wert)
+    for termin in termine:
+        if not termin["ende"]:
+            termin["ende"] = termin["beginn"] + timedelta(hours=1)
+    return sorted(termine, key=lambda t: t["beginn"])
+
+
+def konflikte_finden(termine: list) -> list:
+    """Findet Überschneidungen: nach Beginn sortieren, mit dem vorigen Ende vergleichen."""
+    sortiert = sorted([t for t in termine if t.get("beginn") and t.get("ende")],
+                      key=lambda t: t["beginn"])
+    konflikte = []
+    for index in range(1, len(sortiert)):
+        vorher = sortiert[index - 1]
+        jetzt = sortiert[index]
+        if jetzt["beginn"] < vorher["ende"]:
+            ueberlappung = (min(vorher["ende"], jetzt["ende"]) - jetzt["beginn"])
+            konflikte.append({
+                "erster": vorher["titel"], "zweiter": jetzt["titel"],
+                "beginn": jetzt["beginn"].strftime("%d.%m. %H:%M"),
+                "minuten": int(ueberlappung.total_seconds() // 60),
+                "text": "%s und %s überschneiden sich am %s um %d Minuten."
+                        % (vorher["titel"] or "Ein Termin", jetzt["titel"] or "ein Termin",
+                           jetzt["beginn"].strftime("%d.%m. um %H:%M"),
+                           int(ueberlappung.total_seconds() // 60))})
+    return konflikte
+
+
+class Kalender:
+    """CalDAV-Zugriff: Termine lesen und anlegen."""
+
+    def __init__(self):
+        self.letzter_fehler = ""
+
+    def verfuegbar(self) -> bool:
+        """Ist ein Kalender hinterlegt?"""
+        return bool(CALDAV_URL and CALDAV_USER)
+
+    def zustand(self) -> dict:
+        """Kurzer Überblick für den Selbsttest."""
+        return {"eingerichtet": self.verfuegbar(),
+                "url": CALDAV_URL or "nicht gesetzt"}
+
+    def _kopfzeilen(self, zusatz: dict = None) -> dict:
+        """Basic-Auth und Standardköpfe."""
+        zugang = base64.b64encode(
+            ("%s:%s" % (CALDAV_USER, CALDAV_PASSWORT)).encode("utf-8")
+        ).decode("ascii")
+        kopf = {"Authorization": "Basic %s" % zugang, "User-Agent": "Jarvis/1.0"}
+        kopf.update(zusatz or {})
+        return kopf
+
+    def _anfrage(self, methode: str, url: str, koerper: str = "", zusatz: dict = None):
+        """Führt eine HTTP-Anfrage mit beliebiger Methode aus (auch REPORT)."""
+        anfrage = urllib.request.Request(
+            url, data=(koerper or "").encode("utf-8") if koerper else None,
+            method=methode, headers=self._kopfzeilen(zusatz))
+        try:
+            with urllib.request.urlopen(anfrage, timeout=30) as antwort:
+                return antwort.status, antwort.read().decode("utf-8", errors="replace")
+        except urllib.error.HTTPError as fehler:
+            return fehler.code, fehler.read().decode("utf-8", errors="replace")
+        except (urllib.error.URLError, OSError) as fehler:
+            self.letzter_fehler = str(fehler)
+            return 0, str(fehler)
+
+    # -- Lesen --------------------------------------------------------------
+
+    def termine(self, tage: int = 7, ab: datetime = None) -> dict:
+        """Alle Termine der nächsten Tage, samt Konflikten."""
+        if not self.verfuegbar():
+            return {"ok": False,
+                    "fehler": "Es ist kein Kalender eingerichtet. In der Einrichtung "
+                              "die CalDAV-Adresse hinterlegen."}
+        beginn = (ab or datetime.now()).replace(hour=0, minute=0, second=0, microsecond=0)
+        ende = beginn + timedelta(days=max(1, int(tage)))
+        koerper = CALDAV_ABFRAGE % (beginn.strftime("%Y%m%dT000000Z"),
+                                    ende.strftime("%Y%m%dT235959Z"))
+        status, inhalt = self._anfrage(
+            "REPORT", CALDAV_URL, koerper,
+            {"Depth": "1", "Content-Type": "application/xml; charset=utf-8"})
+        if status == 0:
+            return {"ok": False, "fehler": "Der Kalender ist nicht erreichbar: %s" % inhalt}
+        if status == 401:
+            return {"ok": False,
+                    "fehler": "Der Kalender lehnt Benutzer oder Passwort ab."}
+        if status >= 400:
+            return {"ok": False,
+                    "fehler": "Der Kalender antwortet mit Fehler %d." % status}
+
+        termine = []
+        for block in re.findall(r"BEGIN:VCALENDAR.*?END:VCALENDAR", inhalt, re.S):
+            entschaerft = block.replace("&#13;", "").replace("&lt;", "<").replace("&gt;", ">")
+            termine.extend(ics_termine_lesen(entschaerft))
+
+        gesehen, eindeutig = set(), []
+        for termin in sorted(termine, key=lambda t: t["beginn"]):
+            schluessel = (termin["uid"], termin["beginn"])
+            if schluessel in gesehen:
+                continue
+            gesehen.add(schluessel)
+            eindeutig.append(termin)
+
+        return {"ok": True, "anzahl": len(eindeutig),
+                "termine": [self._als_text(t) for t in eindeutig],
+                "konflikte": konflikte_finden(eindeutig)}
+
+    @staticmethod
+    def _als_text(termin: dict) -> dict:
+        """Formt einen Termin in schlichte Textfelder um."""
+        return {"titel": termin["titel"] or "(ohne Titel)",
+                "ort": termin["ort"],
+                "beginn": termin["beginn"].strftime("%Y-%m-%d %H:%M"),
+                "ende": termin["ende"].strftime("%Y-%m-%d %H:%M"),
+                "tag": termin["beginn"].strftime("%d.%m.%Y"),
+                "uhrzeit": termin["beginn"].strftime("%H:%M")}
+
+    def heute(self) -> dict:
+        """Nur die heutigen Termine."""
+        return self.termine(tage=1)
+
+    def zusammenfassung(self, tage: int = 1) -> str:
+        """Ein gesprochener Satz über die anstehenden Termine."""
+        ergebnis = self.termine(tage)
+        if not ergebnis.get("ok"):
+            return ergebnis.get("fehler", "Der Kalender ist nicht erreichbar.")
+        if ergebnis["anzahl"] == 0:
+            return "Im Kalender steht nichts an."
+        teile = []
+        for termin in ergebnis["termine"][:6]:
+            ort = (" in %s" % termin["ort"]) if termin["ort"] else ""
+            teile.append("%s Uhr %s%s" % (termin["uhrzeit"], termin["titel"], ort))
+        satz = "Anstehend: " + ", ".join(teile) + "."
+        for konflikt in ergebnis["konflikte"][:2]:
+            satz += " Achtung: %s" % konflikt["text"]
+        return satz
+
+    # -- Anlegen ------------------------------------------------------------
+
+    def termin_anlegen(self, titel: str, beginn: str, dauer_minuten: int = 60,
+                       ort: str = "", beschreibung: str = "") -> dict:
+        """Legt einen Termin als iCal-Datei im Kalender ab.
+
+        Die Freigabe holt der Werkzeugkatalog ein, bevor diese Methode läuft.
+        """
+        if not self.verfuegbar():
+            return {"ok": False, "fehler": "Es ist kein Kalender eingerichtet."}
+        startzeit = None
+        for muster in ("%Y-%m-%d %H:%M", "%Y-%m-%dT%H:%M", "%d.%m.%Y %H:%M",
+                       "%Y-%m-%d %H:%M:%S"):
+            try:
+                startzeit = datetime.strptime(beginn.strip(), muster)
+                break
+            except (ValueError, AttributeError):
+                continue
+        if startzeit is None:
+            return {"ok": False,
+                    "fehler": "Den Zeitpunkt '%s' verstehe ich nicht. Bitte im Format "
+                              "2026-08-27 09:00 angeben." % beginn}
+        try:
+            dauer = max(5, int(dauer_minuten))
+        except (TypeError, ValueError):
+            dauer = 60
+        endzeit = startzeit + timedelta(minutes=dauer)
+
+        kennung = "%s@jarvis" % uuid.uuid4()
+        def escape(wert):
+            return str(wert or "").replace("\\", "\\\\").replace(",", "\\,") \
+                                  .replace(";", "\;").replace("\n", "\\n")
+        ics = "\r\n".join([
+            "BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Jarvis//DE",
+            "BEGIN:VEVENT",
+            "UID:%s" % kennung,
+            "DTSTAMP:%sZ" % ics_zeit_schreiben(datetime.utcnow()),
+            "DTSTART:%s" % ics_zeit_schreiben(startzeit),
+            "DTEND:%s" % ics_zeit_schreiben(endzeit),
+            "SUMMARY:%s" % escape(titel),
+            "LOCATION:%s" % escape(ort),
+            "DESCRIPTION:%s" % escape(beschreibung),
+            "END:VEVENT", "END:VCALENDAR", ""])
+
+        ziel = "%s/%s.ics" % (CALDAV_URL.rstrip("/"), kennung)
+        status, inhalt = self._anfrage("PUT", ziel, ics,
+                                       {"Content-Type": "text/calendar; charset=utf-8"})
+        if status in (200, 201, 204):
+            return {"ok": True, "uid": kennung,
+                    "text": "Termin %s am %s um %s Uhr ist eingetragen."
+                            % (titel, startzeit.strftime("%d.%m.%Y"),
+                               startzeit.strftime("%H:%M"))}
+        if status == 0:
+            return {"ok": False, "fehler": "Der Kalender ist nicht erreichbar: %s" % inhalt}
+        return {"ok": False,
+                "fehler": "Der Kalender hat den Termin abgelehnt (Fehler %d)." % status}
+
+
+# =========================================================================
+# telegram_mod  -  Telegram - senden, empfangen und Freigaben einholen.
+# 
+# Der wichtigste Teil ist :meth:`Telegram.freigabe_einholen`. Dort gilt eine
+# Regel ohne Ausnahme: **Timeout, Netzwerkfehler oder ausbleibende Antwort
+# gelten als Ablehnung.** Nie als Zustimmung. Wer sich nicht meldet, hat nicht
+# zugestimmt - sonst würde ein Ausfall der Verbindung zum Freibrief.
+# =========================================================================
+
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+
+
+TELEGRAM_BASIS = "https://api.telegram.org"
+
+JA_WOERTER = {"ja", "j", "ok", "okay", "yes", "y", "passt", "mach", "machen",
+              "los", "freigabe", "erlaubt", "einverstanden", "jo", "jup", "sicher"}
+NEIN_WOERTER = {"nein", "n", "no", "stop", "stopp", "abbrechen", "abbruch",
+                "nicht", "lass", "niemals", "nope"}
+
+
+class Telegram:
+    """Anbindung an einen Telegram-Bot. Ohne Token meldet sich alles sauber ab."""
+
+    def __init__(self, token: str = None, chat_id: str = None):
+        self.token = (token if token is not None else TELEGRAM_BOT_TOKEN) or ""
+        self.chat_id = (chat_id if chat_id is not None else TELEGRAM_CHAT_ID) or ""
+        self._letzte_update_id = 0
+
+    def verfuegbar(self) -> bool:
+        """Ist Telegram überhaupt eingerichtet?"""
+        return bool(self.token and self.chat_id)
+
+    # -- HTTP-Grundlage -----------------------------------------------------
+
+    def _aufruf(self, methode: str, daten: dict = None, timeout: int = 20) -> dict:
+        """Ruft eine Bot-API-Methode auf. Fehler werden als Wörterbuch gemeldet."""
+        if not self.token:
+            return {"ok": False, "fehler": "Kein Telegram-Token hinterlegt."}
+        ziel = "%s/bot%s/%s" % (TELEGRAM_BASIS, self.token, methode)
+        koerper = json.dumps(daten or {}).encode("utf-8")
+        anfrage = urllib.request.Request(
+            ziel, data=koerper, method="POST",
+            headers={"Content-Type": "application/json"})
+        try:
+            with urllib.request.urlopen(anfrage, timeout=timeout) as antwort:
+                return json.loads(antwort.read().decode("utf-8"))
+        except urllib.error.HTTPError as fehler:
+            try:
+                inhalt = json.loads(fehler.read().decode("utf-8"))
+                text = inhalt.get("description", str(fehler))
+            except (ValueError, OSError):
+                text = str(fehler)
+            return {"ok": False, "fehler": "Telegram meldet: %s" % text}
+        except (urllib.error.URLError, OSError, ValueError) as fehler:
+            return {"ok": False, "fehler": "Telegram nicht erreichbar: %s" % fehler}
+
+    # -- Senden -------------------------------------------------------------
+
+    def senden(self, text: str, chat_id: str = "") -> dict:
+        """Schickt eine Textnachricht."""
+        ziel_chat = chat_id or self.chat_id
+        if not self.verfuegbar() and not chat_id:
+            return {"ok": False, "fehler": "Telegram ist nicht eingerichtet."}
+        antwort = self._aufruf("sendMessage",
+                               {"chat_id": ziel_chat, "text": (text or "")[:4000]})
+        if antwort.get("ok"):
+            return {"ok": True, "text": "Nachricht ist raus."}
+        return {"ok": False, "fehler": antwort.get("fehler", "Senden fehlgeschlagen.")}
+
+    def datei_senden(self, pfad: str, methode: str = "sendVoice",
+                     feld: str = "voice", chat_id: str = "") -> dict:
+        """Schickt eine Datei (Sprachnachricht, Bild, Dokument) als multipart."""
+        ziel_chat = chat_id or self.chat_id
+        if not self.token or not ziel_chat:
+            return {"ok": False, "fehler": "Telegram ist nicht eingerichtet."}
+        if not os.path.exists(pfad):
+            return {"ok": False, "fehler": "Die Datei %s gibt es nicht." % pfad}
+        grenze = "----jarvis%d" % int(time.time() * 1000)
+        try:
+            with open(pfad, "rb") as datei:
+                inhalt = datei.read()
+        except OSError as fehler:
+            return {"ok": False, "fehler": "Datei nicht lesbar: %s" % fehler}
+
+        teile = []
+        teile.append(("--%s\r\nContent-Disposition: form-data; name=\"chat_id\"\r\n\r\n%s\r\n"
+                      % (grenze, ziel_chat)).encode("utf-8"))
+        teile.append(("--%s\r\nContent-Disposition: form-data; name=\"%s\"; filename=\"%s\"\r\n"
+                      "Content-Type: application/octet-stream\r\n\r\n"
+                      % (grenze, feld, os.path.basename(pfad))).encode("utf-8"))
+        teile.append(inhalt)
+        teile.append(("\r\n--%s--\r\n" % grenze).encode("utf-8"))
+        koerper = b"".join(teile)
+
+        anfrage = urllib.request.Request(
+            "%s/bot%s/%s" % (TELEGRAM_BASIS, self.token, methode), data=koerper,
+            method="POST",
+            headers={"Content-Type": "multipart/form-data; boundary=%s" % grenze})
+        try:
+            with urllib.request.urlopen(anfrage, timeout=60) as antwort:
+                ergebnis = json.loads(antwort.read().decode("utf-8"))
+            if ergebnis.get("ok"):
+                return {"ok": True, "text": "Datei ist raus."}
+            return {"ok": False, "fehler": str(ergebnis.get("description", "unbekannt"))}
+        except (urllib.error.URLError, OSError, ValueError) as fehler:
+            return {"ok": False, "fehler": "Senden fehlgeschlagen: %s" % fehler}
+
+    # -- Empfangen ----------------------------------------------------------
+
+    def nachrichten_holen(self, timeout: int = 25, ziel_verzeichnis: str = "") -> list:
+        """Holt neue Nachrichten. Sprachnachrichten werden heruntergeladen."""
+        if not self.verfuegbar():
+            return []
+        antwort = self._aufruf("getUpdates",
+                               {"offset": self._letzte_update_id + 1,
+                                "timeout": timeout, "allowed_updates": ["message"]},
+                               timeout=timeout + 10)
+        if not antwort.get("ok"):
+            return []
+        gesammelt = []
+        for eintrag in antwort.get("result", []):
+            self._letzte_update_id = max(self._letzte_update_id, eintrag.get("update_id", 0))
+            nachricht = eintrag.get("message") or {}
+            if not nachricht:
+                continue
+            chat = str((nachricht.get("chat") or {}).get("id", ""))
+            if self.chat_id and chat != str(self.chat_id):
+                continue  # Fremde Chats werden ignoriert.
+            datensatz = {"update_id": eintrag.get("update_id"), "chat_id": chat,
+                         "text": nachricht.get("text", ""), "sprachdatei": ""}
+            sprache = nachricht.get("voice") or nachricht.get("audio")
+            if sprache and sprache.get("file_id"):
+                datensatz["sprachdatei"] = self.datei_herunterladen(
+                    sprache["file_id"], ziel_verzeichnis)
+            gesammelt.append(datensatz)
+        return gesammelt
+
+    def datei_herunterladen(self, file_id: str, ziel_verzeichnis: str = "") -> str:
+        """Lädt eine Telegram-Datei herunter und gibt den lokalen Pfad zurück."""
+        antwort = self._aufruf("getFile", {"file_id": file_id})
+        if not antwort.get("ok"):
+            return ""
+        pfad = (antwort.get("result") or {}).get("file_path", "")
+        if not pfad:
+            return ""
+        verzeichnis = ziel_verzeichnis or str(BASIS / "sprachnachrichten")
+        try:
+            os.makedirs(verzeichnis, exist_ok=True)
+            ziel = os.path.join(verzeichnis, os.path.basename(pfad))
+            quelle = "%s/file/bot%s/%s" % (TELEGRAM_BASIS, self.token, pfad)
+            with urllib.request.urlopen(quelle, timeout=60) as antwort_datei:
+                with open(ziel, "wb") as datei:
+                    datei.write(antwort_datei.read())
+            return ziel
+        except (urllib.error.URLError, OSError) as fehler:
+            print("[telegram] Download fehlgeschlagen: %s" % fehler)
+            return ""
+
+    # -- Freigaben ----------------------------------------------------------
+
+    def freigabe_einholen(self, aktion: str, details: str = "", timeout: int = None) -> dict:
+        """Fragt vor einer Aktion mit Außenwirkung nach ausdrücklicher Zustimmung.
+
+        Rückgabe enthält ``erlaubt``. Ohne klares Ja ist ``erlaubt`` False -
+        auch bei Timeout, Netzwerkfehler oder unverständlicher Antwort.
+        """
+        timeout = int(timeout if timeout is not None else FREIGABE_TIMEOUT)
+        frage = ("Jarvis fragt um Freigabe.\n\nAktion: %s\n%s\n\n"
+                 "Antworte mit JA oder NEIN. Ohne Antwort in %d Sekunden "
+                 "führe ich nichts aus." % (aktion, details or "", timeout))
+
+        if self.verfuegbar():
+            ergebnis = self._freigabe_ueber_telegram(frage, timeout)
+            if ergebnis is not None:
+                return ergebnis
+            # Telegram ausgefallen - das Terminal übernimmt, statt einfach
+            # durchzuwinken.
+            print("[freigabe] Telegram nicht erreichbar, ich frage im Terminal.")
+
+        return self._freigabe_im_terminal(aktion, details, timeout)
+
+    def _freigabe_ueber_telegram(self, frage: str, timeout: int):
+        """Freigabe per Telegram. ``None`` heißt: Kanal fällt aus, bitte Terminal."""
+        gesendet = self.senden(frage)
+        if not gesendet.get("ok"):
+            return None
+
+        ende = time.time() + timeout
+        while time.time() < ende:
+            rest = max(1, min(20, int(ende - time.time())))
+            antwort = self._aufruf(
+                "getUpdates",
+                {"offset": self._letzte_update_id + 1, "timeout": rest,
+                 "allowed_updates": ["message"]},
+                timeout=rest + 10)
+            if not antwort.get("ok"):
+                time.sleep(1)
+                continue
+            for eintrag in antwort.get("result", []):
+                self._letzte_update_id = max(self._letzte_update_id,
+                                             eintrag.get("update_id", 0))
+                nachricht = eintrag.get("message") or {}
+                chat = str((nachricht.get("chat") or {}).get("id", ""))
+                if self.chat_id and chat != str(self.chat_id):
+                    continue
+                wort = (nachricht.get("text") or "").strip().lower().strip(".!? ")
+                if wort in JA_WOERTER:
+                    self.senden("Verstanden, ich mache es.")
+                    return {"erlaubt": True, "kanal": "telegram", "grund": "Freigabe erteilt"}
+                if wort in NEIN_WOERTER:
+                    self.senden("Alles klar, ich lasse es.")
+                    return {"erlaubt": False, "kanal": "telegram", "grund": "abgelehnt"}
+                if wort:
+                    self.senden("Bitte nur JA oder NEIN.")
+        self.senden("Keine Antwort bekommen - ich habe nichts ausgeführt.")
+        return {"erlaubt": False, "kanal": "telegram",
+                "grund": "keine Antwort innerhalb von %d Sekunden" % timeout}
+
+    def _freigabe_im_terminal(self, aktion: str, details: str, timeout: int) -> dict:
+        """Rückfallebene: Nachfrage im Terminal, ebenfalls mit Zeitgrenze."""
+        if not sys.stdin or not sys.stdin.isatty():
+            return {"erlaubt": False, "kanal": "keiner",
+                    "grund": "Kein Freigabekanal verfügbar - deshalb nicht ausgeführt."}
+        print("\n--- FREIGABE NÖTIG ---")
+        print("Aktion : %s" % aktion)
+        if details:
+            print("Details: %s" % details)
+        print("Mit ja bestätigen, alles andere bricht ab (%d Sekunden Zeit)." % timeout)
+        sys.stdout.write("> ")
+        sys.stdout.flush()
+        try:
+            bereit, _, _ = select.select([sys.stdin], [], [], timeout)
+        except (OSError, ValueError):
+            bereit = []
+        if not bereit:
+            print("\nKeine Antwort - ich führe nichts aus.")
+            return {"erlaubt": False, "kanal": "terminal",
+                    "grund": "keine Antwort innerhalb von %d Sekunden" % timeout}
+        eingabe = sys.stdin.readline().strip().lower().strip(".!? ")
+        if eingabe in JA_WOERTER:
+            return {"erlaubt": True, "kanal": "terminal", "grund": "Freigabe erteilt"}
+        return {"erlaubt": False, "kanal": "terminal", "grund": "abgelehnt"}
+
+
+# =========================================================================
+# bookkeeping  -  Buchhaltung - Belege per Foto, Buchungen, Auswertung, Export.
+# 
+# Wichtig: Jarvis führt die Buchhaltung nur vor. Die fachliche Prüfung macht der
+# Steuerberater. Deshalb wird lieber nachgefragt als geschätzt - ein geratener
+# Betrag ist in der Buchhaltung schlimmer als gar kein Eintrag.
+# =========================================================================
+
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+
+
+SCHEMA_BUCHHALTUNG = """
+CREATE TABLE IF NOT EXISTS buchungen (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    art TEXT NOT NULL,
+    datum TEXT NOT NULL,
+    betrag_brutto REAL NOT NULL,
+    mwst_satz REAL DEFAULT 0,
+    mwst_betrag REAL DEFAULT 0,
+    netto REAL DEFAULT 0,
+    haendler TEXT DEFAULT '',
+    kategorie TEXT DEFAULT 'Sonstiges',
+    zahlungsart TEXT DEFAULT '',
+    positionen TEXT DEFAULT '',
+    beleg_pfad TEXT DEFAULT '',
+    notiz TEXT DEFAULT '',
+    angelegt TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_buchungen_datum ON buchungen(datum);
+"""
+
+# Kategorien, wie sie in der Gebäudereinigung tatsächlich anfallen.
+KATEGORIEN = [
+    "Reinigungsmittel", "Arbeitsmaterial", "Fahrzeug", "Kraftstoff",
+    "Versicherung", "Miete", "Telefon und Internet", "Werbung", "Fortbildung",
+    "Bürobedarf", "Gebühren", "Sonstiges",
+]
+
+BELEG_PROMPT = """Du liest einen Beleg für die Buchhaltung eines Gebäudereinigers.
+
+Gib ausschließlich JSON zurück, ohne Fließtext, mit genau diesen Schlüsseln:
+  haendler        Name des Geschäfts, Text
+  datum           JJJJ-MM-TT
+  brutto          Bruttobetrag als Zahl
+  mwst_satz       Steuersatz in Prozent als Zahl (z.B. 20)
+  mwst_betrag     ausgewiesener Steuerbetrag als Zahl, sonst null
+  netto           Nettobetrag als Zahl, sonst null
+  kategorie       eine aus: %s
+  zahlungsart     bar, Karte, Überweisung oder unbekannt
+  positionen      Liste von Objekten mit bezeichnung und betrag
+  sicher          true nur wenn Händler, Datum und Bruttobetrag zweifelsfrei lesbar sind
+  hinweis         wenn sicher false ist: was genau fehlt oder unleserlich ist
+
+Rate nie einen Betrag. Ist etwas unleserlich, setze sicher auf false und
+schreibe in hinweis, was du nicht erkennen konntest.""" % ", ".join(KATEGORIEN)
+
+
+def mwst_aus_brutto(brutto: float, satz: float) -> float:
+    """Rechnet die enthaltene Mehrwertsteuer aus einem Bruttobetrag heraus."""
+    try:
+        brutto = float(brutto)
+        satz = float(satz)
+    except (TypeError, ValueError):
+        return 0.0
+    if satz <= 0:
+        return 0.0
+    return round(brutto - brutto / (1.0 + satz / 100.0), 2)
+
+
+def geld(betrag) -> str:
+    """Formatiert einen Betrag deutsch: 1.234,56 Euro."""
+    try:
+        betrag = float(betrag)
+    except (TypeError, ValueError):
+        return "0,00 Euro"
+    text = "{:,.2f}".format(betrag).replace(",", "#").replace(".", ",").replace("#", ".")
+    return "%s Euro" % text
+
+
+class Bookkeeping:
+    """Führt Einnahmen und Ausgaben, wertet aus und exportiert für den Steuerberater."""
+
+    def __init__(self, memory: Memory = None):
+        self.memory = memory or Memory()
+        db_schema_anlegen(SCHEMA_BUCHHALTUNG, self.memory.db_pfad)
+
+    # -- Buchen -------------------------------------------------------------
+
+    def buchung_eintragen(self, art: str, datum: str, betrag: float, haendler: str = "",
+                          kategorie: str = "Sonstiges", mwst_satz: float = None,
+                          mwst_betrag: float = None, zahlungsart: str = "",
+                          positionen=None, beleg_pfad: str = "", notiz: str = "") -> dict:
+        """Trägt eine Einnahme oder Ausgabe ein und rechnet die Steuer sauber aus."""
+        art = (art or "").strip().lower()
+        if art not in ("einnahme", "ausgabe"):
+            return {"ok": False, "fehler": "Die Art muss einnahme oder ausgabe sein."}
+        try:
+            brutto = round(float(betrag), 2)
+        except (TypeError, ValueError):
+            return {"ok": False, "fehler": "Der Betrag ist keine gültige Zahl."}
+        if brutto <= 0:
+            return {"ok": False, "fehler": "Der Betrag muss größer als null sein."}
+
+        datum = (datum or heute_datum()).strip()
+        try:
+            datetime.strptime(datum, "%Y-%m-%d")
+        except ValueError:
+            return {"ok": False,
+                    "fehler": "Das Datum muss im Format JJJJ-MM-TT stehen, bekommen habe ich '%s'." % datum}
+
+        satz = STANDARD_MWST if mwst_satz is None else mwst_satz
+        try:
+            satz = float(satz)
+        except (TypeError, ValueError):
+            satz = float(STANDARD_MWST)
+
+        if mwst_betrag is None or str(mwst_betrag).strip() == "":
+            steuer = mwst_aus_brutto(brutto, satz)
+        else:
+            try:
+                steuer = round(float(mwst_betrag), 2)
+            except (TypeError, ValueError):
+                steuer = mwst_aus_brutto(brutto, satz)
+        netto = round(brutto - steuer, 2)
+
+        if kategorie not in KATEGORIEN:
+            kategorie = kategorie if kategorie else "Sonstiges"
+
+        try:
+            positionen_text = json.dumps(positionen or [], ensure_ascii=False)
+        except (TypeError, ValueError):
+            positionen_text = "[]"
+
+        nummer = self.memory._schreiben(
+            "INSERT INTO buchungen (art, datum, betrag_brutto, mwst_satz, mwst_betrag, netto, "
+            "haendler, kategorie, zahlungsart, positionen, beleg_pfad, notiz, angelegt) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (art, datum, brutto, satz, steuer, netto, haendler, kategorie, zahlungsart,
+             positionen_text, beleg_pfad, notiz, zeitstempel()))
+
+        return {"ok": True, "id": nummer, "art": art, "datum": datum, "brutto": brutto,
+                "mwst_satz": satz, "mwst_betrag": steuer, "netto": netto,
+                "haendler": haendler, "kategorie": kategorie,
+                "text": "%s über %s bei %s am %s eingetragen, davon %s Steuer."
+                        % (art.capitalize(), geld(brutto), haendler or "unbekannt", datum,
+                           geld(steuer))}
+
+    def buchung_loeschen(self, nummer: int) -> bool:
+        """Löscht eine Buchung anhand ihrer Nummer."""
+        if not self.memory._lesen("SELECT id FROM buchungen WHERE id=?", (nummer,)):
+            return False
+        self.memory._schreiben("DELETE FROM buchungen WHERE id=?", (nummer,))
+        return True
+
+    def buchungen(self, von: str = "", bis: str = "", art: str = "", limit: int = 200) -> list:
+        """Listet Buchungen in einem Zeitraum."""
+        bedingungen, werte = [], []
+        if von:
+            bedingungen.append("datum>=?")
+            werte.append(von)
+        if bis:
+            bedingungen.append("datum<=?")
+            werte.append(bis)
+        if art:
+            bedingungen.append("art=?")
+            werte.append(art)
+        wo = ("WHERE " + " AND ".join(bedingungen)) if bedingungen else ""
+        werte.append(limit)
+        return self.memory._lesen(
+            "SELECT * FROM buchungen %s ORDER BY datum DESC, id DESC LIMIT ?" % wo, tuple(werte))
+
+    # -- Beleg per Foto -----------------------------------------------------
+
+    def beleg_erfassen(self, bildpfad: str, agent=None) -> dict:
+        """Liest einen Beleg vom Foto und trägt ihn ein - aber nur, wenn er sicher ist."""
+        if not bildpfad or not os.path.exists(bildpfad):
+            return {"ok": False,
+                    "fehler": "Ich finde die Bilddatei nicht: %s" % bildpfad}
+        if agent is None or not getattr(agent, "einsatzbereit", lambda: False)():
+            return {"ok": False,
+                    "fehler": "Ohne Anthropic-Schlüssel kann ich keinen Beleg lesen. "
+                              "Bitte zuerst die Einrichtung durchlaufen."}
+        try:
+            with open(bildpfad, "rb") as datei:
+                rohbild = base64.b64encode(datei.read()).decode("ascii")
+        except OSError as fehler:
+            return {"ok": False, "fehler": "Die Bilddatei ist nicht lesbar: %s" % fehler}
+
+        endung = os.path.splitext(bildpfad)[1].lower()
+        medientyp = {".png": "image/png", ".gif": "image/gif",
+                     ".webp": "image/webp"}.get(endung, "image/jpeg")
+
+        antwort = agent.json_anfrage(BELEG_PROMPT, bild_base64=rohbild, bild_typ=medientyp)
+        if not antwort.get("ok"):
+            return {"ok": False, "fehler": antwort.get("fehler", "Der Beleg war nicht lesbar.")}
+
+        daten = antwort["daten"]
+        if not daten.get("sicher"):
+            hinweis = daten.get("hinweis") or "Ich konnte den Beleg nicht zweifelsfrei lesen."
+            return {"ok": False, "eingetragen": False, "sicher": False, "hinweis": hinweis,
+                    "rohdaten": daten,
+                    "text": "Ich trage nichts ein. %s Sag mir die fehlenden Angaben, "
+                            "dann buche ich es." % hinweis}
+
+        ergebnis = self.buchung_eintragen(
+            art="ausgabe",
+            datum=str(daten.get("datum") or heute_datum()),
+            betrag=daten.get("brutto"),
+            haendler=str(daten.get("haendler") or ""),
+            kategorie=str(daten.get("kategorie") or "Sonstiges"),
+            mwst_satz=daten.get("mwst_satz"),
+            mwst_betrag=daten.get("mwst_betrag"),
+            zahlungsart=str(daten.get("zahlungsart") or ""),
+            positionen=daten.get("positionen"),
+            beleg_pfad=bildpfad)
+        ergebnis["sicher"] = True
+        return ergebnis
+
+    # -- Auswertung ---------------------------------------------------------
+
+    def auswertung(self, von: str = "", bis: str = "") -> dict:
+        """Einnahmen, Ausgaben, Ergebnis, Vorsteuer, Umsatzsteuer und Zahllast."""
+        if not von and not bis:
+            von = datetime.now().strftime("%Y-%m-01")
+            bis = heute_datum()
+        zeilen = self.buchungen(von, bis, limit=100000)
+
+        einnahmen = sum(z["betrag_brutto"] for z in zeilen if z["art"] == "einnahme")
+        ausgaben = sum(z["betrag_brutto"] for z in zeilen if z["art"] == "ausgabe")
+        umsatzsteuer = sum(z["mwst_betrag"] for z in zeilen if z["art"] == "einnahme")
+        vorsteuer = sum(z["mwst_betrag"] for z in zeilen if z["art"] == "ausgabe")
+
+        nach_kategorie = {}
+        for zeile in zeilen:
+            if zeile["art"] != "ausgabe":
+                continue
+            nach_kategorie.setdefault(zeile["kategorie"], 0.0)
+            nach_kategorie[zeile["kategorie"]] += zeile["betrag_brutto"]
+        nach_kategorie = {k: round(v, 2) for k, v in
+                          sorted(nach_kategorie.items(), key=lambda p: -p[1])}
+
+        ergebnis = {
+            "von": von, "bis": bis, "anzahl": len(zeilen),
+            "einnahmen": round(einnahmen, 2),
+            "ausgaben": round(ausgaben, 2),
+            "ergebnis": round(einnahmen - ausgaben, 2),
+            "umsatzsteuer": round(umsatzsteuer, 2),
+            "vorsteuer": round(vorsteuer, 2),
+            "zahllast": round(umsatzsteuer - vorsteuer, 2),
+            "nach_kategorie": nach_kategorie,
+        }
+        ergebnis["text"] = (
+            "Vom %s bis %s: Einnahmen %s, Ausgaben %s, Ergebnis %s. "
+            "Umsatzsteuer %s, Vorsteuer %s, Zahllast %s."
+            % (von, bis, geld(ergebnis["einnahmen"]), geld(ergebnis["ausgaben"]),
+               geld(ergebnis["ergebnis"]), geld(ergebnis["umsatzsteuer"]),
+               geld(ergebnis["vorsteuer"]), geld(ergebnis["zahllast"])))
+        return ergebnis
+
+    def fehlende_belege(self, von: str = "", bis: str = "") -> dict:
+        """Ausgaben ohne hinterlegtes Belegfoto - genau die fehlen beim Steuerberater."""
+        zeilen = self.buchungen(von, bis, art="ausgabe", limit=100000)
+        ohne = []
+        for zeile in zeilen:
+            pfad = (zeile["beleg_pfad"] or "").strip()
+            if not pfad or not os.path.exists(pfad):
+                ohne.append({"id": zeile["id"], "datum": zeile["datum"],
+                             "haendler": zeile["haendler"], "betrag": zeile["betrag_brutto"],
+                             "kategorie": zeile["kategorie"],
+                             "grund": "kein Foto hinterlegt" if not pfad
+                                      else "Datei nicht mehr vorhanden"})
+        summe = round(sum(e["betrag"] for e in ohne), 2)
+        if not ohne:
+            text = "Zu allen Ausgaben liegt ein Beleg vor."
+        else:
+            text = ("%d Ausgaben ohne Beleg, zusammen %s. Die größte: %s bei %s am %s."
+                    % (len(ohne), geld(summe),
+                       geld(max(ohne, key=lambda e: e["betrag"])["betrag"]),
+                       max(ohne, key=lambda e: e["betrag"])["haendler"] or "unbekannt",
+                       max(ohne, key=lambda e: e["betrag"])["datum"]))
+        return {"ok": True, "anzahl": len(ohne), "summe": summe, "buchungen": ohne,
+                "text": text}
+
+    # -- Export -------------------------------------------------------------
+
+    def csv_export(self, von: str = "", bis: str = "", ziel: str = "") -> dict:
+        """Schreibt eine CSV-Datei, die Excel auf Anhieb richtig öffnet.
+
+        Semikolon als Trenner und ``utf-8-sig`` - sonst zerlegt Excel die Umlaute.
+        """
+        zeilen = self.buchungen(von, bis, limit=100000)
+        try:
+            EXPORT_VERZEICHNIS.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            pass
+        if not ziel:
+            ziel = str(EXPORT_VERZEICHNIS /
+                       ("buchhaltung_%s.csv" % datetime.now().strftime("%Y%m%d_%H%M%S")))
+        kopf = ["Nummer", "Art", "Datum", "Händler", "Kategorie", "Brutto", "MwSt-Satz",
+                "MwSt-Betrag", "Netto", "Zahlungsart", "Beleg vorhanden", "Notiz"]
+        try:
+            with open(ziel, "w", encoding="utf-8-sig", newline="") as datei:
+                schreiber = csv.writer(datei, delimiter=";")
+                schreiber.writerow(kopf)
+                for zeile in zeilen:
+                    beleg = "ja" if (zeile["beleg_pfad"] and
+                                     os.path.exists(zeile["beleg_pfad"])) else "nein"
+                    schreiber.writerow([
+                        zeile["id"], zeile["art"], zeile["datum"], zeile["haendler"],
+                        zeile["kategorie"],
+                        ("%.2f" % zeile["betrag_brutto"]).replace(".", ","),
+                        ("%.2f" % zeile["mwst_satz"]).replace(".", ","),
+                        ("%.2f" % zeile["mwst_betrag"]).replace(".", ","),
+                        ("%.2f" % zeile["netto"]).replace(".", ","),
+                        zeile["zahlungsart"], beleg, zeile["notiz"]])
+        except OSError as fehler:
+            return {"ok": False, "fehler": "Die CSV-Datei ließ sich nicht schreiben: %s" % fehler}
+        return {"ok": True, "datei": ziel, "zeilen": len(zeilen),
+                "text": "%d Buchungen nach %s exportiert." % (len(zeilen), ziel)}
+
+
+# =========================================================================
+# call_analysis  -  Kundengespräche bewerten - ehrlich, nicht schmeichelnd.
+# 
+# Ein freundliches Gespräch ohne Ergebnis ist kein gutes Gespräch. Die Bewertung
+# sagt das auch. Schwächen werden konkret benannt, nicht allgemein.
+# =========================================================================
+
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+
+
+SCHEMA_GESPRAECHE = """
+CREATE TABLE IF NOT EXISTS gespraeche (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    kunde TEXT DEFAULT '',
+    datum TEXT NOT NULL,
+    punktzahl INTEGER DEFAULT 0,
+    ergebnis TEXT DEFAULT 'unklar',
+    volumen REAL DEFAULT 0,
+    staerken TEXT DEFAULT '',
+    schwaechen TEXT DEFAULT '',
+    einwaende TEXT DEFAULT '',
+    offene_einwaende TEXT DEFAULT '',
+    naechster_schritt TEXT DEFAULT '',
+    bewertung TEXT DEFAULT '',
+    rohtext TEXT DEFAULT '',
+    angelegt TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_gespraeche_datum ON gespraeche(datum);
+"""
+
+ERGEBNIS_WERTE = ("gewonnen", "offen", "verloren", "unklar")
+
+GESPRAECH_PROMPT = """Du bewertest ein Kundengespräch eines Gebäudereinigers.
+Sei streng. Ein nettes Gespräch ohne Abschluss oder konkreten nächsten Termin
+ist kein gutes Gespräch - das sagst du dann auch deutlich.
+
+Worauf es in dieser Branche ankommt:
+- Quadratmeter, Anzahl der Räume, Bodenbeläge erfasst?
+- Reinigungsintervall geklärt (täglich, zweimal die Woche, monatlich)?
+- Zugang, Schlüsselübergabe, Zeitfenster besprochen?
+- Sonderleistungen angesprochen (Fensterreinigung, Grundreinigung, Teppich)?
+- Preisbildung nachvollziehbar begründet, pro Quadratmeter oder pro Stunde?
+- Probereinigung angeboten?
+- Konkreter nächster Termin mit Datum vereinbart?
+
+Gib ausschließlich JSON zurück, ohne Fließtext, mit genau diesen Schlüsseln:
+  kunde              Name des Kunden oder Objekts, Text
+  punktzahl          0 bis 100, ganze Zahl
+  ergebnis           gewonnen, offen, verloren oder unklar
+  volumen            geschätztes Auftragsvolumen pro Jahr in Euro als Zahl, sonst 0
+  staerken           Liste konkreter Sätze, was gut lief
+  schwaechen         Liste konkreter Sätze. Nicht "hätte mehr fragen sollen",
+                     sondern "Bodenbelag und Quadratmeter nie erfasst - ohne die
+                     ist kein Preis kalkulierbar"
+  einwaende          Liste der Einwände, die der Kunde gebracht hat
+  offene_einwaende   Liste der Einwände, die unbeantwortet geblieben sind
+  naechster_schritt  ein konkreter Satz, was jetzt zu tun ist
+  bewertung          Objekt mit den Schlüsseln bedarf_erfasst, objekt_verstanden,
+                     preis_begruendet, einwaende_behandelt, abschluss_gesucht -
+                     jeweils eine Zahl von 0 bis 10
+
+Das Gespräch, wie er es erzählt hat:
+"""
+
+
+def _liste_zu_text(wert) -> str:
+    """Macht aus einer Liste oder einem Text eine Zeile mit Strichpunkten."""
+    if wert is None:
+        return ""
+    if isinstance(wert, (list, tuple)):
+        return "; ".join(str(teil).strip() for teil in wert if str(teil).strip())
+    return str(wert).strip()
+
+
+def _text_zu_liste(wert: str) -> list:
+    """Umkehrung von :func:`_liste_zu_text`."""
+    if not wert:
+        return []
+    return [teil.strip() for teil in str(wert).split(";") if teil.strip()]
+
+
+class CallAnalysis:
+    """Bewertet Kundengespräche und erkennt Muster über viele Gespräche hinweg."""
+
+    def __init__(self, memory: Memory = None):
+        self.memory = memory or Memory()
+        db_schema_anlegen(SCHEMA_GESPRAECHE, self.memory.db_pfad)
+
+    # -- Erfassen -----------------------------------------------------------
+
+    def gespraech_festhalten(self, bericht: str, agent=None, kunde: str = "",
+                             datum: str = "") -> dict:
+        """Lässt Claude das Gespräch bewerten und legt es ab."""
+        bericht = (bericht or "").strip()
+        if not bericht:
+            return {"ok": False, "fehler": "Du hast mir noch nicht erzählt, wie es lief."}
+        datum = datum or heute_datum()
+
+        if agent is None or not getattr(agent, "einsatzbereit", lambda: False)():
+            # Ohne Claude wird nichts erfunden - der Bericht wird roh abgelegt.
+            nummer = self._ablegen({"kunde": kunde, "datum": datum, "punktzahl": 0,
+                                    "ergebnis": "unklar", "volumen": 0}, bericht, {})
+            return {"ok": True, "id": nummer, "bewertet": False,
+                    "text": "Ich habe das Gespräch festgehalten, konnte es ohne "
+                            "Anthropic-Schlüssel aber nicht bewerten."}
+
+        antwort = agent.json_anfrage(GESPRAECH_PROMPT + bericht)
+        if not antwort.get("ok"):
+            nummer = self._ablegen({"kunde": kunde, "datum": datum}, bericht, {})
+            return {"ok": True, "id": nummer, "bewertet": False,
+                    "text": "Festgehalten. Die Bewertung ist fehlgeschlagen: %s"
+                            % antwort.get("fehler", "unbekannter Fehler")}
+
+        daten = antwort["daten"]
+        if kunde:
+            daten["kunde"] = kunde
+        daten["datum"] = datum
+        nummer = self._ablegen(daten, bericht, daten.get("bewertung") or {})
+
+        punkte = int(daten.get("punktzahl") or 0)
+        ergebnis = str(daten.get("ergebnis") or "unklar").lower()
+        if ergebnis not in ERGEBNIS_WERTE:
+            ergebnis = "unklar"
+        schwaechen = daten.get("schwaechen") or []
+        erste_schwaeche = _liste_zu_text(schwaechen[:1]) if isinstance(schwaechen, list) \
+            else _liste_zu_text(schwaechen)
+
+        text = ("%s: %d von 100, Ergebnis %s." %
+                (daten.get("kunde") or "Das Gespräch", punkte, ergebnis))
+        if erste_schwaeche:
+            text += " Größte Lücke: %s" % erste_schwaeche
+        if daten.get("naechster_schritt"):
+            text += " Nächster Schritt: %s" % daten["naechster_schritt"]
+
+        return {"ok": True, "id": nummer, "bewertet": True, "punktzahl": punkte,
+                "ergebnis": ergebnis, "daten": daten, "text": text}
+
+    def _ablegen(self, daten: dict, rohtext: str, bewertung: dict) -> int:
+        """Schreibt eine Gesprächsbewertung in die Datenbank."""
+        try:
+            volumen = float(daten.get("volumen") or 0)
+        except (TypeError, ValueError):
+            volumen = 0.0
+        try:
+            punktzahl = int(daten.get("punktzahl") or 0)
+        except (TypeError, ValueError):
+            punktzahl = 0
+        ergebnis = str(daten.get("ergebnis") or "unklar").lower()
+        if ergebnis not in ERGEBNIS_WERTE:
+            ergebnis = "unklar"
+        try:
+            bewertung_text = json.dumps(bewertung or {}, ensure_ascii=False)
+        except (TypeError, ValueError):
+            bewertung_text = "{}"
+        return self.memory._schreiben(
+            "INSERT INTO gespraeche (kunde, datum, punktzahl, ergebnis, volumen, staerken, "
+            "schwaechen, einwaende, offene_einwaende, naechster_schritt, bewertung, rohtext, "
+            "angelegt) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (str(daten.get("kunde") or ""), str(daten.get("datum") or heute_datum()),
+             punktzahl, ergebnis, volumen,
+             _liste_zu_text(daten.get("staerken")),
+             _liste_zu_text(daten.get("schwaechen")),
+             _liste_zu_text(daten.get("einwaende")),
+             _liste_zu_text(daten.get("offene_einwaende")),
+             str(daten.get("naechster_schritt") or ""),
+             bewertung_text, rohtext[:6000], zeitstempel()))
+
+    # -- Auswerten ----------------------------------------------------------
+
+    def gespraeche(self, limit: int = 50) -> list:
+        """Die zuletzt festgehaltenen Gespräche."""
+        return self.memory._lesen(
+            "SELECT * FROM gespraeche ORDER BY datum DESC, id DESC LIMIT ?", (limit,))
+
+    def offene_leads(self) -> dict:
+        """Alle Gespräche mit Ergebnis 'offen', samt Summe des offenen Volumens."""
+        zeilen = self.memory._lesen(
+            "SELECT * FROM gespraeche WHERE ergebnis='offen' ORDER BY volumen DESC, datum DESC")
+        summe = round(sum(z["volumen"] or 0 for z in zeilen), 2)
+        leads = [{"id": z["id"], "kunde": z["kunde"], "datum": z["datum"],
+                  "volumen": z["volumen"], "punktzahl": z["punktzahl"],
+                  "naechster_schritt": z["naechster_schritt"]} for z in zeilen]
+        if not leads:
+            text = "Es ist gerade kein Lead offen."
+        else:
+            groesster = leads[0]
+            text = ("%d offene Leads über zusammen %.0f Euro. Der größte ist %s mit "
+                    "%.0f Euro. Nächster Schritt dort: %s"
+                    % (len(leads), summe, groesster["kunde"] or "ein Kunde ohne Namen",
+                       groesster["volumen"],
+                       groesster["naechster_schritt"] or "steht noch nicht fest"))
+        return {"ok": True, "anzahl": len(leads), "volumen_offen": summe,
+                "leads": leads, "text": text}
+
+    def verkaufsmuster(self, tage: int = 90) -> dict:
+        """Abschlussquote, Durchschnittspunktzahl und wiederkehrende Einwände.
+
+        Kommt derselbe Einwand dreimal, ist das kein Zufall, sondern eine Lücke
+        im Angebot.
+        """
+        grenze = (datetime.now() - timedelta(days=tage)).strftime("%Y-%m-%d")
+        zeilen = self.memory._lesen(
+            "SELECT * FROM gespraeche WHERE datum>=? ORDER BY datum", (grenze,))
+        if not zeilen:
+            return {"ok": True, "anzahl": 0,
+                    "text": "In den letzten %d Tagen ist kein Gespräch festgehalten worden."
+                            % tage}
+
+        gewonnen = len([z for z in zeilen if z["ergebnis"] == "gewonnen"])
+        verloren = len([z for z in zeilen if z["ergebnis"] == "verloren"])
+        offen = len([z for z in zeilen if z["ergebnis"] == "offen"])
+        entschieden = gewonnen + verloren
+        quote = round(100.0 * gewonnen / entschieden, 1) if entschieden else 0.0
+        schnitt = round(sum(z["punktzahl"] for z in zeilen) / float(len(zeilen)), 1)
+
+        haeufigkeit = {}
+        for zeile in zeilen:
+            for einwand in _text_zu_liste(zeile["einwaende"]) + \
+                           _text_zu_liste(zeile["offene_einwaende"]):
+                schluessel = einwand.lower()[:80]
+                haeufigkeit[schluessel] = haeufigkeit.get(schluessel, 0) + 1
+        wiederkehrend = sorted([(anzahl, text) for text, anzahl in haeufigkeit.items()
+                                if anzahl >= 2], reverse=True)[:6]
+
+        schwaechen = {}
+        for zeile in zeilen:
+            for schwaeche in _text_zu_liste(zeile["schwaechen"]):
+                schluessel = schwaeche.lower()[:80]
+                schwaechen[schluessel] = schwaechen.get(schluessel, 0) + 1
+        haeufige_schwaechen = sorted([(a, t) for t, a in schwaechen.items() if a >= 2],
+                                     reverse=True)[:5]
+
+        text = ("%d Gespräche in %d Tagen. Abschlussquote %.1f Prozent, "
+                "Durchschnitt %.1f Punkte. %d gewonnen, %d verloren, %d offen."
+                % (len(zeilen), tage, quote, schnitt, gewonnen, verloren, offen))
+        if wiederkehrend:
+            anzahl, einwand = wiederkehrend[0]
+            text += (" Der Einwand '%s' kam %d mal - das ist kein Zufall, "
+                     "sondern eine Lücke im Angebot." % (einwand, anzahl))
+
+        return {"ok": True, "anzahl": len(zeilen), "gewonnen": gewonnen,
+                "verloren": verloren, "offen": offen, "abschlussquote": quote,
+                "durchschnitt": schnitt,
+                "wiederkehrende_einwaende": [{"einwand": t, "anzahl": a}
+                                             for a, t in wiederkehrend],
+                "haeufige_schwaechen": [{"schwaeche": t, "anzahl": a}
+                                        for a, t in haeufige_schwaechen],
+                "text": text}
+
+
+# =========================================================================
+# routines  -  Routinen - gespeicherte Abläufe, die der Nutzer per Sprache anlegt.
+# 
+# Eine Routine ist kein starres Skript, sondern eine Anweisung an Claude selbst.
+# Er liest sie und entscheidet mit seinen Werkzeugen, wie er sie umsetzt. Das ist
+# robuster als eine feste Schrittfolge: ändert sich etwas, passt Claude sich an.
+# 
+# Namen trifft die Spracherkennung selten wortgenau. Deshalb wird dreistufig
+# gesucht: exakt, dann Teiltreffer, dann einzelne Wörter.
+# =========================================================================
+
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+
+
+SCHEMA_ROUTINEN = """
+CREATE TABLE IF NOT EXISTS routinen (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    anweisung TEXT NOT NULL,
+    uhrzeit TEXT DEFAULT '',
+    tage TEXT DEFAULT 'taeglich',
+    aktiv INTEGER DEFAULT 1,
+    zuletzt TEXT DEFAULT '',
+    laeufe INTEGER DEFAULT 0,
+    angelegt TEXT NOT NULL
+);
+"""
+
+UHRZEIT_MUSTER = re.compile(r"^([01]?\d|2[0-3])[:.]?([0-5]\d)?$")
+
+
+def name_normalisieren(name: str) -> str:
+    """Kleinschreibung, Umlaute ausgeschrieben, Sonderzeichen weg."""
+    text = (name or "").strip().lower()
+    for alt, neu in (("ä", "ae"), ("ö", "oe"), ("ü", "ue"), ("ß", "ss")):
+        text = text.replace(alt, neu)
+    return re.sub(r"\s+", " ", re.sub(r"[^a-z0-9 ]+", " ", text)).strip()
+
+
+def name_kompakt(name: str) -> str:
+    """Wie :func:`name_normalisieren`, aber ohne jedes Leerzeichen."""
+    return name_normalisieren(name).replace(" ", "")
+
+
+def uhrzeit_normalisieren(uhrzeit: str) -> str:
+    """Macht aus '18', '18 Uhr', '1800' oder '18:00' ein sauberes 'HH:MM'."""
+    roh = (uhrzeit or "").strip().lower()
+    if not roh:
+        return ""
+    roh = roh.replace("uhr", "").strip()
+    roh = re.sub(r"[^0-9:.]", "", roh)
+    if not roh:
+        return ""
+    if ":" in roh or "." in roh:
+        teile = re.split(r"[:.]", roh)
+        stunde = teile[0]
+        minute = teile[1] if len(teile) > 1 and teile[1] else "00"
+    elif len(roh) == 4:
+        stunde, minute = roh[:2], roh[2:]
+    else:
+        stunde, minute = roh, "00"
+    try:
+        stunde_zahl, minute_zahl = int(stunde), int(minute)
+    except ValueError:
+        return ""
+    if not (0 <= stunde_zahl <= 23 and 0 <= minute_zahl <= 59):
+        return ""
+    return "%02d:%02d" % (stunde_zahl, minute_zahl)
+
+
+class Routines:
+    """Verwaltet gespeicherte Abläufe und findet sie auch bei ungenauem Namen."""
+
+    def __init__(self, memory: Memory = None):
+        self.memory = memory or Memory()
+        db_schema_anlegen(SCHEMA_ROUTINEN, self.memory.db_pfad)
+
+    # -- Anlegen und pflegen ------------------------------------------------
+
+    def routine_anlegen(self, name: str, anweisung: str, uhrzeit: str = "",
+                        tage: str = "taeglich") -> dict:
+        """Legt eine Routine an oder überschreibt eine gleichnamige."""
+        name = (name or "").strip()
+        anweisung = (anweisung or "").strip()
+        if not name:
+            return {"ok": False, "fehler": "Die Routine braucht einen Namen."}
+        if not anweisung:
+            return {"ok": False,
+                    "fehler": "Sag mir, was die Routine tun soll, dann lege ich sie an."}
+        zeit = uhrzeit_normalisieren(uhrzeit)
+        if uhrzeit and not zeit:
+            return {"ok": False,
+                    "fehler": "Die Uhrzeit '%s' verstehe ich nicht. Sag sie zum Beispiel "
+                              "als 18 Uhr oder 18:30." % uhrzeit}
+
+        vorhanden = self._exakt(name)
+        if vorhanden:
+            self.memory._schreiben(
+                "UPDATE routinen SET anweisung=?, uhrzeit=?, tage=?, aktiv=1 WHERE id=?",
+                (anweisung, zeit, tage, vorhanden["id"]))
+            return {"ok": True, "id": vorhanden["id"], "name": name, "uhrzeit": zeit,
+                    "ersetzt": True,
+                    "text": "Die Routine %s ist aktualisiert.%s"
+                            % (name, (" Sie läuft künftig um %s." % zeit) if zeit else "")}
+
+        nummer = self.memory._schreiben(
+            "INSERT INTO routinen (name, anweisung, uhrzeit, tage, aktiv, zuletzt, laeufe, "
+            "angelegt) VALUES (?,?,?,?,1,'',0,?)",
+            (name, anweisung, zeit, tage, zeitstempel()))
+        return {"ok": True, "id": nummer, "name": name, "uhrzeit": zeit, "ersetzt": False,
+                "text": "Routine %s angelegt.%s"
+                        % (name, (" Sie läuft täglich um %s." % zeit) if zeit
+                           else " Sag einfach ihren Namen, dann führe ich sie aus.")}
+
+    def routine_loeschen(self, name: str) -> dict:
+        """Löscht eine Routine - auch bei ungenauem Namen."""
+        treffer = self.routine_finden(name)
+        if not treffer:
+            return {"ok": False, "fehler": "Eine Routine namens '%s' kenne ich nicht." % name}
+        self.memory._schreiben("DELETE FROM routinen WHERE id=?", (treffer["id"],))
+        return {"ok": True, "text": "Die Routine %s ist gelöscht." % treffer["name"]}
+
+    def routinen_liste(self, nur_aktive: bool = True) -> list:
+        """Alle Routinen."""
+        wo = "WHERE aktiv=1" if nur_aktive else ""
+        return self.memory._lesen("SELECT * FROM routinen %s ORDER BY name" % wo)
+
+    def geplante_routinen(self) -> list:
+        """Routinen mit Uhrzeit - genau die hängen sich in den Zeitplan."""
+        return self.memory._lesen(
+            "SELECT * FROM routinen WHERE aktiv=1 AND uhrzeit<>'' ORDER BY uhrzeit")
+
+    # -- Suchen -------------------------------------------------------------
+
+    def _exakt(self, name: str):
+        """Stufe 1: der normalisierte Name stimmt genau überein."""
+        gesucht = name_normalisieren(name)
+        for zeile in self.memory._lesen("SELECT * FROM routinen"):
+            if name_normalisieren(zeile["name"]) == gesucht:
+                return zeile
+        return None
+
+    def routine_finden(self, name: str):
+        """Findet eine Routine dreistufig: exakt, Teiltreffer, einzelne Wörter.
+
+        Damit findet 'den Tages Bericht' die Routine 'tagesbericht'.
+        """
+        if not name or not str(name).strip():
+            return None
+        alle = self.memory._lesen("SELECT * FROM routinen WHERE aktiv=1")
+        if not alle:
+            return None
+
+        gesucht = name_normalisieren(name)
+        gesucht_kompakt = name_kompakt(name)
+
+        # Stufe 1: exakt
+        for zeile in alle:
+            if name_normalisieren(zeile["name"]) == gesucht:
+                return zeile
+
+        # Stufe 2: Teiltreffer, auch ohne Leerzeichen ("dentagesbericht" enthält
+        # "tagesbericht")
+        beste, bestwert = None, 0
+        for zeile in alle:
+            kompakt = name_kompakt(zeile["name"])
+            if not kompakt:
+                continue
+            if kompakt in gesucht_kompakt or gesucht_kompakt in kompakt:
+                wert = len(kompakt)
+                if wert > bestwert:
+                    beste, bestwert = zeile, wert
+        if beste is not None:
+            return beste
+
+        # Stufe 3: einzelne Wörter ab 4 Zeichen
+        woerter = [w for w in gesucht.split() if len(w) >= 4]
+        if not woerter:
+            return None
+        beste, bestwert = None, 0
+        for zeile in alle:
+            kompakt = name_kompakt(zeile["name"])
+            treffer = sum(1 for wort in woerter if wort in kompakt)
+            if treffer > bestwert:
+                beste, bestwert = zeile, treffer
+        return beste if bestwert > 0 else None
+
+    # -- Ausführen ----------------------------------------------------------
+
+    def routine_ausfuehren(self, name: str, agent=None) -> dict:
+        """Übergibt die Anweisung der Routine an Claude - er entscheidet das Wie."""
+        treffer = self.routine_finden(name)
+        if not treffer:
+            vorhandene = ", ".join(z["name"] for z in self.routinen_liste()) or "keine"
+            return {"ok": False,
+                    "fehler": "Eine Routine namens '%s' kenne ich nicht. Ich habe: %s."
+                              % (name, vorhandene)}
+
+        self.memory._schreiben(
+            "UPDATE routinen SET zuletzt=?, laeufe=laeufe+1 WHERE id=?",
+            (zeitstempel(), treffer["id"]))
+
+        if agent is None or not getattr(agent, "einsatzbereit", lambda: False)():
+            return {"ok": False, "name": treffer["name"], "anweisung": treffer["anweisung"],
+                    "fehler": "Ohne Anthropic-Schlüssel kann ich die Routine %s nicht "
+                              "ausführen." % treffer["name"]}
+
+        auftrag = ("Führe jetzt die gespeicherte Routine '%s' aus. Das ist die Anweisung:\n\n%s\n\n"
+                   "Nutze dafür deine Werkzeuge und melde am Ende kurz, was du getan hast."
+                   % (treffer["name"], treffer["anweisung"]))
+        antwort = agent.denken(auftrag, protokollieren=False)
+        return {"ok": True, "name": treffer["name"], "text": antwort}
+
+    def statistik(self) -> dict:
+        """Wie viele Routinen es gibt und welche geplant sind."""
+        alle = self.routinen_liste()
+        geplant = self.geplante_routinen()
+        return {"anzahl": len(alle), "geplant": len(geplant),
+                "namen": [z["name"] for z in alle],
+                "zeiten": {z["name"]: z["uhrzeit"] for z in geplant}}
+
+
+# =========================================================================
+# camera  -  Kamera - ein Einzelbild aufnehmen und von Claude beschreiben lassen.
+# 
+# Damit sieht Jarvis den Nutzer, einen vorgehaltenen Beleg oder ein Objekt.
+# 
+# **Ehrliche Grenze:** Das ist ein Einzelbild auf Zuruf. Kein Dauervideo, keine
+# Überwachung, keine Aufzeichnung im Hintergrund. Das Bild wird nach der
+# Auswertung gelöscht, außer der Nutzer will es ausdrücklich behalten.
+# 
+# Das Kamera-Recht muss dem Terminal unter Systemeinstellungen, Datenschutz,
+# Kamera erteilt sein. Die Ersteinrichtung weist darauf hin.
+# =========================================================================
+
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+
+
+
+class Kamera:
+    """Nimmt Einzelbilder auf und lässt sie von Claude beschreiben."""
+
+    def __init__(self):
+        self.letzter_fehler = ""
+
+    # -- Verfügbarkeit ------------------------------------------------------
+
+    @staticmethod
+    def werkzeug_vorhanden() -> str:
+        """Welches Aufnahmeprogramm ist da? ``imagesnap``, ``ffmpeg`` oder nichts."""
+        if shutil.which("imagesnap"):
+            return "imagesnap"
+        if shutil.which("ffmpeg"):
+            return "ffmpeg"
+        return ""
+
+    def verfuegbar(self) -> bool:
+        """Kann überhaupt ein Bild aufgenommen werden?"""
+        return bool(self.werkzeug_vorhanden())
+
+    def zustand(self) -> dict:
+        """Kurzer Überblick für den Selbsttest."""
+        return {"programm": self.werkzeug_vorhanden() or "keines",
+                "verfuegbar": self.verfuegbar()}
+
+    # -- Aufnahme -----------------------------------------------------------
+
+    def bild_aufnehmen(self, ziel: str = "") -> dict:
+        """Nimmt ein Einzelbild der eingebauten Kamera auf."""
+        programm = self.werkzeug_vorhanden()
+        if not programm:
+            self.letzter_fehler = (
+                "Ich habe kein Programm zum Fotografieren. Bitte im Terminal "
+                "'brew install imagesnap' ausführen, dann kann ich mich umsehen.")
+            return {"ok": False, "fehler": self.letzter_fehler}
+
+        try:
+            BELEGE_VERZEICHNIS.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            pass
+        ziel = ziel or str(BELEGE_VERZEICHNIS /
+                           ("kamera_%d.jpg" % int(time.time())))
+
+        if programm == "imagesnap":
+            # -w wartet kurz, damit sich die Kamera an das Licht anpassen kann.
+            befehl = ["imagesnap", "-q", "-w", "1", ziel]
+        else:
+            befehl = ["ffmpeg", "-y", "-f", "avfoundation", "-framerate", "30",
+                      "-video_size", "1280x720", "-i", "0", "-frames:v", "1", ziel]
+
+        try:
+            ergebnis = subprocess.run(befehl, capture_output=True, timeout=30, shell=False)
+        except subprocess.TimeoutExpired:
+            self.letzter_fehler = "Die Kamera hat nicht rechtzeitig geantwortet."
+            return {"ok": False, "fehler": self.letzter_fehler}
+        except (OSError, subprocess.SubprocessError) as fehler:
+            self.letzter_fehler = "Die Aufnahme ist fehlgeschlagen: %s" % fehler
+            return {"ok": False, "fehler": self.letzter_fehler}
+
+        if not os.path.exists(ziel) or os.path.getsize(ziel) < 1000:
+            fehlertext = (ergebnis.stderr or b"").decode("utf-8", errors="replace")[-300:]
+            self.letzter_fehler = (
+                "Es ist kein Bild entstanden. Meist fehlt das Kamera-Recht: "
+                "Systemeinstellungen, Datenschutz und Sicherheit, Kamera - dort das "
+                "Terminal erlauben und das Terminal neu starten. %s" % fehlertext)
+            return {"ok": False, "fehler": self.letzter_fehler}
+        return {"ok": True, "pfad": ziel}
+
+    # -- Umschauen ----------------------------------------------------------
+
+    def umschauen(self, frage: str = "", agent=None, behalten: bool = False) -> dict:
+        """Nimmt ein Bild auf und beschreibt, was darauf zu sehen ist."""
+        aufnahme = self.bild_aufnehmen()
+        if not aufnahme.get("ok"):
+            return aufnahme
+        pfad = aufnahme["pfad"]
+
+        if agent is None or not getattr(agent, "einsatzbereit", lambda: False)():
+            if not behalten:
+                self._aufraeumen(pfad)
+            return {"ok": False,
+                    "fehler": "Ich habe ein Bild gemacht, kann es ohne Anthropic-Schlüssel "
+                              "aber nicht auswerten."}
+
+        try:
+            with open(pfad, "rb") as datei:
+                rohbild = base64.b64encode(datei.read()).decode("ascii")
+        except OSError as fehler:
+            self._aufraeumen(pfad)
+            return {"ok": False, "fehler": "Das Bild ist nicht lesbar: %s" % fehler}
+
+        auftrag = (frage or "Was ist auf diesem Bild zu sehen?").strip()
+        auftrag += ("\n\nAntworte in zwei bis vier Sätzen, gesprochen, ohne Aufzählungen. "
+                    "Beschreibe nur, was wirklich zu sehen ist. Bist du dir bei etwas "
+                    "nicht sicher, sag das.")
+        antwort = agent.text_anfrage(auftrag, bild_base64=rohbild, bild_typ="image/jpeg")
+
+        if not behalten:
+            self._aufraeumen(pfad)
+        if not antwort.get("ok"):
+            return {"ok": False, "fehler": antwort.get("fehler", "Auswertung fehlgeschlagen.")}
+        return {"ok": True, "text": antwort["text"],
+                "bild": pfad if behalten else "", "behalten": behalten}
+
+    @staticmethod
+    def _aufraeumen(pfad: str):
+        """Löscht das Bild nach der Auswertung."""
+        try:
+            if pfad and os.path.exists(pfad):
+                os.remove(pfad)
+        except OSError:
+            pass
+
+
+# =========================================================================
+# mcp_client  -  MCP - fertige Dienste einbinden, statt jede Anbindung selbst zu programmieren.
+# 
+# Ein MCP-Server ist ein eigener Prozess, der über stdin und stdout JSON-RPC
+# spricht. Der Ablauf ist immer derselbe::
+# 
+#     initialize -> notifications/initialized -> tools/list -> tools/call
+# 
+# Seine Werkzeuge landen als ``mcp__<server>__<werkzeug>`` im Katalog, damit
+# Claude sie neben den eigenen sieht.
+# 
+# **Freigabe umgekehrt als bei den eigenen Werkzeugen:** MCP-Werkzeuge brauchen
+# *standardmäßig* eine Freigabe. Nur was ausdrücklich unter ``ohne_rueckfrage``
+# steht (lesen, suchen, auflisten), läuft durch. Andersherum könnte ein frisch
+# angesteckter Server beim allerersten Aufruf löschen oder versenden, ohne dass je
+# gefragt wurde.
+# =========================================================================
+
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+
+
+MCP_PROTOKOLL_VERSION = "2024-11-05"
+MCP_START_TIMEOUT = 25
+MCP_AUFRUF_TIMEOUT = 90
+
+# Vorlage mit acht gängigen Diensten. Alle stehen bewusst auf "aus": true -
+# der Nutzer schaltet frei, was er wirklich will.
+VORLAGE_MCP = {
+    "_hinweis": ("Ein Dienst wird benutzt, sobald 'aus' auf false steht. "
+                 "Werkzeuge unter 'ohne_rueckfrage' laufen ohne Nachfrage, "
+                 "alle anderen fragen vorher per Telegram nach."),
+    "server": {
+        "dateien": {
+            "aus": True,
+            "befehl": "npx",
+            "argumente": ["-y", "@modelcontextprotocol/server-filesystem",
+                          str(BASIS)],
+            "umgebung": {},
+            "ohne_rueckfrage": ["list_directory", "read_file", "read_text_file",
+                                "search_files", "get_file_info", "directory_tree"],
+        },
+        "notion": {
+            "aus": True,
+            "befehl": "npx",
+            "argumente": ["-y", "@notionhq/notion-mcp-server"],
+            "umgebung": {"NOTION_TOKEN": "HIER_DEIN_NOTION_TOKEN"},
+            "ohne_rueckfrage": ["search", "retrieve_page", "retrieve_database",
+                                "query_database"],
+        },
+        "github": {
+            "aus": True,
+            "befehl": "npx",
+            "argumente": ["-y", "@modelcontextprotocol/server-github"],
+            "umgebung": {"GITHUB_PERSONAL_ACCESS_TOKEN": "HIER_DEIN_GITHUB_TOKEN"},
+            "ohne_rueckfrage": ["search_repositories", "get_file_contents",
+                                "list_issues", "search_code"],
+        },
+        "slack": {
+            "aus": True,
+            "befehl": "npx",
+            "argumente": ["-y", "@modelcontextprotocol/server-slack"],
+            "umgebung": {"SLACK_BOT_TOKEN": "HIER_DEIN_SLACK_TOKEN",
+                         "SLACK_TEAM_ID": "HIER_DEINE_TEAM_ID"},
+            "ohne_rueckfrage": ["slack_list_channels", "slack_get_channel_history",
+                                "slack_get_users"],
+        },
+        "postgres": {
+            "aus": True,
+            "befehl": "npx",
+            "argumente": ["-y", "@modelcontextprotocol/server-postgres",
+                          "postgresql://benutzer:passwort@localhost/datenbank"],
+            "umgebung": {},
+            "ohne_rueckfrage": ["query"],
+        },
+        "suche": {
+            "aus": True,
+            "befehl": "npx",
+            "argumente": ["-y", "@modelcontextprotocol/server-brave-search"],
+            "umgebung": {"BRAVE_API_KEY": "HIER_DEIN_BRAVE_KEY"},
+            "ohne_rueckfrage": ["brave_web_search", "brave_local_search"],
+        },
+        "google_drive": {
+            "aus": True,
+            "befehl": "npx",
+            "argumente": ["-y", "@modelcontextprotocol/server-gdrive"],
+            "umgebung": {"GDRIVE_CREDENTIALS_PATH": "HIER_PFAD_ZU_credentials.json"},
+            "ohne_rueckfrage": ["gdrive_search", "gdrive_read_file"],
+        },
+        "whatsapp": {
+            "aus": True,
+            "befehl": "npx",
+            "argumente": ["-y", "@modelcontextprotocol/server-whatsapp"],
+            "umgebung": {},
+            "ohne_rueckfrage": ["list_chats", "search_contacts", "get_messages"],
+        },
+    },
+}
+
+
+def vorlage_schreiben(pfad=None) -> str:
+    """Legt ``config/mcp_servers.json`` an, falls sie noch fehlt."""
+    ziel = str(pfad or MCP_DATEI)
+    if os.path.exists(ziel):
+        return ziel
+    try:
+        os.makedirs(os.path.dirname(ziel), exist_ok=True)
+        with open(ziel, "w", encoding="utf-8") as datei:
+            json.dump(VORLAGE_MCP, datei, ensure_ascii=False, indent=2)
+    except OSError as fehler:
+        print("[mcp] Vorlage nicht schreibbar: %s" % fehler)
+    return ziel
+
+
+class MCPServer:
+    """Ein einzelner MCP-Server als Unterprozess."""
+
+    def __init__(self, name: str, konfig: dict):
+        self.name = name
+        self.konfig = konfig or {}
+        self.prozess = None
+        self.werkzeugliste = []
+        self.fehler = ""
+        self._zaehler = 0
+        self._antworten = queue.Queue()
+        self._leser = None
+        self._sperre = threading.Lock()
+
+    # -- Start und Ende -----------------------------------------------------
+
+    def starten(self) -> bool:
+        """Startet den Prozess und führt den MCP-Handschlag durch."""
+        befehl = self.konfig.get("befehl")
+        if not befehl:
+            self.fehler = "Für %s ist kein Befehl eingetragen." % self.name
+            return False
+        if not shutil.which(befehl):
+            self.fehler = ("Das Programm '%s' ist nicht installiert - der Dienst %s "
+                           "bleibt aus." % (befehl, self.name))
+            return False
+
+        umgebung = dict(os.environ)
+        for schluessel, wert in (self.konfig.get("umgebung") or {}).items():
+            umgebung[str(schluessel)] = str(wert)
+
+        argumente = [str(teil) for teil in (self.konfig.get("argumente") or [])]
+        try:
+            self.prozess = subprocess.Popen(
+                [befehl] + argumente, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL, env=umgebung, text=True, bufsize=1,
+                shell=False)
+        except (OSError, subprocess.SubprocessError) as fehler:
+            self.fehler = "Der Dienst %s ließ sich nicht starten: %s" % (self.name, fehler)
+            return False
+
+        self._leser = threading.Thread(target=self._mitlesen, daemon=True,
+                                       name="mcp-%s" % self.name)
+        self._leser.start()
+
+        antwort = self._senden("initialize", {
+            "protocolVersion": MCP_PROTOKOLL_VERSION,
+            "capabilities": {"tools": {}},
+            "clientInfo": {"name": "jarvis", "version": "1.0"},
+        }, timeout=MCP_START_TIMEOUT)
+        if antwort is None or "error" in (antwort or {}):
+            self.fehler = ("Der Dienst %s hat den Handschlag nicht beantwortet." % self.name)
+            self.stoppen()
+            return False
+
+        self._benachrichtigen("notifications/initialized", {})
+        self.werkzeuge_laden()
+        return True
+
+    def stoppen(self):
+        """Beendet den Unterprozess."""
+        if self.prozess is None:
+            return
+        try:
+            if self.prozess.stdin:
+                self.prozess.stdin.close()
+        except OSError:
+            pass
+        try:
+            self.prozess.terminate()
+            self.prozess.wait(timeout=5)
+        except (OSError, subprocess.SubprocessError):
+            try:
+                self.prozess.kill()
+            except OSError:
+                pass
+        self.prozess = None
+
+    def laeuft(self) -> bool:
+        """Läuft der Unterprozess noch?"""
+        return self.prozess is not None and self.prozess.poll() is None
+
+    # -- JSON-RPC -----------------------------------------------------------
+
+    def _mitlesen(self):
+        """Liest den stdout des Servers Zeile für Zeile mit."""
+        strom = self.prozess.stdout if self.prozess else None
+        if strom is None:
+            return
+        try:
+            for zeile in strom:
+                zeile = (zeile or "").strip()
+                if not zeile:
+                    continue
+                try:
+                    self._antworten.put(json.loads(zeile))
+                except ValueError:
+                    continue  # Zeilen ohne JSON sind Logausgaben des Servers.
+        except (OSError, ValueError):
+            pass
+
+    def _benachrichtigen(self, methode: str, parameter: dict):
+        """Schickt eine Benachrichtigung ohne Antwort."""
+        self._schreiben({"jsonrpc": "2.0", "method": methode, "params": parameter or {}})
+
+    def _schreiben(self, nachricht: dict) -> bool:
+        """Schreibt eine JSON-RPC-Nachricht auf stdin des Servers."""
+        if not self.laeuft() or not self.prozess.stdin:
+            return False
+        try:
+            self.prozess.stdin.write(json.dumps(nachricht) + "\n")
+            self.prozess.stdin.flush()
+            return True
+        except (OSError, ValueError, BrokenPipeError):
+            return False
+
+    def _senden(self, methode: str, parameter: dict, timeout: int = MCP_AUFRUF_TIMEOUT):
+        """Schickt eine Anfrage und wartet auf die passende Antwort."""
+        with self._sperre:
+            self._zaehler += 1
+            kennung = self._zaehler
+            if not self._schreiben({"jsonrpc": "2.0", "id": kennung,
+                                    "method": methode, "params": parameter or {}}):
+                return None
+            ende = time.time() + timeout
+            zurueckgelegt = []
+            antwort = None
+            while time.time() < ende:
+                try:
+                    nachricht = self._antworten.get(timeout=0.5)
+                except queue.Empty:
+                    if not self.laeuft():
+                        break
+                    continue
+                if nachricht.get("id") == kennung:
+                    antwort = nachricht
+                    break
+                zurueckgelegt.append(nachricht)
+            for nachricht in zurueckgelegt:
+                self._antworten.put(nachricht)
+            return antwort
+
+    # -- Werkzeuge ----------------------------------------------------------
+
+    def werkzeuge_laden(self) -> list:
+        """Fragt den Server nach seinen Werkzeugen."""
+        antwort = self._senden("tools/list", {}, timeout=MCP_START_TIMEOUT)
+        if not antwort or "result" not in antwort:
+            self.werkzeugliste = []
+            return []
+        self.werkzeugliste = (antwort["result"] or {}).get("tools", []) or []
+        return self.werkzeugliste
+
+    def aufrufen(self, werkzeug: str, argumente: dict) -> dict:
+        """Ruft ein Werkzeug des Servers auf."""
+        if not self.laeuft():
+            return {"ok": False, "fehler": "Der Dienst %s läuft nicht." % self.name}
+        antwort = self._senden("tools/call",
+                               {"name": werkzeug, "arguments": argumente or {}})
+        if antwort is None:
+            return {"ok": False,
+                    "fehler": "Der Dienst %s hat nicht geantwortet." % self.name}
+        if "error" in antwort:
+            meldung = (antwort["error"] or {}).get("message", "unbekannter Fehler")
+            return {"ok": False, "fehler": "%s meldet: %s" % (self.name, meldung)}
+        ergebnis = antwort.get("result") or {}
+        teile = []
+        for eintrag in ergebnis.get("content", []) or []:
+            if isinstance(eintrag, dict) and eintrag.get("type") == "text":
+                teile.append(str(eintrag.get("text", "")))
+            else:
+                teile.append(json.dumps(eintrag, ensure_ascii=False))
+        text = "\n".join(teile) if teile else json.dumps(ergebnis, ensure_ascii=False)
+        if ergebnis.get("isError"):
+            return {"ok": False, "fehler": text}
+        return {"ok": True, "text": text}
+
+
+class MCPClient:
+    """Verwaltet alle eingeschalteten MCP-Server."""
+
+    def __init__(self, konfig_pfad=None):
+        self.konfig_pfad = str(konfig_pfad or MCP_DATEI)
+        self.server = {}
+        self.konfig = {}
+        self.meldungen = []
+
+    def konfiguration_lesen(self) -> dict:
+        """Liest ``config/mcp_servers.json`` und legt sie an, falls sie fehlt."""
+        vorlage_schreiben(self.konfig_pfad)
+        try:
+            with open(self.konfig_pfad, "r", encoding="utf-8") as datei:
+                self.konfig = json.load(datei) or {}
+        except (OSError, ValueError) as fehler:
+            self.meldungen.append("Die MCP-Konfiguration ist fehlerhaft: %s" % fehler)
+            self.konfig = {}
+        return self.konfig
+
+    def starten(self) -> dict:
+        """Startet alle Dienste, die nicht auf 'aus' stehen."""
+        self.konfiguration_lesen()
+        gestartet, uebersprungen, fehlgeschlagen = [], [], []
+        for name, eintrag in (self.konfig.get("server") or {}).items():
+            if not isinstance(eintrag, dict):
+                continue
+            if eintrag.get("aus", True):
+                uebersprungen.append(name)
+                continue
+            server = MCPServer(name, eintrag)
+            if server.starten():
+                self.server[name] = server
+                gestartet.append(name)
+            else:
+                fehlgeschlagen.append("%s (%s)" % (name, server.fehler))
+                self.meldungen.append(server.fehler)
+        return {"gestartet": gestartet, "aus": uebersprungen,
+                "fehlgeschlagen": fehlgeschlagen}
+
+    def server_hinzufuegen(self, name: str, server: MCPServer):
+        """Hängt einen bereits gestarteten Server ein - vor allem für Tests."""
+        self.server[name] = server
+
+    def stoppen(self):
+        """Beendet alle Dienste."""
+        for server in list(self.server.values()):
+            server.stoppen()
+        self.server.clear()
+
+    # -- Katalog ------------------------------------------------------------
+
+    def alle_werkzeuge(self) -> list:
+        """Alle MCP-Werkzeuge im Format, das die Claude-Schnittstelle erwartet."""
+        katalog = []
+        for name, server in self.server.items():
+            for werkzeug in server.werkzeugliste:
+                if not isinstance(werkzeug, dict) or not werkzeug.get("name"):
+                    continue
+                katalog.append({
+                    "name": "mcp__%s__%s" % (name, werkzeug["name"]),
+                    "description": ("[%s] %s" % (name, werkzeug.get("description", "")))[:900],
+                    "input_schema": werkzeug.get("inputSchema")
+                                    or {"type": "object", "properties": {}},
+                })
+        return katalog
+
+    def ist_mcp_werkzeug(self, name: str) -> bool:
+        """Gehört dieser Werkzeugname zu einem MCP-Server?"""
+        return str(name or "").startswith("mcp__")
+
+    def zerlegen(self, voller_name: str):
+        """Zerlegt ``mcp__server__werkzeug`` in seine beiden Teile."""
+        if not self.ist_mcp_werkzeug(voller_name):
+            return None, None
+        rest = voller_name[len("mcp__"):]
+        server, _, werkzeug = rest.partition("__")
+        return server, werkzeug
+
+    def braucht_freigabe(self, voller_name: str) -> bool:
+        """Standardmäßig ja - nur ausdrücklich freigegebene Werkzeuge laufen durch."""
+        server_name, werkzeug = self.zerlegen(voller_name)
+        if not server_name:
+            return True
+        eintrag = (self.konfig.get("server") or {}).get(server_name) or {}
+        ohne = eintrag.get("ohne_rueckfrage") or []
+        return werkzeug not in [str(w) for w in ohne]
+
+    def aufrufen(self, voller_name: str, argumente: dict) -> dict:
+        """Ruft ein MCP-Werkzeug auf. Die Freigabe prüft der Werkzeugkatalog davor."""
+        server_name, werkzeug = self.zerlegen(voller_name)
+        if not server_name:
+            return {"ok": False, "fehler": "'%s' ist kein MCP-Werkzeug." % voller_name}
+        server = self.server.get(server_name)
+        if server is None:
+            return {"ok": False,
+                    "fehler": "Der Dienst %s ist nicht eingeschaltet." % server_name}
+        return server.aufrufen(werkzeug, argumente)
+
+    def zustand(self) -> dict:
+        """Was läuft, was ist aus - für Selbsttest und Dashboard."""
+        return {"dienste": {name: {"laeuft": server.laeuft(),
+                                   "werkzeuge": len(server.werkzeugliste)}
+                            for name, server in self.server.items()},
+                "anzahl_werkzeuge": len(self.alle_werkzeuge()),
+                "konfiguration": self.konfig_pfad,
+                "meldungen": self.meldungen[-5:]}
+
+
+# =========================================================================
+# world  -  Welt - echtes Wetter und Recherche.
+# 
+# Das Wetter kommt von Open-Meteo: kostenlos, ohne Schlüssel, ohne Anmeldung.
+# Zuerst wird der Ortsname in Koordinaten übersetzt, dann die Vorhersage geholt.
+# 
+# Recherche und Flugsuche laufen über einen Such-MCP (Brave). **Flüge werden
+# gefunden und genannt, nie gebucht.** Das Buchen läuft danach über die
+# Bildschirmsteuerung mit ausdrücklicher Freigabe - niemals heimlich.
+# =========================================================================
+
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+
+
+GEO_URL = "https://geocoding-api.open-meteo.com/v1/search"
+WETTER_URL = "https://api.open-meteo.com/v1/forecast"
+
+# WMO-Wettercodes in verständliches Deutsch.
+WETTERLAGE = {
+    0: "klar", 1: "überwiegend klar", 2: "teilweise bewölkt", 3: "bedeckt",
+    45: "neblig", 48: "Nebel mit Reifbildung",
+    51: "leichter Nieselregen", 53: "Nieselregen", 55: "starker Nieselregen",
+    56: "gefrierender Nieselregen", 57: "starker gefrierender Nieselregen",
+    61: "leichter Regen", 63: "Regen", 65: "starker Regen",
+    66: "gefrierender Regen", 67: "starker gefrierender Regen",
+    71: "leichter Schneefall", 73: "Schneefall", 75: "starker Schneefall",
+    77: "Schneekörner", 80: "leichte Regenschauer", 81: "Regenschauer",
+    82: "heftige Regenschauer", 85: "Schneeschauer", 86: "starke Schneeschauer",
+    95: "Gewitter", 96: "Gewitter mit Hagel", 99: "schweres Gewitter mit Hagel",
+}
+
+
+def _holen(url: str, parameter: dict, timeout: int = 20, versuche: int = 3):
+    """Holt JSON von einer Adresse.
+
+    Ein einzelner Verbindungsabbruch - unterwegs im Auto oder im WLAN eines
+    Kunden keine Seltenheit - soll nicht gleich als "kein Wetter" beim Nutzer
+    ankommen. Deshalb wird mit wachsendem Abstand nachgefasst.
+    """
+    ziel = "%s?%s" % (url, urllib.parse.urlencode(parameter))
+    letzter_fehler = "unbekannt"
+    for versuch in range(max(1, versuche)):
+        try:
+            anfrage = urllib.request.Request(ziel, headers={"User-Agent": "Jarvis/1.0"})
+            with urllib.request.urlopen(anfrage, timeout=timeout) as antwort:
+                return json.loads(antwort.read().decode("utf-8")), ""
+        except urllib.error.HTTPError as fehler:
+            return None, "Der Wetterdienst antwortet mit Fehler %d." % fehler.code
+        except (urllib.error.URLError, OSError, ValueError) as fehler:
+            letzter_fehler = str(fehler)
+            if versuch + 1 < max(1, versuche):
+                time.sleep(1.5 * (versuch + 1))
+    return None, "Der Wetterdienst ist nicht erreichbar: %s" % letzter_fehler
+
+
+class Welt:
+    """Wetter, Recherche und Flugsuche."""
+
+    def __init__(self, mcp=None):
+        self.mcp = mcp
+
+    # -- Wetter -------------------------------------------------------------
+
+    def ort_finden(self, ort: str):
+        """Übersetzt einen Ortsnamen in Koordinaten."""
+        daten, fehler = _holen(GEO_URL, {"name": ort, "count": 1,
+                                         "language": "de", "format": "json"})
+        if daten is None:
+            return None, fehler
+        treffer = (daten or {}).get("results") or []
+        if not treffer:
+            return None, "Den Ort '%s' finde ich nicht." % ort
+        erster = treffer[0]
+        return {"name": erster.get("name", ort),
+                "land": erster.get("country", ""),
+                "breite": erster.get("latitude"),
+                "laenge": erster.get("longitude")}, ""
+
+    def wetter(self, ort: str = "") -> dict:
+        """Aktuelles Wetter und die nächsten zwei Tage - als gesprochener Satz."""
+        ort = (ort or WETTER_ORT or "Wien").strip()
+        koordinaten, fehler = self.ort_finden(ort)
+        if koordinaten is None:
+            return {"ok": False, "fehler": fehler}
+
+        daten, fehler = _holen(WETTER_URL, {
+            "latitude": koordinaten["breite"], "longitude": koordinaten["laenge"],
+            "current": "temperature_2m,weather_code,wind_speed_10m,relative_humidity_2m",
+            "daily": "temperature_2m_max,temperature_2m_min,weather_code,"
+                     "precipitation_probability_max",
+            "timezone": "auto", "forecast_days": 3})
+        if daten is None:
+            return {"ok": False, "fehler": fehler}
+
+        jetzt = daten.get("current") or {}
+        taeglich = daten.get("daily") or {}
+        lage = WETTERLAGE.get(int(jetzt.get("weather_code") or 0), "wechselhaft")
+        temperatur = jetzt.get("temperature_2m")
+        wind = jetzt.get("wind_speed_10m")
+
+        satz = ("In %s ist es gerade %s bei %.0f Grad, Wind %.0f Kilometer pro Stunde."
+                % (koordinaten["name"], lage, float(temperatur or 0), float(wind or 0)))
+
+        tage = []
+        namen = ["Heute", "Morgen", "Übermorgen"]
+        for index in range(min(3, len(taeglich.get("time", []) or []))):
+            hoch = (taeglich.get("temperature_2m_max") or [None])[index]
+            tief = (taeglich.get("temperature_2m_min") or [None])[index]
+            code = (taeglich.get("weather_code") or [0])[index]
+            regen = (taeglich.get("precipitation_probability_max") or [0])[index]
+            tage.append({"tag": namen[index] if index < 3 else taeglich["time"][index],
+                         "hoch": hoch, "tief": tief,
+                         "lage": WETTERLAGE.get(int(code or 0), "wechselhaft"),
+                         "regenwahrscheinlichkeit": regen})
+            if index <= 1:
+                satz += (" %s %s, %.0f bis %.0f Grad, Regenwahrscheinlichkeit %d Prozent."
+                         % (namen[index], WETTERLAGE.get(int(code or 0), "wechselhaft"),
+                            float(tief or 0), float(hoch or 0), int(regen or 0)))
+
+        # Für einen Gebäudereiniger ist Regen kein Nebenthema: Fensterreinigung
+        # und Außenflächen fallen dann aus.
+        regen_heute = (taeglich.get("precipitation_probability_max") or [0])[0]
+        if regen_heute and int(regen_heute) >= 60:
+            satz += " Bei der Regenwahrscheinlichkeit würde ich Fensterarbeiten verschieben."
+
+        return {"ok": True, "ort": koordinaten["name"], "aktuell": jetzt,
+                "tage": tage, "text": satz}
+
+    # -- Recherche ----------------------------------------------------------
+
+    def _such_werkzeug(self):
+        """Sucht das passende Werkzeug des Such-MCP-Servers."""
+        if self.mcp is None:
+            return ""
+        for werkzeug in self.mcp.alle_werkzeuge():
+            name = werkzeug.get("name", "")
+            if "search" in name.lower() and "local" not in name.lower():
+                return name
+        return ""
+
+    def recherche(self, frage: str) -> dict:
+        """Sucht im Web über den Such-MCP."""
+        frage = (frage or "").strip()
+        if not frage:
+            return {"ok": False, "fehler": "Sag mir, wonach ich suchen soll."}
+        werkzeug = self._such_werkzeug()
+        if not werkzeug:
+            return {"ok": False,
+                    "fehler": "Für die Recherche fehlt der Such-Dienst. In "
+                              "config/mcp_servers.json den Eintrag 'suche' auf "
+                              "\"aus\": false stellen und einen Brave-Schlüssel eintragen."}
+        ergebnis = self.mcp.aufrufen(werkzeug, {"query": frage, "count": 6})
+        if not ergebnis.get("ok"):
+            return ergebnis
+        return {"ok": True, "frage": frage, "text": ergebnis["text"][:4000]}
+
+    def flug_suchen(self, von: str, nach: str, wann: str = "") -> dict:
+        """Sucht Flugverbindungen und nennt sie. Gebucht wird hier nichts."""
+        von, nach = (von or "").strip(), (nach or "").strip()
+        if not von or not nach:
+            return {"ok": False, "fehler": "Ich brauche Abflugort und Ziel."}
+        anfrage = "Flug von %s nach %s%s Preise Fluggesellschaft Abflugzeit" % (
+            von, nach, (" am %s" % wann) if wann else "")
+        ergebnis = self.recherche(anfrage)
+        if not ergebnis.get("ok"):
+            return ergebnis
+        return {"ok": True, "von": von, "nach": nach, "wann": wann,
+                "gebucht": False,
+                "text": ("Das habe ich zu Flügen von %s nach %s gefunden:\n%s\n\n"
+                         "Gebucht ist nichts. Wenn du willst, buche ich über die "
+                         "Bildschirmsteuerung - dafür fragst du mich noch einmal und "
+                         "bestätigst jeden Schritt."
+                         % (von, nach, ergebnis["text"][:2500]))}
+
+
+# =========================================================================
+# messenger  -  Versand - echte Nachrichten über vier Wege.
+# 
+#     telegram   Text oder Sprachnachricht
+#     mail       über SMTP
+#     imessage   Nachrichten-App per AppleScript (auch SMS)
+#     whatsapp   über einen MCP-Server
+# 
+# Beim AppleScript werden Nummer und Text **als Argumente übergeben**, nicht in
+# den Skripttext eingebaut. Ein Text mit Anführungszeichen würde sonst das Skript
+# aufbrechen - und wer den Text bestimmt, bestimmte dann das Skript.
+# 
+# Jeder Versand nach außen braucht eine Freigabe. Die holt der Werkzeugkatalog
+# ein, bevor eine Methode dieses Moduls überhaupt aufgerufen wird.
+# =========================================================================
+
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+
+
+# Nummer und Text kommen über argv herein, nicht über Textersetzung.
+IMESSAGE_SKRIPT = """on run argv
+    set zielAdresse to item 1 of argv
+    set nachrichtText to item 2 of argv
+    tell application "Messages"
+        try
+            set zielDienst to 1st service whose service type = iMessage
+            set zielPerson to buddy zielAdresse of zielDienst
+            send nachrichtText to zielPerson
+            return "iMessage"
+        on error
+            set smsDienst to 1st service whose service type = SMS
+            set smsPerson to buddy zielAdresse of smsDienst
+            send nachrichtText to smsPerson
+            return "SMS"
+        end try
+    end tell
+end run"""
+
+KANAELE = ("telegram", "mail", "imessage", "whatsapp")
+
+
+class Messenger:
+    """Verschickt Nachrichten über den jeweils passenden Weg."""
+
+    def __init__(self, telegram=None, mail=None, mcp=None, stimme=None):
+        self.telegram = telegram
+        self.mail = mail
+        self.mcp = mcp
+        self.stimme = stimme
+
+    def zustand(self) -> dict:
+        """Welche Wege stehen offen?"""
+        return {
+            "telegram": bool(self.telegram and self.telegram.verfuegbar()),
+            "mail": bool(self.mail and self.mail.senden_moeglich()),
+            "imessage": bool(shutil.which("osascript")),
+            "whatsapp": bool(self._whatsapp_werkzeug()),
+        }
+
+    # -- Hauptzugang --------------------------------------------------------
+
+    def nachricht_senden(self, kanal: str, an: str, text: str,
+                         als_sprache: bool = False, betreff: str = "") -> dict:
+        """Verschickt eine Nachricht über den gewählten Kanal."""
+        kanal = (kanal or "").strip().lower()
+        text = (text or "").strip()
+        if not text:
+            return {"ok": False, "fehler": "Die Nachricht ist leer."}
+        if kanal in ("sms", "nachrichten"):
+            kanal = "imessage"
+        if kanal in ("email", "e-mail"):
+            kanal = "mail"
+        if kanal not in KANAELE:
+            return {"ok": False,
+                    "fehler": "Den Kanal '%s' kenne ich nicht. Möglich sind: %s."
+                              % (kanal, ", ".join(KANAELE))}
+
+        if kanal == "telegram":
+            return self._telegram(an, text, als_sprache)
+        if kanal == "mail":
+            return self._mail(an, betreff, text)
+        if kanal == "imessage":
+            return self._imessage(an, text)
+        return self._whatsapp(an, text)
+
+    # -- Die einzelnen Wege -------------------------------------------------
+
+    def _telegram(self, an: str, text: str, als_sprache: bool) -> dict:
+        """Telegram, wahlweise als Sprachnachricht."""
+        if self.telegram is None or not self.telegram.verfuegbar():
+            return {"ok": False, "fehler": "Telegram ist nicht eingerichtet."}
+        if als_sprache and self.stimme is not None:
+            pfad = self.stimme.sprachdatei_erzeugen(text)
+            if pfad:
+                ergebnis = self.telegram.datei_senden(pfad, "sendVoice", "voice", an or "")
+                try:
+                    os.remove(pfad)
+                except OSError:
+                    pass
+                if ergebnis.get("ok"):
+                    return {"ok": True, "kanal": "telegram",
+                            "text": "Sprachnachricht ist raus."}
+                # Klappt die Sprachnachricht nicht, geht wenigstens der Text raus.
+                print("[versand] Sprachnachricht fehlgeschlagen: %s"
+                      % ergebnis.get("fehler"))
+        ergebnis = self.telegram.senden(text, an or "")
+        if ergebnis.get("ok"):
+            return {"ok": True, "kanal": "telegram", "text": "Nachricht ist raus."}
+        return ergebnis
+
+    def _mail(self, an: str, betreff: str, text: str) -> dict:
+        """E-Mail über SMTP."""
+        if self.mail is None or not self.mail.senden_moeglich():
+            return {"ok": False, "fehler": "Der Mailversand ist nicht eingerichtet."}
+        if not an:
+            return {"ok": False, "fehler": "Ich brauche eine Empfängeradresse."}
+        ergebnis = self.mail.senden(an, betreff or "Nachricht von %s" % NUTZER_NAME,
+                                    text)
+        if ergebnis.get("ok"):
+            ergebnis["kanal"] = "mail"
+        return ergebnis
+
+    def _imessage(self, an: str, text: str) -> dict:
+        """iMessage oder SMS über die Nachrichten-App."""
+        if not shutil.which("osascript"):
+            return {"ok": False,
+                    "fehler": "iMessage gibt es nur auf einem Mac mit der Nachrichten-App."}
+        if not an:
+            return {"ok": False,
+                    "fehler": "Ich brauche eine Telefonnummer oder Apple-ID."}
+        try:
+            # Das Skript kommt über stdin, Nummer und Text als eigene Argumente.
+            ergebnis = subprocess.run(
+                ["osascript", "-", str(an), str(text)],
+                input=IMESSAGE_SKRIPT, capture_output=True, text=True,
+                timeout=45, shell=False)
+        except (OSError, subprocess.SubprocessError) as fehler:
+            return {"ok": False, "fehler": "Die Nachrichten-App antwortet nicht: %s" % fehler}
+        if ergebnis.returncode != 0:
+            meldung = (ergebnis.stderr or "").strip()[:300]
+            if "not allowed" in meldung.lower() or "1743" in meldung:
+                return {"ok": False,
+                        "fehler": "Die Nachrichten-App verweigert den Zugriff. In den "
+                                  "Systemeinstellungen unter Datenschutz, Automation dem "
+                                  "Terminal die Steuerung von Nachrichten erlauben."}
+            return {"ok": False, "fehler": "Die Nachricht ging nicht raus: %s" % meldung}
+        weg = (ergebnis.stdout or "iMessage").strip() or "iMessage"
+        return {"ok": True, "kanal": "imessage",
+                "text": "Nachricht an %s über %s ist raus." % (an, weg)}
+
+    def _whatsapp_werkzeug(self) -> str:
+        """Sucht ein Sende-Werkzeug beim WhatsApp-MCP-Server."""
+        if self.mcp is None:
+            return ""
+        for werkzeug in self.mcp.alle_werkzeuge():
+            name = werkzeug.get("name", "")
+            if name.startswith("mcp__whatsapp__") and "send" in name.lower():
+                return name
+        return ""
+
+    def _whatsapp(self, an: str, text: str) -> dict:
+        """WhatsApp über den MCP-Server."""
+        werkzeug = self._whatsapp_werkzeug()
+        if not werkzeug:
+            return {"ok": False,
+                    "fehler": "WhatsApp läuft über einen MCP-Dienst. In "
+                              "config/mcp_servers.json den Eintrag 'whatsapp' auf "
+                              "\"aus\": false stellen."}
+        if not an:
+            return {"ok": False, "fehler": "Ich brauche eine Telefonnummer."}
+        ergebnis = self.mcp.aufrufen(werkzeug, {"recipient": an, "message": text})
+        if ergebnis.get("ok"):
+            return {"ok": True, "kanal": "whatsapp",
+                    "text": "WhatsApp-Nachricht an %s ist raus." % an}
+        return ergebnis
+
+
+# =========================================================================
+# computer_use  -  Bildschirmsteuerung - sehen, klicken, tippen.
+# 
+# Vier Dinge, an denen die üblichen Anleitungen auf dem Mac scheitern:
+# 
+# 1. **Retina-Skalierung.** Ein MacBook-Screenshot hat die doppelte Pixelzahl der
+#    logischen Bildschirmgröße. Ohne Umrechnung landet jeder Klick bei der Hälfte
+#    der Koordinate, also im linken oberen Viertel. Das ist der häufigste Grund,
+#    warum solche Skripte auf dem Mac scheinbar grundlos danebenklicken. Der
+#    Faktor wird gemessen (``bild.width / pyautogui.size().width``), nicht geraten.
+# 2. **Bestätigung vor jedem Schritt.** Ein frei klickender Agent verschickt sonst
+#    etwas, bevor der Nutzer überhaupt reagieren kann.
+# 3. **Kostenbremse.** Der Screenshot wird vor dem Senden auf 1400 Pixel Breite
+#    verkleinert. Ein Vollbild in Originalgröße kostet ein Vielfaches, ohne dass
+#    der Agent mehr erkennt. Ein Screenshot pro Schritt, nicht mehrere.
+# 4. **Selbstabbruch.** Sieht der Agent eine Login-Maske, einen Bezahlvorgang oder
+#    eine Warnung, hält er an, statt weiterzuklicken.
+# =========================================================================
+
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+
+
+
+MAX_BREITE = 1400
+MAX_SCHRITTE = 12
+
+ERLAUBTE_AKTIONEN = ("click", "doubleclick", "type", "press", "hotkey",
+                     "scroll", "wait", "done", "abbruch")
+
+# Begriffe, bei denen der Agent von sich aus stehen bleibt.
+STOPP_BEGRIFFE = ["passwort", "password", "anmelden", "login", "sign in",
+                  "kreditkarte", "credit card", "bezahlen", "zahlung", "checkout",
+                  "cvv", "iban", "zwei-faktor", "verifizierungscode", "warnung",
+                  "endgültig löschen", "unwiderruflich"]
+
+STEUER_PROMPT = """Du steuerst einen Mac über Screenshots. Du siehst das Bild und
+gibst genau einen nächsten Schritt zurück.
+
+Antworte ausschließlich als JSON, ohne Fließtext:
+{"gedanke": "was du siehst und warum dieser Schritt", "aktion": "click",
+ "x": 100, "y": 200, "text": "", "tasten": [], "richtung": 0}
+
+Mögliche Aktionen:
+  click        x und y setzen
+  doubleclick  x und y setzen
+  type         text setzen
+  press        text ist der Tastenname, etwa enter oder tab
+  hotkey       tasten als Liste, etwa ["command","s"]
+  scroll       richtung negativ für nach unten
+  wait         kurz warten
+  done         Ziel erreicht, text enthält das Ergebnis
+  abbruch      du kommst nicht weiter oder es wird heikel, text enthält den Grund
+
+Koordinaten beziehen sich auf das Bild, das du gerade siehst.
+
+Halte sofort mit abbruch an, wenn du eine Login-Maske, eine Passwortabfrage,
+einen Bezahlvorgang oder eine Warnung vor unwiderruflichen Änderungen siehst.
+Klicke niemals darüber hinweg.
+
+Das Ziel: %s
+"""
+
+
+class Bildschirm:
+    """Steuert den Mac über Screenshots - Schritt für Schritt, jeder bestätigt."""
+
+    def __init__(self, agent=None):
+        self.agent = agent
+        self.letzter_fehler = ""
+        if pyautogui is not None:
+            # Maus in eine Bildschirmecke bricht alles ab - die Notbremse.
+            pyautogui.FAILSAFE = True
+            pyautogui.PAUSE = 0.3
+
+    # -- Verfügbarkeit ------------------------------------------------------
+
+    def verfuegbar(self) -> bool:
+        """Ist die Bildschirmsteuerung technisch nutzbar?"""
+        return pyautogui is not None and Image is not None
+
+    def zustand(self) -> dict:
+        """Kurzer Überblick für den Selbsttest."""
+        zustand = {"pyautogui": pyautogui is not None, "pillow": Image is not None,
+                   "skalierung": None, "bildschirm": None}
+        if self.verfuegbar():
+            try:
+                groesse = pyautogui.size()
+                zustand["bildschirm"] = "%dx%d" % (groesse.width, groesse.height)
+                zustand["skalierung"] = self.skalierung_messen()
+            except Exception as fehler:
+                zustand["fehler"] = str(fehler)
+        return zustand
+
+    def skalierung_messen(self) -> float:
+        """Misst den Retina-Faktor: Screenshot-Pixel geteilt durch logische Breite."""
+        if not self.verfuegbar():
+            return 1.0
+        try:
+            bild = pyautogui.screenshot()
+            logisch = pyautogui.size()
+            if not logisch.width:
+                return 1.0
+            return float(bild.width) / float(logisch.width)
+        except Exception:
+            return 1.0
+
+    # -- Screenshot ---------------------------------------------------------
+
+    def screenshot(self):
+        """Nimmt einen Screenshot auf und verkleinert ihn auf 1400 Pixel Breite.
+
+        Gibt ``(base64, faktor_bild_zu_logisch)`` zurück. Der Faktor rechnet
+        Koordinaten aus dem gesendeten Bild direkt in Bildschirmkoordinaten um -
+        Retina-Skalierung und Verkleinerung stecken beide darin.
+        """
+        if not self.verfuegbar():
+            return None, 1.0
+        try:
+            bild = pyautogui.screenshot()
+            logisch = pyautogui.size()
+        except Exception as fehler:
+            self.letzter_fehler = (
+                "Ich kann keinen Screenshot machen: %s. In den Systemeinstellungen "
+                "unter Datenschutz die Bildschirmaufnahme für das Terminal "
+                "freigeben." % fehler)
+            return None, 1.0
+
+        original_breite = bild.width
+        if original_breite > MAX_BREITE:
+            neue_hoehe = int(bild.height * MAX_BREITE / float(original_breite))
+            bild = bild.resize((MAX_BREITE, neue_hoehe), Image.LANCZOS)
+
+        # Vom gesendeten Bild direkt auf die logische Bildschirmbreite.
+        faktor = float(logisch.width) / float(bild.width)
+
+        puffer = io.BytesIO()
+        bild.convert("RGB").save(puffer, format="PNG", optimize=True)
+        return base64.b64encode(puffer.getvalue()).decode("ascii"), faktor
+
+    # -- Einzelaktionen -----------------------------------------------------
+
+    def _aktion_ausfuehren(self, schritt: dict, faktor: float) -> str:
+        """Führt genau einen Schritt aus und beschreibt, was passiert ist."""
+        aktion = str(schritt.get("aktion", "")).strip().lower()
+        if aktion not in ERLAUBTE_AKTIONEN:
+            return "Die Aktion '%s' kenne ich nicht." % aktion
+
+        def logisch(wert):
+            """Bildkoordinate in Bildschirmkoordinate umrechnen."""
+            try:
+                return int(round(float(wert) * faktor))
+            except (TypeError, ValueError):
+                return 0
+
+        try:
+            if aktion in ("click", "doubleclick"):
+                x, y = logisch(schritt.get("x")), logisch(schritt.get("y"))
+                if aktion == "click":
+                    pyautogui.click(x, y)
+                else:
+                    pyautogui.doubleClick(x, y)
+                return "Auf %d, %d geklickt." % (x, y)
+            if aktion == "type":
+                pyautogui.typewrite(str(schritt.get("text", "")), interval=0.02)
+                return "Text getippt."
+            if aktion == "press":
+                taste = str(schritt.get("text", "enter")).strip().lower()
+                pyautogui.press(taste)
+                return "Taste %s gedrückt." % taste
+            if aktion == "hotkey":
+                tasten = [str(t).strip().lower() for t in (schritt.get("tasten") or []) if t]
+                if not tasten:
+                    return "Für hotkey fehlen die Tasten."
+                pyautogui.hotkey(*tasten)
+                return "Tastenkombination %s ausgelöst." % "+".join(tasten)
+            if aktion == "scroll":
+                try:
+                    richtung = int(schritt.get("richtung") or -3)
+                except (TypeError, ValueError):
+                    richtung = -3
+                pyautogui.scroll(richtung * 100)
+                return "Gescrollt."
+            if aktion == "wait":
+                time.sleep(1.5)
+                return "Kurz gewartet."
+        except Exception as fehler:
+            return "Der Schritt ist fehlgeschlagen: %s" % fehler
+        return ""
+
+    @staticmethod
+    def _heikel(schritt: dict) -> str:
+        """Erkennt heikle Lagen im Gedanken des Agenten."""
+        gedanke = ("%s %s" % (schritt.get("gedanke", ""), schritt.get("text", ""))).lower()
+        for begriff in STOPP_BEGRIFFE:
+            if begriff in gedanke:
+                return begriff
+        return ""
+
+    # -- Hauptschleife ------------------------------------------------------
+
+    def bedienen(self, ziel: str, schritte_max: int = MAX_SCHRITTE,
+                 bestaetigen: bool = True) -> dict:
+        """Arbeitet ein Ziel Schritt für Schritt ab.
+
+        Vor jedem Schritt wird angezeigt, was geschehen soll, und auf Enter
+        gewartet. Die Freigabe für den ganzen Vorgang holt der Werkzeugkatalog
+        vorher ein.
+        """
+        if not self.verfuegbar():
+            return {"ok": False,
+                    "fehler": "Für die Bildschirmsteuerung fehlen die Pakete pyautogui "
+                              "und pillow. Ohne sie läuft alles andere weiter."}
+        if self.agent is None or not getattr(self.agent, "einsatzbereit", lambda: False)():
+            return {"ok": False,
+                    "fehler": "Ohne Anthropic-Schlüssel kann ich den Bildschirm nicht sehen."}
+
+        verlauf = []
+        for nummer in range(1, max(1, int(schritte_max)) + 1):
+            bild, faktor = self.screenshot()
+            if bild is None:
+                return {"ok": False, "fehler": self.letzter_fehler,
+                        "schritte": verlauf}
+
+            auftrag = STEUER_PROMPT % ziel
+            if verlauf:
+                auftrag += "\nWas bisher geschah:\n" + "\n".join(verlauf[-6:])
+
+            antwort = self.agent.json_anfrage(auftrag, bild_base64=bild,
+                                              bild_typ="image/png")
+            if not antwort.get("ok"):
+                return {"ok": False,
+                        "fehler": "Der Bildschirmagent hat nicht sauber geantwortet: %s"
+                                  % antwort.get("fehler", ""), "schritte": verlauf}
+
+            schritt = antwort["daten"]
+            aktion = str(schritt.get("aktion", "")).lower()
+            gedanke = str(schritt.get("gedanke", ""))[:300]
+
+            if aktion == "abbruch":
+                grund = schritt.get("text") or gedanke or "kein Grund genannt"
+                return {"ok": False, "abgebrochen": True, "schritte": verlauf,
+                        "text": "Ich habe abgebrochen: %s" % grund}
+            if aktion == "done":
+                ergebnis = schritt.get("text") or "Fertig."
+                verlauf.append("Schritt %d: fertig." % nummer)
+                return {"ok": True, "schritte": verlauf, "text": ergebnis}
+
+            heikel = self._heikel(schritt)
+            if heikel:
+                return {"ok": False, "abgebrochen": True, "schritte": verlauf,
+                        "text": "Ich halte an: Auf dem Bildschirm geht es um '%s'. "
+                                "Das machst du bitte selbst." % heikel}
+
+            beschreibung = "Schritt %d: %s (%s)" % (nummer, aktion, gedanke)
+            print("\n%s" % beschreibung)
+            if bestaetigen:
+                if not sys.stdin or not sys.stdin.isatty():
+                    return {"ok": False, "schritte": verlauf,
+                            "fehler": "Ich kann den Schritt nicht bestätigen lassen und "
+                                      "führe deshalb nichts aus."}
+                try:
+                    eingabe = input("Enter führt aus, alles andere bricht ab: ").strip()
+                except (EOFError, KeyboardInterrupt):
+                    eingabe = "abbruch"
+                if eingabe:
+                    return {"ok": False, "abgebrochen": True, "schritte": verlauf,
+                            "text": "Abgebrochen."}
+
+            ergebnis = self._aktion_ausfuehren(schritt, faktor)
+            verlauf.append("%s -> %s" % (beschreibung, ergebnis))
+            time.sleep(0.6)
+
+        return {"ok": False, "schritte": verlauf,
+                "text": "Nach %d Schritten bin ich nicht fertig geworden und höre auf."
+                        % schritte_max}
+
+
+# =========================================================================
+# dashboard  -  Command Center - erzeugt ``dashboard/dashboard.html`` und ``data.json``.
+# 
+# Der Nutzer soll auf einen Blick sehen, wie sein Betrieb steht: Zahlen des
+# Monats, Termine, Posteingang, offene Leads, Notizen und - besonders wichtig -
+# was Jarvis zuletzt getan hat. Jede ausgeführte Aktion steht dort. Ein
+# Assistent, der handelt, muss nachprüfbar sein.
+# 
+# Die Seite lädt sich alle 60 Sekunden selbst neu und braucht keinen Server.
+# =========================================================================
+
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+
+
+# Farben des Cockpits
+FARBE_HINTERGRUND = "#08090B"
+FARBE_PANEL = "#0F1113"
+FARBE_AKZENT = "#E8622C"
+
+WOCHENTAGE = ["Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag",
+              "Samstag", "Sonntag"]
+
+SEITE = """<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="refresh" content="60">
+<title>Jarvis Command Center</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: %(bg)s; color: #E6E8EA; min-height: 100vh;
+    font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
+    padding-bottom: 40px;
+  }
+  .ticker {
+    background: linear-gradient(90deg, %(akzent)s22, transparent);
+    border-bottom: 1px solid %(akzent)s55; padding: 10px 20px;
+    font-size: 13px; letter-spacing: .06em; text-transform: uppercase;
+    display: flex; gap: 28px; flex-wrap: wrap; align-items: center;
+  }
+  .ticker b { color: %(akzent)s; text-shadow: 0 0 12px %(akzent)s88; }
+  header { padding: 26px 20px 10px; }
+  header h1 {
+    font-size: 26px; font-weight: 600; letter-spacing: .02em;
+    color: %(akzent)s; text-shadow: 0 0 22px %(akzent)s55;
+  }
+  header p { color: #8A9096; font-size: 14px; margin-top: 4px; }
+  .raster {
+    display: grid; gap: 14px; padding: 14px 20px;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  }
+  .panel {
+    background: %(panel)s; border: 1px solid #1C1F23; border-radius: 10px;
+    padding: 16px 18px;
+  }
+  .panel h2 {
+    font-size: 11px; text-transform: uppercase; letter-spacing: .14em;
+    color: #6E767D; margin-bottom: 12px; font-weight: 600;
+  }
+  .kacheln { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px,1fr)); gap: 10px; }
+  .kachel {
+    background: #121517; border: 1px solid #1C1F23; border-radius: 8px;
+    padding: 12px 14px;
+  }
+  .kachel .wert { font-size: 22px; font-weight: 600; color: #F2F4F6; }
+  .kachel .wert.akzent { color: %(akzent)s; text-shadow: 0 0 16px %(akzent)s66; }
+  .kachel .wert.gut { color: #4CC38A; }
+  .kachel .wert.schlecht { color: #E5484D; }
+  .kachel .name { font-size: 11px; color: #6E767D; text-transform: uppercase;
+                  letter-spacing: .08em; margin-top: 4px; }
+  ul { list-style: none; }
+  li { padding: 8px 0; border-bottom: 1px solid #17191C; font-size: 14px; line-height: 1.45; }
+  li:last-child { border-bottom: none; }
+  .zeit { color: %(akzent)s; font-variant-numeric: tabular-nums; margin-right: 8px; }
+  .grau { color: #6E767D; font-size: 12px; }
+  .warnung { color: #E5484D; }
+  .ok { color: #4CC38A; }
+  .leer { color: #4A5157; font-style: italic; font-size: 13px; }
+  .status { display: inline-block; width: 7px; height: 7px; border-radius: 50%%;
+            margin-right: 7px; }
+  .an { background: #4CC38A; box-shadow: 0 0 8px #4CC38A; }
+  .aus { background: #3A4046; }
+  footer { padding: 16px 20px; color: #4A5157; font-size: 12px; }
+</style>
+</head>
+<body>
+<div class="ticker">%(ticker)s</div>
+<header>
+  <h1>Jarvis Command Center</h1>
+  <p>%(wochentag)s, %(datum)s &middot; Stand %(uhrzeit)s Uhr &middot; %(firma)s</p>
+</header>
+<div class="raster">
+%(panels)s
+</div>
+<footer>Diese Seite aktualisiert sich alle 60 Sekunden von selbst.
+Alle Daten liegen lokal auf diesem Rechner.</footer>
+</body>
+</html>
+"""
+
+
+def sicher(text) -> str:
+    """Macht Text HTML-sicher - Kundennamen dürfen die Seite nicht aufbrechen."""
+    return html.escape(str(text if text is not None else ""))
+
+
+def euro(betrag) -> str:
+    """Formatiert einen Betrag deutsch mit Euro-Zeichen."""
+    try:
+        betrag = float(betrag)
+    except (TypeError, ValueError):
+        betrag = 0.0
+    return "{:,.2f}".format(betrag).replace(",", "#").replace(".", ",").replace("#", ".") + " €"
+
+
+class Dashboard:
+    """Baut das Command Center als einzelne HTML-Datei."""
+
+    def __init__(self, memory=None, bookkeeping=None, call_analysis=None,
+                 recall=None, kalender=None, mail=None, routines=None,
+                 scheduler=None, mcp=None):
+        self.memory = memory
+        self.bookkeeping = bookkeeping
+        self.call_analysis = call_analysis
+        self.recall = recall
+        self.kalender = kalender
+        self.mail = mail
+        self.routines = routines
+        self.scheduler = scheduler
+        self.mcp = mcp
+
+    # -- Daten sammeln ------------------------------------------------------
+
+    def daten_sammeln(self, mit_netz: bool = False) -> dict:
+        """Trägt alles zusammen, was auf die Seite kommt.
+
+        ``mit_netz`` steuert, ob Kalender und Posteingang abgefragt werden -
+        beim Bauen im Hintergrund bleibt das aus, damit es schnell bleibt.
+        """
+        jetzt = datetime.now()
+        daten = {"erzeugt": jetzt.strftime("%Y-%m-%d %H:%M:%S"),
+                 "wochentag": WOCHENTAGE[jetzt.weekday()],
+                 "datum": jetzt.strftime("%d.%m.%Y"),
+                 "uhrzeit": jetzt.strftime("%H:%M"),
+                 "firma": FIRMA, "nutzer": NUTZER_NAME}
+
+        if self.bookkeeping is not None:
+            try:
+                daten["monat"] = self.bookkeeping.auswertung(
+                    jetzt.strftime("%Y-%m-01"), heute_datum())
+                daten["belege"] = self.bookkeeping.fehlende_belege()
+            except Exception as fehler:
+                daten["monat_fehler"] = str(fehler)
+
+        if self.call_analysis is not None:
+            try:
+                daten["leads"] = self.call_analysis.offene_leads()
+                daten["muster"] = self.call_analysis.verkaufsmuster()
+            except Exception as fehler:
+                daten["leads_fehler"] = str(fehler)
+
+        if self.memory is not None:
+            try:
+                daten["notizen"] = self.memory.notizen_letzte(8)
+                daten["punkte"] = self.memory.punkte_offen()
+                daten["protokoll"] = self.memory.protokoll(14)
+                daten["statistik"] = self.memory.statistik()
+            except Exception as fehler:
+                daten["memory_fehler"] = str(fehler)
+
+        if self.routines is not None:
+            try:
+                daten["routinen"] = self.routines.statistik()
+            except Exception:
+                daten["routinen"] = {}
+
+        if self.scheduler is not None:
+            try:
+                daten["zeitplan"] = self.scheduler.uebersicht()
+            except Exception:
+                daten["zeitplan"] = []
+
+        if mit_netz and self.kalender is not None and self.kalender.verfuegbar():
+            try:
+                daten["kalender"] = self.kalender.termine(3)
+            except Exception as fehler:
+                daten["kalender"] = {"ok": False, "fehler": str(fehler)}
+
+        if mit_netz and self.mail is not None and self.mail.lesen_moeglich():
+            try:
+                daten["mail"] = self.mail.ungelesene(10)
+            except Exception as fehler:
+                daten["mail"] = {"ok": False, "fehler": str(fehler)}
+
+        daten["dienste"] = konfig_uebersicht()
+        if self.mcp is not None:
+            try:
+                daten["mcp"] = self.mcp.zustand()
+            except Exception:
+                daten["mcp"] = {}
+        return daten
+
+    # -- Panels -------------------------------------------------------------
+
+    @staticmethod
+    def _panel(titel: str, inhalt: str) -> str:
+        return '<section class="panel"><h2>%s</h2>%s</section>' % (sicher(titel), inhalt)
+
+    @staticmethod
+    def _liste(eintraege: list, leer_text: str) -> str:
+        if not eintraege:
+            return '<p class="leer">%s</p>' % sicher(leer_text)
+        return "<ul>%s</ul>" % "".join("<li>%s</li>" % eintrag for eintrag in eintraege)
+
+    def _panel_zahlen(self, daten: dict) -> str:
+        monat = daten.get("monat")
+        if not monat:
+            return self._panel("Monat", '<p class="leer">Keine Buchhaltungsdaten.</p>')
+        ergebnis_klasse = "gut" if monat["ergebnis"] >= 0 else "schlecht"
+        kacheln = [
+            ("Einnahmen", euro(monat["einnahmen"]), "gut"),
+            ("Ausgaben", euro(monat["ausgaben"]), ""),
+            ("Ergebnis", euro(monat["ergebnis"]), ergebnis_klasse),
+            ("Zahllast", euro(monat["zahllast"]), "akzent"),
+            ("Vorsteuer", euro(monat["vorsteuer"]), ""),
+            ("Buchungen", str(monat["anzahl"]), ""),
+        ]
+        inhalt = '<div class="kacheln">%s</div>' % "".join(
+            '<div class="kachel"><div class="wert %s">%s</div><div class="name">%s</div></div>'
+            % (klasse, sicher(wert), sicher(name)) for name, wert, klasse in kacheln)
+        return self._panel("Laufender Monat", inhalt)
+
+    def _panel_belege(self, daten: dict) -> str:
+        belege = daten.get("belege")
+        if not belege:
+            return ""
+        if belege["anzahl"] == 0:
+            inhalt = '<p class="ok">Zu allen Ausgaben liegt ein Beleg vor.</p>'
+        else:
+            zeilen = ['<span class="zeit">%s</span>%s <span class="grau">%s</span>'
+                      % (sicher(e["datum"]), sicher(e["haendler"] or "unbekannt"),
+                         euro(e["betrag"])) for e in belege["buchungen"][:8]]
+            inhalt = ('<p class="warnung">%d Ausgaben ohne Beleg, zusammen %s.</p>%s'
+                      % (belege["anzahl"], euro(belege["summe"]),
+                         self._liste(zeilen, "")))
+        return self._panel("Fehlende Belege", inhalt)
+
+    def _panel_termine(self, daten: dict) -> str:
+        kalender = daten.get("kalender")
+        if not kalender:
+            return self._panel("Termine",
+                               '<p class="leer">Kein Kalender eingerichtet.</p>')
+        if not kalender.get("ok"):
+            return self._panel("Termine", '<p class="warnung">%s</p>'
+                               % sicher(kalender.get("fehler", "nicht erreichbar")))
+        zeilen = ['<span class="zeit">%s %s</span>%s%s'
+                  % (sicher(t["tag"]), sicher(t["uhrzeit"]), sicher(t["titel"]),
+                     (' <span class="grau">%s</span>' % sicher(t["ort"])) if t["ort"] else "")
+                  for t in kalender.get("termine", [])[:10]]
+        inhalt = self._liste(zeilen, "Nichts eingetragen.")
+        for konflikt in kalender.get("konflikte", [])[:3]:
+            inhalt += '<p class="warnung">%s</p>' % sicher(konflikt["text"])
+        return self._panel("Termine", inhalt)
+
+    def _panel_mail(self, daten: dict) -> str:
+        mail = daten.get("mail")
+        if not mail:
+            return self._panel("Posteingang",
+                               '<p class="leer">Kein Postfach eingerichtet.</p>')
+        if not mail.get("ok"):
+            return self._panel("Posteingang", '<p class="warnung">%s</p>'
+                               % sicher(mail.get("fehler", "nicht erreichbar")))
+        zeilen = []
+        for eintrag in mail.get("wichtig", [])[:5] + mail.get("spaeter", [])[:5]:
+            marke = "warnung" if eintrag["einstufung"] == "wichtig" else "grau"
+            zeilen.append('<span class="%s">%s</span> %s<br><span class="grau">%s</span>'
+                          % (marke, sicher(eintrag["einstufung"]),
+                             sicher(eintrag["betreff"]),
+                             sicher(eintrag["absender"][:60])))
+        return self._panel("Posteingang (%d ungelesen)" % mail.get("anzahl", 0),
+                           self._liste(zeilen, "Nichts Ungelesenes."))
+
+    def _panel_leads(self, daten: dict) -> str:
+        leads = daten.get("leads")
+        if not leads:
+            return ""
+        zeilen = ['<span class="zeit">%s</span>%s <span class="grau">%s &middot; %d Punkte</span>'
+                  % (sicher(l["datum"]), sicher(l["kunde"] or "ohne Namen"),
+                     euro(l["volumen"]), l["punktzahl"])
+                  for l in leads.get("leads", [])[:8]]
+        inhalt = ('<div class="kacheln"><div class="kachel">'
+                  '<div class="wert akzent">%s</div>'
+                  '<div class="name">Offenes Volumen</div></div>'
+                  '<div class="kachel"><div class="wert">%d</div>'
+                  '<div class="name">Offene Leads</div></div></div>'
+                  % (euro(leads.get("volumen_offen", 0)), leads.get("anzahl", 0)))
+        inhalt += self._liste(zeilen, "Kein Lead offen.")
+        muster = daten.get("muster") or {}
+        if muster.get("anzahl"):
+            inhalt += ('<p class="grau">Abschlussquote %.1f Prozent bei %d Gesprächen.</p>'
+                       % (muster.get("abschlussquote", 0), muster["anzahl"]))
+            for einwand in muster.get("wiederkehrende_einwaende", [])[:2]:
+                inhalt += ('<p class="warnung">Einwand "%s" kam %d mal.</p>'
+                           % (sicher(einwand["einwand"]), einwand["anzahl"]))
+        return self._panel("Vertrieb", inhalt)
+
+    def _panel_offen(self, daten: dict) -> str:
+        punkte = daten.get("punkte") or []
+        zeilen = ['%s%s' % (sicher(p["text"]),
+                            (' <span class="grau">bis %s</span>' % sicher(p["faellig"]))
+                            if p["faellig"] else "")
+                  for p in punkte[:12]]
+        return self._panel("Noch offen", self._liste(zeilen, "Nichts offen."))
+
+    def _panel_notizen(self, daten: dict) -> str:
+        notizen = daten.get("notizen") or []
+        zeilen = ['<span class="zeit">%s</span>%s' % (sicher(n["angelegt"][5:10]),
+                                                      sicher(n["text"]))
+                  for n in notizen]
+        return self._panel("Notizen", self._liste(zeilen, "Noch keine Notizen."))
+
+    def _panel_protokoll(self, daten: dict) -> str:
+        protokoll = daten.get("protokoll") or []
+        zeilen = []
+        for eintrag in protokoll:
+            klasse = "ok" if eintrag["status"] == "ok" else "warnung"
+            zeilen.append('<span class="zeit">%s</span><span class="%s">%s</span> '
+                          '<span class="grau">%s</span>'
+                          % (sicher(eintrag["zeit"][11:16]), klasse,
+                             sicher(eintrag["werkzeug"]),
+                             sicher((eintrag["ergebnis"] or "")[:80])))
+        return self._panel("Was Jarvis getan hat",
+                           self._liste(zeilen, "Noch nichts ausgeführt."))
+
+    def _panel_zeitplan(self, daten: dict) -> str:
+        eintraege = daten.get("zeitplan") or []
+        zeilen = ['<span class="zeit">%s</span>%s' % (sicher(e["uhrzeit"]),
+                                                      sicher(e["beschreibung"]))
+                  for e in eintraege]
+        routinen = daten.get("routinen") or {}
+        inhalt = self._liste(zeilen, "Nichts geplant.")
+        if routinen.get("anzahl"):
+            inhalt += ('<p class="grau">%d Routinen hinterlegt: %s</p>'
+                       % (routinen["anzahl"], sicher(", ".join(routinen.get("namen", [])))))
+        return self._panel("Zeitplan", inhalt)
+
+    def _panel_dienste(self, daten: dict) -> str:
+        dienste = daten.get("dienste") or {}
+        zeilen = ['<span class="status %s"></span>%s'
+                  % ("an" if aktiv else "aus", sicher(name))
+                  for name, aktiv in dienste.items()]
+        mcp = daten.get("mcp") or {}
+        for name, angaben in (mcp.get("dienste") or {}).items():
+            zeilen.append('<span class="status %s"></span>MCP %s '
+                          '<span class="grau">%d Werkzeuge</span>'
+                          % ("an" if angaben.get("laeuft") else "aus", sicher(name),
+                             angaben.get("werkzeuge", 0)))
+        return self._panel("Dienste", self._liste(zeilen, "Nichts eingerichtet."))
+
+    def _ticker(self, daten: dict) -> str:
+        teile = []
+        monat = daten.get("monat")
+        if monat:
+            teile.append("Ergebnis Monat <b>%s</b>" % euro(monat["ergebnis"]))
+            teile.append("Zahllast <b>%s</b>" % euro(monat["zahllast"]))
+        leads = daten.get("leads")
+        if leads:
+            teile.append("Offene Leads <b>%d</b> über <b>%s</b>"
+                         % (leads.get("anzahl", 0), euro(leads.get("volumen_offen", 0))))
+        belege = daten.get("belege")
+        if belege and belege.get("anzahl"):
+            teile.append("Belege fehlen <b>%d</b>" % belege["anzahl"])
+        punkte = daten.get("punkte") or []
+        teile.append("Offene Punkte <b>%d</b>" % len(punkte))
+        if not teile:
+            teile.append("Jarvis ist bereit")
+        return "".join("<span>%s</span>" % teil for teil in teile)
+
+    # -- Bauen --------------------------------------------------------------
+
+    def bauen(self, mit_netz: bool = False) -> dict:
+        """Erzeugt ``dashboard.html`` und ``data.json``."""
+        daten = self.daten_sammeln(mit_netz)
+        panels = "".join(teil for teil in [
+            self._panel_zahlen(daten),
+            self._panel_termine(daten),
+            self._panel_leads(daten),
+            self._panel_offen(daten),
+            self._panel_mail(daten),
+            self._panel_belege(daten),
+            self._panel_notizen(daten),
+            self._panel_zeitplan(daten),
+            self._panel_protokoll(daten),
+            self._panel_dienste(daten),
+        ] if teil)
+
+        seite = SEITE % {"bg": FARBE_HINTERGRUND, "panel": FARBE_PANEL,
+                         "akzent": FARBE_AKZENT, "ticker": self._ticker(daten),
+                         "wochentag": sicher(daten["wochentag"]),
+                         "datum": sicher(daten["datum"]),
+                         "uhrzeit": sicher(daten["uhrzeit"]),
+                         "firma": sicher(daten["firma"]), "panels": panels}
+        try:
+            DASHBOARD_VERZEICHNIS.mkdir(parents=True, exist_ok=True)
+            html_pfad = DASHBOARD_VERZEICHNIS / "dashboard.html"
+            json_pfad = DASHBOARD_VERZEICHNIS / "data.json"
+            html_pfad.write_text(seite, encoding="utf-8")
+            json_pfad.write_text(json.dumps(daten, ensure_ascii=False, indent=2,
+                                            default=str), encoding="utf-8")
+        except OSError as fehler:
+            return {"ok": False,
+                    "fehler": "Das Dashboard ließ sich nicht schreiben: %s" % fehler}
+        return {"ok": True, "datei": str(html_pfad), "daten": str(json_pfad),
+                "text": "Das Command Center ist gebaut: %s" % html_pfad}
+
+
+# =========================================================================
+# scheduler  -  Zeitplan - automatische Briefings und geplante Routinen.
+# 
+# Bewusst ein Hintergrund-Thread statt cron: cron müsste eingerichtet werden, kennt
+# die laufende Sitzung nicht und hinterlässt beim Deinstallieren Reste.
+# 
+# Zwei Entscheidungen, die den Alltag betreffen:
+# 
+# * **Vergangenes wird nicht nachgeholt.** Liegt ein Zeitpunkt mehr als 120 Minuten
+#   zurück, wird der Job übersprungen. Ein Morgenbriefing um 15 Uhr hilft niemandem.
+# * **Beim Start gilt alles Heutige als erledigt**, was schon vorbei ist. Sonst
+#   würde jeder Neustart am Abend das Morgenbriefing nachschieben.
+# =========================================================================
+
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+
+
+# Wie lange ein Job nach seiner Zeit noch nachgeholt werden darf.
+MAX_VERSPAETUNG_MINUTEN = 120
+# Wie oft der Zeitplan nachsieht.
+PRUEF_ABSTAND_SEKUNDEN = 30
+
+
+def minuten_seit(uhrzeit: str, jetzt: datetime = None):
+    """Minuten seit dem heutigen Zeitpunkt ``uhrzeit``. Negativ heißt: noch nicht."""
+    jetzt = jetzt or datetime.now()
+    try:
+        stunde, minute = [int(teil) for teil in str(uhrzeit).split(":")[:2]]
+    except (ValueError, TypeError):
+        return None
+    zeitpunkt = jetzt.replace(hour=stunde, minute=minute, second=0, microsecond=0)
+    return (jetzt - zeitpunkt).total_seconds() / 60.0
+
+
+def ist_faellig(uhrzeit: str, jetzt: datetime = None) -> bool:
+    """Ist der Zeitpunkt erreicht und noch nicht zu lange her?
+
+    9:00-Job um 9:30 abgefragt: ja. Um 8:00: nein, noch nicht.
+    Um 14:00: nein, zu spät - das wird nicht nachgeholt.
+    """
+    versaeumt = minuten_seit(uhrzeit, jetzt)
+    if versaeumt is None:
+        return False
+    return 0 <= versaeumt <= MAX_VERSPAETUNG_MINUTEN
+
+
+class Scheduler:
+    """Führt Briefings und zeitgesteuerte Routinen im Hintergrund aus."""
+
+    def __init__(self, agent=None, routines=None, ausgabe=None):
+        self.agent = agent
+        self.routines = routines
+        # ``ausgabe`` bekommt jeden erzeugten Text - im Dauerbetrieb die Stimme.
+        self.ausgabe = ausgabe or (lambda text: print("[zeitplan] %s" % text))
+        self.jobs = {}
+        self._laeuft = False
+        self._thread = None
+        self._sperre = threading.Lock()
+
+    # -- Jobs verwalten -----------------------------------------------------
+
+    def job_anlegen(self, name: str, uhrzeit: str, aufgabe, beschreibung: str = "") -> bool:
+        """Trägt einen Job ein. ``aufgabe`` ist eine Funktion ohne Argumente."""
+        if not uhrzeit or not callable(aufgabe):
+            return False
+        with self._sperre:
+            self.jobs[name] = {"uhrzeit": uhrzeit, "aufgabe": aufgabe,
+                               "beschreibung": beschreibung or name, "zuletzt": ""}
+        return True
+
+    def job_entfernen(self, name: str) -> bool:
+        """Nimmt einen Job wieder heraus."""
+        with self._sperre:
+            return self.jobs.pop(name, None) is not None
+
+    def standardjobs_anlegen(self):
+        """Legt Morgen- und Abendbriefing aus der Konfiguration an."""
+        if BRIEFING_MORGENS:
+            self.job_anlegen("morgenbriefing", BRIEFING_MORGENS,
+                             self._morgenbriefing, "Morgenbriefing")
+        if BRIEFING_ABENDS:
+            self.job_anlegen("abendrueckblick", BRIEFING_ABENDS,
+                             self._abendrueckblick, "Abendrückblick")
+
+    def routinen_einhaengen(self):
+        """Hängt alle Routinen mit Uhrzeit in den Zeitplan."""
+        if self.routines is None:
+            return 0
+        anzahl = 0
+        for zeile in self.routines.geplante_routinen():
+            name = "routine:%s" % zeile["name"]
+            if self.job_anlegen(name, zeile["uhrzeit"],
+                                self._routine_starter(zeile["name"]),
+                                "Routine %s" % zeile["name"]):
+                anzahl += 1
+        return anzahl
+
+    def _routine_starter(self, routinen_name: str):
+        """Baut die Funktion, die eine bestimmte Routine startet."""
+        def starten():
+            ergebnis = self.routines.routine_ausfuehren(routinen_name, self.agent)
+            return ergebnis.get("text") or ergebnis.get("fehler", "")
+        return starten
+
+    # -- Ablauf -------------------------------------------------------------
+
+    def vergangenes_abhaken(self, jetzt: datetime = None):
+        """Markiert alles, was heute schon vorbei ist, als erledigt."""
+        jetzt = jetzt or datetime.now()
+        heute = jetzt.strftime("%Y-%m-%d")
+        with self._sperre:
+            for job in self.jobs.values():
+                versaeumt = minuten_seit(job["uhrzeit"], jetzt)
+                if versaeumt is not None and versaeumt > 0:
+                    job["zuletzt"] = heute
+
+    def faellige_jobs(self, jetzt: datetime = None) -> list:
+        """Namen aller Jobs, die jetzt laufen müssten und heute noch nicht liefen."""
+        jetzt = jetzt or datetime.now()
+        heute = jetzt.strftime("%Y-%m-%d")
+        faellig = []
+        with self._sperre:
+            for name, job in self.jobs.items():
+                if job["zuletzt"] == heute:
+                    continue
+                if ist_faellig(job["uhrzeit"], jetzt):
+                    faellig.append(name)
+        return faellig
+
+    def job_ausfuehren(self, name: str) -> str:
+        """Führt einen Job aus und merkt sich das Datum."""
+        with self._sperre:
+            job = self.jobs.get(name)
+        if not job:
+            return ""
+        try:
+            ergebnis = job["aufgabe"]()
+        except Exception as fehler:  # Ein kaputter Job darf den Zeitplan nicht stoppen.
+            ergebnis = "Der Job %s ist fehlgeschlagen: %s" % (job["beschreibung"], fehler)
+            print("[zeitplan] %s\n%s" % (ergebnis, traceback.format_exc()))
+        with self._sperre:
+            job["zuletzt"] = heute_datum()
+        text = str(ergebnis or "").strip()
+        if text:
+            try:
+                self.ausgabe(text)
+            except Exception as fehler:
+                print("[zeitplan] Ausgabe fehlgeschlagen: %s" % fehler)
+        return text
+
+    def einmal_pruefen(self, jetzt: datetime = None) -> list:
+        """Ein Durchlauf: alles Fällige ausführen. Gibt die Jobnamen zurück."""
+        gelaufen = []
+        for name in self.faellige_jobs(jetzt):
+            self.job_ausfuehren(name)
+            gelaufen.append(name)
+        return gelaufen
+
+    def _schleife(self):
+        """Die Hintergrundschleife - alle 30 Sekunden nachsehen."""
+        while self._laeuft:
+            try:
+                self.einmal_pruefen()
+            except Exception as fehler:
+                print("[zeitplan] Fehler in der Schleife: %s" % fehler)
+            for _ in range(PRUEF_ABSTAND_SEKUNDEN):
+                if not self._laeuft:
+                    break
+                time.sleep(1)
+
+    def start(self) -> bool:
+        """Startet den Zeitplan im Hintergrund."""
+        if self._laeuft:
+            return False
+        self.standardjobs_anlegen()
+        self.routinen_einhaengen()
+        self.vergangenes_abhaken()
+        self._laeuft = True
+        self._thread = threading.Thread(target=self._schleife, daemon=True,
+                                        name="jarvis-zeitplan")
+        self._thread.start()
+        return True
+
+    def stop(self):
+        """Hält den Zeitplan an."""
+        self._laeuft = False
+        if self._thread and self._thread.is_alive():
+            self._thread.join(timeout=3)
+
+    def uebersicht(self) -> list:
+        """Was wann geplant ist - für Dashboard und Selbsttest."""
+        with self._sperre:
+            return [{"name": name, "uhrzeit": job["uhrzeit"],
+                     "beschreibung": job["beschreibung"], "zuletzt": job["zuletzt"]}
+                    for name, job in sorted(self.jobs.items(),
+                                            key=lambda p: p[1]["uhrzeit"])]
+
+    # -- Die beiden Briefings ----------------------------------------------
+
+    def _morgenbriefing(self) -> str:
+        """Der Text, den Jarvis morgens von sich aus sagt."""
+        if self.agent is None:
+            return "Guten Morgen. Ich bin da, aber noch nicht eingerichtet."
+        return self.agent.briefing_morgens()
+
+    def _abendrueckblick(self) -> str:
+        """Der Text, den Jarvis abends von sich aus sagt."""
+        if self.agent is None:
+            return "Feierabend. Eingerichtet bin ich noch nicht."
+        return self.agent.briefing_abends()
+
+
+# =========================================================================
+# setup_wizard  -  Ersteinrichtung - geführt, gesprochen, ohne Suchen.
+# 
+# Der Nutzer ist kein Entwickler. Er soll nichts nachschlagen müssen. Deshalb:
+# 
+# * Jeder Schritt wird **vorgelesen**, damit er nicht mitlesen muss.
+# * Seiten und Systemeinstellungen werden **geöffnet**, nicht beschrieben.
+# * Der Anthropic-Schlüssel wird **sofort mit einem echten Mini-Aufruf getestet**.
+#   Ein Schlüssel, der erst beim ersten Gespräch auffällt, hilft niemandem.
+# * Die drei Rechte werden **einzeln geprüft**, und nur die fehlenden werden
+#   geöffnet. Wer schon alles erlaubt hat, soll nicht drei Fenster wegklicken.
+# =========================================================================
+
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+
+
+ANTHROPIC_SEITE = "https://console.anthropic.com/settings/keys"
+
+# Direktlinks in die Systemeinstellungen - beschreiben hilft ihm nicht.
+EINSTELLUNG_MIKROFON = ("x-apple.systempreferences:com.apple.preference.security"
+                        "?Privacy_Microphone")
+EINSTELLUNG_BILDSCHIRM = ("x-apple.systempreferences:com.apple.preference.security"
+                          "?Privacy_ScreenCapture")
+EINSTELLUNG_BEDIENHILFEN = ("x-apple.systempreferences:com.apple.preference.security"
+                            "?Privacy_Accessibility")
+EINSTELLUNG_SPRACHE = "x-apple.systempreferences:com.apple.preference.speech"
+
+# Drei Routinen, die von Anfang an da sind.
+STARTROUTINEN = [
+    ("Wochenrückblick",
+     "Fasse die letzte Woche zusammen: Zahlen des Monats, gewonnene und verlorene "
+     "Gespräche, offene Leads mit Volumen, fehlende Belege und was liegen geblieben "
+     "ist. Nenne konkret, was diese Woche zuerst drankommt.", ""),
+    ("Belege prüfen",
+     "Sieh nach, zu welchen Ausgaben noch kein Beleg hinterlegt ist. Nenne Betrag, "
+     "Händler und Datum der größten fehlenden Belege und erinnere daran, sie zu "
+     "fotografieren.", ""),
+    ("Nachfassen",
+     "Zeige alle offenen Leads. Für jeden: wie lange er schon offen ist, welches "
+     "Volumen dahinter steht und welcher nächste Schritt vereinbart war. Sag mir, "
+     "bei wem ich heute anrufen sollte und warum.", ""),
+]
+
+
+class Einrichtung:
+    """Führt den Nutzer Schritt für Schritt durch die Ersteinrichtung."""
+
+    def __init__(self, stimme=None):
+        self.stimme = stimme
+        self.ergebnisse = {}
+
+    # -- Ausgabe ------------------------------------------------------------
+
+    def sagen(self, text: str):
+        """Schreibt und spricht einen Satz."""
+        print("\n%s" % text)
+        if self.stimme is not None:
+            self.stimme.sprich(text)
+        elif shutil.which("say"):
+            try:
+                subprocess.run(["say", "-r", str(int(SPEECH_RATE)), text[:2000]],
+                               timeout=120, shell=False,
+                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            except (OSError, subprocess.SubprocessError):
+                pass
+
+    @staticmethod
+    def fragen(frage: str) -> str:
+        """Liest eine Eingabe vom Terminal."""
+        try:
+            return input("%s " % frage).strip()
+        except (EOFError, KeyboardInterrupt):
+            return ""
+
+    @staticmethod
+    def oeffnen(ziel: str) -> bool:
+        """Öffnet eine Seite oder eine Systemeinstellung."""
+        if not shutil.which("open"):
+            print("Bitte von Hand öffnen: %s" % ziel)
+            return False
+        try:
+            subprocess.run(["open", ziel], timeout=20, shell=False,
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            return True
+        except (OSError, subprocess.SubprocessError):
+            return False
+
+    # -- Schritt 1: Stimme --------------------------------------------------
+
+    def schritt_stimme(self) -> bool:
+        """Sucht eine deutsche Systemstimme, sonst öffnet sich die Einstellung."""
+        if not shutil.which("say"):
+            self.ergebnisse["stimme"] = "kein say - kein Mac?"
+            print("[--] Die Sprachausgabe 'say' gibt es nur auf einem Mac.")
+            return False
+        gefunden = ""
+        try:
+            ergebnis = subprocess.run(["say", "-v", "?"], capture_output=True,
+                                      text=True, timeout=10, shell=False)
+            for zeile in ergebnis.stdout.splitlines():
+                teile = zeile.split()
+                if len(teile) >= 2 and teile[1] in ("de_DE", "de_AT", "de_CH"):
+                    gefunden = teile[0]
+                    if teile[0] in ("Markus", "Yannick", "Petra", "Anna", "Viktor"):
+                        break
+        except (OSError, subprocess.SubprocessError):
+            pass
+
+        if gefunden:
+            env_setzen("MACOS_STIMME", gefunden)
+            self.ergebnisse["stimme"] = gefunden
+            self.sagen("Ich habe die deutsche Stimme %s gefunden und benutze sie." % gefunden)
+            return True
+
+        self.ergebnisse["stimme"] = "keine"
+        self.sagen("Auf diesem Mac ist keine deutsche Stimme installiert. Ich öffne die "
+                   "Einstellung. Lade dort bitte eine deutsche Stimme herunter, zum "
+                   "Beispiel Markus oder Anna.")
+        self.oeffnen(EINSTELLUNG_SPRACHE)
+        self.fragen("Drücke Enter, wenn du fertig bist:")
+        return False
+
+    # -- Schritt 2: Anthropic-Schlüssel ------------------------------------
+
+    def schluessel_testen(self, schluessel: str) -> dict:
+        """Prüft einen Schlüssel mit einem echten, winzigen Aufruf."""
+        koerper = json.dumps({
+            "model": CLAUDE_MODEL, "max_tokens": 8,
+            "messages": [{"role": "user", "content": "Sag nur: ok"}],
+        }).encode("utf-8")
+        anfrage = urllib.request.Request(
+            "https://api.anthropic.com/v1/messages", data=koerper, method="POST",
+            headers={"x-api-key": schluessel, "anthropic-version": "2023-06-01",
+                     "content-type": "application/json"})
+        try:
+            with urllib.request.urlopen(anfrage, timeout=45) as antwort:
+                antwort.read()
+            return {"ok": True, "text": "Der Schlüssel funktioniert."}
+        except urllib.error.HTTPError as fehler:
+            try:
+                inhalt = fehler.read().decode("utf-8")
+                meldung = (json.loads(inhalt).get("error") or {}).get("message", inhalt)
+            except (ValueError, OSError):
+                meldung = str(fehler)
+            if fehler.code == 401:
+                return {"ok": False, "grund": "schluessel",
+                        "text": "Der Schlüssel wird abgelehnt. Vermutlich ist beim "
+                                "Kopieren etwas verloren gegangen. Bitte noch einmal "
+                                "vollständig kopieren."}
+            if fehler.code == 400 and "credit" in meldung.lower():
+                return {"ok": False, "grund": "guthaben",
+                        "text": "Der Schlüssel stimmt, aber auf dem Konto ist kein "
+                                "Guthaben. Bitte auf der Anthropic-Seite unter Billing "
+                                "etwas aufladen."}
+            if fehler.code == 429:
+                return {"ok": False, "grund": "zuviel",
+                        "text": "Zu viele Anfragen auf einmal. Ich warte kurz und "
+                                "versuche es noch einmal."}
+            if fehler.code == 404:
+                return {"ok": False, "grund": "modell",
+                        "text": "Das eingestellte Modell %s kennt die Schnittstelle "
+                                "nicht." % CLAUDE_MODEL}
+            return {"ok": False, "grund": "sonstiges",
+                    "text": "Die Prüfung ist fehlgeschlagen: %s" % meldung[:200]}
+        except (urllib.error.URLError, OSError) as fehler:
+            return {"ok": False, "grund": "netz",
+                    "text": "Keine Verbindung zu Anthropic. Ist das Internet da? (%s)"
+                            % fehler}
+
+    def schritt_schluessel(self) -> bool:
+        """Holt den Schlüssel und prüft ihn - bis zu vier Versuche."""
+        if ANTHROPIC_API_KEY:
+            self.sagen("Ich prüfe den hinterlegten Schlüssel.")
+            probe = self.schluessel_testen(ANTHROPIC_API_KEY)
+            if probe.get("ok"):
+                self.ergebnisse["schluessel"] = "vorhanden und geprüft"
+                self.sagen("Der hinterlegte Schlüssel funktioniert.")
+                return True
+            self.sagen(probe["text"])
+
+        self.sagen("Jetzt brauche ich deinen Anthropic-Schlüssel. Ich öffne die Seite. "
+                   "Melde dich an, drücke auf Create Key, kopiere den Schlüssel und "
+                   "füge ihn hier ein.")
+        self.oeffnen(ANTHROPIC_SEITE)
+
+        for versuch in range(1, 5):
+            schluessel = self.fragen("Schlüssel hier einfügen und Enter drücken:")
+            if not schluessel:
+                self.sagen("Ich habe nichts bekommen. Versuch %d von 4." % versuch)
+                continue
+            if not schluessel.startswith("sk-"):
+                self.sagen("Das sieht nicht nach einem Anthropic-Schlüssel aus - die "
+                           "beginnen mit s k Bindestrich. Bitte noch einmal.")
+                continue
+            self.sagen("Ich probiere den Schlüssel aus.")
+            probe = self.schluessel_testen(schluessel)
+            if probe.get("ok"):
+                env_setzen("ANTHROPIC_API_KEY", schluessel)
+                self.ergebnisse["schluessel"] = "geprüft"
+                self.sagen("Der Schlüssel funktioniert. Damit kann ich denken.")
+                return True
+            self.sagen(probe["text"])
+            if probe.get("grund") == "guthaben":
+                env_setzen("ANTHROPIC_API_KEY", schluessel)
+                self.ergebnisse["schluessel"] = "gespeichert, kein Guthaben"
+                self.oeffnen("https://console.anthropic.com/settings/billing")
+                return False
+            if probe.get("grund") == "zuviel":
+                time.sleep(8)
+            if probe.get("grund") == "netz":
+                return False
+
+        self.ergebnisse["schluessel"] = "fehlgeschlagen"
+        self.sagen("Der Schlüssel hat nach vier Versuchen nicht funktioniert. Alles "
+                   "andere richte ich trotzdem ein. Du kannst ihn später eintragen mit: "
+                   "python3 jarvis.py einrichten")
+        return False
+
+    # -- Schritt 3: Die drei Rechte ----------------------------------------
+
+    def recht_mikrofon(self) -> bool:
+        """Prüft das Mikrofon, indem wirklich ein Eingabestrom geöffnet wird."""
+        try:
+            import sounddevice
+        except (ImportError, OSError):
+            self.ergebnisse["mikrofon"] = "Paket sounddevice fehlt"
+            return False
+        try:
+            strom = sounddevice.InputStream(samplerate=16000, channels=1)
+            strom.start()
+            strom.stop()
+            strom.close()
+            self.ergebnisse["mikrofon"] = "erlaubt"
+            return True
+        except Exception:
+            self.ergebnisse["mikrofon"] = "nicht erlaubt"
+            return False
+
+    def recht_bildschirm(self) -> bool:
+        """Prüft die Bildschirmaufnahme.
+
+        Ohne dieses Recht liefert macOS ein schwarzes Bild statt einer Fehlermeldung.
+        Deshalb wird gezählt, wie viele verschiedene Farben darin vorkommen: mehr
+        als drei bedeutet, dass wirklich der Bildschirm zu sehen ist.
+        """
+        try:
+            import pyautogui
+        except Exception:
+            self.ergebnisse["bildschirm"] = "Paket pyautogui fehlt"
+            return False
+        try:
+            bild = pyautogui.screenshot()
+            klein = bild.convert("RGB").resize((80, 50))
+            farben = {klein.getpixel((x, y)) for x in range(0, 80, 2)
+                      for y in range(0, 50, 2)}
+            if len(farben) > 3:
+                self.ergebnisse["bildschirm"] = "erlaubt"
+                return True
+            self.ergebnisse["bildschirm"] = "nicht erlaubt (schwarzes Bild)"
+            return False
+        except Exception as fehler:
+            self.ergebnisse["bildschirm"] = "nicht prüfbar: %s" % fehler
+            return False
+
+    def recht_bedienhilfen(self) -> bool:
+        """Prüft die Bedienungshilfen über einen echten AppleScript-Aufruf."""
+        if not shutil.which("osascript"):
+            self.ergebnisse["bedienhilfen"] = "kein osascript"
+            return False
+        skript = ('tell application "System Events" to return count of processes')
+        try:
+            ergebnis = subprocess.run(["osascript", "-e", skript], capture_output=True,
+                                      text=True, timeout=20, shell=False)
+        except (OSError, subprocess.SubprocessError):
+            self.ergebnisse["bedienhilfen"] = "nicht prüfbar"
+            return False
+        if ergebnis.returncode == 0 and (ergebnis.stdout or "").strip().isdigit():
+            self.ergebnisse["bedienhilfen"] = "erlaubt"
+            return True
+        self.ergebnisse["bedienhilfen"] = "nicht erlaubt"
+        return False
+
+    def schritt_rechte(self):
+        """Prüft alle drei Rechte einzeln und öffnet nur die fehlenden."""
+        self.sagen("Jetzt prüfe ich die drei Rechte, die ich brauche.")
+
+        fehlend = []
+        if self.recht_mikrofon():
+            print("[ok] Mikrofon")
+        else:
+            print("[!!] Mikrofon: %s" % self.ergebnisse["mikrofon"])
+            fehlend.append(("Mikrofon", EINSTELLUNG_MIKROFON,
+                            "damit ich dich hören kann"))
+        if self.recht_bildschirm():
+            print("[ok] Bildschirmaufnahme")
+        else:
+            print("[!!] Bildschirmaufnahme: %s" % self.ergebnisse["bildschirm"])
+            fehlend.append(("Bildschirmaufnahme", EINSTELLUNG_BILDSCHIRM,
+                            "damit ich den Bildschirm sehen kann"))
+        if self.recht_bedienhilfen():
+            print("[ok] Bedienungshilfen")
+        else:
+            print("[!!] Bedienungshilfen: %s" % self.ergebnisse["bedienhilfen"])
+            fehlend.append(("Bedienungshilfen", EINSTELLUNG_BEDIENHILFEN,
+                            "damit ich klicken und tippen kann"))
+
+        if not fehlend:
+            self.sagen("Alle drei Rechte sind bereits erteilt.")
+            return
+
+        self.sagen("Es fehlen %d Rechte. Ich öffne die Einstellungen einzeln. Setze dort "
+                   "jeweils den Haken beim Terminal." % len(fehlend))
+        for name, ziel, zweck in fehlend:
+            self.sagen("Jetzt %s, %s." % (name, zweck))
+            self.oeffnen(ziel)
+            self.fragen("Enter, wenn der Haken gesetzt ist:")
+
+    # -- Schritt 4: Angaben zur Person -------------------------------------
+
+    def schritt_person(self):
+        """Fragt Name, Firma und Ort ab."""
+        name = self.fragen("Wie soll ich dich nennen? (Enter für '%s')"
+                           % NUTZER_NAME)
+        if name:
+            env_setzen("NUTZER_NAME", name)
+        firma = self.fragen("Wie heißt deine Firma? (Enter zum Überspringen)")
+        if firma:
+            env_setzen("FIRMA", firma)
+        ort = self.fragen("In welchem Ort arbeitest du? (Enter für '%s')"
+                          % WETTER_ORT)
+        if ort:
+            env_setzen("WETTER_ORT", ort)
+        mwst = self.fragen("Welcher Mehrwertsteuersatz gilt bei dir? (Enter für %g)"
+                           % STANDARD_MWST)
+        if mwst:
+            try:
+                env_setzen("STANDARD_MWST", float(mwst.replace(",", ".")))
+            except ValueError:
+                print("Das war keine Zahl - ich bleibe bei %g." % STANDARD_MWST)
+        self.ergebnisse["person"] = NUTZER_NAME
+
+    # -- Schritt 5: Telegram ------------------------------------------------
+
+    def schritt_telegram(self):
+        """Richtet Telegram ein - der Weg für Freigaben unterwegs."""
+        self.sagen("Telegram ist der Weg, über den ich dich um Freigaben bitte, wenn du "
+                   "nicht am Rechner sitzt. Das ist freiwillig. Ohne Telegram frage ich "
+                   "im Terminal.")
+        antwort = self.fragen("Telegram jetzt einrichten? (ja/nein)").lower()
+        if antwort not in ("ja", "j", "yes", "y"):
+            self.ergebnisse["telegram"] = "übersprungen"
+            return
+        self.sagen("Öffne Telegram, suche den BotFather, schicke ihm slash newbot und "
+                   "folge den Anweisungen. Am Ende bekommst du einen Token.")
+        token = self.fragen("Bot-Token hier einfügen:")
+        if not token:
+            self.ergebnisse["telegram"] = "kein Token"
+            return
+        env_setzen("TELEGRAM_BOT_TOKEN", token)
+        self.sagen("Schreibe deinem neuen Bot jetzt irgendeine Nachricht in Telegram, "
+                   "dann drücke hier Enter.")
+        self.fragen("Enter, wenn du dem Bot geschrieben hast:")
+        chat_id = self._chat_id_holen(token)
+        if chat_id:
+            env_setzen("TELEGRAM_CHAT_ID", chat_id)
+            self.ergebnisse["telegram"] = "eingerichtet"
+            self.sagen("Telegram ist eingerichtet. Ich schicke dir eine Testnachricht.")
+            self._telegram_test(token, chat_id)
+        else:
+            self.ergebnisse["telegram"] = "keine Nachricht gefunden"
+            self.sagen("Ich habe keine Nachricht gefunden. Du kannst das später "
+                       "nachholen.")
+
+    @staticmethod
+    def _chat_id_holen(token: str) -> str:
+        """Liest die Chat-Nummer aus der ersten Nachricht an den Bot."""
+        try:
+            ziel = "https://api.telegram.org/bot%s/getUpdates" % token
+            with urllib.request.urlopen(ziel, timeout=25) as antwort:
+                daten = json.loads(antwort.read().decode("utf-8"))
+            for eintrag in reversed(daten.get("result", []) or []):
+                chat = ((eintrag.get("message") or {}).get("chat") or {})
+                if chat.get("id"):
+                    return str(chat["id"])
+        except (urllib.error.URLError, OSError, ValueError):
+            pass
+        return ""
+
+    @staticmethod
+    def _telegram_test(token: str, chat_id: str):
+        """Schickt eine Testnachricht."""
+        try:
+            koerper = json.dumps({"chat_id": chat_id,
+                                  "text": "Jarvis ist eingerichtet. Über diesen Chat "
+                                          "frage ich dich künftig um Freigaben."}
+                                 ).encode("utf-8")
+            anfrage = urllib.request.Request(
+                "https://api.telegram.org/bot%s/sendMessage" % token, data=koerper,
+                method="POST", headers={"Content-Type": "application/json"})
+            urllib.request.urlopen(anfrage, timeout=20).read()
+        except (urllib.error.URLError, OSError, ValueError):
+            pass
+
+    # -- Schritt 6: Startroutinen ------------------------------------------
+
+    def schritt_routinen(self):
+        """Legt die drei Startroutinen an."""
+        routinen = Routines(Memory())
+        angelegt = []
+        for name, anweisung, uhrzeit in STARTROUTINEN:
+            ergebnis = routinen.routine_anlegen(name, anweisung, uhrzeit)
+            if ergebnis.get("ok"):
+                angelegt.append(name)
+        self.ergebnisse["routinen"] = angelegt
+        self.sagen("Ich habe drei Routinen für dich angelegt: %s. Du rufst sie auf, "
+                   "indem du einfach ihren Namen sagst." % ", ".join(angelegt))
+
+    # -- Schritt 7: Stimmprofil --------------------------------------------
+
+    def schritt_stimmprofil(self):
+        """Bietet an, die Stimme einzulernen."""
+        self.sagen("Zum Schluss kann ich deine Stimme einlernen. Dann reagiere ich "
+                   "bevorzugt auf dich. Wichtig zu wissen: Das unterscheidet Sprecher "
+                   "im Alltag zuverlässig, ist aber kein Schutz gegen eine abgespielte "
+                   "Aufnahme. Deshalb gibt die Stimme allein nie eine Mail oder eine "
+                   "Buchung frei. Sie entscheidet nur, ob ich zuhöre.")
+        antwort = self.fragen("Stimme jetzt einlernen? (ja/nein)").lower()
+        if antwort not in ("ja", "j", "yes", "y"):
+            self.ergebnisse["stimmprofil"] = "übersprungen"
+            return
+        profil = Sprecherprofil()
+        ergebnis = profil.einlernen(self.stimme or Stimme())
+        if ergebnis.get("ok"):
+            env_setzen("STIMMPRUEFUNG_AN", "ja")
+            self.ergebnisse["stimmprofil"] = "angelegt"
+            self.sagen(ergebnis.get("text", "Stimmprofil angelegt."))
+        else:
+            self.ergebnisse["stimmprofil"] = ergebnis.get("fehler", "fehlgeschlagen")
+            self.sagen(ergebnis.get("fehler", "Das Einlernen hat nicht geklappt."))
+
+    # -- Ablauf -------------------------------------------------------------
+
+    def durchlaufen(self) -> dict:
+        """Führt die ganze Einrichtung durch."""
+        verzeichnisse_anlegen()
+        vorlage_schreiben()
+
+        self.sagen("Hallo. Ich bin Jarvis und richte mich jetzt einmalig ein. Das "
+                   "dauert ein paar Minuten. Ich lese dir alles vor, du musst nichts "
+                   "mitlesen.")
+
+        self.schritt_stimme()
+        self.schritt_person()
+        self.schritt_schluessel()
+        self.schritt_rechte()
+        self.schritt_telegram()
+        self.schritt_routinen()
+        self.schritt_stimmprofil()
+
+        env_setzen("EINRICHTUNG_FERTIG", "ja")
+
+        print("\n" + "=" * 60)
+        print("EINRICHTUNG ABGESCHLOSSEN")
+        print("=" * 60)
+        for name, wert in self.ergebnisse.items():
+            print("  %-14s %s" % (name + ":", wert))
+        print("=" * 60)
+
+        self.sagen("Fertig. Eine Sache noch, und die ist wichtig: Du musst das Terminal "
+                   "jetzt einmal komplett schließen und neu öffnen. Sonst greifen die "
+                   "erteilten Rechte nicht. Danach startest du mich einfach wieder über "
+                   "JARVIS Punkt command. Dann sag: Hey Jarvis, wie sieht mein Tag aus.")
+        return self.ergebnisse
+
+
+def einrichtung_starten(stimme=None) -> dict:
+    """Startet die geführte Ersteinrichtung."""
+    return Einrichtung(stimme).durchlaufen()
+
+
+# =========================================================================
+# tools  -  Werkzeugkatalog - alles, was Claude tatsächlich tun kann.
+# 
+# Zwei Sicherheitsentscheidungen stecken in diesem Modul, und sie sind nicht
+# verhandelbar.
+# 
+# **Keine freie Kommandozeile.** Eine Blockliste gefährlicher Befehle wäre
+# wertlos: ``rm -rf`` lässt sich als ``rm  -rf`` oder ``rm -fr`` schreiben und
+# rutscht durch. Stattdessen gibt es eine *Allowlist* registrierter Aktionen mit
+# festen Argumenten. Was nicht registriert ist, läuft nicht. Jeder Aufruf geht über
+# ``subprocess.run([...])`` mit abgeschalteter Shell - eine Shell wird im ganzen
+# Projekt an keiner Stelle eingeschaltet.
+# 
+# **Kein Vollzug ohne klares Ja.** Alles mit Wirkung nach außen fragt vorher nach.
+# Timeout oder ausbleibende Antwort gelten als Ablehnung.
+# =========================================================================
+
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+
+
+# Zeichen, die in eingesetzten Parametern nichts zu suchen haben. Weil überall
+# ``shell=False`` gilt, wären sie ohnehin harmlos - abgelehnt werden sie
+# trotzdem, damit ein späterer Umbau nicht plötzlich eine Lücke aufreißt.
+GEFAEHRLICHE_ZEICHEN = set(";|&$`\n<>")
+
+# Registrierte Aktionen ohne Parameter. Der Name ist der einzige Schlüssel -
+# alles andere steht fest im Code.
+SYSTEM_AKTIONEN = {
+    "datum": (["date", "+%A, %d.%m.%Y, %H:%M"], "Datum und Uhrzeit"),
+    "speicherplatz": (["df", "-h", "/"], "freier Speicherplatz"),
+    "rechnername": (["hostname"], "Name des Rechners"),
+    "laufzeit": (["uptime"], "wie lange der Rechner läuft"),
+    "arbeitsspeicher": (["vm_stat"], "Arbeitsspeicher"),
+    "batterie": (["pmset", "-g", "batt"], "Ladezustand des Akkus"),
+    "netzwerk": (["ifconfig", "en0"], "Netzwerkverbindung"),
+    "wlan": (["networksetup", "-getairportnetwork", "en0"], "verbundenes WLAN"),
+    "programme": (["ps", "-A", "-o", "comm"], "laufende Programme"),
+    "lautstaerke": (["osascript", "-e", "output volume of (get volume settings)"],
+                    "Lautstärke"),
+}
+
+# Registrierte Aktionen mit genau einem geprüften Parameter.
+PARAMETER_AKTIONEN = {
+    "ordner_zeigen": (["ls", "-la", "{pfad}"], "pfad", "Inhalt eines Ordners"),
+    "programm_oeffnen": (["open", "-a", "{programm}"], "programm", "Programm starten"),
+    "datei_oeffnen": (["open", "{pfad}"], "pfad", "Datei öffnen"),
+}
+
+# Alles hier drin fragt vor der Ausführung nach einer Freigabe.
+FREIGABE_PFLICHTIG = {"mail_senden", "termin_anlegen", "bildschirm_bedienen",
+                      "nachricht_senden"}
+
+
+def parameter_pruefen(wert: str):
+    """Prüft einen eingesetzten Parameter. Gibt ``(ok, meldung)`` zurück."""
+    text = str(wert if wert is not None else "")
+    if not text.strip():
+        return False, "Der Wert ist leer."
+    if len(text) > 500:
+        return False, "Der Wert ist zu lang."
+    treffer = sorted({z for z in text if z in GEFAEHRLICHE_ZEICHEN})
+    if treffer:
+        sichtbar = ", ".join(repr(z) for z in treffer)
+        return False, ("Der Wert enthält die Zeichen %s. Solche Werte führe ich "
+                       "grundsätzlich nicht aus." % sichtbar)
+    return True, ""
+
+
+class Werkzeuge:
+    """Der Katalog: Beschreibungen für Claude und die Ausführung dahinter."""
+
+    def __init__(self, agent=None, db_pfad: str = None):
+        self.agent = agent
+        self.memory = Memory(db_pfad)
+        self.recall = Recall(self.memory)
+        self.bookkeeping = Bookkeeping(self.memory)
+        self.call_analysis = CallAnalysis(self.memory)
+        self.routines = Routines(self.memory)
+        self.mail = Mail()
+        self.kalender = Kalender()
+        self.telegram = Telegram()
+        self.kamera = Kamera()
+        self.mcp = MCPClient()
+        self.welt = Welt(self.mcp)
+        self.bildschirm = Bildschirm(agent)
+        self.messenger = Messenger(self.telegram, self.mail, self.mcp, None)
+        self.dashboard = Dashboard(memory=self.memory, bookkeeping=self.bookkeeping,
+                                   call_analysis=self.call_analysis, recall=self.recall,
+                                   kalender=self.kalender, mail=self.mail,
+                                   routines=self.routines, mcp=self.mcp)
+        self.stimme = None
+
+    def stimme_setzen(self, stimme):
+        """Reicht die Sprachausgabe durch - für Sprachnachrichten."""
+        self.stimme = stimme
+        self.messenger.stimme = stimme
+
+    def agent_setzen(self, agent):
+        """Verknüpft den Katalog mit dem Agenten, damit Werkzeuge Claude nutzen können."""
+        self.agent = agent
+        self.bildschirm.agent = agent
+
+    # -- Katalog für Claude -------------------------------------------------
+
+    def katalog(self) -> list:
+        """Alle Werkzeuge im Format der Claude-Schnittstelle."""
+        def werkzeug(name, beschreibung, eigenschaften=None, pflicht=None):
+            return {"name": name, "description": beschreibung,
+                    "input_schema": {"type": "object",
+                                     "properties": eigenschaften or {},
+                                     "required": pflicht or []}}
+
+        text = {"type": "string"}
+        zahl = {"type": "number"}
+        ganz = {"type": "integer"}
+        wahr = {"type": "boolean"}
+
+        eigene = [
+            # -- Gedächtnis --
+            werkzeug("notiz_speichern",
+                     "Hält etwas Wichtiges fest, das er nebenbei erwähnt: eine "
+                     "Kundeninformation, eine Entscheidung, eine Zahl.",
+                     {"text": text, "kategorie": text}, ["text"]),
+            werkzeug("notizen_suchen", "Sucht in gespeicherten Notizen.",
+                     {"begriff": text}, ["begriff"]),
+            werkzeug("kontakt_anlegen",
+                     "Legt einen Kunden oder Lieferanten an oder ergänzt ihn.",
+                     {"name": text, "firma": text, "telefon": text, "email": text,
+                      "adresse": text, "notiz": text}, ["name"]),
+            werkzeug("kontakt_suchen", "Sucht einen Kontakt.",
+                     {"begriff": text}, ["begriff"]),
+            werkzeug("punkt_anlegen",
+                     "Merkt sich etwas, das noch zu erledigen ist.",
+                     {"text": text, "faellig": text}, ["text"]),
+            werkzeug("punkte_offen", "Zeigt, was noch offen ist.", {}),
+            werkzeug("punkt_erledigen", "Hakt einen offenen Punkt ab.",
+                     {"id": ganz}, ["id"]),
+            werkzeug("kennzahl_setzen", "Hält eine Kennzahl mit Datum fest.",
+                     {"name": text, "wert": zahl, "einheit": text}, ["name", "wert"]),
+            werkzeug("gedaechtnis_durchsuchen",
+                     "Sucht in Notizen, Kontakten, Tagesberichten und früheren "
+                     "Gesprächen nach einem Thema.",
+                     {"frage": text}, ["frage"]),
+            werkzeug("tagesbericht_speichern",
+                     "Legt die Zusammenfassung eines Tages ab.",
+                     {"zusammenfassung": text, "entscheidungen": text, "offen": text,
+                      "datum": text}, ["zusammenfassung"]),
+            werkzeug("rueckblick", "Gibt die Tagesberichte der letzten Tage zurück.",
+                     {"tage": ganz}),
+
+            # -- Buchhaltung --
+            werkzeug("buchung_eintragen",
+                     "Trägt eine Einnahme oder Ausgabe ein. Beträge nie schätzen - "
+                     "ist etwas unklar, vorher nachfragen.",
+                     {"art": {"type": "string", "enum": ["einnahme", "ausgabe"]},
+                      "datum": text, "betrag": zahl, "haendler": text,
+                      "kategorie": {"type": "string", "enum": KATEGORIEN},
+                      "mwst_satz": zahl, "mwst_betrag": zahl, "zahlungsart": text,
+                      "notiz": text},
+                     ["art", "datum", "betrag"]),
+            werkzeug("beleg_erfassen",
+                     "Liest einen Beleg von einem Foto und trägt ihn ein.",
+                     {"bildpfad": text}, ["bildpfad"]),
+            werkzeug("auswertung",
+                     "Einnahmen, Ausgaben, Ergebnis, Vorsteuer, Umsatzsteuer und "
+                     "Zahllast für einen Zeitraum.",
+                     {"von": text, "bis": text}),
+            werkzeug("fehlende_belege",
+                     "Zeigt Ausgaben ohne hinterlegtes Belegfoto - genau die fehlen "
+                     "beim Steuerberater.", {"von": text, "bis": text}),
+            werkzeug("csv_export", "Exportiert die Buchungen als CSV für den Steuerberater.",
+                     {"von": text, "bis": text}),
+
+            # -- Kundengespräche --
+            werkzeug("gespraech_festhalten",
+                     "Bewertet ein Kundengespräch und legt es ab. Nutze das immer "
+                     "ungefragt, wenn er von einem Kundentermin erzählt.",
+                     {"bericht": text, "kunde": text}, ["bericht"]),
+            werkzeug("offene_leads", "Zeigt offene Leads samt offenem Volumen.", {}),
+            werkzeug("verkaufsmuster",
+                     "Abschlussquote, Durchschnittspunktzahl und wiederkehrende Einwände.",
+                     {"tage": ganz}),
+
+            # -- Routinen --
+            werkzeug("routine_anlegen",
+                     "Legt einen gespeicherten Ablauf an. Mit Uhrzeit läuft er täglich "
+                     "von selbst.",
+                     {"name": text, "anweisung": text, "uhrzeit": text},
+                     ["name", "anweisung"]),
+            werkzeug("routine_ausfuehren", "Führt eine gespeicherte Routine aus.",
+                     {"name": text}, ["name"]),
+            werkzeug("routinen_liste", "Zeigt alle gespeicherten Routinen.", {}),
+
+            # -- Kommunikation --
+            werkzeug("mails_lesen",
+                     "Holt ungelesene Mails und sortiert sie vor.", {"limit": ganz}),
+            werkzeug("mail_senden",
+                     "Verschickt eine E-Mail. Braucht eine Freigabe.",
+                     {"an": text, "betreff": text, "text": text},
+                     ["an", "betreff", "text"]),
+            werkzeug("nachricht_senden",
+                     "Verschickt eine Nachricht über telegram, mail, imessage oder "
+                     "whatsapp. Braucht eine Freigabe.",
+                     {"kanal": {"type": "string",
+                                "enum": ["telegram", "mail", "imessage", "whatsapp"]},
+                      "an": text, "text": text, "als_sprache": wahr, "betreff": text},
+                     ["kanal", "text"]),
+
+            # -- Kalender --
+            werkzeug("termine_lesen",
+                     "Termine der nächsten Tage samt Überschneidungen.", {"tage": ganz}),
+            werkzeug("termin_anlegen",
+                     "Trägt einen Termin ein. Braucht eine Freigabe.",
+                     {"titel": text, "beginn": text, "dauer_minuten": ganz,
+                      "ort": text, "beschreibung": text}, ["titel", "beginn"]),
+
+            # -- Welt --
+            werkzeug("wetter", "Aktuelles Wetter und Vorhersage für einen Ort.",
+                     {"ort": text}),
+            werkzeug("recherche", "Sucht etwas im Internet.", {"frage": text}, ["frage"]),
+            werkzeug("flug_suchen",
+                     "Sucht Flugverbindungen und nennt sie. Bucht nichts.",
+                     {"von": text, "nach": text, "wann": text}, ["von", "nach"]),
+            werkzeug("umschauen",
+                     "Nimmt ein Einzelbild der Kamera auf und beschreibt, was zu sehen "
+                     "ist. Kein Dauervideo.",
+                     {"frage": text, "behalten": wahr}),
+
+            # -- Bildschirm --
+            werkzeug("bildschirm_bedienen",
+                     "Bedient den Mac über Screenshots, Schritt für Schritt. Braucht "
+                     "eine Freigabe und bestätigt jeden Schritt einzeln.",
+                     {"ziel": text}, ["ziel"]),
+
+            # -- System --
+            werkzeug("systeminfo",
+                     "Fragt eine registrierte Systeminformation ab. Erlaubt sind "
+                     "ausschließlich: %s." % ", ".join(sorted(SYSTEM_AKTIONEN)),
+                     {"was": {"type": "string", "enum": sorted(SYSTEM_AKTIONEN)}},
+                     ["was"]),
+            werkzeug("ordner_zeigen", "Listet den Inhalt eines Ordners auf.",
+                     {"pfad": text}, ["pfad"]),
+            werkzeug("programm_oeffnen", "Startet ein Programm auf dem Mac.",
+                     {"programm": text}, ["programm"]),
+            werkzeug("dashboard_bauen", "Baut das Command Center neu.", {}),
+        ]
+        return eigene + self.mcp.alle_werkzeuge()
+
+    def namen(self) -> list:
+        """Alle Werkzeugnamen."""
+        return [w["name"] for w in self.katalog()]
+
+    # -- Freigabe -----------------------------------------------------------
+
+    def braucht_freigabe(self, name: str) -> bool:
+        """Muss vor diesem Werkzeug gefragt werden?"""
+        if self.mcp.ist_mcp_werkzeug(name):
+            return self.mcp.braucht_freigabe(name)
+        return name in FREIGABE_PFLICHTIG
+
+    def _freigabe(self, name: str, argumente: dict) -> dict:
+        """Holt die Freigabe ein. Ohne klares Ja wird nichts ausgeführt."""
+        try:
+            details = json.dumps(argumente or {}, ensure_ascii=False)[:600]
+        except (TypeError, ValueError):
+            details = str(argumente)[:600]
+        return self.telegram.freigabe_einholen(name, details)
+
+    # -- Ausführung ---------------------------------------------------------
+
+    def run(self, name: str, argumente: dict = None) -> dict:
+        """Führt ein Werkzeug aus - mit Freigabeprüfung und Protokoll."""
+        argumente = argumente or {}
+        if name not in self.namen():
+            ergebnis = {"ok": False,
+                        "fehler": "Das Werkzeug '%s' gibt es nicht." % name}
+            self.memory.aktion_protokollieren(name, argumente, ergebnis["fehler"],
+                                              "unbekannt")
+            return ergebnis
+
+        if self.braucht_freigabe(name):
+            entscheidung = self._freigabe(name, argumente)
+            if not entscheidung.get("erlaubt"):
+                ergebnis = {"ok": False, "abgebrochen": True,
+                            "text": "Abgebrochen. %s" % entscheidung.get("grund", "")}
+                self.memory.aktion_protokollieren(
+                    name, argumente, "Abgebrochen: %s" % entscheidung.get("grund", ""),
+                    "abgelehnt")
+                return ergebnis
+
+        try:
+            ergebnis = self._ausfuehren(name, argumente)
+        except Exception as fehler:
+            ergebnis = {"ok": False,
+                        "fehler": "Das Werkzeug %s ist fehlgeschlagen: %s" % (name, fehler)}
+
+        if not isinstance(ergebnis, dict):
+            ergebnis = {"ok": True, "text": str(ergebnis)}
+        kurz = str(ergebnis.get("text") or ergebnis.get("fehler") or "")[:400]
+        self.memory.aktion_protokollieren(
+            name, argumente, kurz, "ok" if ergebnis.get("ok") else "fehler")
+        return ergebnis
+
+    def _ausfuehren(self, name: str, a: dict) -> dict:
+        """Die eigentliche Zuordnung von Namen zu Funktionen."""
+        if self.mcp.ist_mcp_werkzeug(name):
+            return self.mcp.aufrufen(name, a)
+
+        # -- Gedächtnis --
+        if name == "notiz_speichern":
+            return self.memory.notiz_speichern(a.get("text"), a.get("kategorie", "allgemein"))
+        if name == "notizen_suchen":
+            treffer = self.memory.notizen_suchen(a.get("begriff"))
+            return {"ok": True, "anzahl": len(treffer),
+                    "notizen": [{"id": n["id"], "text": n["text"],
+                                 "datum": n["angelegt"][:10]} for n in treffer],
+                    "text": ("%d Notizen gefunden." % len(treffer)) if treffer
+                            else "Dazu habe ich nichts gespeichert."}
+        if name == "kontakt_anlegen":
+            return self.memory.kontakt_anlegen(
+                a.get("name"), a.get("firma", ""), a.get("telefon", ""),
+                a.get("email", ""), a.get("adresse", ""), a.get("notiz", ""))
+        if name == "kontakt_suchen":
+            treffer = self.memory.kontakt_suchen(a.get("begriff"))
+            return {"ok": True, "anzahl": len(treffer),
+                    "kontakte": [{k: z[k] for k in ("id", "name", "firma", "telefon",
+                                                    "email", "notiz")} for z in treffer],
+                    "text": ("%d Kontakte gefunden." % len(treffer)) if treffer
+                            else "Den Kontakt kenne ich nicht."}
+        if name == "punkt_anlegen":
+            return self.memory.punkt_anlegen(a.get("text"), a.get("faellig", ""))
+        if name == "punkte_offen":
+            punkte = self.memory.punkte_offen()
+            return {"ok": True, "anzahl": len(punkte),
+                    "punkte": [{"id": p["id"], "text": p["text"],
+                                "faellig": p["faellig"]} for p in punkte],
+                    "text": ("%d Punkte offen." % len(punkte)) if punkte
+                            else "Es ist nichts offen."}
+        if name == "punkt_erledigen":
+            erledigt = self.memory.punkt_erledigen(a.get("id"))
+            return {"ok": erledigt,
+                    "text": "Erledigt." if erledigt
+                            else "Einen offenen Punkt mit dieser Nummer gibt es nicht."}
+        if name == "kennzahl_setzen":
+            return self.memory.kennzahl_setzen(a.get("name"), a.get("wert"),
+                                               a.get("einheit", ""))
+        if name == "gedaechtnis_durchsuchen":
+            treffer = self.recall.nachschlagen(a.get("frage", ""))
+            anzahl = sum(len(treffer[s]) for s in
+                         ("notizen", "kontakte", "berichte", "aeusserungen"))
+            return {"ok": True, "treffer": {
+                        "notizen": [n["text"] for n in treffer["notizen"]],
+                        "kontakte": [k["name"] for k in treffer["kontakte"]],
+                        "berichte": [("%s: %s" % (b["datum"], b["zusammenfassung"]))
+                                     for b in treffer["berichte"]],
+                        "aeusserungen": [z["text"][:200] for z in treffer["aeusserungen"]]},
+                    "text": ("%d Treffer im Gedächtnis." % anzahl) if anzahl
+                            else "Dazu finde ich nichts."}
+        if name == "tagesbericht_speichern":
+            return self.recall.tagesbericht_speichern(
+                a.get("zusammenfassung"), a.get("entscheidungen", ""),
+                a.get("offen", ""), a.get("datum", ""))
+        if name == "rueckblick":
+            return {"ok": True, "text": self.recall.rueckblick(int(a.get("tage") or 7))}
+
+        # -- Buchhaltung --
+        if name == "buchung_eintragen":
+            return self.bookkeeping.buchung_eintragen(
+                a.get("art"), a.get("datum"), a.get("betrag"), a.get("haendler", ""),
+                a.get("kategorie", "Sonstiges"), a.get("mwst_satz"),
+                a.get("mwst_betrag"), a.get("zahlungsart", ""), None, "",
+                a.get("notiz", ""))
+        if name == "beleg_erfassen":
+            return self.bookkeeping.beleg_erfassen(a.get("bildpfad"), self.agent)
+        if name == "auswertung":
+            return self.bookkeeping.auswertung(a.get("von", ""), a.get("bis", ""))
+        if name == "fehlende_belege":
+            return self.bookkeeping.fehlende_belege(a.get("von", ""), a.get("bis", ""))
+        if name == "csv_export":
+            return self.bookkeeping.csv_export(a.get("von", ""), a.get("bis", ""))
+
+        # -- Kundengespräche --
+        if name == "gespraech_festhalten":
+            return self.call_analysis.gespraech_festhalten(
+                a.get("bericht"), self.agent, a.get("kunde", ""))
+        if name == "offene_leads":
+            return self.call_analysis.offene_leads()
+        if name == "verkaufsmuster":
+            return self.call_analysis.verkaufsmuster(int(a.get("tage") or 90))
+
+        # -- Routinen --
+        if name == "routine_anlegen":
+            return self.routines.routine_anlegen(a.get("name"), a.get("anweisung"),
+                                                 a.get("uhrzeit", ""))
+        if name == "routine_ausfuehren":
+            return self.routines.routine_ausfuehren(a.get("name"), self.agent)
+        if name == "routinen_liste":
+            liste = self.routines.routinen_liste()
+            return {"ok": True, "anzahl": len(liste),
+                    "routinen": [{"name": z["name"], "uhrzeit": z["uhrzeit"],
+                                  "anweisung": z["anweisung"][:200]} for z in liste],
+                    "text": ("Gespeicherte Routinen: %s."
+                             % ", ".join(z["name"] for z in liste)) if liste
+                            else "Es ist noch keine Routine angelegt."}
+
+        # -- Kommunikation --
+        if name == "mails_lesen":
+            return self.mail.ungelesene(int(a.get("limit") or 15))
+        if name == "mail_senden":
+            return self.mail.senden(a.get("an"), a.get("betreff"), a.get("text"))
+        if name == "nachricht_senden":
+            return self.messenger.nachricht_senden(
+                a.get("kanal"), a.get("an", ""), a.get("text"),
+                bool(a.get("als_sprache")), a.get("betreff", ""))
+
+        # -- Kalender --
+        if name == "termine_lesen":
+            return self.kalender.termine(int(a.get("tage") or 7))
+        if name == "termin_anlegen":
+            return self.kalender.termin_anlegen(
+                a.get("titel"), a.get("beginn"), int(a.get("dauer_minuten") or 60),
+                a.get("ort", ""), a.get("beschreibung", ""))
+
+        # -- Welt --
+        if name == "wetter":
+            return self.welt.wetter(a.get("ort", ""))
+        if name == "recherche":
+            return self.welt.recherche(a.get("frage"))
+        if name == "flug_suchen":
+            return self.welt.flug_suchen(a.get("von"), a.get("nach"), a.get("wann", ""))
+        if name == "umschauen":
+            return self.kamera.umschauen(a.get("frage", ""), self.agent,
+                                         bool(a.get("behalten")))
+
+        # -- Bildschirm --
+        if name == "bildschirm_bedienen":
+            return self.bildschirm.bedienen(a.get("ziel", ""))
+
+        # -- System --
+        if name == "systeminfo":
+            return self.systeminfo(a.get("was", ""))
+        if name in PARAMETER_AKTIONEN:
+            return self.parameter_aktion(name, a)
+        if name == "dashboard_bauen":
+            return self.dashboard.bauen(mit_netz=True)
+
+        return {"ok": False, "fehler": "Für '%s' fehlt die Umsetzung." % name}
+
+    # -- Die Allowlist ------------------------------------------------------
+
+    def systeminfo(self, was: str) -> dict:
+        """Führt eine registrierte Systemabfrage aus.
+
+        Nur die Namen aus :data:`SYSTEM_AKTIONEN` sind zulässig. Ein übergebener
+        Befehlstext wird nie ausgeführt - er ist schlicht kein gültiger Name.
+        """
+        schluessel = str(was or "").strip().lower()
+        if schluessel not in SYSTEM_AKTIONEN:
+            return {"ok": False,
+                    "fehler": "'%s' ist keine registrierte Abfrage. Ich führe nur "
+                              "diese aus: %s." % (was, ", ".join(sorted(SYSTEM_AKTIONEN)))}
+        befehl, beschreibung = SYSTEM_AKTIONEN[schluessel]
+        return self._befehl_ausfuehren(befehl, beschreibung)
+
+    def parameter_aktion(self, name: str, argumente: dict) -> dict:
+        """Führt eine registrierte Aktion mit genau einem geprüften Parameter aus."""
+        vorlage, parametername, beschreibung = PARAMETER_AKTIONEN[name]
+        wert = argumente.get(parametername, "")
+        ok, meldung = parameter_pruefen(wert)
+        if not ok:
+            return {"ok": False,
+                    "fehler": "Der Wert für %s ist nicht zulässig. %s"
+                              % (parametername, meldung)}
+        if parametername == "pfad":
+            wert = os.path.expanduser(str(wert))
+        befehl = [teil.replace("{%s}" % parametername, str(wert)) for teil in vorlage]
+        return self._befehl_ausfuehren(befehl, beschreibung)
+
+    @staticmethod
+    def _befehl_ausfuehren(befehl: list, beschreibung: str) -> dict:
+        """Führt einen fest registrierten Befehl aus - immer ohne Shell."""
+        try:
+            ergebnis = subprocess.run(befehl, capture_output=True, text=True,
+                                      timeout=25, shell=False)
+        except FileNotFoundError:
+            return {"ok": False,
+                    "fehler": "Das Programm '%s' gibt es auf diesem Rechner nicht. "
+                              "Diese Abfrage funktioniert nur auf einem Mac." % befehl[0]}
+        except (OSError, subprocess.SubprocessError) as fehler:
+            return {"ok": False, "fehler": "Die Abfrage ist fehlgeschlagen: %s" % fehler}
+        ausgabe = (ergebnis.stdout or ergebnis.stderr or "").strip()
+        if ergebnis.returncode != 0 and not ergebnis.stdout:
+            return {"ok": False,
+                    "fehler": "Die Abfrage '%s' hat nicht funktioniert: %s"
+                              % (beschreibung, ausgabe[:300])}
+        return {"ok": True, "was": beschreibung, "text": ausgabe[:3000]}
+
+    # -- Übersicht ----------------------------------------------------------
+
+    def zustand(self) -> dict:
+        """Was ist einsatzbereit - für den Selbsttest und das Dashboard."""
+        return {
+            "werkzeuge": len(self.namen()),
+            "mcp_werkzeuge": len(self.mcp.alle_werkzeuge()),
+            "freigabepflichtig": sorted(FREIGABE_PFLICHTIG),
+            "systemaktionen": sorted(SYSTEM_AKTIONEN),
+            "mail": self.mail.zustand(),
+            "kalender": self.kalender.zustand(),
+            "telegram": self.telegram.verfuegbar(),
+            "kamera": self.kamera.zustand(),
+            "bildschirm": self.bildschirm.zustand(),
+            "versand": self.messenger.zustand(),
+        }
+
+
+# =========================================================================
+# agent  -  Der Kern - Claude denkt, die Werkzeuge handeln.
+# 
+# Ablauf pro Eingabe:
+# 
+# 1. Erinnerung nachschlagen und dem Systemprompt beilegen
+# 2. Anfrage an die Claude-Schnittstelle mit dem gesamten Werkzeugkatalog
+#    (eigene Werkzeuge **plus** alle von MCP-Servern)
+# 3. Fordert Claude ein Werkzeug an: ausführen, Ergebnis zurückgeben, wiederholen
+# 4. Höchstens acht Runden, dann Abbruch mit klarer Meldung
+# =========================================================================
+
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+
+
+API_URL = "https://api.anthropic.com/v1/messages"
+API_VERSION = "2023-06-01"
+MAX_RUNDEN = 8
+MAX_VERLAUF = 24
+
+WOCHENTAGE_DE = ["Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag",
+                 "Samstag", "Sonntag"]
+MONATE_DE = ["Januar", "Februar", "März", "April", "Mai", "Juni", "Juli",
+             "August", "September", "Oktober", "November", "Dezember"]
+
+SYSTEMPROMPT = """Du bist Jarvis, der persönliche Assistent von {name}.
+{name} führt eine Gebäudereinigungsfirma als Einzelunternehmer.
+
+So sprichst du:
+- Kurz und gesprochen. Deine Antworten werden vorgelesen — keine
+  Aufzählungszeichen, keine Sternchen, keine Überschriften. Ganze Sätze.
+- Zwei bis vier Sätze reichen fast immer.
+- Du duzt ihn. Sachlich und ruhig, nicht kumpelhaft.
+
+So arbeitest du:
+- Du nutzt deine Werkzeuge selbstständig, ohne zu fragen, wenn die Absicht klar ist.
+- Erzählt er von einem Kundentermin, bewertest du ihn und hältst ihn fest —
+  ungefragt. Ehrlich, nicht schmeichelnd: ein nettes Gespräch ohne Abschluss
+  war kein gutes Gespräch, und das sagst du auch.
+- Nennt er nebenbei etwas Wichtiges über einen Kunden oder eine Entscheidung,
+  merkst du es dir.
+- Bei Geld bist du genau. Beträge schätzt du nie. Ist etwas unklar, fragst du nach.
+- Du hast ein Gedächtnis über frühere Tage. Nutze es beiläufig, ohne es
+  anzukündigen. Sag nie "laut meinem Gedächtnis".
+- Ging etwas schief, sagst du es. Du erfindest keine Ergebnisse.
+
+Die Buchhaltung führst du vor — die fachliche Prüfung macht sein Steuerberater.
+
+Heute ist {wochentag}, der {datum}.
+
+{gedaechtnis}"""
+
+
+def datum_deutsch(zeitpunkt: datetime = None) -> tuple:
+    """Gibt Wochentag und ausgeschriebenes Datum auf Deutsch zurück."""
+    zeitpunkt = zeitpunkt or datetime.now()
+    return (WOCHENTAGE_DE[zeitpunkt.weekday()],
+            "%d. %s %d" % (zeitpunkt.day, MONATE_DE[zeitpunkt.month - 1], zeitpunkt.year))
+
+
+def json_aus_text(rohtext: str):
+    """Holt ein JSON-Objekt aus einer Antwort, auch wenn Code-Zäune drumherum stehen."""
+    if not rohtext:
+        return None
+    text = str(rohtext).strip()
+    if text.startswith("```"):
+        text = text.split("```")[1] if "```" in text[3:] else text[3:]
+        if text.lstrip().lower().startswith("json"):
+            text = text.lstrip()[4:]
+    text = text.strip().strip("`").strip()
+    try:
+        return json.loads(text)
+    except ValueError:
+        pass
+    # Notfalls das äußerste geschweifte Klammerpaar herausschneiden.
+    beginn, ende = text.find("{"), text.rfind("}")
+    if beginn >= 0 and ende > beginn:
+        try:
+            return json.loads(text[beginn:ende + 1])
+        except ValueError:
+            return None
+    return None
+
+
+class JarvisAgent:
+    """Die Denkschleife: fragt Claude, führt Werkzeuge aus, antwortet gesprochen."""
+
+    def __init__(self, db_pfad: str = None, stimme=None):
+        self.tools = Werkzeuge(agent=None, db_pfad=db_pfad)
+        self.tools.agent_setzen(self)
+        self.memory = self.tools.memory
+        self.recall = self.tools.recall
+        self.stimme = stimme
+        if stimme is not None:
+            self.tools.stimme_setzen(stimme)
+        self.verlauf = []
+        self.letzter_fehler = ""
+
+    # -- Grundlagen ---------------------------------------------------------
+
+    def einsatzbereit(self) -> bool:
+        """Ist ein Anthropic-Schlüssel hinterlegt?"""
+        return bool(ANTHROPIC_API_KEY)
+
+    def stimme_setzen(self, stimme):
+        """Hängt die Sprachausgabe ein."""
+        self.stimme = stimme
+        self.tools.stimme_setzen(stimme)
+
+    def dienste_starten(self) -> dict:
+        """Startet die eingeschalteten MCP-Dienste."""
+        return self.tools.mcp.starten()
+
+    def systemprompt(self, frage: str = "") -> str:
+        """Baut den Systemprompt samt passendem Gedächtnisauszug."""
+        wochentag, datum = datum_deutsch()
+        try:
+            gedaechtnis = self.recall.gedaechtnis_block(frage)
+        except Exception as fehler:
+            gedaechtnis = ""
+            print("[agent] Gedächtnis nicht lesbar: %s" % fehler)
+        return SYSTEMPROMPT.format(name=NUTZER_NAME, wochentag=wochentag,
+                                   datum=datum, gedaechtnis=gedaechtnis)
+
+    # -- Schnittstelle ------------------------------------------------------
+
+    def _anfrage(self, koerper: dict, timeout: int = 120) -> dict:
+        """Schickt eine Anfrage an die Claude-Schnittstelle.
+
+        Fehler kommen auf Deutsch zurück und benennen den nächsten Schritt.
+        """
+        if not self.einsatzbereit():
+            return {"ok": False,
+                    "fehler": "Es ist kein Anthropic-Schlüssel hinterlegt. Starte die "
+                              "Einrichtung mit: python3 jarvis.py einrichten"}
+        daten = json.dumps(koerper).encode("utf-8")
+        anfrage = urllib.request.Request(API_URL, data=daten, method="POST", headers={
+            "x-api-key": ANTHROPIC_API_KEY,
+            "anthropic-version": API_VERSION,
+            "content-type": "application/json",
+        })
+        for versuch in range(3):
+            try:
+                with urllib.request.urlopen(anfrage, timeout=timeout) as antwort:
+                    return {"ok": True,
+                            "daten": json.loads(antwort.read().decode("utf-8"))}
+            except urllib.error.HTTPError as fehler:
+                try:
+                    inhalt = fehler.read().decode("utf-8")
+                    meldung = (json.loads(inhalt).get("error") or {}).get("message", inhalt)
+                except (ValueError, OSError):
+                    meldung = str(fehler)
+                if fehler.code == 401:
+                    return {"ok": False,
+                            "fehler": "Der Schlüssel wird abgelehnt - bitte neu kopieren "
+                                      "und die Einrichtung noch einmal starten."}
+                if fehler.code == 400 and "credit" in meldung.lower():
+                    return {"ok": False,
+                            "fehler": "Auf dem Anthropic-Konto ist kein Guthaben mehr. "
+                                      "Bitte unter console.anthropic.com aufladen."}
+                if fehler.code in (429, 529) and versuch < 2:
+                    time.sleep(3 * (versuch + 1))
+                    continue
+                if fehler.code == 429:
+                    return {"ok": False,
+                            "fehler": "Zu viele Anfragen in kurzer Zeit. Bitte in einer "
+                                      "Minute noch einmal."}
+                return {"ok": False,
+                        "fehler": "Claude meldet einen Fehler (%d): %s"
+                                  % (fehler.code, meldung[:300])}
+            except (urllib.error.URLError, OSError) as fehler:
+                if versuch < 2:
+                    time.sleep(2 * (versuch + 1))
+                    continue
+                return {"ok": False,
+                        "fehler": "Keine Verbindung zu Claude: %s. Ist das Internet da?"
+                                  % fehler}
+            except ValueError as fehler:
+                return {"ok": False, "fehler": "Die Antwort war unlesbar: %s" % fehler}
+        return {"ok": False, "fehler": "Claude hat nicht geantwortet."}
+
+    @staticmethod
+    def _inhalt_bauen(auftrag: str, bild_base64: str = "", bild_typ: str = "image/jpeg"):
+        """Baut den Inhaltsblock einer Nachricht, wahlweise mit Bild."""
+        if not bild_base64:
+            return auftrag
+        return [
+            {"type": "image", "source": {"type": "base64", "media_type": bild_typ,
+                                         "data": bild_base64}},
+            {"type": "text", "text": auftrag},
+        ]
+
+    def text_anfrage(self, auftrag: str, bild_base64: str = "",
+                     bild_typ: str = "image/jpeg", max_tokens: int = 1200) -> dict:
+        """Eine einzelne Anfrage ohne Werkzeuge - gibt reinen Text zurück."""
+        antwort = self._anfrage({
+            "model": CLAUDE_MODEL,
+            "max_tokens": max_tokens,
+            "messages": [{"role": "user",
+                          "content": self._inhalt_bauen(auftrag, bild_base64, bild_typ)}],
+        })
+        if not antwort.get("ok"):
+            return antwort
+        teile = [block.get("text", "") for block in antwort["daten"].get("content", [])
+                 if block.get("type") == "text"]
+        return {"ok": True, "text": "\n".join(teile).strip()}
+
+    def json_anfrage(self, auftrag: str, bild_base64: str = "",
+                     bild_typ: str = "image/jpeg", max_tokens: int = 2000) -> dict:
+        """Eine Anfrage, deren Antwort als JSON erwartet wird."""
+        antwort = self.text_anfrage(auftrag, bild_base64, bild_typ, max_tokens)
+        if not antwort.get("ok"):
+            return antwort
+        daten = json_aus_text(antwort["text"])
+        if daten is None:
+            return {"ok": False,
+                    "fehler": "Die Antwort war kein auswertbares JSON.",
+                    "rohtext": antwort["text"][:500]}
+        return {"ok": True, "daten": daten}
+
+    # -- Verlauf ------------------------------------------------------------
+
+    def _verlauf_kuerzen(self):
+        """Kürzt den Verlauf auf 24 Nachrichten - immer beginnend bei einer Nutzerfrage.
+
+        Beginnt der Verlauf mit einer Antwort oder einem Werkzeugergebnis, weist
+        die Schnittstelle die ganze Anfrage ab. Deshalb wird vorne so lange
+        abgeschnitten, bis eine echte Nutzernachricht am Anfang steht.
+        """
+        if len(self.verlauf) <= MAX_VERLAUF:
+            return
+        rest = self.verlauf[-MAX_VERLAUF:]
+        while rest and not self._ist_echte_nutzerfrage(rest[0]):
+            rest.pop(0)
+        self.verlauf = rest
+
+    @staticmethod
+    def _ist_echte_nutzerfrage(nachricht: dict) -> bool:
+        """Ist das eine Nutzernachricht, die nicht bloß ein Werkzeugergebnis ist?"""
+        if nachricht.get("role") != "user":
+            return False
+        inhalt = nachricht.get("content")
+        if isinstance(inhalt, str):
+            return True
+        for block in inhalt or []:
+            if isinstance(block, dict) and block.get("type") == "tool_result":
+                return False
+        return True
+
+    def verlauf_leeren(self):
+        """Beginnt ein neues Gespräch."""
+        self.verlauf = []
+
+    # -- Denkschleife -------------------------------------------------------
+
+    def denken(self, eingabe: str, protokollieren: bool = True) -> str:
+        """Die Hauptschleife: fragen, Werkzeuge ausführen, antworten."""
+        eingabe = (eingabe or "").strip()
+        if not eingabe:
+            return ""
+        if not self.einsatzbereit():
+            return ("Es ist kein Anthropic-Schlüssel hinterlegt. Starte einmal die "
+                    "Einrichtung, dann kann ich dir antworten.")
+
+        if protokollieren:
+            self.memory.verlauf_anhaengen("user", eingabe)
+        self.verlauf.append({"role": "user", "content": eingabe})
+        self._verlauf_kuerzen()
+
+        systemtext = self.systemprompt(eingabe)
+        katalog = self.tools.katalog()
+
+        for runde in range(MAX_RUNDEN):
+            antwort = self._anfrage({
+                "model": CLAUDE_MODEL,
+                "max_tokens": CLAUDE_MAX_TOKENS,
+                "system": systemtext,
+                "tools": katalog,
+                "messages": self.verlauf,
+            })
+            if not antwort.get("ok"):
+                self.letzter_fehler = antwort.get("fehler", "")
+                return self.letzter_fehler
+
+            nachricht = antwort["daten"]
+            inhalt = nachricht.get("content", [])
+            self.verlauf.append({"role": "assistant", "content": inhalt})
+
+            werkzeugaufrufe = [b for b in inhalt if b.get("type") == "tool_use"]
+            if not werkzeugaufrufe:
+                text = "\n".join(b.get("text", "") for b in inhalt
+                                 if b.get("type") == "text").strip()
+                if protokollieren and text:
+                    self.memory.verlauf_anhaengen("assistant", text)
+                return text or "Dazu habe ich nichts zu sagen."
+
+            ergebnisse = []
+            for aufruf in werkzeugaufrufe:
+                name = aufruf.get("name", "")
+                argumente = aufruf.get("input") or {}
+                print("[werkzeug] %s %s" % (name, json.dumps(argumente,
+                                                             ensure_ascii=False)[:200]))
+                ergebnis = self.tools.run(name, argumente)
+                try:
+                    text = json.dumps(ergebnis, ensure_ascii=False, default=str)[:6000]
+                except (TypeError, ValueError):
+                    text = str(ergebnis)[:6000]
+                ergebnisse.append({"type": "tool_result", "tool_use_id": aufruf.get("id"),
+                                   "content": text,
+                                   "is_error": not bool(ergebnis.get("ok"))})
+            self.verlauf.append({"role": "user", "content": ergebnisse})
+            self._verlauf_kuerzen()
+
+        return ("Ich habe es %d Mal versucht und komme nicht weiter. Sag mir bitte "
+                "genauer, was du brauchst." % MAX_RUNDEN)
+
+    def antworten(self, eingabe: str) -> str:
+        """Denken und die Antwort aussprechen."""
+        antwort = self.denken(eingabe)
+        if antwort and self.stimme is not None:
+            self.stimme.sprich(antwort)
+        elif antwort:
+            print("Jarvis: %s" % antwort)
+        return antwort
+
+    # -- Briefings ----------------------------------------------------------
+
+    def briefing_morgens(self) -> str:
+        """Das Morgenbriefing - Termine, Post, Offenes, Wetter."""
+        bausteine = self._bausteine_sammeln(morgens=True)
+        if not self.einsatzbereit():
+            return self._briefing_ohne_claude(bausteine, morgens=True)
+        auftrag = ("Sprich jetzt dein Morgenbriefing. Vier bis sechs Sätze, gesprochen, "
+                   "ohne Aufzählungen. Beginne mit einer kurzen Begrüßung. Nenne die "
+                   "Termine, das Wichtigste aus der Post und was offen ist. Wenn etwas "
+                   "davon nicht abrufbar war, sag es kurz und erfinde nichts.\n\n"
+                   "Das sind die Daten:\n%s" % bausteine)
+        antwort = self.denken(auftrag, protokollieren=False)
+        return antwort
+
+    def briefing_abends(self) -> str:
+        """Der Abendrückblick - Zahlen, Leads, offene Punkte, Tagesbericht."""
+        try:
+            self.recall.tag_zusammenfassen(self)
+        except Exception as fehler:
+            print("[agent] Tagesbericht fehlgeschlagen: %s" % fehler)
+        bausteine = self._bausteine_sammeln(morgens=False)
+        if not self.einsatzbereit():
+            return self._briefing_ohne_claude(bausteine, morgens=False)
+        auftrag = ("Sprich jetzt deinen Abendrückblick. Vier bis sechs Sätze, gesprochen, "
+                   "ohne Aufzählungen. Wie der Tag lief, was er morgen anpacken sollte, "
+                   "und wenn ein Lead liegen bleibt, sag das deutlich.\n\n"
+                   "Das sind die Daten:\n%s" % bausteine)
+        return self.denken(auftrag, protokollieren=False)
+
+    def _bausteine_sammeln(self, morgens: bool) -> str:
+        """Sammelt die Fakten für ein Briefing - jeder Fehler bleibt sichtbar."""
+        teile = []
+
+        if morgens and self.tools.kalender.verfuegbar():
+            teile.append("Kalender: %s" % self.tools.kalender.zusammenfassung(1))
+        if morgens and self.tools.mail.lesen_moeglich():
+            teile.append("Posteingang: %s" % self.tools.mail.zusammenfassung(10))
+        if morgens and WETTER_ORT:
+            wetter = self.tools.welt.wetter(WETTER_ORT)
+            teile.append("Wetter: %s" % (wetter.get("text") or wetter.get("fehler")))
+
+        punkte = self.memory.punkte_offen()
+        teile.append("Offene Punkte: %s"
+                     % ("; ".join(p["text"] for p in punkte[:8]) if punkte else "keine"))
+
+        leads = self.tools.call_analysis.offene_leads()
+        teile.append("Leads: %s" % leads.get("text", ""))
+
+        if not morgens:
+            auswertung = self.tools.bookkeeping.auswertung()
+            teile.append("Zahlen des Monats: %s" % auswertung.get("text", ""))
+            belege = self.tools.bookkeeping.fehlende_belege()
+            teile.append("Belege: %s" % belege.get("text", ""))
+            muster = self.tools.call_analysis.verkaufsmuster(30)
+            teile.append("Vertrieb: %s" % muster.get("text", ""))
+
+        return "\n".join(teile)
+
+    @staticmethod
+    def _briefing_ohne_claude(bausteine: str, morgens: bool) -> str:
+        """Rückfallebene ohne Schlüssel: die nackten Fakten, nichts Erfundenes."""
+        kopf = ("Guten Morgen. Ohne Anthropic-Schlüssel kann ich nur die nackten Zahlen "
+                "vorlesen." if morgens else
+                "Feierabend. Ohne Anthropic-Schlüssel kann ich nur die nackten Zahlen "
+                "vorlesen.")
+        return "%s\n%s" % (kopf, bausteine)
+
+    # -- Übersicht ----------------------------------------------------------
+
+    def zustand(self) -> dict:
+        """Was ist bereit - für den Selbsttest."""
+        return {"schluessel": self.einsatzbereit(), "modell": CLAUDE_MODEL,
+                "verlauf": len(self.verlauf), "werkzeuge": len(self.tools.namen()),
+                "gedaechtnis": self.memory.statistik()}
+
+
+# =========================================================================
+# run  -  Betriebsarten - was passiert, wenn Jarvis gestartet wird.
+# 
+#     python3 jarvis.py             Dauerbetrieb: hört zu und meldet sich von selbst
+#     python3 jarvis.py chat        tippen statt sprechen (Notfall)
+#     python3 jarvis.py telegram    vom Handy aus
+#     python3 jarvis.py briefing    Briefing sofort
+#     python3 jarvis.py abend       Abendrückblick sofort
+#     python3 jarvis.py dashboard   Dashboard bauen
+#     python3 jarvis.py export      Buchhaltung als CSV
+#     python3 jarvis.py stimme      Stimmprofil einlernen
+#     python3 jarvis.py stimmen     ElevenLabs-Stimme aussuchen
+#     python3 jarvis.py test        Selbsttest
+#     python3 jarvis.py einrichten  geführte Ersteinrichtung
+# =========================================================================
+
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+
+
+BANNER = r"""
+   _   _   ___  _   _ ___ ___
+  | | /_\ | _ \| | | |_ _/ __|   Persönlicher Assistent
+  | |/ _ \|   /| |_| || |\__ \   Gebäudereinigung
+ _/ /_/ \_\_|_\ \___/|___|___/   alles lokal auf diesem Rechner
+|__/
+"""
+
+
+def agent_aufbauen(mit_stimme: bool = True):
+    """Baut Agent, Sprachausgabe und startet die MCP-Dienste."""
+    stimme = Stimme() if mit_stimme else None
+    agent = JarvisAgent(stimme=stimme)
+    bericht = agent.dienste_starten()
+    if bericht.get("gestartet"):
+        print("[mcp] gestartet: %s" % ", ".join(bericht["gestartet"]))
+    if bericht.get("fehlgeschlagen"):
+        for eintrag in bericht["fehlgeschlagen"]:
+            print("[mcp] nicht gestartet: %s" % eintrag)
+    return agent, stimme
+
+
+# ---------------------------------------------------------------------------
+# Dauerbetrieb
+# ---------------------------------------------------------------------------
+
+def dauerbetrieb():
+    """Hört auf das Weckwort und meldet sich zu den eingestellten Zeiten."""
+    print(BANNER)
+    agent, stimme = agent_aufbauen()
+    profil = Sprecherprofil()
+
+    zeitplan = Scheduler(agent=agent, routines=agent.tools.routines,
+                         ausgabe=stimme.sprich)
+    zeitplan.start()
+    print("[zeitplan] Morgens %s, abends %s." % (BRIEFING_MORGENS,
+                                                 BRIEFING_ABENDS))
+    for eintrag in zeitplan.uebersicht():
+        print("           %s  %s" % (eintrag["uhrzeit"], eintrag["beschreibung"]))
+
+    if not stimme.mikrofon_bereit():
+        print("\n[!] Kein Mikrofonzugriff. Ich wechsle in den Tippbetrieb.")
+        stimme.sprich("Ich komme nicht an das Mikrofon. Wir tippen erst einmal.")
+        zeitplan.stop()
+        return chatbetrieb(agent, stimme)
+
+    if not agent.einsatzbereit():
+        stimme.sprich("Es ist kein Anthropic-Schlüssel hinterlegt. Starte bitte einmal "
+                      "die Einrichtung.")
+        print("Starte die Einrichtung mit: python3 jarvis.py einrichten")
+
+    stimme.sprich("Ich bin da. Sag Hey Jarvis, wenn du etwas brauchst.")
+    print("\nIch höre zu. Abbrechen mit Strg und C.\n")
+
+    try:
+        while True:
+            pfad = stimme.aufnehmen_bis_pause(still_signal=True)
+            if not pfad:
+                continue
+            try:
+                text = stimme.transkribieren(pfad)
+                if not text:
+                    continue
+                erkannt, befehl = weckwort_pruefen(text)
+                if not erkannt:
+                    continue
+
+                pruefung = profil.ist_der_nutzer(pfad)
+                if not pruefung["erkannt"]:
+                    print("[stimme] %s - ich reagiere nicht." % pruefung["grund"])
+                    continue
+            finally:
+                try:
+                    os.remove(pfad)
+                except OSError:
+                    pass
+
+            stimme.signal("verstanden")
+            if not befehl:
+                stimme.sprich("Ja?")
+                nachtrag = stimme.zuhoeren()
+                if not nachtrag:
+                    continue
+                befehl = nachtrag
+
+            print("Du: %s" % befehl)
+            try:
+                agent.antworten(befehl)
+            except Exception as fehler:
+                stimme.signal("fehler")
+                print("[fehler] %s" % fehler)
+                stimme.sprich("Da ist etwas schiefgegangen: %s" % fehler)
+    except KeyboardInterrupt:
+        print("\nBis später.")
+        stimme.sprich("Bis später.")
+    finally:
+        zeitplan.stop()
+        agent.tools.mcp.stoppen()
+
+
+# ---------------------------------------------------------------------------
+# Tippbetrieb
+# ---------------------------------------------------------------------------
+
+def chatbetrieb(agent=None, stimme=None):
+    """Tippen statt sprechen - der Notfallweg, wenn das Mikrofon streikt."""
+    if agent is None:
+        print(BANNER)
+        agent, stimme = agent_aufbauen(mit_stimme=True)
+    print("Tippbetrieb. 'ende' beendet, 'neu' beginnt ein neues Gespräch.\n")
+    try:
+        while True:
+            try:
+                eingabe = input("Du: ").strip()
+            except (EOFError, KeyboardInterrupt):
+                break
+            if not eingabe:
+                continue
+            if eingabe.lower() in ("ende", "exit", "quit", "schluss", "feierabend jarvis"):
+                break
+            if eingabe.lower() == "neu":
+                agent.verlauf_leeren()
+                print("Jarvis: Neues Gespräch.")
+                continue
+            antwort = agent.denken(eingabe)
+            print("Jarvis: %s\n" % antwort)
+            if stimme is not None:
+                stimme.sprich(antwort)
+    finally:
+        agent.tools.mcp.stoppen()
+    print("Bis später.")
+
+
+# ---------------------------------------------------------------------------
+# Telegram-Betrieb
+# ---------------------------------------------------------------------------
+
+def telegrambetrieb():
+    """Jarvis vom Handy aus bedienen."""
+    print(BANNER)
+    agent, stimme = agent_aufbauen()
+    telegram = agent.tools.telegram
+    if not telegram.verfuegbar():
+        print("Telegram ist nicht eingerichtet. Starte: python3 jarvis.py einrichten")
+        return
+    telegram.senden("Ich bin da. Schreib oder sprich einfach.")
+    print("Telegram-Betrieb läuft. Abbrechen mit Strg und C.\n")
+
+    zeitplan = Scheduler(agent=agent, routines=agent.tools.routines,
+                         ausgabe=lambda text: telegram.senden(text))
+    zeitplan.start()
+    try:
+        while True:
+            for nachricht in telegram.nachrichten_holen(timeout=25):
+                text = (nachricht.get("text") or "").strip()
+                if not text and nachricht.get("sprachdatei"):
+                    text = stimme.transkribieren(nachricht["sprachdatei"])
+                    try:
+                        os.remove(nachricht["sprachdatei"])
+                    except OSError:
+                        pass
+                if not text:
+                    continue
+                erkannt, befehl = weckwort_pruefen(text)
+                befehl = befehl if erkannt and befehl else text
+                print("Du: %s" % befehl)
+                antwort = agent.denken(befehl)
+                telegram.senden(antwort)
+                print("Jarvis: %s\n" % antwort)
+    except KeyboardInterrupt:
+        print("\nBeendet.")
+    finally:
+        zeitplan.stop()
+        agent.tools.mcp.stoppen()
+
+
+# ---------------------------------------------------------------------------
+# Einzelaufgaben
+# ---------------------------------------------------------------------------
+
+def briefing_sofort(abends: bool = False):
+    """Spricht sofort das Morgen- oder Abendbriefing."""
+    agent, stimme = agent_aufbauen()
+    try:
+        text = agent.briefing_abends() if abends else agent.briefing_morgens()
+        stimme.sprich(text)
+        print("\n%s" % text)
+    finally:
+        agent.tools.mcp.stoppen()
+
+
+def dashboard_bauen():
+    """Baut das Command Center."""
+    agent, _ = agent_aufbauen(mit_stimme=False)
+    try:
+        ergebnis = agent.tools.dashboard.bauen(mit_netz=True)
+        print(ergebnis.get("text") or ergebnis.get("fehler"))
+        if ergebnis.get("ok"):
+            import subprocess
+            import shutil as _shutil
+            if _shutil.which("open"):
+                subprocess.run(["open", ergebnis["datei"]], shell=False,
+                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    finally:
+        agent.tools.mcp.stoppen()
+
+
+def buchhaltung_exportieren(argumente=None):
+    """Schreibt die Buchungen als CSV für den Steuerberater."""
+    argumente = argumente or []
+    von = argumente[0] if len(argumente) > 0 else ""
+    bis = argumente[1] if len(argumente) > 1 else ""
+    agent, _ = agent_aufbauen(mit_stimme=False)
+    try:
+        ergebnis = agent.tools.bookkeeping.csv_export(von, bis)
+        print(ergebnis.get("text") or ergebnis.get("fehler"))
+        return 0 if ergebnis.get("ok") else 1
+    finally:
+        agent.tools.mcp.stoppen()
+
+
+def stimmprofil_einlernen():
+    """Lernt die Stimme des Nutzers ein."""
+    stimme = Stimme()
+    profil = Sprecherprofil()
+    ergebnis = profil.einlernen(stimme)
+    print(ergebnis.get("text") or ergebnis.get("fehler"))
+    if ergebnis.get("ok"):
+        env_setzen("STIMMPRUEFUNG_AN", "ja")
+        stimme.sprich(ergebnis["text"])
+    else:
+        stimme.sprich(ergebnis.get("fehler", "Das hat nicht geklappt."))
+
+
+def stimme_aussuchen():
+    """Listet die ElevenLabs-Stimmen auf und speichert die gewählte."""
+    if not ELEVENLABS_API_KEY:
+        print("Für ElevenLabs ist kein Schlüssel hinterlegt. Ich benutze die "
+              "Systemstimme von macOS - die kostet nichts und ist immer da.")
+        stimme = Stimme()
+        print("Aktuelle Systemstimme: %s" % (stimme.macos_stimme or "keine deutsche"))
+        return
+    try:
+        anfrage = urllib.request.Request(
+            "https://api.elevenlabs.io/v1/voices",
+            headers={"xi-api-key": ELEVENLABS_API_KEY})
+        with urllib.request.urlopen(anfrage, timeout=30) as antwort:
+            daten = json.loads(antwort.read().decode("utf-8"))
+    except (urllib.error.URLError, OSError, ValueError) as fehler:
+        print("Die Stimmenliste ist nicht erreichbar: %s" % fehler)
+        return
+
+    stimmen = daten.get("voices", []) or []
+    if not stimmen:
+        print("Es sind keine Stimmen hinterlegt.")
+        return
+    for nummer, eintrag in enumerate(stimmen, 1):
+        marken = eintrag.get("labels") or {}
+        print("%2d. %-22s %s" % (nummer, eintrag.get("name", "?"),
+                                 ", ".join("%s: %s" % (k, v) for k, v in marken.items())))
+    try:
+        wahl = input("\nNummer der Stimme (Enter bricht ab): ").strip()
+    except (EOFError, KeyboardInterrupt):
+        return
+    if not wahl.isdigit() or not (1 <= int(wahl) <= len(stimmen)):
+        print("Nichts geändert.")
+        return
+    gewaehlt = stimmen[int(wahl) - 1]
+    env_setzen("ELEVENLABS_VOICE_ID", gewaehlt.get("voice_id", ""))
+    print("Gespeichert: %s" % gewaehlt.get("name"))
+    Stimme().sprich("So klinge ich jetzt.")
+
+
+# ---------------------------------------------------------------------------
+# Selbsttest
+# ---------------------------------------------------------------------------
+
+def _marke(zustand: str) -> str:
+    return {"ok": "[ok]", "fehlt": "[--]", "fehler": "[!!]"}.get(zustand, "[??]")
+
+
+def selbsttest() -> int:
+    """Geht jeden Baustein durch.
+
+    ``[ok]`` läuft, ``[--]`` läuft ohne diese Funktion weiter, ``[!!]`` ist kaputt.
+    """
+    print(BANNER)
+    print("SELBSTTEST\n" + "=" * 62)
+    fehler_gesamt = 0
+
+    def melden(name, zustand, hinweis=""):
+        nonlocal fehler_gesamt
+        if zustand == "fehler":
+            fehler_gesamt += 1
+        print("%s %-26s %s" % (_marke(zustand), name, hinweis))
+
+    # -- Konfiguration --
+    print("\nGrundlage")
+    melden("Konfiguration", "ok", "Basis: %s" % BASIS)
+    melden("Anthropic-Schlüssel", "ok" if ANTHROPIC_API_KEY else "fehlt",
+           CLAUDE_MODEL if ANTHROPIC_API_KEY
+           else "ohne ihn kann Jarvis nicht denken")
+
+    # -- Agent und Gedächtnis --
+    print("\nGedächtnis")
+    try:
+        agent = JarvisAgent()
+        melden("Agent gestartet", "ok", "%d Werkzeuge" % len(agent.tools.namen()))
+    except Exception as fehler:
+        melden("Agent gestartet", "fehler", str(fehler))
+        return 1
+
+    memory = agent.memory
+    try:
+        notiz = memory.notiz_speichern("Selbsttest: Kunde Meier will Fensterreinigung",
+                                       "test")
+        gefunden = memory.notizen_suchen("Selbsttest")
+        melden("Notiz speichern und finden", "ok" if gefunden else "fehler",
+               "%d Treffer" % len(gefunden))
+        memory.notiz_loeschen(notiz.get("id"))
+    except Exception as fehler:
+        melden("Notiz speichern und finden", "fehler", str(fehler))
+
+    try:
+        memory.kontakt_anlegen("Selbsttest Berger", "Berger GmbH")
+        treffer = memory.kontakt_suchen("Selbsttest Berger")
+        melden("Kontakt anlegen und suchen", "ok" if treffer else "fehler",
+               "%d Treffer" % len(treffer))
+    except Exception as fehler:
+        melden("Kontakt anlegen und suchen", "fehler", str(fehler))
+
+    try:
+        block = agent.recall.gedaechtnis_block("Angebot Meier")
+        melden("Gedächtnis nachschlagen", "ok", "%d Zeichen Kontext" % len(block))
+    except Exception as fehler:
+        melden("Gedächtnis nachschlagen", "fehler", str(fehler))
+
+    # -- Buchhaltung --
+    print("\nBuchhaltung")
+    try:
+        vorsteuer = mwst_aus_brutto(130.40, 20)
+        melden("MwSt-Rechnung 130,40 bei 20%", "ok" if vorsteuer == 21.73 else "fehler",
+               "%.2f Euro (erwartet 21,73)" % vorsteuer)
+    except Exception as fehler:
+        melden("MwSt-Rechnung", "fehler", str(fehler))
+
+    try:
+        auswertung = agent.tools.bookkeeping.auswertung()
+        melden("Auswertung", "ok", auswertung["text"][:70])
+        belege = agent.tools.bookkeeping.fehlende_belege()
+        melden("Fehlende Belege", "ok", belege["text"][:70])
+    except Exception as fehler:
+        melden("Auswertung", "fehler", str(fehler))
+
+    # -- Vertrieb --
+    print("\nVertrieb")
+    try:
+        leads = agent.tools.call_analysis.offene_leads()
+        melden("Offene Leads", "ok", leads["text"][:70])
+        muster = agent.tools.call_analysis.verkaufsmuster()
+        melden("Verkaufsmuster", "ok", muster["text"][:70])
+    except Exception as fehler:
+        melden("Vertrieb", "fehler", str(fehler))
+
+    # -- Routinen --
+    print("\nRoutinen")
+    try:
+        routinen = agent.tools.routines
+        routinen.routine_anlegen("Selbsttest Tagesbericht", "Zahlen zusammenfassen",
+                                 "18 Uhr")
+        treffer = routinen.routine_finden("den Selbsttest Tages Bericht")
+        melden("Routine mit ungenauem Namen finden",
+               "ok" if treffer else "fehler",
+               treffer["name"] if treffer else "nicht gefunden")
+        geplant = routinen.geplante_routinen()
+        melden("Routine im Zeitplan", "ok" if geplant else "fehler",
+               "%d mit Uhrzeit" % len(geplant))
+        routinen.routine_loeschen("Selbsttest Tagesbericht")
+    except Exception as fehler:
+        melden("Routinen", "fehler", str(fehler))
+
+    # -- Zeitplan --
+    print("\nZeitplan")
+    try:
+        from datetime import datetime as _dt
+        pruefungen = [
+            (_dt(2026, 1, 1, 9, 30), True, "9:30 bei 9:00-Job"),
+            (_dt(2026, 1, 1, 8, 0), False, "8:00 bei 9:00-Job"),
+            (_dt(2026, 1, 1, 14, 0), False, "14:00 bei 9:00-Job (zu spät)"),
+        ]
+        alle_ok = True
+        for zeitpunkt, erwartet, name in pruefungen:
+            tatsaechlich = ist_faellig("09:00", zeitpunkt)
+            if tatsaechlich != erwartet:
+                alle_ok = False
+            melden(name, "ok" if tatsaechlich == erwartet else "fehler",
+                   "%s (erwartet %s)" % (tatsaechlich, erwartet))
+        del alle_ok
+    except Exception as fehler:
+        melden("Zeitplan", "fehler", str(fehler))
+
+    # -- Sicherheit --
+    print("\nSicherheit")
+    try:
+        abgewiesen = agent.tools.run("systeminfo", {"was": "rm -rf /"})
+        melden("systeminfo mit 'rm -rf /' abgewiesen",
+               "ok" if not abgewiesen.get("ok") else "fehler",
+               abgewiesen.get("fehler", "")[:60])
+        abgewiesen = agent.tools.run("ordner_zeigen", {"pfad": ".;rm -rf /"})
+        melden("ordner_zeigen mit ';' abgewiesen",
+               "ok" if not abgewiesen.get("ok") else "fehler",
+               abgewiesen.get("fehler", "")[:60])
+        unbekannt = agent.tools.run("beliebiger_befehl", {})
+        melden("Unbekanntes Werkzeug abgewiesen",
+               "ok" if not unbekannt.get("ok") else "fehler", "")
+        pflichtig = sorted(n for n in agent.tools.namen()
+                           if agent.tools.braucht_freigabe(n))
+        melden("Freigabepflichtige Werkzeuge", "ok", ", ".join(pflichtig))
+    except Exception as fehler:
+        melden("Sicherheit", "fehler", str(fehler))
+
+    # -- MCP --
+    print("\nMCP")
+    try:
+        vorlage_schreiben()
+        client = MCPClient()
+        client.konfiguration_lesen()
+        eingeschaltet = [name for name, eintrag in
+                         (client.konfig.get("server") or {}).items()
+                         if isinstance(eintrag, dict) and not eintrag.get("aus", True)]
+        melden("Konfiguration", "ok",
+               "%d Dienste hinterlegt, %d eingeschaltet"
+               % (len(client.konfig.get("server") or {}), len(eingeschaltet)))
+        testserver = os.path.join(str(BASIS), "tests", "mcp_testserver.py")
+        if os.path.exists(testserver):
+            probe = MCPClient()
+            probe.konfig = {"server": {"test": {
+                "aus": False, "befehl": sys.executable, "argumente": [testserver],
+                "ohne_rueckfrage": ["liste_lesen"]}}}
+            server = MCPServer("test", probe.konfig["server"]["test"])
+            if server.starten():
+                probe.server_hinzufuegen("test", server)
+                werkzeuge = [w["name"] for w in probe.alle_werkzeuge()]
+                melden("Testserver Werkzeuge", "ok" if len(werkzeuge) == 2 else "fehler",
+                       ", ".join(werkzeuge))
+                frei = probe.braucht_freigabe("mcp__test__liste_lesen")
+                pflicht = probe.braucht_freigabe("mcp__test__datei_loeschen")
+                melden("ohne_rueckfrage läuft durch",
+                       "ok" if frei is False else "fehler", "")
+                melden("Rest fragt nach", "ok" if pflicht is True else "fehler", "")
+                ergebnis = probe.aufrufen("mcp__test__liste_lesen", {"was": "test"})
+                melden("Testaufruf", "ok" if ergebnis.get("ok") else "fehler",
+                       ergebnis.get("text", ergebnis.get("fehler", ""))[:50])
+                server.stoppen()
+            else:
+                melden("Testserver", "fehler", server.fehler)
+        else:
+            melden("Testserver", "fehlt", "tests/mcp_testserver.py nicht gefunden")
+    except Exception as fehler:
+        melden("MCP", "fehler", str(fehler))
+
+    # -- Sprache --
+    print("\nSprache")
+    try:
+        stimme = Stimme()
+        zustand = stimme.zustand()
+        melden("Sprachausgabe macOS", "ok" if zustand["macos_say"] else "fehlt",
+               zustand["macos_stimme"])
+        melden("ElevenLabs", "ok" if zustand["elevenlabs"] else "fehlt",
+               "optional, die Systemstimme reicht")
+        melden("Mikrofon", "ok" if zustand["mikrofon"] else "fehlt",
+               "" if zustand["mikrofon"] else "Pakete sounddevice und numpy fehlen")
+        melden("Spracherkennung lokal", "ok" if zustand["whisper_lokal"] else "fehlt",
+               "" if zustand["whisper_lokal"] else "Paket faster-whisper fehlt")
+        melden("Spracherkennung API", "ok" if zustand["whisper_api"] else "fehlt",
+               "optional")
+        erkannt, rest = weckwort_pruefen("Hey Javis, wie sieht mein Tag aus?")
+        melden("Weckwort erkennen", "ok" if erkannt else "fehler", "Rest: %s" % rest)
+        profil = Sprecherprofil()
+        melden("Stimmprofil", "ok" if profil.eingelernt() else "fehlt",
+               "entscheidet nur, ob Jarvis zuhört - gibt nie etwas frei")
+    except Exception as fehler:
+        melden("Sprache", "fehler", str(fehler))
+
+    # -- Außenwelt --
+    print("\nAußenwelt")
+    try:
+        melden("E-Mail lesen", "ok" if agent.tools.mail.lesen_moeglich() else "fehlt", "")
+        melden("E-Mail senden", "ok" if agent.tools.mail.senden_moeglich() else "fehlt", "")
+        melden("Kalender", "ok" if agent.tools.kalender.verfuegbar() else "fehlt", "")
+        melden("Telegram", "ok" if agent.tools.telegram.verfuegbar() else "fehlt",
+               "ohne ihn fragt Jarvis im Terminal nach Freigaben")
+        kamera = agent.tools.kamera.zustand()
+        melden("Kamera", "ok" if kamera["verfuegbar"] else "fehlt",
+               kamera["programm"] if kamera["verfuegbar"] else "brew install imagesnap")
+        bildschirm = agent.tools.bildschirm.zustand()
+        melden("Bildschirmsteuerung",
+               "ok" if bildschirm.get("pyautogui") and bildschirm.get("pillow") else "fehlt",
+               "Skalierung %s" % bildschirm.get("skalierung"))
+        wetter = agent.tools.welt.wetter(WETTER_ORT)
+        melden("Wetter", "ok" if wetter.get("ok") else "fehlt",
+               (wetter.get("text") or wetter.get("fehler", ""))[:60])
+    except Exception as fehler:
+        melden("Außenwelt", "fehler", str(fehler))
+
+    # -- Dashboard --
+    print("\nDashboard")
+    try:
+        ergebnis = agent.tools.dashboard.bauen()
+        melden("Command Center bauen", "ok" if ergebnis.get("ok") else "fehler",
+               ergebnis.get("datei", ergebnis.get("fehler", "")))
+    except Exception as fehler:
+        melden("Command Center bauen", "fehler", str(fehler))
+
+    agent.tools.mcp.stoppen()
+
+    print("\n" + "=" * 62)
+    if fehler_gesamt == 0:
+        print("Alles, was eingerichtet ist, funktioniert. [--] heißt nicht kaputt,")
+        print("sondern: läuft ohne diese Funktion weiter.")
+    else:
+        print("%d Prüfungen sind fehlgeschlagen. Details stehen oben bei [!!]."
+              % fehler_gesamt)
+    print("=" * 62)
+    return 0 if fehler_gesamt == 0 else 1
+
+
+# ---------------------------------------------------------------------------
+# Einstieg
+# ---------------------------------------------------------------------------
+
+def hauptprogramm(argumente=None) -> int:
+    """Wählt die Betriebsart anhand des ersten Arguments."""
+    argumente = argumente if argumente is not None else sys.argv[1:]
+    modus = (argumente[0].strip().lower() if argumente else "")
+
+    verzeichnisse_anlegen()
+    vorlage_schreiben()
+
+    if modus in ("", "start", "dauerbetrieb"):
+        if not EINRICHTUNG_FERTIG and not ANTHROPIC_API_KEY:
+            print("Jarvis ist noch nicht eingerichtet. Ich starte die Einrichtung.")
+            einrichtung_starten()
+            return 0
+        dauerbetrieb()
+    elif modus == "chat":
+        chatbetrieb()
+    elif modus == "telegram":
+        telegrambetrieb()
+    elif modus == "briefing":
+        briefing_sofort(abends=False)
+    elif modus in ("abend", "abendrueckblick", "feierabend"):
+        briefing_sofort(abends=True)
+    elif modus == "dashboard":
+        dashboard_bauen()
+    elif modus == "export":
+        return buchhaltung_exportieren(argumente[1:])
+    elif modus == "stimme":
+        stimmprofil_einlernen()
+    elif modus == "stimmen":
+        stimme_aussuchen()
+    elif modus == "test":
+        return selbsttest()
+    elif modus in ("einrichten", "setup"):
+        einrichtung_starten()
+    elif modus in ("hilfe", "--help", "-h", "help"):
+        print(__doc__)
+    else:
+        print("Die Betriebsart '%s' kenne ich nicht.\n" % modus)
+        print(__doc__)
+        return 2
+    return 0
+
+
+# ===========================================================================
+# Einstieg
+# ===========================================================================
+
+if __name__ == "__main__":
+    try:
+        sys.exit(hauptprogramm())
+    except KeyboardInterrupt:
+        print("\nAbgebrochen.")
+        sys.exit(130)
