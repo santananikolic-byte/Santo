@@ -14,6 +14,18 @@ die Anleitung führt in drei Schritten von Claude Code zum laufenden Jarvis.
 
 ## Loslegen
 
+Der kürzeste Weg — eine Zeile ins Terminal, sonst nichts:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/santananikolic-byte/Santo/claude/jarvis-voice-assistant-70695g/install.sh | bash
+```
+
+Das lädt Jarvis nach `~/Jarvis`, holt was fehlt, legt eine Verknüpfung auf den
+Schreibtisch und startet die Einrichtung. Dieselbe Zeile später noch einmal
+ausgeführt aktualisiert ihn — Schlüssel und Gedächtnis bleiben unangetastet.
+
+Wer die Dateien schon von Hand geholt hat:
+
 1. Den Ordner an einen festen Platz legen, zum Beispiel in **Dokumente**.
 2. Doppelklick auf **`JARVIS.command`**.
 3. Beim ersten Mal richtet sich alles selbst ein. Jarvis liest jeden Schritt

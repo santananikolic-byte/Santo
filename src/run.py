@@ -503,7 +503,7 @@ def selbsttest() -> int:
         melden("ElevenLabs", "ok" if zustand["elevenlabs"] else "fehlt",
                "optional, die Systemstimme reicht")
         melden("Mikrofon", "ok" if zustand["mikrofon"] else "fehlt",
-               "" if zustand["mikrofon"] else "Pakete sounddevice und numpy fehlen")
+               zustand.get("mikrofon_grund", ""))
         melden("Spracherkennung lokal", "ok" if zustand["whisper_lokal"] else "fehlt",
                "" if zustand["whisper_lokal"] else "Paket faster-whisper fehlt")
         melden("Spracherkennung API", "ok" if zustand["whisper_api"] else "fehlt",

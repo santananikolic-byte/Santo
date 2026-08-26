@@ -12,6 +12,7 @@ schneiden entweder mitten im Satz ab oder lassen den Nutzer nach dem letzten
 Wort warten - beides fällt im Alltag sofort unangenehm auf.
 """
 
+import importlib.util
 import json
 import os
 import re
@@ -66,6 +67,29 @@ PEGEL_FAKTOR = 3.5
 
 ELEVENLABS_URL = "https://api.elevenlabs.io/v1"
 WHISPER_URL = "https://api.openai.com/v1/audio/transcriptions"
+
+
+def mikrofon_fehlermeldung() -> str:
+    """Sagt genau, was fuer die Aufnahme fehlt - Paket oder Tonbibliothek.
+
+    ``sounddevice`` laesst sich zwar installieren, wirft beim Import aber
+    ``OSError``, wenn die Bibliothek PortAudio fehlt. Wer dann liest, das
+    Paket fehle, installiert es ein zweites Mal und wundert sich. Deshalb
+    wird nachgesehen, ob das Paket da ist, und nur der wirklich fehlende
+    Teil genannt.
+    """
+    if np is None:
+        return "Es fehlt das Paket numpy."
+    if sd is not None:
+        return ""
+    try:
+        vorhanden = importlib.util.find_spec("sounddevice") is not None
+    except (ImportError, ValueError):
+        vorhanden = False
+    if vorhanden:
+        return ("Die Tonbibliothek PortAudio fehlt. Im Terminal eingeben: "
+                "brew install portaudio")
+    return "Es fehlt das Paket sounddevice."
 
 
 def text_fuers_sprechen(text: str) -> str:
@@ -150,6 +174,7 @@ class Stimme:
             "macos_stimme": self.macos_stimme or "keine deutsche gefunden",
             "elevenlabs": bool(config.ELEVENLABS_API_KEY),
             "mikrofon": sd is not None and np is not None,
+            "mikrofon_grund": mikrofon_fehlermeldung(),
             "whisper_lokal": WhisperModel is not None,
             "whisper_api": bool(config.OPENAI_API_KEY),
         }
@@ -289,8 +314,7 @@ class Stimme:
         dauernd als Sprache gilt und ein leiser nicht überhört wird.
         """
         if not self.mikrofon_bereit():
-            self.letzter_fehler = ("Kein Mikrofonzugriff. Es fehlen die Pakete "
-                                   "sounddevice und numpy.")
+            self.letzter_fehler = "Kein Mikrofonzugriff. %s" % mikrofon_fehlermeldung()
             return ""
         blockgroesse = int(ABTASTRATE * BLOCK_SEKUNDEN)
         gesammelt = []
