@@ -43,6 +43,11 @@ So sprichst du:
 
 So arbeitest du:
 - Du nutzt deine Werkzeuge selbstständig, ohne zu fragen, wenn die Absicht klar ist.
+- Du hast ein Team: Buchhalter, Verkäufer, Terminplaner, Postbearbeiter,
+  Kundenberater, Rechercheur, Controller und Programmierer. Für eine Aufgabe,
+  die klar zu einem von ihnen gehört und mehrere Schritte braucht, beauftragst
+  du ihn mit mitarbeiter_beauftragen und gibst danach seinen Bericht weiter.
+  Kleine Handgriffe machst du selbst - dafür brauchst du niemanden.
 - Erzählt er von einem Kundentermin, bewertest du ihn und hältst ihn fest —
   ungefragt. Ehrlich, nicht schmeichelnd: ein nettes Gespräch ohne Abschluss
   war kein gutes Gespräch, und das sagst du auch.
@@ -322,6 +327,63 @@ class JarvisAgent:
 
         return ("Ich habe es %d Mal versucht und komme nicht weiter. Sag mir bitte "
                 "genauer, was du brauchst." % MAX_RUNDEN)
+
+    def arbeiten(self, systemtext: str, auftrag: str, werkzeugnamen: list = None,
+                 max_runden: int = 6) -> str:
+        """Eine abgeschlossene Arbeitsschleife ohne eigenen Gesprächsverlauf.
+
+        Damit arbeitet eine Fachkraft ihren Auftrag ab: eigener Systemprompt,
+        eigener Werkzeugsatz, eigenes Ende. Der Verlauf des Hauptgesprächs
+        bleibt davon unberührt - sonst würde jeder Zwischenschritt einer
+        Fachkraft den Kontext des Chefs zumüllen.
+        """
+        if not self.einsatzbereit():
+            return ("Es ist kein Anthropic-Schlüssel hinterlegt.")
+
+        katalog = self.tools.katalog()
+        if werkzeugnamen:
+            erlaubt = set(werkzeugnamen)
+            katalog = [w for w in katalog if w["name"] in erlaubt]
+            if not katalog:
+                return "Für diesen Auftrag stehen keine Werkzeuge bereit."
+
+        nachrichten = [{"role": "user", "content": auftrag}]
+        for _ in range(max(1, int(max_runden))):
+            antwort = self._anfrage({
+                "model": config.CLAUDE_MODEL,
+                "max_tokens": config.CLAUDE_MAX_TOKENS,
+                "system": systemtext,
+                "tools": katalog,
+                "messages": nachrichten,
+            })
+            if not antwort.get("ok"):
+                return antwort.get("fehler", "Der Auftrag ist fehlgeschlagen.")
+
+            inhalt = antwort["daten"].get("content", [])
+            nachrichten.append({"role": "assistant", "content": inhalt})
+            aufrufe = [b for b in inhalt if b.get("type") == "tool_use"]
+            if not aufrufe:
+                return "\n".join(b.get("text", "") for b in inhalt
+                                  if b.get("type") == "text").strip()
+
+            ergebnisse = []
+            for aufruf in aufrufe:
+                name = aufruf.get("name", "")
+                print("[fachkraft] %s" % name)
+                ergebnis = self.tools.run(name, aufruf.get("input") or {})
+                try:
+                    text = json.dumps(ergebnis, ensure_ascii=False,
+                                      default=str)[:6000]
+                except (TypeError, ValueError):
+                    text = str(ergebnis)[:6000]
+                ergebnisse.append({"type": "tool_result",
+                                   "tool_use_id": aufruf.get("id"),
+                                   "content": text,
+                                   "is_error": not bool(ergebnis.get("ok"))})
+            nachrichten.append({"role": "user", "content": ergebnisse})
+
+        return ("Ich bin nach %d Schritten nicht fertig geworden und höre auf."
+                % max_runden)
 
     def antworten(self, eingabe: str) -> str:
         """Denken und die Antwort aussprechen."""

@@ -22,6 +22,7 @@ import re
 import subprocess
 
 import config
+from modules.akquise import Akquise, SONDERLEISTUNGEN, STUFEN
 from modules.bookkeeping import Bookkeeping, KATEGORIEN
 from modules.calendar_mod import Kalender
 from modules.call_analysis import CallAnalysis
@@ -34,7 +35,9 @@ from modules.memory import Memory, heute_datum
 from modules.messenger import Messenger
 from modules.recall import Recall
 from modules.routines import Routines
+from modules.team import ROLLEN, Team
 from modules.telegram_mod import Telegram
+from modules.werkstatt import Werkstatt
 from modules.world import Welt
 
 # Zeichen, die in eingesetzten Parametern nichts zu suchen haben. Weil überall
@@ -67,7 +70,7 @@ PARAMETER_AKTIONEN = {
 
 # Alles hier drin fragt vor der Ausführung nach einer Freigabe.
 FREIGABE_PFLICHTIG = {"mail_senden", "termin_anlegen", "bildschirm_bedienen",
-                      "nachricht_senden"}
+                      "nachricht_senden", "skript_ausfuehren"}
 
 
 def parameter_pruefen(wert: str):
@@ -94,6 +97,8 @@ class Werkzeuge:
         self.recall = Recall(self.memory)
         self.bookkeeping = Bookkeeping(self.memory)
         self.call_analysis = CallAnalysis(self.memory)
+        self.akquise = Akquise(self.memory, config.STANDARD_MWST)
+        self.werkstatt = Werkstatt(self.memory)
         self.routines = Routines(self.memory)
         self.mail = Mail()
         self.kalender = Kalender()
@@ -103,10 +108,12 @@ class Werkzeuge:
         self.welt = Welt(self.mcp)
         self.bildschirm = Bildschirm(agent)
         self.messenger = Messenger(self.telegram, self.mail, self.mcp, None)
+        self.team = Team(agent, self.memory)
         self.dashboard = Dashboard(memory=self.memory, bookkeeping=self.bookkeeping,
                                    call_analysis=self.call_analysis, recall=self.recall,
                                    kalender=self.kalender, mail=self.mail,
-                                   routines=self.routines, mcp=self.mcp)
+                                   routines=self.routines, mcp=self.mcp,
+                                   akquise=self.akquise, team=self.team)
         self.stimme = None
 
     def stimme_setzen(self, stimme):
@@ -118,6 +125,7 @@ class Werkzeuge:
         """Verknüpft den Katalog mit dem Agenten, damit Werkzeuge Claude nutzen können."""
         self.agent = agent
         self.bildschirm.agent = agent
+        self.team.agent = agent
 
     # -- Katalog für Claude -------------------------------------------------
 
@@ -210,6 +218,74 @@ class Werkzeuge:
                      {"name": text}, ["name"]),
             werkzeug("routinen_liste", "Zeigt alle gespeicherten Routinen.", {}),
 
+            # -- Akquise --
+            werkzeug("lead_anlegen",
+                     "Nimmt einen Interessenten in die Pipeline auf.",
+                     {"firma": text, "ansprechpartner": text, "telefon": text,
+                      "email": text, "adresse": text, "quelle": text,
+                      "objekt_qm": zahl, "bodenbelag": text,
+                      "intervall_pro_woche": zahl, "notiz": text,
+                      "naechster_schritt": text}, ["firma"]),
+            werkzeug("lead_weiterstufen",
+                     "Setzt einen Interessenten auf eine neue Stufe.",
+                     {"name": text,
+                      "stufe": {"type": "string", "enum": STUFEN},
+                      "notiz": text, "naechster_schritt": text,
+                      "wert_monat": zahl}, ["name", "stufe"]),
+            werkzeug("angebot_kalkulieren",
+                     "Rechnet aus Fläche, Bodenbelag und Reinigungsintervall einen "
+                     "Monatspreis über Leistungswerte. Ohne Quadratmeter und "
+                     "Intervall wird nichts gerechnet - dann nachfragen.",
+                     {"qm": zahl, "bodenbelag": text, "intervall_pro_woche": zahl,
+                      "stundensatz": zahl,
+                      "sonderleistungen": {
+                          "type": "object",
+                          "description": "Mengen je Leistung: %s"
+                                         % ", ".join(SONDERLEISTUNGEN)}},
+                     ["qm", "intervall_pro_woche"]),
+            werkzeug("angebot_ablegen",
+                     "Legt ein kalkuliertes Angebot beim Interessenten ab und "
+                     "setzt ihn auf die Stufe Angebot.",
+                     {"name": text, "qm": zahl, "bodenbelag": text,
+                      "intervall_pro_woche": zahl, "stundensatz": zahl,
+                      "notiz": text}, ["name", "qm", "intervall_pro_woche"]),
+            werkzeug("nachfassliste",
+                     "Wer heute zum Nachfassen fällig ist und warum.", {}),
+            werkzeug("pipeline",
+                     "Alle Interessenten nach Stufen, mit Werten.", {}),
+            werkzeug("cashflow_prognose",
+                     "Was in den nächsten Monaten hereinkommt: gesichert aus "
+                     "Aufträgen, gewichtet aus der Pipeline, abzüglich Kosten.",
+                     {"monate": ganz}),
+
+            # -- Team --
+            werkzeug("mitarbeiter_beauftragen",
+                     "Gibt einen mehrschrittigen Auftrag an eine Fachkraft: %s. "
+                     "Sie arbeitet ihn mit ihren eigenen Werkzeugen ab und "
+                     "berichtet zurück." % ", ".join(ROLLEN),
+                     {"rolle": {"type": "string", "enum": sorted(ROLLEN)},
+                      "auftrag": text}, ["rolle", "auftrag"]),
+            werkzeug("team_liste", "Zeigt, welche Fachkräfte es gibt.", {}),
+            werkzeug("lagebericht",
+                     "Der vollständige aktuelle Stand des Betriebs: Kasse, "
+                     "Aufträge, Cashflow, Termine, Post, Offenes.", {}),
+
+            # -- Werkstatt --
+            werkzeug("skript_schreiben",
+                     "Schreibt ein Python-Skript in die Werkstatt. Ausgeführt "
+                     "wird dabei nichts.",
+                     {"name": text, "code": text, "zweck": text},
+                     ["name", "code"]),
+            werkzeug("skript_zeigen", "Zeigt den Code eines abgelegten Skripts.",
+                     {"name": text}, ["name"]),
+            werkzeug("skript_ausfuehren",
+                     "Führt ein Skript aus der Werkstatt aus. Braucht eine "
+                     "Freigabe, und der Code wird dabei vollständig angezeigt.",
+                     {"name": text, "argumente": {"type": "array",
+                                                  "items": {"type": "string"}}},
+                     ["name"]),
+            werkzeug("werkstatt_liste", "Zeigt alle abgelegten Skripte.", {}),
+
             # -- Kommunikation --
             werkzeug("mails_lesen",
                      "Holt ungelesene Mails und sortiert sie vor.", {"limit": ganz}),
@@ -279,10 +355,15 @@ class Werkzeuge:
 
     def _freigabe(self, name: str, argumente: dict) -> dict:
         """Holt die Freigabe ein. Ohne klares Ja wird nichts ausgeführt."""
-        try:
-            details = json.dumps(argumente or {}, ensure_ascii=False)[:600]
-        except (TypeError, ValueError):
-            details = str(argumente)[:600]
+        if name == "skript_ausfuehren":
+            # Beim Ausführen von Code muss der Code selbst in der Frage stehen.
+            # Über einen blossen Dateinamen kann niemand entscheiden.
+            details = self.werkstatt.freigabetext(argumente.get("name", ""))
+        else:
+            try:
+                details = json.dumps(argumente or {}, ensure_ascii=False)[:600]
+            except (TypeError, ValueError):
+                details = str(argumente)[:600]
         return self.telegram.freigabe_einholen(name, details)
 
     # -- Ausführung ---------------------------------------------------------
@@ -421,6 +502,65 @@ class Werkzeuge:
                     "text": ("Gespeicherte Routinen: %s."
                              % ", ".join(z["name"] for z in liste)) if liste
                             else "Es ist noch keine Routine angelegt."}
+
+        # -- Akquise --
+        if name == "lead_anlegen":
+            return self.akquise.lead_anlegen(
+                a.get("firma"), a.get("ansprechpartner", ""), a.get("telefon", ""),
+                a.get("email", ""), a.get("adresse", ""), a.get("quelle", ""),
+                a.get("objekt_qm", 0), a.get("bodenbelag", ""),
+                a.get("intervall_pro_woche", 0), a.get("notiz", ""),
+                a.get("naechster_schritt", ""))
+        if name == "lead_weiterstufen":
+            return self.akquise.lead_weiterstufen(
+                a.get("name"), a.get("stufe"), a.get("notiz", ""),
+                a.get("naechster_schritt", ""), a.get("wert_monat"))
+        if name == "angebot_kalkulieren":
+            return self.akquise.angebot_kalkulieren(
+                a.get("qm"), a.get("bodenbelag", ""), a.get("intervall_pro_woche"),
+                a.get("stundensatz"), a.get("sonderleistungen"))
+        if name == "angebot_ablegen":
+            kalkulation = self.akquise.angebot_kalkulieren(
+                a.get("qm"), a.get("bodenbelag", ""), a.get("intervall_pro_woche"),
+                a.get("stundensatz"))
+            if not kalkulation.get("ok"):
+                return kalkulation
+            ergebnis = self.akquise.angebot_ablegen(a.get("name"), kalkulation,
+                                                    a.get("notiz", ""))
+            ergebnis["angebotstext"] = self.akquise.angebotstext(
+                kalkulation, a.get("name", ""))
+            return ergebnis
+        if name == "nachfassliste":
+            return self.akquise.nachfassliste()
+        if name == "pipeline":
+            return self.akquise.pipeline()
+        if name == "cashflow_prognose":
+            return self.akquise.cashflow_prognose(int(a.get("monate") or 6),
+                                                  self.bookkeeping)
+
+        # -- Team --
+        if name == "mitarbeiter_beauftragen":
+            return self.team.beauftragen(a.get("rolle"), a.get("auftrag"))
+        if name == "team_liste":
+            liste = self.team.rollen_liste()
+            return {"ok": True, "team": liste,
+                    "text": "Im Team sind: %s."
+                            % ", ".join("%s (%s)" % (e["name"], e["rolle"])
+                                        for e in liste)}
+        if name == "lagebericht":
+            return self.team.lagebericht(self)
+
+        # -- Werkstatt --
+        if name == "skript_schreiben":
+            return self.werkstatt.skript_schreiben(a.get("name"), a.get("code"),
+                                                   a.get("zweck", ""))
+        if name == "skript_zeigen":
+            return self.werkstatt.skript_zeigen(a.get("name"))
+        if name == "skript_ausfuehren":
+            return self.werkstatt.skript_ausfuehren(a.get("name"),
+                                                    a.get("argumente"))
+        if name == "werkstatt_liste":
+            return self.werkstatt.werkstatt_liste()
 
         # -- Kommunikation --
         if name == "mails_lesen":

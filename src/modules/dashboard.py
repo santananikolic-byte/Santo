@@ -32,7 +32,7 @@ class Dashboard:
 
     def __init__(self, memory=None, bookkeeping=None, call_analysis=None,
                  recall=None, kalender=None, mail=None, routines=None,
-                 scheduler=None, mcp=None):
+                 scheduler=None, mcp=None, akquise=None, team=None):
         self.memory = memory
         self.bookkeeping = bookkeeping
         self.call_analysis = call_analysis
@@ -42,6 +42,8 @@ class Dashboard:
         self.routines = routines
         self.scheduler = scheduler
         self.mcp = mcp
+        self.akquise = akquise
+        self.team = team
         # Die Sales-Analyse ist eine eigene Seite, wird aber immer mitgebaut -
         # sonst zeigt der Verweis im Kopf auf eine Datei, die es nicht gibt.
         self.verkaufsansicht = Verkaufsansicht(call_analysis, memory)
@@ -80,6 +82,21 @@ class Dashboard:
                 daten["dimensionen"] = self.call_analysis.dimensionen_schnitt()
             except Exception as fehler:
                 daten["leads_fehler"] = str(fehler)
+
+        if self.akquise is not None:
+            try:
+                daten["pipeline"] = self.akquise.pipeline()
+                daten["nachfassen"] = self.akquise.nachfassliste()
+                daten["cashflow"] = self.akquise.cashflow_prognose(
+                    6, self.bookkeeping)
+            except Exception as fehler:
+                daten["pipeline_fehler"] = str(fehler)
+
+        if self.team is not None:
+            try:
+                daten["auftraege"] = [dict(z) for z in self.team.auftraege_letzte(8)]
+            except Exception:
+                daten["auftraege"] = []
 
         if self.memory is not None:
             try:
@@ -272,6 +289,80 @@ class Dashboard:
             for name, betrag in list(nach_kategorie.items())[:8])
         return self._panel("Ausgaben je Kategorie", inhalt)
 
+    def _panel_pipeline(self, daten: dict) -> str:
+        """Die Auftragspipeline nach Stufen - wo Geld auf der Straße liegt."""
+        pipeline = daten.get("pipeline")
+        if not pipeline or not pipeline.get("ok"):
+            return self._panel("Auftragspipeline",
+                               '<p class="leer">Noch kein Interessent erfasst.</p>')
+        stufen = pipeline.get("stufen") or {}
+        offene = [(name, angaben) for name, angaben in stufen.items()
+                  if name not in ("gewonnen", "verloren") and angaben["anzahl"]]
+        if not offene and not stufen.get("gewonnen", {}).get("anzahl"):
+            return self._panel("Auftragspipeline",
+                               '<p class="leer">Noch kein Interessent erfasst.</p>')
+
+        groesster = max([a["wert_monat"] for _, a in offene] or [1])
+        inhalt = self._kacheln([
+            ("Gesichert je Monat", euro(pipeline["laufender_umsatz_monat"]), "gut"),
+            ("Offen je Monat", euro(pipeline["offener_wert_monat"]), ""),
+            ("Realistisch", euro(pipeline["gewichteter_wert_monat"]), "akzent"),
+            ("Interessenten", str(pipeline["offen"]), ""),
+        ])
+        if offene:
+            inhalt += '<div style="margin-top:13px">'
+            for name, angaben in offene:
+                inhalt += balken("%s (%d)" % (name.capitalize(), angaben["anzahl"]),
+                                 angaben["wert_monat"], groesster,
+                                 euro(angaben["wert_monat"]))
+            inhalt += '</div>'
+        return self._panel("Auftragspipeline", inhalt, "breit")
+
+    def _panel_nachfassen(self, daten: dict) -> str:
+        """Wer heute drankommt. Die wichtigste Liste des Tages."""
+        nachfassen = daten.get("nachfassen")
+        if not nachfassen or not nachfassen.get("anzahl"):
+            return self._panel("Heute nachfassen",
+                               '<p class="leer">Heute ist niemand fällig.</p>')
+        zeilen = []
+        for eintrag in nachfassen["eintraege"][:8]:
+            spaet = ('<span class="warnung">%d Tage überfällig</span>'
+                     % eintrag["seit_tagen"]) if eintrag["seit_tagen"] > 0 else ""
+            zeilen.append('%s <span class="grau">%s · %s</span><br>'
+                          '<span class="grau">%s</span> %s'
+                          % (sicher(eintrag["firma"]), sicher(eintrag["stufe"]),
+                             euro(eintrag["wert_monat"]),
+                             sicher(eintrag["schritt"]), spaet))
+        return self._panel("Heute nachfassen", self._liste(zeilen, ""), "",
+                           "%d fällig" % nachfassen["anzahl"])
+
+    def _panel_cashflow(self, daten: dict) -> str:
+        """Was in den nächsten Monaten hereinkommt."""
+        cashflow = daten.get("cashflow")
+        if not cashflow or not cashflow.get("monate"):
+            return ""
+        reihe = cashflow["monate"]
+        inhalt = ('<div class="verlaufkopf"><span>Erwartete Einnahmen</span>'
+                  '<b>%s je Monat gesichert</b></div>%s'
+                  % (euro(cashflow["gesichert_monat"]),
+                     saeulen([m["einnahmen"] for m in reihe],
+                             [m["monat"][5:] for m in reihe], 62, FARBE_GUT)))
+        inhalt += ('<p class="grau" style="margin-top:10px">Aus der Pipeline kommen '
+                   'gewichtet %s dazu. Kosten %s je Monat (%s).</p>'
+                   % (euro(cashflow["pipeline_gewichtet"]),
+                      euro(cashflow["kosten_monat"]), sicher(cashflow["kostenquelle"])))
+        return self._panel("Cashflow-Vorschau", inhalt, "breit", "6 Monate")
+
+    def _panel_team(self, daten: dict) -> str:
+        """Was die Fachkräfte zuletzt gemacht haben."""
+        auftraege = daten.get("auftraege") or []
+        zeilen = ['<span class="zeit">%s</span>%s <span class="grau">%s</span>'
+                  % (sicher(a["angelegt"][11:16]), sicher(a["rolle"]),
+                     sicher((a["auftrag"] or "")[:70]))
+                  for a in auftraege]
+        return self._panel("Was das Team gemacht hat",
+                           self._liste(zeilen, "Noch kein Auftrag ans Team."))
+
     def _panel_termine(self, daten: dict) -> str:
         kalender = daten.get("kalender")
         if not kalender:
@@ -406,6 +497,15 @@ class Dashboard:
         if quote is not None:
             marke = "b" if quote >= 90 else "b class=\"rot\""
             teile.append("Belegquote <%s>%d%%</b>" % (marke, round(quote)))
+        pipeline = daten.get("pipeline")
+        if pipeline and pipeline.get("ok") and pipeline.get("offen"):
+            teile.append("Gesichert <b>%s</b> je Monat"
+                         % euro(pipeline["laufender_umsatz_monat"]))
+            teile.append("Pipeline <b>%s</b> realistisch"
+                         % euro(pipeline["gewichteter_wert_monat"]))
+        nachfassen = daten.get("nachfassen")
+        if nachfassen and nachfassen.get("anzahl"):
+            teile.append('Nachfassen <b class="rot">%d</b>' % nachfassen["anzahl"])
         leads = daten.get("leads")
         if leads and leads.get("anzahl"):
             teile.append("Offene Leads <b>%d</b> über <b>%s</b>"
@@ -441,6 +541,9 @@ class Dashboard:
             self._panel_zahlen(daten),
             self._panel_verlauf(daten),
             self._panel_vertrieb(daten),
+            self._panel_pipeline(daten),
+            self._panel_nachfassen(daten),
+            self._panel_cashflow(daten),
             self._panel_leads(daten),
             self._panel_termine(daten),
             self._panel_offen(daten),
@@ -449,6 +552,7 @@ class Dashboard:
             self._panel_mail(daten),
             self._panel_notizen(daten),
             self._panel_protokoll(daten),
+            self._panel_team(daten),
             self._panel_zeitplan(daten),
             self._panel_dienste(daten),
         ] if teil)

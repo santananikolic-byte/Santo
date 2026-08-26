@@ -22,7 +22,7 @@ import subprocess
 import sys
 import tempfile
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 
 WURZEL = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(WURZEL, "src"))
@@ -37,7 +37,10 @@ from agent import JarvisAgent  # noqa: E402
 from modules.bookkeeping import mwst_aus_brutto  # noqa: E402
 from modules.calendar_mod import ics_termine_lesen, konflikte_finden  # noqa: E402
 from modules.mcp_client import MCPClient, MCPServer  # noqa: E402
+from modules.akquise import Akquise  # noqa: E402
 from modules.scheduler import Scheduler, ist_faellig  # noqa: E402
+from modules.team import ROLLEN, Team  # noqa: E402
+from modules.werkstatt import Werkstatt, name_saeubern  # noqa: E402
 from modules.voice import weckwort_pruefen  # noqa: E402
 
 BESTANDEN = []
@@ -257,6 +260,169 @@ def pruefung_vertrieb(agent):
             and schnitt["bewertete_gespraeche"] == 2,
             "schwächste: %s mit %.1f" % (schnitt["schwaechste"]["name"],
                                          schnitt["schwaechste"]["wert"]))
+
+
+def pruefung_akquise(agent):
+    """Aufträge hereinholen: Kalkulation, Pipeline, Nachfassen, Cashflow."""
+    abschnitt("Akquise")
+    akquise = agent.tools.akquise
+
+    # Von Hand nachgerechnet: 600 / 300 m² je Stunde = 2 h je Reinigung,
+    # 2x pro Woche = 8,66 Reinigungen, also 17,32 Stunden. Mal 32 Euro plus
+    # 4 Prozent Material.
+    kalkulation = akquise.angebot_kalkulieren(600, "Linoleum", 2, 32)
+    erwartete_stunden = 600 / 300.0 * 2 * 4.33
+    erwartetes_netto = round(erwartete_stunden * 32 * 1.04, 2)
+    pruefen("Angebot über Leistungswerte gerechnet",
+            kalkulation.get("ok")
+            and abs(kalkulation["stunden_monat"] - erwartete_stunden) < 0.01
+            and abs(kalkulation["netto_monat"] - erwartetes_netto) < 0.01,
+            "%.2f Stunden, %.2f Euro netto" % (kalkulation.get("stunden_monat", 0),
+                                               kalkulation.get("netto_monat", 0)))
+    pruefen("Sanitär wird langsamer gerechnet als eine Halle",
+            akquise.angebot_kalkulieren(100, "Sanitaer", 1)["stunden_monat"] >
+            akquise.angebot_kalkulieren(100, "Industriehalle", 1)["stunden_monat"] * 5,
+            "80 gegen 500 Quadratmeter je Stunde")
+    pruefen("Ohne Quadratmeter wird nicht kalkuliert",
+            akquise.angebot_kalkulieren(0, "Teppich", 2).get("ok") is False,
+            akquise.angebot_kalkulieren(0, "Teppich", 2).get("fehler", "")[:52])
+    pruefen("Ohne Intervall wird nicht kalkuliert",
+            akquise.angebot_kalkulieren(600, "Teppich", 0).get("ok") is False)
+
+    akquise.lead_anlegen("Berger GmbH", objekt_qm=600, bodenbelag="Linoleum",
+                         intervall_pro_woche=2)
+    akquise.lead_anlegen("Huber Ordination", objekt_qm=180, bodenbelag="Sanitaer",
+                         intervall_pro_woche=3)
+    pruefen("Derselbe Interessent wird nicht doppelt angelegt",
+            akquise.lead_anlegen("berger gmbh").get("ok") is False)
+    akquise.lead_weiterstufen("Huber", "gewonnen", "Vertrag unterschrieben")
+    akquise.lead_weiterstufen("Berger", "angebot", "Angebot verschickt")
+
+    pipeline = akquise.pipeline()
+    pruefen("Pipeline trennt gesichert von gewichtet",
+            pipeline["laufender_umsatz_monat"] > 0
+            and 0 < pipeline["gewichteter_wert_monat"] < pipeline["offener_wert_monat"],
+            "gesichert %.2f, offen %.2f, gewichtet %.2f"
+            % (pipeline["laufender_umsatz_monat"], pipeline["offener_wert_monat"],
+               pipeline["gewichteter_wert_monat"]))
+
+    spaeter = (datetime.now() + timedelta(days=14)).strftime("%Y-%m-%d")
+    nachfassen = akquise.nachfassliste(spaeter)
+    pruefen("Nachfassliste nennt Überfällige", nachfassen["anzahl"] >= 1
+            and nachfassen["eintraege"][0]["seit_tagen"] > 0,
+            nachfassen["text"][:52])
+
+    cashflow = akquise.cashflow_prognose(6, agent.tools.bookkeeping)
+    erster, letzter = cashflow["monate"][0], cashflow["monate"][-1]
+    pruefen("Cashflow setzt die Pipeline erst später an",
+            erster["aus_pipeline"] == 0 and letzter["aus_pipeline"] > 0,
+            "Monat 1: %.2f, Monat 6: %.2f" % (erster["aus_pipeline"],
+                                              letzter["aus_pipeline"]))
+
+
+def pruefung_team(agent):
+    """Die Fachkräfte - vor allem, dass die Werkzeugtrennung wirklich greift."""
+    abschnitt("Team")
+    team = agent.tools.team
+    pruefen("Acht Fachkräfte vorhanden", len(ROLLEN) == 8,
+            ", ".join(sorted(ROLLEN)))
+    treffer = {"buchhaltung": "buchhalter", "vertrieb": "akquisiteur",
+               "mails sortieren": "postmeister", "cashflow": "controller",
+               "skript": "programmierer", "kalender": "terminplaner"}
+    falsch = [wort for wort, rolle in treffer.items()
+              if Team.rolle_finden(wort) != rolle]
+    pruefen("Umgangssprache trifft die richtige Rolle", not falsch,
+            ", ".join(falsch) or "alle sechs Proben")
+    pruefen("Unbekannte Rolle wird abgewiesen",
+            team.beauftragen("hausmeister", "x").get("ok") is False)
+
+    # Der eigentliche Punkt: jede Rolle sieht nur ihre Werkzeuge.
+    alle = set(agent.tools.namen())
+    verstoesse = []
+    for rolle, angaben in ROLLEN.items():
+        unbekannt = [w for w in angaben["werkzeuge"] if w not in alle]
+        if unbekannt:
+            verstoesse.append("%s kennt %s nicht" % (rolle, unbekannt[0]))
+    pruefen("Jede Rolle nennt nur vorhandene Werkzeuge", not verstoesse,
+            verstoesse[0] if verstoesse else "%d Rollen geprüft" % len(ROLLEN))
+    pruefen("Der Verkäufer kann nicht buchen und nicht mailen",
+            "buchung_eintragen" not in ROLLEN["akquisiteur"]["werkzeuge"]
+            and "mail_senden" not in ROLLEN["akquisiteur"]["werkzeuge"],
+            "%d von %d Werkzeugen"
+            % (len(ROLLEN["akquisiteur"]["werkzeuge"]), len(alle)))
+    pruefen("Der Buchhalter kann nichts verschicken",
+            not [w for w in ROLLEN["buchhalter"]["werkzeuge"]
+                 if w in ("mail_senden", "nachricht_senden", "termin_anlegen")])
+    pruefen("Der Rechercheur kann nichts eintragen",
+            "buchung_eintragen" not in ROLLEN["rechercheur"]["werkzeuge"]
+            and "lead_anlegen" not in ROLLEN["rechercheur"]["werkzeuge"])
+
+    lage = team.lagebericht(agent.tools)
+    pruefen("Lagebericht nennt die Kassenzahlen",
+            lage.get("ok") and "Einnahmen" in lage["text"],
+            lage.get("text", "")[:52])
+
+
+def pruefung_werkstatt(agent):
+    """Der Programmierer - Pfade, Fehler, Laufzeit."""
+    abschnitt("Werkstatt")
+    werkstatt = agent.tools.werkstatt
+
+    angriffe = ["../../etc/passwd", "/etc/shadow", "..\\..\\windows"]
+    ausbrueche = [n for n in angriffe
+                  if "/" in name_saeubern(n) or "\\" in name_saeubern(n)
+                  or ".." in name_saeubern(n)]
+    pruefen("Pfadangriffe im Dateinamen sind nicht darstellbar", not ausbrueche,
+            "%s wird zu %s" % (angriffe[0], name_saeubern(angriffe[0])))
+
+    pruefen("Syntaxfehler wird vor dem Ablegen erkannt",
+            werkstatt.skript_schreiben("kaputt", "def x(\n  print(1)").get("ok") is False)
+
+    abgelegt = werkstatt.skript_schreiben(
+        "rechnen", "stunden = 600 / 300 * 2 * 4.33\nprint('%.2f' % stunden)",
+        "Testrechner")
+    pruefen("Skript wird abgelegt, aber nicht ausgeführt", abgelegt.get("ok")
+            and "Ausgeführt ist noch nichts" in abgelegt["text"])
+
+    gelaufen = werkstatt.skript_ausfuehren("rechnen")
+    pruefen("Skript läuft und liefert seine Ausgabe",
+            gelaufen.get("ok") and "17.32" in gelaufen.get("ausgabe", ""),
+            gelaufen.get("ausgabe", "")[:40])
+
+    werkstatt.skript_schreiben("faellt_um", "raise ValueError('Absicht')")
+    pruefen("Ein Fehler im Skript wird sauber gemeldet",
+            werkstatt.skript_ausfuehren("faellt_um").get("ok") is False)
+
+    werkstatt.skript_schreiben("holt_was", "import urllib.request\nprint(1)")
+    text = werkstatt.freigabetext("holt_was")
+    pruefen("Die Freigabefrage zeigt Code und Absicht",
+            "will ins Netz" in text and "urllib" in text,
+            "Netzzugriff wird benannt")
+
+    pruefen("skript_ausfuehren ist freigabepflichtig",
+            agent.tools.braucht_freigabe("skript_ausfuehren") is True)
+
+
+def pruefung_werkzeugvertrag(agent):
+    """Jedes Werkzeug muss ein ok melden - sonst gilt Erfolg als Fehler."""
+    abschnitt("Werkzeugvertrag")
+    proben = {
+        "notiz_speichern": {"text": "Vertragsprobe"},
+        "notizen_suchen": {"begriff": "Vertragsprobe"},
+        "punkte_offen": {}, "auswertung": {}, "fehlende_belege": {},
+        "csv_export": {}, "offene_leads": {}, "verkaufsmuster": {},
+        "routinen_liste": {}, "pipeline": {}, "nachfassliste": {},
+        "cashflow_prognose": {"monate": 3}, "team_liste": {}, "lagebericht": {},
+        "werkstatt_liste": {}, "gedaechtnis_durchsuchen": {"frage": "Berger"},
+        "angebot_kalkulieren": {"qm": 300, "intervall_pro_woche": 1},
+    }
+    ohne = []
+    for name, argumente in proben.items():
+        ergebnis = agent.tools.run(name, argumente)
+        if not isinstance(ergebnis, dict) or "ok" not in ergebnis:
+            ohne.append(name)
+    pruefen("Alle geprüften Werkzeuge melden ok", not ohne,
+            ", ".join(ohne) or "%d Werkzeuge geprüft" % len(proben))
 
 
 def pruefung_routinen(agent):
@@ -555,7 +721,7 @@ def pruefung_einzeldatei():
                "Telegram", "Bookkeeping", "CallAnalysis", "Routines", "Kamera",
                "MCPServer", "MCPClient", "Welt", "Messenger", "Bildschirm",
                "Dashboard", "Verkaufsansicht", "Scheduler", "Einrichtung",
-               "Werkzeuge", "JarvisAgent"]
+               "Werkzeuge", "JarvisAgent", "Akquise", "Team", "Werkstatt"]
     fehlend = [k for k in klassen if inhalt.count("\nclass %s" % k) != 1]
     pruefen("Einzeldatei enthält alle Klassen genau einmal", not fehlend,
             ", ".join(fehlend) or "%d Klassen" % len(klassen))
@@ -582,6 +748,10 @@ def main() -> int:
     agent = pruefung_agent()
     pruefung_buchhaltung(agent)
     pruefung_vertrieb(agent)
+    pruefung_akquise(agent)
+    pruefung_team(agent)
+    pruefung_werkstatt(agent)
+    pruefung_werkzeugvertrag(agent)
     pruefung_routinen(agent)
     pruefung_zeitplan()
     pruefung_kalender()

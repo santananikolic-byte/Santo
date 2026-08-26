@@ -88,6 +88,24 @@ gutes Gespräch, und das sagt er auch. Über viele Gespräche hinweg erkennt er
 Muster: Kommt derselbe Einwand dreimal, ist das kein Zufall, sondern eine Lücke
 im Angebot.
 
+**Ein Team statt eines Alleskönners.** Acht Fachkräfte mit eigenem Auftrag und
+**eigenem Werkzeugsatz**: Buchhalter, Verkäufer, Terminplaner, Postbearbeiter,
+Kundenberater, Rechercheur, Controller, Programmierer. Die Trennung ist echt —
+der Verkäufer sieht 11 von 50 Werkzeugen und kann weder buchen noch mailen, der
+Rechercheur kann gar nichts eintragen. Wer alles darf, macht irgendwann alles,
+auch das Falsche.
+
+**Akquise und Cashflow.** Eine Pipeline von „neu“ bis „gewonnen“, eine
+Nachfassliste, die sagt wer heute dran ist, und eine Angebotskalkulation, die
+über **Leistungswerte** rechnet statt einen Quadratmeterpreis zu raten: Fläche
+geteilt durch m² pro Stunde ergibt Stunden, mal Stundensatz ergibt den Preis.
+Die Cashflow-Vorschau trennt Gesichertes von Erhofftem — ein Angebot ist kein
+Geld und wird gewichtet, nicht voll angesetzt.
+
+**Werkstatt.** Der Programmierer schreibt kleine Python-Skripte und legt sie ab.
+Ausgeführt wird nur nach Freigabe, und die Freigabefrage zeigt vorher den
+vollständigen Code samt Hinweis, ob er ins Netz will oder Dateien anfasst.
+
 **Routinen.** „Leg eine Routine an: Tagesbericht. Zahlen zusammenfassen,
 per Telegram schicken. Jeden Tag um 18 Uhr.“ Danach genügt „Mach den
 Tagesbericht“. Routinen mit Uhrzeit laufen von selbst.
@@ -153,6 +171,7 @@ python3 jarvis.py telegram    vom Handy aus
 python3 jarvis.py briefing    Briefing sofort
 python3 jarvis.py abend       Abendrückblick sofort
 python3 jarvis.py dashboard   Dashboard bauen
+python3 jarvis.py status      voller Stand: Kasse, Aufträge, Cashflow, Offenes
 python3 jarvis.py export      Buchhaltung als CSV
 python3 jarvis.py stimme      Stimmprofil einlernen
 python3 jarvis.py stimmen     ElevenLabs-Stimme aussuchen
@@ -191,6 +210,9 @@ src/agent.py               Claude-Schleife mit Werkzeugaufrufen
 src/run.py                 Betriebsarten
 src/modules/               ein Modul je Aufgabe
 src/modules/dashboard_teile.py  Farben, Zahlenformate, SVG-Grafiken
+src/modules/team.py        acht Fachkräfte mit eigenem Werkzeugsatz
+src/modules/akquise.py     Pipeline, Angebotskalkulation, Cashflow
+src/modules/werkstatt.py   Skripte schreiben und nach Freigabe ausführen
 landing/index.html         Verkaufsseite, eigenständig, ohne externe Anfragen
 landing/anleitung.html     Bauanleitung als Unterseite, beide gegenseitig verlinkt
 tests/abnahme.py           führt die Abnahmeliste wirklich aus

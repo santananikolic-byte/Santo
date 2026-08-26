@@ -250,6 +250,7 @@ class Bookkeeping:
                           sorted(nach_kategorie.items(), key=lambda p: -p[1])}
 
         ergebnis = {
+            "ok": True,
             "von": von, "bis": bis, "anzahl": len(zeilen),
             "einnahmen": round(einnahmen, 2),
             "ausgaben": round(ausgaben, 2),
@@ -311,7 +312,8 @@ class Bookkeeping:
             tagesliste.append(tag)
             reihe_ein.append(round(einnahmen.get(tag, 0.0), 2))
             reihe_aus.append(round(ausgaben.get(tag, 0.0), 2))
-        return {"tage": tagesliste, "einnahmen": reihe_ein, "ausgaben": reihe_aus,
+        return {"ok": True,
+                "tage": tagesliste, "einnahmen": reihe_ein, "ausgaben": reihe_aus,
                 "summe_einnahmen": round(sum(reihe_ein), 2),
                 "summe_ausgaben": round(sum(reihe_aus), 2)}
 
@@ -337,7 +339,8 @@ class Bookkeeping:
             namen.append(MONATSKUERZEL[monat - 1])
             werte.append(round(ein - aus, 2))
             umsaetze.append(round(ein, 2))
-        return {"monate": namen, "ergebnis": werte, "einnahmen": umsaetze}
+        return {"ok": True, "monate": namen, "ergebnis": werte,
+                "einnahmen": umsaetze}
 
     def belegquote(self, von: str = "", bis: str = "") -> dict:
         """Anteil der Ausgaben, zu denen ein Belegfoto vorliegt.
@@ -347,14 +350,15 @@ class Bookkeeping:
         """
         zeilen = self.buchungen(von, bis, art="ausgabe", limit=100000)
         if not zeilen:
-            return {"quote": None, "belegt": 0.0, "gesamt": 0.0, "anzahl": 0,
+            return {"ok": True, "quote": None, "belegt": 0.0, "gesamt": 0.0,
+                    "anzahl": 0,
                     "text": "Noch keine Ausgaben erfasst."}
         gesamt = sum(z["betrag_brutto"] for z in zeilen)
         belegt = sum(z["betrag_brutto"] for z in zeilen
                      if (z["beleg_pfad"] or "").strip()
                      and os.path.exists(z["beleg_pfad"]))
         quote = (100.0 * belegt / gesamt) if gesamt else 0.0
-        return {"quote": round(quote, 1), "belegt": round(belegt, 2),
+        return {"ok": True, "quote": round(quote, 1), "belegt": round(belegt, 2),
                 "gesamt": round(gesamt, 2), "anzahl": len(zeilen),
                 "text": "%.0f Prozent der Ausgaben sind belegt." % quote}
 

@@ -23,6 +23,7 @@ Alle Daten bleiben lokal auf diesem Rechner.
 """
 
 
+import ast
 import base64
 import csv
 import email
@@ -2406,7 +2407,7 @@ def mwst_aus_brutto(brutto: float, satz: float) -> float:
     return round(brutto - brutto / (1.0 + satz / 100.0), 2)
 
 
-def geld(betrag) -> str:
+def geld_bookkeeping(betrag) -> str:
     """Formatiert einen Betrag deutsch: 1.234,56 Euro."""
     try:
         betrag = float(betrag)
@@ -2481,8 +2482,8 @@ class Bookkeeping:
                 "mwst_satz": satz, "mwst_betrag": steuer, "netto": netto,
                 "haendler": haendler, "kategorie": kategorie,
                 "text": "%s über %s bei %s am %s eingetragen, davon %s Steuer."
-                        % (art.capitalize(), geld(brutto), haendler or "unbekannt", datum,
-                           geld(steuer))}
+                        % (art.capitalize(), geld_bookkeeping(brutto), haendler or "unbekannt", datum,
+                           geld_bookkeeping(steuer))}
 
     def buchung_loeschen(self, nummer: int) -> bool:
         """Löscht eine Buchung anhand ihrer Nummer."""
@@ -2579,6 +2580,7 @@ class Bookkeeping:
                           sorted(nach_kategorie.items(), key=lambda p: -p[1])}
 
         ergebnis = {
+            "ok": True,
             "von": von, "bis": bis, "anzahl": len(zeilen),
             "einnahmen": round(einnahmen, 2),
             "ausgaben": round(ausgaben, 2),
@@ -2591,9 +2593,9 @@ class Bookkeeping:
         ergebnis["text"] = (
             "Vom %s bis %s: Einnahmen %s, Ausgaben %s, Ergebnis %s. "
             "Umsatzsteuer %s, Vorsteuer %s, Zahllast %s."
-            % (von, bis, geld(ergebnis["einnahmen"]), geld(ergebnis["ausgaben"]),
-               geld(ergebnis["ergebnis"]), geld(ergebnis["umsatzsteuer"]),
-               geld(ergebnis["vorsteuer"]), geld(ergebnis["zahllast"])))
+            % (von, bis, geld_bookkeeping(ergebnis["einnahmen"]), geld_bookkeeping(ergebnis["ausgaben"]),
+               geld_bookkeeping(ergebnis["ergebnis"]), geld_bookkeeping(ergebnis["umsatzsteuer"]),
+               geld_bookkeeping(ergebnis["vorsteuer"]), geld_bookkeeping(ergebnis["zahllast"])))
         return ergebnis
 
     def fehlende_belege(self, von: str = "", bis: str = "") -> dict:
@@ -2613,8 +2615,8 @@ class Bookkeeping:
             text = "Zu allen Ausgaben liegt ein Beleg vor."
         else:
             text = ("%d Ausgaben ohne Beleg, zusammen %s. Die größte: %s bei %s am %s."
-                    % (len(ohne), geld(summe),
-                       geld(max(ohne, key=lambda e: e["betrag"])["betrag"]),
+                    % (len(ohne), geld_bookkeeping(summe),
+                       geld_bookkeeping(max(ohne, key=lambda e: e["betrag"])["betrag"]),
                        max(ohne, key=lambda e: e["betrag"])["haendler"] or "unbekannt",
                        max(ohne, key=lambda e: e["betrag"])["datum"]))
         return {"ok": True, "anzahl": len(ohne), "summe": summe, "buchungen": ohne,
@@ -2640,7 +2642,8 @@ class Bookkeeping:
             tagesliste.append(tag)
             reihe_ein.append(round(einnahmen.get(tag, 0.0), 2))
             reihe_aus.append(round(ausgaben.get(tag, 0.0), 2))
-        return {"tage": tagesliste, "einnahmen": reihe_ein, "ausgaben": reihe_aus,
+        return {"ok": True,
+                "tage": tagesliste, "einnahmen": reihe_ein, "ausgaben": reihe_aus,
                 "summe_einnahmen": round(sum(reihe_ein), 2),
                 "summe_ausgaben": round(sum(reihe_aus), 2)}
 
@@ -2666,7 +2669,8 @@ class Bookkeeping:
             namen.append(MONATSKUERZEL[monat - 1])
             werte.append(round(ein - aus, 2))
             umsaetze.append(round(ein, 2))
-        return {"monate": namen, "ergebnis": werte, "einnahmen": umsaetze}
+        return {"ok": True, "monate": namen, "ergebnis": werte,
+                "einnahmen": umsaetze}
 
     def belegquote(self, von: str = "", bis: str = "") -> dict:
         """Anteil der Ausgaben, zu denen ein Belegfoto vorliegt.
@@ -2676,14 +2680,15 @@ class Bookkeeping:
         """
         zeilen = self.buchungen(von, bis, art="ausgabe", limit=100000)
         if not zeilen:
-            return {"quote": None, "belegt": 0.0, "gesamt": 0.0, "anzahl": 0,
+            return {"ok": True, "quote": None, "belegt": 0.0, "gesamt": 0.0,
+                    "anzahl": 0,
                     "text": "Noch keine Ausgaben erfasst."}
         gesamt = sum(z["betrag_brutto"] for z in zeilen)
         belegt = sum(z["betrag_brutto"] for z in zeilen
                      if (z["beleg_pfad"] or "").strip()
                      and os.path.exists(z["beleg_pfad"]))
         quote = (100.0 * belegt / gesamt) if gesamt else 0.0
-        return {"quote": round(quote, 1), "belegt": round(belegt, 2),
+        return {"ok": True, "quote": round(quote, 1), "belegt": round(belegt, 2),
                 "gesamt": round(gesamt, 2), "anzahl": len(zeilen),
                 "text": "%.0f Prozent der Ausgaben sind belegt." % quote}
 
@@ -3018,6 +3023,542 @@ class CallAnalysis:
                 "haeufige_schwaechen": [{"schwaeche": t, "anzahl": a}
                                         for a, t in haeufige_schwaechen],
                 "text": text}
+
+
+# =========================================================================
+# akquise  -  Akquise - Aufträge hereinholen und den Cashflow daraus vorhersagen.
+# 
+# Das ist der Teil, der Geld bringt. Bewertung allein hilft nicht: Es braucht
+# eine Pipeline, die weiß, wer wann wieder angerufen werden muss, eine
+# Kalkulation, die aus Quadratmetern einen belastbaren Monatspreis macht, und
+# eine Vorhersage, die sagt, was in drei Monaten auf dem Konto ist.
+# 
+# Die Kalkulation rechnet, wie in der Branche wirklich gerechnet wird: über
+# Leistungswerte. Ein Reiniger schafft je nach Bodenbelag eine bestimmte Fläche
+# pro Stunde. Daraus ergeben sich Stunden, daraus der Preis. Wer stattdessen
+# einen Quadratmeterpreis rät, verkalkuliert sich beim ersten Sonderfall.
+# =========================================================================
+
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+
+
+SCHEMA_AKQUISE = """
+CREATE TABLE IF NOT EXISTS leads (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    firma TEXT NOT NULL,
+    ansprechpartner TEXT DEFAULT '',
+    telefon TEXT DEFAULT '',
+    email TEXT DEFAULT '',
+    adresse TEXT DEFAULT '',
+    quelle TEXT DEFAULT '',
+    objekt_qm REAL DEFAULT 0,
+    bodenbelag TEXT DEFAULT '',
+    intervall_pro_woche REAL DEFAULT 0,
+    sonderleistungen TEXT DEFAULT '',
+    stufe TEXT DEFAULT 'neu',
+    wert_monat REAL DEFAULT 0,
+    naechster_schritt TEXT DEFAULT '',
+    naechster_kontakt TEXT DEFAULT '',
+    notiz TEXT DEFAULT '',
+    angelegt TEXT NOT NULL,
+    geaendert TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS angebote (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    lead_id INTEGER,
+    datum TEXT NOT NULL,
+    qm REAL DEFAULT 0,
+    bodenbelag TEXT DEFAULT '',
+    intervall_pro_woche REAL DEFAULT 0,
+    stundensatz REAL DEFAULT 0,
+    stunden_monat REAL DEFAULT 0,
+    netto_monat REAL DEFAULT 0,
+    brutto_monat REAL DEFAULT 0,
+    posten TEXT DEFAULT '',
+    status TEXT DEFAULT 'entwurf',
+    notiz TEXT DEFAULT '',
+    angelegt TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_leads_stufe ON leads(stufe);
+CREATE INDEX IF NOT EXISTS idx_leads_kontakt ON leads(naechster_kontakt);
+"""
+
+# Die Stufen, die ein Interessent durchläuft. Reihenfolge ist bewusst:
+# sie bestimmt auch, wie wahrscheinlich ein Abschluss ist.
+STUFEN = ["neu", "kontaktiert", "besichtigt", "angebot", "nachfassen",
+          "gewonnen", "verloren"]
+
+# Erfahrungswerte, wie sicher eine Stufe zum Auftrag führt. Bewusst
+# zurückhaltend: eine zu optimistische Pipeline führt zu Fehlplanung.
+WAHRSCHEINLICHKEIT = {"neu": 0.10, "kontaktiert": 0.20, "besichtigt": 0.40,
+                      "angebot": 0.60, "nachfassen": 0.45, "gewonnen": 1.0,
+                      "verloren": 0.0}
+
+# Wie viele Tage nach dem letzten Schritt nachgefasst werden sollte.
+NACHFASS_TAGE = {"neu": 2, "kontaktiert": 3, "besichtigt": 2, "angebot": 5,
+                 "nachfassen": 7}
+
+# Leistungswerte in Quadratmetern je Stunde. So rechnet die Branche.
+LEISTUNGSWERTE = {
+    "teppich": 350.0,
+    "hartboden": 300.0,
+    "linoleum": 300.0,
+    "pvc": 300.0,
+    "fliesen": 280.0,
+    "naturstein": 250.0,
+    "beton": 250.0,
+    "parkett": 260.0,
+    "treppenhaus": 150.0,
+    "sanitaer": 80.0,
+    "sanitär": 80.0,
+    "kueche": 120.0,
+    "küche": 120.0,
+    "halle": 500.0,
+    "industrie": 500.0,
+}
+LEISTUNG_STANDARD = 280.0
+
+# Sonderleistungen, die getrennt berechnet werden. Wert ist Euro je Einheit.
+SONDERLEISTUNGEN = {
+    "fensterreinigung": ("je Fensterflügel", 3.50),
+    "grundreinigung": ("je Quadratmeter", 2.80),
+    "teppichreinigung": ("je Quadratmeter", 2.20),
+    "bauschlussreinigung": ("je Quadratmeter", 4.50),
+}
+
+WOCHEN_PRO_MONAT = 4.33
+MATERIALZUSCHLAG = 0.04   # Reinigungsmittel, Tücher, Verbrauch
+STUNDENSATZ_STANDARD = 32.0
+
+
+def leistungswert(bodenbelag: str) -> float:
+    """Quadratmeter je Stunde für einen Bodenbelag."""
+    schluessel = (bodenbelag or "").strip().lower()
+    for name, wert in LEISTUNGSWERTE.items():
+        if name in schluessel:
+            return wert
+    return LEISTUNG_STANDARD
+
+
+def geld_akquise(betrag) -> str:
+    """Deutscher Betrag mit Euro-Zeichen."""
+    try:
+        betrag = float(betrag)
+    except (TypeError, ValueError):
+        betrag = 0.0
+    return ("{:,.2f}".format(betrag).replace(",", "#").replace(".", ",")
+            .replace("#", ".")) + " €"
+
+
+class Akquise:
+    """Führt die Pipeline, kalkuliert Angebote und sagt den Cashflow vorher."""
+
+    def __init__(self, memory: Memory = None, mwst_satz: float = 20.0):
+        self.memory = memory or Memory()
+        self.mwst_satz = float(mwst_satz)
+        db_schema_anlegen(SCHEMA_AKQUISE, self.memory.db_pfad)
+
+    # -- Kalkulation --------------------------------------------------------
+
+    def angebot_kalkulieren(self, qm: float, bodenbelag: str = "",
+                            intervall_pro_woche: float = 1.0,
+                            stundensatz: float = None,
+                            sonderleistungen: dict = None) -> dict:
+        """Rechnet aus Fläche, Belag und Intervall einen Monatspreis.
+
+        Der Weg: Fläche geteilt durch Leistungswert ergibt Stunden je
+        Reinigung. Mal Reinigungen im Monat ergibt Monatsstunden. Mal
+        Stundensatz ergibt den Preis. Sonderleistungen kommen getrennt dazu,
+        weil sie nicht im Intervall stecken.
+        """
+        try:
+            qm = float(qm)
+        except (TypeError, ValueError):
+            return {"ok": False, "fehler": "Die Quadratmeter sind keine Zahl."}
+        if qm <= 0:
+            return {"ok": False,
+                    "fehler": "Ohne Quadratmeter kann ich nicht kalkulieren. "
+                              "Frag beim Objekt nach der Fläche."}
+        try:
+            intervall = float(intervall_pro_woche)
+        except (TypeError, ValueError):
+            intervall = 1.0
+        if intervall <= 0:
+            return {"ok": False,
+                    "fehler": "Wie oft pro Woche soll gereinigt werden? Ohne das "
+                              "gibt es keinen Monatspreis."}
+        satz = float(stundensatz) if stundensatz else STUNDENSATZ_STANDARD
+
+        leistung = leistungswert(bodenbelag)
+        stunden_je_reinigung = qm / leistung
+        reinigungen_monat = intervall * WOCHEN_PRO_MONAT
+        stunden_monat = stunden_je_reinigung * reinigungen_monat
+        lohn = stunden_monat * satz
+        material = lohn * MATERIALZUSCHLAG
+
+        posten = [
+            {"bezeichnung": "Unterhaltsreinigung %.0f m² bei %s, %gx pro Woche"
+                            % (qm, bodenbelag or "Standardbelag", intervall),
+             "menge": round(stunden_monat, 2), "einheit": "Stunden",
+             "einzelpreis": satz, "betrag": round(lohn, 2)},
+            {"bezeichnung": "Reinigungsmittel und Verbrauchsmaterial",
+             "menge": 1, "einheit": "pauschal",
+             "einzelpreis": round(material, 2), "betrag": round(material, 2)},
+        ]
+
+        einmalig = 0.0
+        for name, menge in (sonderleistungen or {}).items():
+            schluessel = str(name).strip().lower()
+            if schluessel not in SONDERLEISTUNGEN:
+                continue
+            einheit, preis = SONDERLEISTUNGEN[schluessel]
+            try:
+                menge = float(menge)
+            except (TypeError, ValueError):
+                continue
+            if menge <= 0:
+                continue
+            betrag = menge * preis
+            einmalig += betrag
+            posten.append({"bezeichnung": "%s (%s)" % (name.capitalize(), einheit),
+                           "menge": menge, "einheit": einheit,
+                           "einzelpreis": preis, "betrag": round(betrag, 2)})
+
+        netto_monat = round(lohn + material, 2)
+        mwst_monat = round(netto_monat * self.mwst_satz / 100.0, 2)
+        brutto_monat = round(netto_monat + mwst_monat, 2)
+        netto_einmalig = round(einmalig, 2)
+
+        return {
+            "ok": True,
+            "qm": qm, "bodenbelag": bodenbelag or "Standardbelag",
+            "leistungswert": leistung,
+            "intervall_pro_woche": intervall,
+            "stundensatz": satz,
+            "stunden_je_reinigung": round(stunden_je_reinigung, 2),
+            "reinigungen_monat": round(reinigungen_monat, 1),
+            "stunden_monat": round(stunden_monat, 2),
+            "netto_monat": netto_monat,
+            "mwst_monat": mwst_monat,
+            "brutto_monat": brutto_monat,
+            "einmalig_netto": netto_einmalig,
+            "jahreswert_netto": round(netto_monat * 12 + netto_einmalig, 2),
+            "qm_preis_monat": round(netto_monat / qm, 3),
+            "posten": posten,
+            "text": ("%.0f Quadratmeter %s, %gmal die Woche: das sind %.1f Stunden "
+                     "im Monat. Bei %s Stundensatz macht das %s netto im Monat, "
+                     "%s brutto. Im Jahr %s netto.%s"
+                     % (qm, bodenbelag or "Standardbelag", intervall, stunden_monat,
+                        geld_akquise(satz), geld_akquise(netto_monat), geld_akquise(brutto_monat),
+                        geld_akquise(netto_monat * 12),
+                        (" Dazu einmalig %s für Sonderleistungen."
+                         % geld_akquise(netto_einmalig)) if netto_einmalig else "")),
+        }
+
+    def angebotstext(self, kalkulation: dict, firma: str = "",
+                     ansprechpartner: str = "") -> str:
+        """Formt aus der Kalkulation ein Angebot, das man verschicken kann."""
+        if not kalkulation.get("ok"):
+            return kalkulation.get("fehler", "Die Kalkulation fehlt.")
+        zeilen = []
+        anrede = ("Sehr geehrte Damen und Herren," if not ansprechpartner
+                  else "Sehr geehrte/r %s," % ansprechpartner)
+        zeilen.append(anrede)
+        zeilen.append("")
+        zeilen.append("vielen Dank für Ihr Interesse. Für die Reinigung Ihres "
+                      "Objekts%s unterbreite ich Ihnen folgendes Angebot:"
+                      % (" (%s)" % firma if firma else ""))
+        zeilen.append("")
+        for posten in kalkulation["posten"]:
+            zeilen.append("  %-52s %12s"
+                          % (posten["bezeichnung"][:52], geld_akquise(posten["betrag"])))
+        zeilen.append("")
+        zeilen.append("  %-52s %12s" % ("Monatlich netto", geld_akquise(kalkulation["netto_monat"])))
+        zeilen.append("  %-52s %12s" % ("Mehrwertsteuer %g Prozent" % self.mwst_satz,
+                                        geld_akquise(kalkulation["mwst_monat"])))
+        zeilen.append("  %-52s %12s" % ("Monatlich brutto",
+                                        geld_akquise(kalkulation["brutto_monat"])))
+        if kalkulation["einmalig_netto"]:
+            zeilen.append("  %-52s %12s" % ("Einmalige Sonderleistungen netto",
+                                            geld_akquise(kalkulation["einmalig_netto"])))
+        zeilen.append("")
+        zeilen.append("Der Preis beruht auf %.1f Arbeitsstunden im Monat "
+                      "(%.0f m² bei %gmaliger Reinigung pro Woche)."
+                      % (kalkulation["stunden_monat"], kalkulation["qm"],
+                         kalkulation["intervall_pro_woche"]))
+        zeilen.append("Gerne führe ich vorab eine kostenlose Probereinigung durch, "
+                      "damit Sie die Qualität beurteilen können.")
+        zeilen.append("")
+        zeilen.append("Mit freundlichen Grüßen")
+        return "\n".join(zeilen)
+
+    # -- Pipeline -----------------------------------------------------------
+
+    def lead_anlegen(self, firma: str, ansprechpartner: str = "", telefon: str = "",
+                     email: str = "", adresse: str = "", quelle: str = "",
+                     objekt_qm: float = 0, bodenbelag: str = "",
+                     intervall_pro_woche: float = 0, notiz: str = "",
+                     naechster_schritt: str = "") -> dict:
+        """Nimmt einen Interessenten auf."""
+        firma = (firma or "").strip()
+        if not firma:
+            return {"ok": False, "fehler": "Der Interessent braucht einen Namen."}
+        vorhanden = self.memory._lesen(
+            "SELECT id FROM leads WHERE lower(firma)=lower(?) LIMIT 1", (firma,))
+        if vorhanden:
+            return {"ok": False, "id": vorhanden[0]["id"],
+                    "fehler": "%s steht schon in der Liste." % firma}
+        try:
+            qm = float(objekt_qm or 0)
+        except (TypeError, ValueError):
+            qm = 0.0
+        try:
+            intervall = float(intervall_pro_woche or 0)
+        except (TypeError, ValueError):
+            intervall = 0.0
+
+        wert = 0.0
+        if qm > 0 and intervall > 0:
+            kalkulation = self.angebot_kalkulieren(qm, bodenbelag, intervall)
+            if kalkulation.get("ok"):
+                wert = kalkulation["netto_monat"]
+
+        faellig = (datetime.now() + timedelta(days=NACHFASS_TAGE["neu"])
+                   ).strftime("%Y-%m-%d")
+        nummer = self.memory._schreiben(
+            "INSERT INTO leads (firma, ansprechpartner, telefon, email, adresse, "
+            "quelle, objekt_qm, bodenbelag, intervall_pro_woche, sonderleistungen, "
+            "stufe, wert_monat, naechster_schritt, naechster_kontakt, notiz, "
+            "angelegt, geaendert) VALUES (?,?,?,?,?,?,?,?,?,'','neu',?,?,?,?,?,?)",
+            (firma, ansprechpartner, telefon, email, adresse, quelle, qm, bodenbelag,
+             intervall, wert, naechster_schritt or "anrufen und Termin vereinbaren",
+             faellig, notiz, zeitstempel(), zeitstempel()))
+        return {"ok": True, "id": nummer, "firma": firma, "wert_monat": wert,
+                "text": "%s ist aufgenommen.%s Nächster Schritt bis %s: %s"
+                        % (firma,
+                           (" Geschätzter Wert %s im Monat." % geld_akquise(wert)) if wert else "",
+                           faellig, naechster_schritt or "anrufen und Termin vereinbaren")}
+
+    def lead_finden(self, name: str):
+        """Sucht einen Interessenten - auch bei ungenauem Namen."""
+        name = (name or "").strip()
+        if not name:
+            return None
+        genau = self.memory._lesen(
+            "SELECT * FROM leads WHERE lower(firma)=lower(?) LIMIT 1", (name,))
+        if genau:
+            return genau[0]
+        teil = self.memory._lesen(
+            "SELECT * FROM leads WHERE firma LIKE ? OR ansprechpartner LIKE ? "
+            "ORDER BY geaendert DESC LIMIT 1",
+            ("%%%s%%" % name, "%%%s%%" % name))
+        return teil[0] if teil else None
+
+    def lead_weiterstufen(self, name: str, stufe: str, notiz: str = "",
+                          naechster_schritt: str = "",
+                          wert_monat: float = None) -> dict:
+        """Setzt einen Interessenten auf die nächste Stufe."""
+        stufe = (stufe or "").strip().lower()
+        if stufe not in STUFEN:
+            return {"ok": False,
+                    "fehler": "'%s' ist keine Stufe. Möglich: %s."
+                              % (stufe, ", ".join(STUFEN))}
+        lead = self.lead_finden(name)
+        if lead is None:
+            return {"ok": False, "fehler": "'%s' steht nicht in der Liste." % name}
+
+        tage = NACHFASS_TAGE.get(stufe, 0)
+        faellig = ((datetime.now() + timedelta(days=tage)).strftime("%Y-%m-%d")
+                   if tage else "")
+        neuer_wert = lead["wert_monat"] if wert_monat is None else float(wert_monat)
+        neue_notiz = ("%s | %s" % (lead["notiz"], notiz)).strip(" |") if notiz \
+            else lead["notiz"]
+
+        self.memory._schreiben(
+            "UPDATE leads SET stufe=?, notiz=?, naechster_schritt=?, "
+            "naechster_kontakt=?, wert_monat=?, geaendert=? WHERE id=?",
+            (stufe, neue_notiz, naechster_schritt or lead["naechster_schritt"],
+             faellig, neuer_wert, zeitstempel(), lead["id"]))
+
+        if stufe == "gewonnen":
+            text = ("%s ist gewonnen. %s im Monat, das sind %s im Jahr."
+                    % (lead["firma"], geld_akquise(neuer_wert), geld_akquise(neuer_wert * 12)))
+        elif stufe == "verloren":
+            text = "%s ist verloren. %s" % (lead["firma"], notiz or "")
+        else:
+            text = ("%s steht jetzt auf %s.%s"
+                    % (lead["firma"], stufe,
+                       (" Wieder melden bis %s: %s" % (faellig, naechster_schritt))
+                       if faellig and naechster_schritt else ""))
+        return {"ok": True, "id": lead["id"], "stufe": stufe, "text": text}
+
+    def pipeline(self) -> dict:
+        """Alle Interessenten nach Stufen, mit Werten."""
+        zeilen = self.memory._lesen("SELECT * FROM leads ORDER BY wert_monat DESC")
+        nach_stufe = {stufe: [] for stufe in STUFEN}
+        for zeile in zeilen:
+            nach_stufe.setdefault(zeile["stufe"], []).append(zeile)
+
+        offen = [z for z in zeilen if z["stufe"] not in ("gewonnen", "verloren")]
+        gewichtet = sum(z["wert_monat"] * WAHRSCHEINLICHKEIT.get(z["stufe"], 0)
+                        for z in offen)
+        gewonnen = [z for z in zeilen if z["stufe"] == "gewonnen"]
+        laufend = sum(z["wert_monat"] for z in gewonnen)
+
+        uebersicht = {}
+        for stufe in STUFEN:
+            eintraege = nach_stufe.get(stufe, [])
+            uebersicht[stufe] = {
+                "anzahl": len(eintraege),
+                "wert_monat": round(sum(e["wert_monat"] for e in eintraege), 2),
+                "firmen": [e["firma"] for e in eintraege[:6]]}
+
+        return {"ok": True, "stufen": uebersicht,
+                "offen": len(offen),
+                "offener_wert_monat": round(sum(z["wert_monat"] for z in offen), 2),
+                "gewichteter_wert_monat": round(gewichtet, 2),
+                "laufender_umsatz_monat": round(laufend, 2),
+                "text": ("%d Interessenten offen über %s im Monat. Realistisch "
+                         "gewichtet sind das %s. Laufend gesichert: %s im Monat "
+                         "aus %d Aufträgen."
+                         % (len(offen), geld_akquise(sum(z["wert_monat"] for z in offen)),
+                            geld_akquise(gewichtet), geld_akquise(laufend), len(gewonnen)))}
+
+    def nachfassliste(self, bis: str = "") -> dict:
+        """Wer heute dran ist - und warum.
+
+        Das ist die Liste, die morgens zählt. Ein Interessent, bei dem niemand
+        nachfasst, ist verloren, ohne dass es jemand merkt.
+        """
+        grenze = bis or heute_datum()
+        zeilen = self.memory._lesen(
+            "SELECT * FROM leads WHERE stufe NOT IN ('gewonnen','verloren') "
+            "AND naechster_kontakt<>'' AND naechster_kontakt<=? "
+            "ORDER BY wert_monat DESC", (grenze,))
+        eintraege = []
+        for zeile in zeilen:
+            try:
+                faellig_seit = (datetime.strptime(grenze, "%Y-%m-%d") -
+                                datetime.strptime(zeile["naechster_kontakt"],
+                                                  "%Y-%m-%d")).days
+            except ValueError:
+                faellig_seit = 0
+            eintraege.append({
+                "id": zeile["id"], "firma": zeile["firma"],
+                "ansprechpartner": zeile["ansprechpartner"],
+                "telefon": zeile["telefon"], "stufe": zeile["stufe"],
+                "wert_monat": zeile["wert_monat"],
+                "seit_tagen": faellig_seit,
+                "schritt": zeile["naechster_schritt"]})
+
+        if not eintraege:
+            text = "Heute ist niemand zum Nachfassen fällig."
+        else:
+            erster = eintraege[0]
+            text = ("%d Interessenten sind fällig, zusammen %s im Monat. "
+                    "Fang mit %s an: %s%s"
+                    % (len(eintraege),
+                       geld_akquise(sum(e["wert_monat"] for e in eintraege)),
+                       erster["firma"], erster["schritt"],
+                       (" Der Termin ist seit %d Tagen überfällig."
+                        % erster["seit_tagen"]) if erster["seit_tagen"] > 0 else ""))
+        return {"ok": True, "anzahl": len(eintraege), "eintraege": eintraege,
+                "text": text}
+
+    # -- Cashflow -----------------------------------------------------------
+
+    def cashflow_prognose(self, monate: int = 6, bookkeeping=None) -> dict:
+        """Was in den nächsten Monaten hereinkommt.
+
+        Gesichert sind die gewonnenen Aufträge - die laufen weiter. Dazu kommt
+        die Pipeline, aber nur gewichtet nach Stufe. Ein Angebot ist kein Geld,
+        und so wird es hier auch behandelt.
+        """
+        monate = max(1, min(24, int(monate or 6)))
+        gewonnen = self.memory._lesen(
+            "SELECT * FROM leads WHERE stufe='gewonnen'")
+        offen = self.memory._lesen(
+            "SELECT * FROM leads WHERE stufe NOT IN ('gewonnen','verloren')")
+
+        gesichert = sum(z["wert_monat"] for z in gewonnen)
+        gewichtet = sum(z["wert_monat"] * WAHRSCHEINLICHKEIT.get(z["stufe"], 0)
+                        for z in offen)
+
+        # Laufende Kosten aus der Buchhaltung, sofern vorhanden.
+        kosten_monat = 0.0
+        kostenquelle = "keine Buchhaltungsdaten"
+        if bookkeeping is not None:
+            try:
+                verlauf = bookkeeping.monatsverlauf(3)
+                ausgaben = [a for a in verlauf.get("einnahmen", [])]
+                del ausgaben
+                gesamt = bookkeeping.auswertung(
+                    (datetime.now() - timedelta(days=90)).strftime("%Y-%m-%d"),
+                    heute_datum())
+                if gesamt.get("anzahl"):
+                    kosten_monat = round(gesamt["ausgaben"] / 3.0, 2)
+                    kostenquelle = "Durchschnitt der letzten 3 Monate"
+            except Exception:
+                kosten_monat = 0.0
+
+        reihe = []
+        jetzt = datetime.now()
+        for versatz in range(monate):
+            jahr, monat = jetzt.year, jetzt.month + versatz
+            while monat > 12:
+                monat -= 12
+                jahr += 1
+            # Neue Abschlüsse brauchen Anlaufzeit: im ersten Monat wirkt die
+            # Pipeline noch nicht, danach steigt sie langsam ein.
+            anteil = 0.0 if versatz == 0 else min(1.0, versatz / 3.0)
+            erwartet = gesichert + gewichtet * anteil
+            reihe.append({
+                "monat": "%04d-%02d" % (jahr, monat),
+                "gesichert": round(gesichert, 2),
+                "aus_pipeline": round(gewichtet * anteil, 2),
+                "einnahmen": round(erwartet, 2),
+                "kosten": kosten_monat,
+                "ergebnis": round(erwartet - kosten_monat, 2)})
+
+        return {"ok": True, "monate": reihe,
+                "gesichert_monat": round(gesichert, 2),
+                "pipeline_gewichtet": round(gewichtet, 2),
+                "kosten_monat": kosten_monat, "kostenquelle": kostenquelle,
+                "text": ("Gesichert laufen %s im Monat herein. Aus der Pipeline "
+                         "kommen realistisch %s dazu, aber erst über zwei bis drei "
+                         "Monate. Bei Kosten von %s im Monat (%s) bleiben in %d "
+                         "Monaten etwa %s übrig."
+                         % (geld_akquise(gesichert), geld_akquise(gewichtet), geld_akquise(kosten_monat),
+                            kostenquelle, monate,
+                            geld_akquise(sum(m["ergebnis"] for m in reihe))))}
+
+    def angebot_ablegen(self, lead_name: str, kalkulation: dict,
+                        notiz: str = "") -> dict:
+        """Legt ein kalkuliertes Angebot zum Interessenten ab."""
+        if not kalkulation.get("ok"):
+            return {"ok": False, "fehler": "Die Kalkulation ist nicht gültig."}
+        lead = self.lead_finden(lead_name)
+        nummer = self.memory._schreiben(
+            "INSERT INTO angebote (lead_id, datum, qm, bodenbelag, "
+            "intervall_pro_woche, stundensatz, stunden_monat, netto_monat, "
+            "brutto_monat, posten, status, notiz, angelegt) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,'entwurf',?,?)",
+            (lead["id"] if lead else None, heute_datum(), kalkulation["qm"],
+             kalkulation["bodenbelag"], kalkulation["intervall_pro_woche"],
+             kalkulation["stundensatz"], kalkulation["stunden_monat"],
+             kalkulation["netto_monat"], kalkulation["brutto_monat"],
+             json.dumps(kalkulation["posten"], ensure_ascii=False), notiz,
+             zeitstempel()))
+        if lead is not None:
+            self.lead_weiterstufen(lead["firma"], "angebot",
+                                   naechster_schritt="Angebot nachfassen",
+                                   wert_monat=kalkulation["netto_monat"])
+        return {"ok": True, "id": nummer,
+                "text": "Angebot über %s im Monat abgelegt%s."
+                        % (geld_akquise(kalkulation["netto_monat"]),
+                           (" für %s" % lead["firma"]) if lead else "")}
 
 
 # =========================================================================
@@ -4416,6 +4957,660 @@ class Bildschirm:
 
 
 # =========================================================================
+# werkstatt  -  Werkstatt - der Programmierer schreibt kleine Programme und führt sie aus.
+# 
+# Hier gilt bewusst eine andere Regel als beim Rest des Programms. Überall sonst
+# läuft nur, was auf einer Allowlist steht. Ein Programmierer, der nur
+# registrierte Befehle ausführen darf, ist aber kein Programmierer.
+# 
+# **Deshalb ist hier der Mensch das Tor, nicht die Liste.** Ein Skript wird
+# geschrieben und abgelegt, ohne dass etwas passiert. Ausgeführt wird es erst
+# nach ausdrücklicher Freigabe - und die Freigabefrage zeigt vorher den
+# vollständigen Code und was er anfassen will.
+# 
+# Was diese Prüfung leistet und was nicht, ehrlich gesagt: Sie **erkennt**, ob
+# ein Skript ins Netz will, Dateien außerhalb der Werkstatt anfasst oder weitere
+# Programme startet, und schreibt das in die Freigabefrage. Sie **verhindert**
+# das nicht - wer Freigabe erteilt, führt aus, was dasteht. Die Prüfung ist eine
+# Lesehilfe für die Entscheidung, keine Mauer. Wer Code ausführt, entscheidet.
+# =========================================================================
+
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+
+
+SCHEMA_WERKSTATT = """
+CREATE TABLE IF NOT EXISTS skripte (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    zweck TEXT DEFAULT '',
+    laeufe INTEGER DEFAULT 0,
+    zuletzt TEXT DEFAULT '',
+    angelegt TEXT NOT NULL,
+    geaendert TEXT NOT NULL
+);
+"""
+
+MAX_ZEICHEN = 20000
+LAUFZEIT_GRENZE = 60
+
+# Module, deren Verwendung in der Freigabefrage genannt wird. Das ist eine
+# Lesehilfe fuer die Entscheidung, keine Sperre.
+AUFFAELLIGE_MODULE = {
+    "socket": "will ins Netz",
+    "urllib": "will ins Netz",
+    "http": "will ins Netz",
+    "requests": "will ins Netz",
+    "ftplib": "will ins Netz",
+    "smtplib": "will Mails verschicken",
+    "subprocess": "will weitere Programme starten",
+    "multiprocessing": "will weitere Prozesse starten",
+    "shutil": "will Dateien verschieben oder löschen",
+    "os": "greift auf das Dateisystem zu",
+    "pathlib": "greift auf das Dateisystem zu",
+    "sqlite3": "will eine Datenbank öffnen",
+    "ctypes": "greift tief ins System",
+}
+
+
+def name_saeubern(name: str) -> str:
+    """Macht aus einem Wunschnamen einen sicheren Dateinamen.
+
+    Nur Buchstaben, Ziffern, Strich und Unterstrich bleiben übrig. Damit sind
+    Pfadangriffe wie ``../../etwas`` von vornherein nicht darstellbar.
+    """
+    roh = (name or "").strip().lower()
+    for alt, neu in (("ä", "ae"), ("ö", "oe"), ("ü", "ue"), ("ß", "ss")):
+        roh = roh.replace(alt, neu)
+    roh = re.sub(r"\.py$", "", roh)
+    roh = re.sub(r"[^a-z0-9_-]+", "_", roh).strip("_-")
+    return (roh or "skript")[:60] + ".py"
+
+
+class Werkstatt:
+    """Legt Skripte ab, zeigt sie und führt sie nach Freigabe aus."""
+
+    def __init__(self, memory: Memory = None, python: str = ""):
+        self.memory = memory or Memory()
+        self.verzeichnis = BASIS / "werkstatt"
+        # Das Python der eigenen Umgebung, damit die installierten Pakete da sind.
+        self.python = python or sys.executable
+        db_schema_anlegen(SCHEMA_WERKSTATT, self.memory.db_pfad)
+        try:
+            self.verzeichnis.mkdir(parents=True, exist_ok=True)
+        except OSError as fehler:
+            print("[werkstatt] Verzeichnis nicht anlegbar: %s" % fehler)
+
+    # -- Pfade --------------------------------------------------------------
+
+    def _pfad(self, name: str):
+        """Voller Pfad eines Skripts, garantiert innerhalb der Werkstatt."""
+        datei = (self.verzeichnis / name_saeubern(name)).resolve()
+        wurzel = self.verzeichnis.resolve()
+        # Doppelt geprüft: auch wenn die Säuberung je umgangen würde, bleibt
+        # alles unterhalb der Werkstatt.
+        if wurzel not in datei.parents and datei != wurzel:
+            return None
+        return datei
+
+    # -- Schreiben ----------------------------------------------------------
+
+    def skript_schreiben(self, name: str, code: str, zweck: str = "") -> dict:
+        """Legt ein Skript ab. Ausgeführt wird dabei nichts."""
+        code = code or ""
+        if not code.strip():
+            return {"ok": False, "fehler": "Das Skript ist leer."}
+        if len(code) > MAX_ZEICHEN:
+            return {"ok": False,
+                    "fehler": "Das Skript ist zu lang (%d Zeichen, erlaubt sind %d)."
+                              % (len(code), MAX_ZEICHEN)}
+        try:
+            ast.parse(code)
+        except SyntaxError as fehler:
+            return {"ok": False,
+                    "fehler": "Das Skript hat einen Syntaxfehler in Zeile %s: %s"
+                              % (fehler.lineno, fehler.msg)}
+
+        datei = self._pfad(name)
+        if datei is None:
+            return {"ok": False, "fehler": "Der Name '%s' ist nicht zulässig." % name}
+        try:
+            datei.write_text(code, encoding="utf-8")
+        except OSError as fehler:
+            return {"ok": False, "fehler": "Nicht schreibbar: %s" % fehler}
+
+        vorhanden = self.memory._lesen(
+            "SELECT id FROM skripte WHERE name=? LIMIT 1", (datei.name,))
+        if vorhanden:
+            self.memory._schreiben(
+                "UPDATE skripte SET zweck=?, geaendert=? WHERE id=?",
+                (zweck, zeitstempel(), vorhanden[0]["id"]))
+        else:
+            self.memory._schreiben(
+                "INSERT INTO skripte (name, zweck, laeufe, zuletzt, angelegt, "
+                "geaendert) VALUES (?,?,0,'',?,?)",
+                (datei.name, zweck, zeitstempel(), zeitstempel()))
+
+        befunde = self.pruefen(code)
+        return {"ok": True, "name": datei.name, "pfad": str(datei),
+                "zeilen": code.count("\n") + 1, "auffaelligkeiten": befunde,
+                "text": "%s ist abgelegt (%d Zeilen). Ausgeführt ist noch nichts.%s"
+                        % (datei.name, code.count("\n") + 1,
+                           (" Achtung: %s." % ", ".join(befunde)) if befunde else "")}
+
+    # -- Lesen --------------------------------------------------------------
+
+    def skript_zeigen(self, name: str) -> dict:
+        """Gibt den Code eines Skripts zurück."""
+        datei = self._pfad(name)
+        if datei is None or not datei.exists():
+            return {"ok": False, "fehler": "Das Skript '%s' gibt es nicht." % name}
+        try:
+            code = datei.read_text(encoding="utf-8")
+        except OSError as fehler:
+            return {"ok": False, "fehler": "Nicht lesbar: %s" % fehler}
+        return {"ok": True, "name": datei.name, "code": code,
+                "auffaelligkeiten": self.pruefen(code), "text": code[:4000]}
+
+    def werkstatt_liste(self) -> dict:
+        """Alle abgelegten Skripte."""
+        zeilen = self.memory._lesen("SELECT * FROM skripte ORDER BY geaendert DESC")
+        eintraege = []
+        for zeile in zeilen:
+            datei = self._pfad(zeile["name"])
+            eintraege.append({"name": zeile["name"], "zweck": zeile["zweck"],
+                              "laeufe": zeile["laeufe"], "zuletzt": zeile["zuletzt"],
+                              "vorhanden": bool(datei and datei.exists())})
+        return {"ok": True, "anzahl": len(eintraege), "skripte": eintraege,
+                "verzeichnis": str(self.verzeichnis),
+                "text": ("In der Werkstatt liegen: %s."
+                         % ", ".join(e["name"] for e in eintraege)) if eintraege
+                        else "In der Werkstatt liegt noch kein Skript."}
+
+    # -- Prüfen -------------------------------------------------------------
+
+    @staticmethod
+    def pruefen(code: str) -> list:
+        """Nennt, was das Skript vorhat - als Lesehilfe für die Freigabe.
+
+        Das ist ausdrücklich keine Sicherheitsprüfung. Sie liest die Importe
+        über den Syntaxbaum und benennt, was auffällt, damit in der
+        Freigabefrage nicht nur nackter Code steht.
+        """
+        befunde = []
+        try:
+            baum = ast.parse(code or "")
+        except SyntaxError:
+            return ["Code ist syntaktisch fehlerhaft"]
+        module = set()
+        for knoten in ast.walk(baum):
+            if isinstance(knoten, ast.Import):
+                for teil in knoten.names:
+                    module.add(teil.name.split(".")[0])
+            elif isinstance(knoten, ast.ImportFrom) and knoten.module:
+                module.add(knoten.module.split(".")[0])
+        for name in sorted(module):
+            if name in AUFFAELLIGE_MODULE:
+                hinweis = AUFFAELLIGE_MODULE[name]
+                if hinweis not in befunde:
+                    befunde.append(hinweis)
+        if re.search(r"\b(eval|exec|compile)\s*\(", code or ""):
+            befunde.append("führt Code zur Laufzeit aus")
+        return befunde
+
+    def freigabetext(self, name: str) -> str:
+        """Was in der Freigabefrage stehen soll: Zweck, Befunde und der Code."""
+        angaben = self.skript_zeigen(name)
+        if not angaben.get("ok"):
+            return angaben.get("fehler", "")
+        befunde = angaben["auffaelligkeiten"]
+        kopf = "Skript %s ausführen." % angaben["name"]
+        if befunde:
+            kopf += " Es %s." % " und ".join(befunde)
+        else:
+            kopf += " Es benutzt nur Standardfunktionen."
+        return "%s\n\n%s" % (kopf, angaben["code"][:1500])
+
+    # -- Ausführen ----------------------------------------------------------
+
+    def skript_ausfuehren(self, name: str, argumente: list = None) -> dict:
+        """Führt ein abgelegtes Skript aus.
+
+        Die Freigabe holt der Werkzeugkatalog ein, bevor diese Methode
+        überhaupt aufgerufen wird. Hier gilt: eigene Shell nie, Arbeitsordner
+        ist die Werkstatt, und nach 60 Sekunden ist Schluss.
+        """
+        datei = self._pfad(name)
+        if datei is None or not datei.exists():
+            return {"ok": False, "fehler": "Das Skript '%s' gibt es nicht." % name}
+
+        befehl = [self.python, str(datei)]
+        for teil in (argumente or []):
+            befehl.append(str(teil))
+
+        beginn = datetime.now()
+        try:
+            ergebnis = subprocess.run(befehl, capture_output=True, text=True,
+                                      timeout=LAUFZEIT_GRENZE, shell=False,
+                                      cwd=str(self.verzeichnis))
+        except subprocess.TimeoutExpired:
+            return {"ok": False,
+                    "fehler": "Das Skript lief länger als %d Sekunden und wurde "
+                              "abgebrochen." % LAUFZEIT_GRENZE}
+        except (OSError, subprocess.SubprocessError) as fehler:
+            return {"ok": False, "fehler": "Der Start ist fehlgeschlagen: %s" % fehler}
+        dauer = (datetime.now() - beginn).total_seconds()
+
+        self.memory._schreiben(
+            "UPDATE skripte SET laeufe=laeufe+1, zuletzt=? WHERE name=?",
+            (zeitstempel(), datei.name))
+
+        ausgabe = (ergebnis.stdout or "").strip()
+        fehlertext = (ergebnis.stderr or "").strip()
+
+        if ergebnis.returncode != 0:
+            letzte = fehlertext.splitlines()[-1] if fehlertext else "ohne Meldung"
+            return {"ok": False, "name": datei.name, "rueckgabe": ergebnis.returncode,
+                    "ausgabe": ausgabe[:3000], "fehlertext": fehlertext[-2000:],
+                    "fehler": "%s ist mit Fehler abgebrochen: %s"
+                              % (datei.name, letzte)}
+        return {"ok": True, "name": datei.name, "rueckgabe": 0,
+                "dauer": round(dauer, 2), "ausgabe": ausgabe[:3000],
+                "text": ("%s lief durch (%.1f Sekunden). Ausgabe: %s"
+                         % (datei.name, dauer,
+                            ausgabe[:900] if ausgabe else "keine"))}
+
+    def skript_loeschen(self, name: str) -> dict:
+        """Entfernt ein Skript aus der Werkstatt."""
+        datei = self._pfad(name)
+        if datei is None or not datei.exists():
+            return {"ok": False, "fehler": "Das Skript '%s' gibt es nicht." % name}
+        try:
+            os.remove(str(datei))
+        except OSError as fehler:
+            return {"ok": False, "fehler": "Nicht löschbar: %s" % fehler}
+        self.memory._schreiben("DELETE FROM skripte WHERE name=?", (datei.name,))
+        return {"ok": True, "text": "%s ist gelöscht." % datei.name}
+
+
+# =========================================================================
+# team  -  Das Team - Spezialisten statt eines Alleskönners.
+# 
+# Ein einzelner Assistent mit vierzig Werkzeugen ist ein Alleskönner, und
+# Alleskönner sind mittelmäßig. Ein Buchhalter, der Beträge schätzt, ist ein
+# schlechter Buchhalter; ein Verkäufer, der nicht nachfasst, ein schlechter
+# Verkäufer. Deshalb gibt es hier Rollen: Jede hat einen eigenen Auftrag, eigene
+# Maßstäbe und **nur die Werkzeuge, die zu ihr gehören**.
+# 
+# Das ist nicht bloß Kosmetik. Die Einschränkung der Werkzeuge ist echte
+# Aufgabentrennung: Der Rechercheur kann keine Buchung anlegen, der Buchhalter
+# keine Mail verschicken. Wer alles darf, macht irgendwann alles - auch das
+# Falsche.
+# 
+# Der Chef bleibt der Nutzer. Jede Wirkung nach außen braucht weiterhin seine
+# Freigabe, egal welche Rolle sie auslöst.
+# =========================================================================
+
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+
+
+SCHEMA_TEAM = """
+CREATE TABLE IF NOT EXISTS auftraege (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    rolle TEXT NOT NULL,
+    auftrag TEXT NOT NULL,
+    bericht TEXT DEFAULT '',
+    status TEXT DEFAULT 'offen',
+    dauer_sekunden REAL DEFAULT 0,
+    angelegt TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_auftraege_rolle ON auftraege(rolle);
+"""
+
+# Gemeinsame Haltung aller Rollen. Steht vor jedem Rollenprompt.
+GRUNDHALTUNG = """Du bist {rolle} im Betrieb von {name}, einer Gebäudereinigung
+mit einem Inhaber. Du arbeitest diesen einen Auftrag ab und meldest zurück.
+
+So arbeitest du:
+- Du nutzt deine Werkzeuge selbstständig. Du fragst nicht um Erlaubnis für das,
+  was du ohnehin darfst.
+- Du erfindest nichts. Fehlt dir eine Angabe, sagst du welche und warum sie
+  nötig ist, statt zu schätzen.
+- Ging etwas schief, steht das in deinem Bericht. Du beschönigst nicht.
+- Dein Bericht ist kurz und gesprochen: zwei bis fünf Sätze, keine
+  Aufzählungszeichen, keine Sternchen. Er wird vorgelesen.
+- Du nennst Zahlen konkret, nicht ungefähr.
+
+Heute ist {wochentag}, der {datum}.
+
+{fachliches}"""
+
+WOCHENTAGE_TEAM = ["Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag",
+                   "Samstag", "Sonntag"]
+
+# Die Mannschaft. Je Rolle: Anzeigename, fachliche Maßstäbe, erlaubte Werkzeuge.
+ROLLEN = {
+    "buchhalter": {
+        "name": "der Buchhalter",
+        "fachliches": """Deine Aufgabe ist die Buchhaltung.
+
+Dein wichtigster Maßstab: Du schätzt niemals einen Betrag. Ist ein Beleg
+unleserlich oder fehlt eine Angabe, trägst du nichts ein und sagst genau, was
+fehlt. Ein geratener Betrag ist in der Buchhaltung schlimmer als kein Eintrag,
+weil er später niemandem auffällt.
+
+Du trennst Vorsteuer und Umsatzsteuer sauber. Du weist auf fehlende Belege hin,
+denn genau die fehlen am Jahresende beim Steuerberater. Du führst die
+Buchhaltung vor - die fachliche Prüfung macht der Steuerberater.""",
+        "werkzeuge": ["buchung_eintragen", "beleg_erfassen", "auswertung",
+                      "fehlende_belege", "csv_export", "kennzahl_setzen",
+                      "notiz_speichern", "gedaechtnis_durchsuchen"],
+    },
+    "akquisiteur": {
+        "name": "der Verkäufer",
+        "fachliches": """Deine Aufgabe ist es, Aufträge hereinzuholen.
+
+Du führst die Pipeline: Wer ist neu, wer wurde besichtigt, wer hat ein Angebot,
+bei wem muss nachgefasst werden. Ein Interessent, bei dem niemand nachfasst,
+ist verloren, ohne dass es jemand merkt - deshalb ist die Nachfassliste dein
+wichtigstes Werkzeug.
+
+Beim Kalkulieren rätst du nie einen Quadratmeterpreis. Du rechnest über
+Leistungswerte: Fläche geteilt durch Quadratmeter pro Stunde ergibt Stunden,
+mal Stundensatz ergibt den Preis. Fehlen dir Fläche, Bodenbelag oder Intervall,
+fragst du danach, statt zu kalkulieren.
+
+Du bist ehrlich über Chancen. Ein Angebot ist kein Auftrag.""",
+        "werkzeuge": ["lead_anlegen", "lead_weiterstufen", "angebot_kalkulieren",
+                      "angebot_ablegen", "nachfassliste", "pipeline",
+                      "kontakt_anlegen", "kontakt_suchen", "notiz_speichern",
+                      "punkt_anlegen", "gedaechtnis_durchsuchen"],
+    },
+    "terminplaner": {
+        "name": "der Terminplaner",
+        "fachliches": """Deine Aufgabe sind Termine und der Tagesablauf.
+
+Du achtest auf Überschneidungen. Bei einem Einzelunternehmer, der selbst zu den
+Objekten fährt, ist eine Doppelbuchung ein verlorener Tag - du sagst es sofort.
+
+Du denkst an die Fahrzeit zwischen zwei Objekten mit. Liegen zwei Termine
+räumlich weit auseinander und zeitlich eng, weist du darauf hin.""",
+        "werkzeuge": ["termine_lesen", "termin_anlegen", "punkt_anlegen",
+                      "punkte_offen", "punkt_erledigen", "kontakt_suchen",
+                      "gedaechtnis_durchsuchen"],
+    },
+    "postmeister": {
+        "name": "der Postbearbeiter",
+        "fachliches": """Deine Aufgabe ist der Posteingang.
+
+Du sortierst nach Dringlichkeit, nicht nach Eingangszeit. Mahnungen, Fristen
+und Auftragsanfragen kommen zuerst, Newsletter zuletzt. Du löschst niemals
+etwas.
+
+Antworten formulierst du vor, verschickst sie aber nur nach ausdrücklicher
+Freigabe. Aus einer Anfrage, die nach Auftrag riecht, machst du einen Hinweis
+an den Verkäufer.""",
+        "werkzeuge": ["mails_lesen", "mail_senden", "notiz_speichern",
+                      "punkt_anlegen", "kontakt_suchen", "kontakt_anlegen",
+                      "gedaechtnis_durchsuchen"],
+    },
+    "kundenberater": {
+        "name": "der Kundenberater",
+        "fachliches": """Deine Aufgabe ist es, Kundengespräche zu bewerten.
+
+Du bewertest streng. Ein freundliches Gespräch ohne Ergebnis ist kein gutes
+Gespräch, und das sagst du auch. Schwächen benennst du konkret: nicht "hätte
+mehr fragen sollen", sondern "Bodenbelag und Quadratmeter nie erfasst - ohne
+die ist kein Preis kalkulierbar".
+
+Kommt derselbe Einwand dreimal, ist das kein Zufall, sondern eine Lücke im
+Angebot. Darauf weist du hin.""",
+        "werkzeuge": ["gespraech_festhalten", "offene_leads", "verkaufsmuster",
+                      "kontakt_suchen", "kontakt_anlegen", "notiz_speichern",
+                      "gedaechtnis_durchsuchen"],
+    },
+    "rechercheur": {
+        "name": "der Rechercheur",
+        "fachliches": """Deine Aufgabe ist es, Dinge herauszufinden.
+
+Du nennst, woher eine Angabe stammt. Findest du etwas nicht, sagst du das,
+statt eine plausible Zahl zu nennen. Bei Preisen und Wetter nennst du Datum
+und Quelle mit.""",
+        "werkzeuge": ["recherche", "wetter", "flug_suchen", "notiz_speichern",
+                      "gedaechtnis_durchsuchen"],
+    },
+    "controller": {
+        "name": "der Controller",
+        "fachliches": """Deine Aufgabe sind die Zahlen des Betriebs.
+
+Du siehst nach, ob der Laden trägt: Was kommt herein, was geht hinaus, was
+bleibt. Du rechnest die Vorschau ehrlich - ein Angebot ist kein Geld, deshalb
+wird die Pipeline gewichtet und nicht voll angesetzt.
+
+Wenn die Zahlen schlecht aussehen, sagst du das zuerst und nennst den größten
+Hebel.""",
+        "werkzeuge": ["auswertung", "cashflow_prognose", "pipeline",
+                      "fehlende_belege", "kennzahl_setzen", "dashboard_bauen",
+                      "verkaufsmuster", "gedaechtnis_durchsuchen"],
+    },
+    "programmierer": {
+        "name": "der Programmierer",
+        "fachliches": """Deine Aufgabe sind kleine Programme und Auswertungen.
+
+Du schreibst kurze, lesbare Python-Skripte, die genau eine Sache tun. Du
+kommentierst auf Deutsch. Vor dem Ausführen zeigst du, was das Skript tut -
+ausgeführt wird nur mit ausdrücklicher Freigabe.
+
+Du schreibst nichts, was Dateien außerhalb der Werkstatt verändert, etwas
+verschickt oder aus dem Netz nachlädt. Brauchst du so etwas, sagst du es,
+statt es zu umgehen.""",
+        "werkzeuge": ["skript_schreiben", "skript_ausfuehren", "skript_zeigen",
+                      "werkstatt_liste", "notiz_speichern"],
+    },
+}
+
+
+class Team:
+    """Verteilt Aufträge an Rollen und hält den Gesamtstand."""
+
+    def __init__(self, agent=None, memory: Memory = None):
+        self.agent = agent
+        self.memory = memory or (agent.memory if agent is not None else Memory())
+        db_schema_anlegen(SCHEMA_TEAM, self.memory.db_pfad)
+
+    # -- Rollen -------------------------------------------------------------
+
+    @staticmethod
+    def rollen_liste() -> list:
+        """Alle Rollen mit ihrem Anzeigenamen."""
+        return [{"rolle": schluessel, "name": angaben["name"],
+                 "werkzeuge": len(angaben["werkzeuge"])}
+                for schluessel, angaben in ROLLEN.items()]
+
+    @staticmethod
+    def rolle_finden(name: str) -> str:
+        """Findet eine Rolle - auch wenn der Nutzer sie umgangssprachlich nennt."""
+        gesucht = (name or "").strip().lower()
+        if not gesucht:
+            return ""
+        if gesucht in ROLLEN:
+            return gesucht
+        # Umgangssprache auf die Rolle abbilden.
+        abbildung = {
+            "buchhaltung": "buchhalter", "steuer": "buchhalter",
+            "belege": "buchhalter", "kasse": "buchhalter",
+            "verkauf": "akquisiteur", "vertrieb": "akquisiteur",
+            "akquise": "akquisiteur", "verkäufer": "akquisiteur",
+            "verkaeufer": "akquisiteur", "angebot": "akquisiteur",
+            "kunden": "kundenberater", "gespräch": "kundenberater",
+            "gespraech": "kundenberater", "beratung": "kundenberater",
+            "termine": "terminplaner", "kalender": "terminplaner",
+            "planer": "terminplaner",
+            "post": "postmeister", "mail": "postmeister",
+            "email": "postmeister", "e-mail": "postmeister",
+            "zahlen": "controller", "cashflow": "controller",
+            "finanzen": "controller", "auswertung": "controller",
+            "suche": "rechercheur", "recherche": "rechercheur",
+            "programm": "programmierer", "skript": "programmierer",
+            "code": "programmierer", "entwickler": "programmierer",
+        }
+        for stichwort, rolle in abbildung.items():
+            if stichwort in gesucht:
+                return rolle
+        for rolle in ROLLEN:
+            if rolle.startswith(gesucht[:5]):
+                return rolle
+        return ""
+
+    def systemprompt(self, rolle: str, mit_gedaechtnis: str = "") -> str:
+        """Baut den Systemprompt einer Rolle."""
+        angaben = ROLLEN[rolle]
+        jetzt = datetime.now()
+        text = GRUNDHALTUNG.format(
+            rolle=angaben["name"], name=NUTZER_NAME,
+            wochentag=WOCHENTAGE_TEAM[jetzt.weekday()],
+            datum=jetzt.strftime("%d.%m.%Y"),
+            fachliches=angaben["fachliches"])
+        if mit_gedaechtnis:
+            text += "\n\n" + mit_gedaechtnis
+        return text
+
+    # -- Beauftragen --------------------------------------------------------
+
+    def beauftragen(self, rolle: str, auftrag: str, max_runden: int = 6) -> dict:
+        """Gibt einen Auftrag an eine Rolle und holt ihren Bericht."""
+        schluessel = self.rolle_finden(rolle)
+        if not schluessel:
+            return {"ok": False,
+                    "fehler": "Die Rolle '%s' kenne ich nicht. Ich habe: %s."
+                              % (rolle, ", ".join(ROLLEN))}
+        auftrag = (auftrag or "").strip()
+        if not auftrag:
+            return {"ok": False,
+                    "fehler": "Sag mir, was %s tun soll."
+                              % ROLLEN[schluessel]["name"]}
+        if self.agent is None or not getattr(self.agent, "einsatzbereit",
+                                             lambda: False)():
+            return {"ok": False,
+                    "fehler": "Ohne Anthropic-Schlüssel kann %s nicht arbeiten."
+                              % ROLLEN[schluessel]["name"]}
+
+        gedaechtnis = ""
+        try:
+            gedaechtnis = self.agent.recall.gedaechtnis_block(auftrag)
+        except Exception:
+            gedaechtnis = ""
+
+        beginn = datetime.now()
+        bericht = self.agent.arbeiten(
+            self.systemprompt(schluessel, gedaechtnis), auftrag,
+            werkzeugnamen=ROLLEN[schluessel]["werkzeuge"], max_runden=max_runden)
+        dauer = (datetime.now() - beginn).total_seconds()
+
+        self.memory._schreiben(
+            "INSERT INTO auftraege (rolle, auftrag, bericht, status, "
+            "dauer_sekunden, angelegt) VALUES (?,?,?,?,?,?)",
+            (schluessel, auftrag[:2000], (bericht or "")[:4000], "fertig",
+             round(dauer, 1), zeitstempel()))
+
+        return {"ok": True, "rolle": schluessel,
+                "name": ROLLEN[schluessel]["name"],
+                "dauer": round(dauer, 1), "text": bericht}
+
+    def auftraege_letzte(self, limit: int = 12) -> list:
+        """Was das Team zuletzt gemacht hat."""
+        return self.memory._lesen(
+            "SELECT * FROM auftraege ORDER BY id DESC LIMIT ?", (limit,))
+
+    # -- Lagebericht --------------------------------------------------------
+
+    def lagebericht(self, werkzeuge=None) -> dict:
+        """Der permanente Stand: Kasse, Aufträge, Termine, Post, Offenes.
+
+        Das ist kein Bericht, den jemand schreibt, sondern der Stand, wie er
+        gerade wirklich ist. Jeder Bereich, der nicht abrufbar ist, sagt das -
+        statt eine Null zu zeigen, die nach Ordnung aussieht.
+        """
+        werkzeuge = werkzeuge or (self.agent.tools if self.agent is not None else None)
+        stand = {"zeitpunkt": zeitstempel(), "datum": heute_datum(), "bereiche": {}}
+        if werkzeuge is None:
+            return {"ok": False, "fehler": "Ohne Werkzeuge kein Lagebericht."}
+
+        def bereich(name, funktion):
+            try:
+                stand["bereiche"][name] = funktion()
+            except Exception as fehler:
+                stand["bereiche"][name] = {"ok": False, "fehler": str(fehler)}
+
+        bereich("kasse", lambda: werkzeuge.bookkeeping.auswertung())
+        bereich("belege", lambda: werkzeuge.bookkeeping.fehlende_belege())
+        bereich("pipeline", lambda: werkzeuge.akquise.pipeline())
+        bereich("nachfassen", lambda: werkzeuge.akquise.nachfassliste())
+        bereich("cashflow", lambda: werkzeuge.akquise.cashflow_prognose(
+            3, werkzeuge.bookkeeping))
+        bereich("gespraeche", lambda: werkzeuge.call_analysis.verkaufsmuster(30))
+        bereich("offene_punkte", lambda: {
+            "ok": True,
+            "punkte": [p["text"] for p in werkzeuge.memory.punkte_offen()]})
+
+        if werkzeuge.kalender.verfuegbar():
+            bereich("termine", lambda: werkzeuge.kalender.termine(2))
+        if werkzeuge.mail.lesen_moeglich():
+            bereich("post", lambda: werkzeuge.mail.ungelesene(10))
+
+        # Gesprochene Kurzfassung - das, was er hören will.
+        teile = []
+        kasse = stand["bereiche"].get("kasse") or {}
+        if kasse.get("ok"):
+            teile.append("Diesen Monat %s Einnahmen, %s Ausgaben, Ergebnis %s."
+                         % (_euro(kasse["einnahmen"]), _euro(kasse["ausgaben"]),
+                            _euro(kasse["ergebnis"])))
+        pipeline = stand["bereiche"].get("pipeline") or {}
+        if pipeline.get("ok"):
+            teile.append("Laufend gesichert %s im Monat, %d Interessenten offen."
+                         % (_euro(pipeline["laufender_umsatz_monat"]),
+                            pipeline["offen"]))
+        nachfassen = stand["bereiche"].get("nachfassen") or {}
+        if nachfassen.get("anzahl"):
+            teile.append("Heute sind %d Interessenten zum Nachfassen fällig."
+                         % nachfassen["anzahl"])
+        belege = stand["bereiche"].get("belege") or {}
+        if belege.get("anzahl"):
+            teile.append("%d Ausgaben ohne Beleg." % belege["anzahl"])
+        punkte = (stand["bereiche"].get("offene_punkte") or {}).get("punkte") or []
+        if punkte:
+            teile.append("%d Punkte offen, zuerst: %s" % (len(punkte), punkte[0]))
+        termine = stand["bereiche"].get("termine") or {}
+        if termine.get("ok") and termine.get("anzahl"):
+            teile.append("%d Termine in den nächsten zwei Tagen."
+                         % termine["anzahl"])
+            for konflikt in termine.get("konflikte", [])[:1]:
+                teile.append("Achtung: %s" % konflikt["text"])
+        post = stand["bereiche"].get("post") or {}
+        if post.get("ok") and post.get("anzahl"):
+            teile.append("%d ungelesene Mails, davon %d wichtig."
+                         % (post["anzahl"], len(post.get("wichtig", []))))
+
+        stand["ok"] = True
+        stand["text"] = (" ".join(teile) if teile
+                         else "Es ist noch nichts erfasst, worüber ich berichten könnte.")
+        return stand
+
+
+def _euro(betrag) -> str:
+    """Deutscher Betrag."""
+    try:
+        betrag = float(betrag)
+    except (TypeError, ValueError):
+        betrag = 0.0
+    return ("{:,.2f}".format(betrag).replace(",", "#").replace(".", ",")
+            .replace("#", ".")) + " €"
+
+
+# =========================================================================
 # dashboard_teile  -  Bausteine für die Oberflächen - Farben, Zahlenformate und SVG-Grafiken.
 # 
 # Hier liegt alles, was Command Center und Sales-Ansicht gemeinsam benutzen.
@@ -4771,7 +5966,7 @@ class Dashboard:
 
     def __init__(self, memory=None, bookkeeping=None, call_analysis=None,
                  recall=None, kalender=None, mail=None, routines=None,
-                 scheduler=None, mcp=None):
+                 scheduler=None, mcp=None, akquise=None, team=None):
         self.memory = memory
         self.bookkeeping = bookkeeping
         self.call_analysis = call_analysis
@@ -4781,6 +5976,8 @@ class Dashboard:
         self.routines = routines
         self.scheduler = scheduler
         self.mcp = mcp
+        self.akquise = akquise
+        self.team = team
         # Die Sales-Analyse ist eine eigene Seite, wird aber immer mitgebaut -
         # sonst zeigt der Verweis im Kopf auf eine Datei, die es nicht gibt.
         self.verkaufsansicht = Verkaufsansicht(call_analysis, memory)
@@ -4819,6 +6016,21 @@ class Dashboard:
                 daten["dimensionen"] = self.call_analysis.dimensionen_schnitt()
             except Exception as fehler:
                 daten["leads_fehler"] = str(fehler)
+
+        if self.akquise is not None:
+            try:
+                daten["pipeline"] = self.akquise.pipeline()
+                daten["nachfassen"] = self.akquise.nachfassliste()
+                daten["cashflow"] = self.akquise.cashflow_prognose(
+                    6, self.bookkeeping)
+            except Exception as fehler:
+                daten["pipeline_fehler"] = str(fehler)
+
+        if self.team is not None:
+            try:
+                daten["auftraege"] = [dict(z) for z in self.team.auftraege_letzte(8)]
+            except Exception:
+                daten["auftraege"] = []
 
         if self.memory is not None:
             try:
@@ -5011,6 +6223,80 @@ class Dashboard:
             for name, betrag in list(nach_kategorie.items())[:8])
         return self._panel("Ausgaben je Kategorie", inhalt)
 
+    def _panel_pipeline(self, daten: dict) -> str:
+        """Die Auftragspipeline nach Stufen - wo Geld auf der Straße liegt."""
+        pipeline = daten.get("pipeline")
+        if not pipeline or not pipeline.get("ok"):
+            return self._panel("Auftragspipeline",
+                               '<p class="leer">Noch kein Interessent erfasst.</p>')
+        stufen = pipeline.get("stufen") or {}
+        offene = [(name, angaben) for name, angaben in stufen.items()
+                  if name not in ("gewonnen", "verloren") and angaben["anzahl"]]
+        if not offene and not stufen.get("gewonnen", {}).get("anzahl"):
+            return self._panel("Auftragspipeline",
+                               '<p class="leer">Noch kein Interessent erfasst.</p>')
+
+        groesster = max([a["wert_monat"] for _, a in offene] or [1])
+        inhalt = self._kacheln([
+            ("Gesichert je Monat", euro(pipeline["laufender_umsatz_monat"]), "gut"),
+            ("Offen je Monat", euro(pipeline["offener_wert_monat"]), ""),
+            ("Realistisch", euro(pipeline["gewichteter_wert_monat"]), "akzent"),
+            ("Interessenten", str(pipeline["offen"]), ""),
+        ])
+        if offene:
+            inhalt += '<div style="margin-top:13px">'
+            for name, angaben in offene:
+                inhalt += balken("%s (%d)" % (name.capitalize(), angaben["anzahl"]),
+                                 angaben["wert_monat"], groesster,
+                                 euro(angaben["wert_monat"]))
+            inhalt += '</div>'
+        return self._panel("Auftragspipeline", inhalt, "breit")
+
+    def _panel_nachfassen(self, daten: dict) -> str:
+        """Wer heute drankommt. Die wichtigste Liste des Tages."""
+        nachfassen = daten.get("nachfassen")
+        if not nachfassen or not nachfassen.get("anzahl"):
+            return self._panel("Heute nachfassen",
+                               '<p class="leer">Heute ist niemand fällig.</p>')
+        zeilen = []
+        for eintrag in nachfassen["eintraege"][:8]:
+            spaet = ('<span class="warnung">%d Tage überfällig</span>'
+                     % eintrag["seit_tagen"]) if eintrag["seit_tagen"] > 0 else ""
+            zeilen.append('%s <span class="grau">%s · %s</span><br>'
+                          '<span class="grau">%s</span> %s'
+                          % (sicher(eintrag["firma"]), sicher(eintrag["stufe"]),
+                             euro(eintrag["wert_monat"]),
+                             sicher(eintrag["schritt"]), spaet))
+        return self._panel("Heute nachfassen", self._liste(zeilen, ""), "",
+                           "%d fällig" % nachfassen["anzahl"])
+
+    def _panel_cashflow(self, daten: dict) -> str:
+        """Was in den nächsten Monaten hereinkommt."""
+        cashflow = daten.get("cashflow")
+        if not cashflow or not cashflow.get("monate"):
+            return ""
+        reihe = cashflow["monate"]
+        inhalt = ('<div class="verlaufkopf"><span>Erwartete Einnahmen</span>'
+                  '<b>%s je Monat gesichert</b></div>%s'
+                  % (euro(cashflow["gesichert_monat"]),
+                     saeulen([m["einnahmen"] for m in reihe],
+                             [m["monat"][5:] for m in reihe], 62, FARBE_GUT)))
+        inhalt += ('<p class="grau" style="margin-top:10px">Aus der Pipeline kommen '
+                   'gewichtet %s dazu. Kosten %s je Monat (%s).</p>'
+                   % (euro(cashflow["pipeline_gewichtet"]),
+                      euro(cashflow["kosten_monat"]), sicher(cashflow["kostenquelle"])))
+        return self._panel("Cashflow-Vorschau", inhalt, "breit", "6 Monate")
+
+    def _panel_team(self, daten: dict) -> str:
+        """Was die Fachkräfte zuletzt gemacht haben."""
+        auftraege = daten.get("auftraege") or []
+        zeilen = ['<span class="zeit">%s</span>%s <span class="grau">%s</span>'
+                  % (sicher(a["angelegt"][11:16]), sicher(a["rolle"]),
+                     sicher((a["auftrag"] or "")[:70]))
+                  for a in auftraege]
+        return self._panel("Was das Team gemacht hat",
+                           self._liste(zeilen, "Noch kein Auftrag ans Team."))
+
     def _panel_termine(self, daten: dict) -> str:
         kalender = daten.get("kalender")
         if not kalender:
@@ -5145,6 +6431,15 @@ class Dashboard:
         if quote is not None:
             marke = "b" if quote >= 90 else "b class=\"rot\""
             teile.append("Belegquote <%s>%d%%</b>" % (marke, round(quote)))
+        pipeline = daten.get("pipeline")
+        if pipeline and pipeline.get("ok") and pipeline.get("offen"):
+            teile.append("Gesichert <b>%s</b> je Monat"
+                         % euro(pipeline["laufender_umsatz_monat"]))
+            teile.append("Pipeline <b>%s</b> realistisch"
+                         % euro(pipeline["gewichteter_wert_monat"]))
+        nachfassen = daten.get("nachfassen")
+        if nachfassen and nachfassen.get("anzahl"):
+            teile.append('Nachfassen <b class="rot">%d</b>' % nachfassen["anzahl"])
         leads = daten.get("leads")
         if leads and leads.get("anzahl"):
             teile.append("Offene Leads <b>%d</b> über <b>%s</b>"
@@ -5180,6 +6475,9 @@ class Dashboard:
             self._panel_zahlen(daten),
             self._panel_verlauf(daten),
             self._panel_vertrieb(daten),
+            self._panel_pipeline(daten),
+            self._panel_nachfassen(daten),
+            self._panel_cashflow(daten),
             self._panel_leads(daten),
             self._panel_termine(daten),
             self._panel_offen(daten),
@@ -5188,6 +6486,7 @@ class Dashboard:
             self._panel_mail(daten),
             self._panel_notizen(daten),
             self._panel_protokoll(daten),
+            self._panel_team(daten),
             self._panel_zeitplan(daten),
             self._panel_dienste(daten),
         ] if teil)
@@ -6382,7 +7681,7 @@ PARAMETER_AKTIONEN = {
 
 # Alles hier drin fragt vor der Ausführung nach einer Freigabe.
 FREIGABE_PFLICHTIG = {"mail_senden", "termin_anlegen", "bildschirm_bedienen",
-                      "nachricht_senden"}
+                      "nachricht_senden", "skript_ausfuehren"}
 
 
 def parameter_pruefen(wert: str):
@@ -6409,6 +7708,8 @@ class Werkzeuge:
         self.recall = Recall(self.memory)
         self.bookkeeping = Bookkeeping(self.memory)
         self.call_analysis = CallAnalysis(self.memory)
+        self.akquise = Akquise(self.memory, STANDARD_MWST)
+        self.werkstatt = Werkstatt(self.memory)
         self.routines = Routines(self.memory)
         self.mail = Mail()
         self.kalender = Kalender()
@@ -6418,10 +7719,12 @@ class Werkzeuge:
         self.welt = Welt(self.mcp)
         self.bildschirm = Bildschirm(agent)
         self.messenger = Messenger(self.telegram, self.mail, self.mcp, None)
+        self.team = Team(agent, self.memory)
         self.dashboard = Dashboard(memory=self.memory, bookkeeping=self.bookkeeping,
                                    call_analysis=self.call_analysis, recall=self.recall,
                                    kalender=self.kalender, mail=self.mail,
-                                   routines=self.routines, mcp=self.mcp)
+                                   routines=self.routines, mcp=self.mcp,
+                                   akquise=self.akquise, team=self.team)
         self.stimme = None
 
     def stimme_setzen(self, stimme):
@@ -6433,6 +7736,7 @@ class Werkzeuge:
         """Verknüpft den Katalog mit dem Agenten, damit Werkzeuge Claude nutzen können."""
         self.agent = agent
         self.bildschirm.agent = agent
+        self.team.agent = agent
 
     # -- Katalog für Claude -------------------------------------------------
 
@@ -6525,6 +7829,74 @@ class Werkzeuge:
                      {"name": text}, ["name"]),
             werkzeug("routinen_liste", "Zeigt alle gespeicherten Routinen.", {}),
 
+            # -- Akquise --
+            werkzeug("lead_anlegen",
+                     "Nimmt einen Interessenten in die Pipeline auf.",
+                     {"firma": text, "ansprechpartner": text, "telefon": text,
+                      "email": text, "adresse": text, "quelle": text,
+                      "objekt_qm": zahl, "bodenbelag": text,
+                      "intervall_pro_woche": zahl, "notiz": text,
+                      "naechster_schritt": text}, ["firma"]),
+            werkzeug("lead_weiterstufen",
+                     "Setzt einen Interessenten auf eine neue Stufe.",
+                     {"name": text,
+                      "stufe": {"type": "string", "enum": STUFEN},
+                      "notiz": text, "naechster_schritt": text,
+                      "wert_monat": zahl}, ["name", "stufe"]),
+            werkzeug("angebot_kalkulieren",
+                     "Rechnet aus Fläche, Bodenbelag und Reinigungsintervall einen "
+                     "Monatspreis über Leistungswerte. Ohne Quadratmeter und "
+                     "Intervall wird nichts gerechnet - dann nachfragen.",
+                     {"qm": zahl, "bodenbelag": text, "intervall_pro_woche": zahl,
+                      "stundensatz": zahl,
+                      "sonderleistungen": {
+                          "type": "object",
+                          "description": "Mengen je Leistung: %s"
+                                         % ", ".join(SONDERLEISTUNGEN)}},
+                     ["qm", "intervall_pro_woche"]),
+            werkzeug("angebot_ablegen",
+                     "Legt ein kalkuliertes Angebot beim Interessenten ab und "
+                     "setzt ihn auf die Stufe Angebot.",
+                     {"name": text, "qm": zahl, "bodenbelag": text,
+                      "intervall_pro_woche": zahl, "stundensatz": zahl,
+                      "notiz": text}, ["name", "qm", "intervall_pro_woche"]),
+            werkzeug("nachfassliste",
+                     "Wer heute zum Nachfassen fällig ist und warum.", {}),
+            werkzeug("pipeline",
+                     "Alle Interessenten nach Stufen, mit Werten.", {}),
+            werkzeug("cashflow_prognose",
+                     "Was in den nächsten Monaten hereinkommt: gesichert aus "
+                     "Aufträgen, gewichtet aus der Pipeline, abzüglich Kosten.",
+                     {"monate": ganz}),
+
+            # -- Team --
+            werkzeug("mitarbeiter_beauftragen",
+                     "Gibt einen mehrschrittigen Auftrag an eine Fachkraft: %s. "
+                     "Sie arbeitet ihn mit ihren eigenen Werkzeugen ab und "
+                     "berichtet zurück." % ", ".join(ROLLEN),
+                     {"rolle": {"type": "string", "enum": sorted(ROLLEN)},
+                      "auftrag": text}, ["rolle", "auftrag"]),
+            werkzeug("team_liste", "Zeigt, welche Fachkräfte es gibt.", {}),
+            werkzeug("lagebericht",
+                     "Der vollständige aktuelle Stand des Betriebs: Kasse, "
+                     "Aufträge, Cashflow, Termine, Post, Offenes.", {}),
+
+            # -- Werkstatt --
+            werkzeug("skript_schreiben",
+                     "Schreibt ein Python-Skript in die Werkstatt. Ausgeführt "
+                     "wird dabei nichts.",
+                     {"name": text, "code": text, "zweck": text},
+                     ["name", "code"]),
+            werkzeug("skript_zeigen", "Zeigt den Code eines abgelegten Skripts.",
+                     {"name": text}, ["name"]),
+            werkzeug("skript_ausfuehren",
+                     "Führt ein Skript aus der Werkstatt aus. Braucht eine "
+                     "Freigabe, und der Code wird dabei vollständig angezeigt.",
+                     {"name": text, "argumente": {"type": "array",
+                                                  "items": {"type": "string"}}},
+                     ["name"]),
+            werkzeug("werkstatt_liste", "Zeigt alle abgelegten Skripte.", {}),
+
             # -- Kommunikation --
             werkzeug("mails_lesen",
                      "Holt ungelesene Mails und sortiert sie vor.", {"limit": ganz}),
@@ -6594,10 +7966,15 @@ class Werkzeuge:
 
     def _freigabe(self, name: str, argumente: dict) -> dict:
         """Holt die Freigabe ein. Ohne klares Ja wird nichts ausgeführt."""
-        try:
-            details = json.dumps(argumente or {}, ensure_ascii=False)[:600]
-        except (TypeError, ValueError):
-            details = str(argumente)[:600]
+        if name == "skript_ausfuehren":
+            # Beim Ausführen von Code muss der Code selbst in der Frage stehen.
+            # Über einen blossen Dateinamen kann niemand entscheiden.
+            details = self.werkstatt.freigabetext(argumente.get("name", ""))
+        else:
+            try:
+                details = json.dumps(argumente or {}, ensure_ascii=False)[:600]
+            except (TypeError, ValueError):
+                details = str(argumente)[:600]
         return self.telegram.freigabe_einholen(name, details)
 
     # -- Ausführung ---------------------------------------------------------
@@ -6736,6 +8113,65 @@ class Werkzeuge:
                     "text": ("Gespeicherte Routinen: %s."
                              % ", ".join(z["name"] for z in liste)) if liste
                             else "Es ist noch keine Routine angelegt."}
+
+        # -- Akquise --
+        if name == "lead_anlegen":
+            return self.akquise.lead_anlegen(
+                a.get("firma"), a.get("ansprechpartner", ""), a.get("telefon", ""),
+                a.get("email", ""), a.get("adresse", ""), a.get("quelle", ""),
+                a.get("objekt_qm", 0), a.get("bodenbelag", ""),
+                a.get("intervall_pro_woche", 0), a.get("notiz", ""),
+                a.get("naechster_schritt", ""))
+        if name == "lead_weiterstufen":
+            return self.akquise.lead_weiterstufen(
+                a.get("name"), a.get("stufe"), a.get("notiz", ""),
+                a.get("naechster_schritt", ""), a.get("wert_monat"))
+        if name == "angebot_kalkulieren":
+            return self.akquise.angebot_kalkulieren(
+                a.get("qm"), a.get("bodenbelag", ""), a.get("intervall_pro_woche"),
+                a.get("stundensatz"), a.get("sonderleistungen"))
+        if name == "angebot_ablegen":
+            kalkulation = self.akquise.angebot_kalkulieren(
+                a.get("qm"), a.get("bodenbelag", ""), a.get("intervall_pro_woche"),
+                a.get("stundensatz"))
+            if not kalkulation.get("ok"):
+                return kalkulation
+            ergebnis = self.akquise.angebot_ablegen(a.get("name"), kalkulation,
+                                                    a.get("notiz", ""))
+            ergebnis["angebotstext"] = self.akquise.angebotstext(
+                kalkulation, a.get("name", ""))
+            return ergebnis
+        if name == "nachfassliste":
+            return self.akquise.nachfassliste()
+        if name == "pipeline":
+            return self.akquise.pipeline()
+        if name == "cashflow_prognose":
+            return self.akquise.cashflow_prognose(int(a.get("monate") or 6),
+                                                  self.bookkeeping)
+
+        # -- Team --
+        if name == "mitarbeiter_beauftragen":
+            return self.team.beauftragen(a.get("rolle"), a.get("auftrag"))
+        if name == "team_liste":
+            liste = self.team.rollen_liste()
+            return {"ok": True, "team": liste,
+                    "text": "Im Team sind: %s."
+                            % ", ".join("%s (%s)" % (e["name"], e["rolle"])
+                                        for e in liste)}
+        if name == "lagebericht":
+            return self.team.lagebericht(self)
+
+        # -- Werkstatt --
+        if name == "skript_schreiben":
+            return self.werkstatt.skript_schreiben(a.get("name"), a.get("code"),
+                                                   a.get("zweck", ""))
+        if name == "skript_zeigen":
+            return self.werkstatt.skript_zeigen(a.get("name"))
+        if name == "skript_ausfuehren":
+            return self.werkstatt.skript_ausfuehren(a.get("name"),
+                                                    a.get("argumente"))
+        if name == "werkstatt_liste":
+            return self.werkstatt.werkstatt_liste()
 
         # -- Kommunikation --
         if name == "mails_lesen":
@@ -6885,6 +8321,11 @@ So sprichst du:
 
 So arbeitest du:
 - Du nutzt deine Werkzeuge selbstständig, ohne zu fragen, wenn die Absicht klar ist.
+- Du hast ein Team: Buchhalter, Verkäufer, Terminplaner, Postbearbeiter,
+  Kundenberater, Rechercheur, Controller und Programmierer. Für eine Aufgabe,
+  die klar zu einem von ihnen gehört und mehrere Schritte braucht, beauftragst
+  du ihn mit mitarbeiter_beauftragen und gibst danach seinen Bericht weiter.
+  Kleine Handgriffe machst du selbst - dafür brauchst du niemanden.
 - Erzählt er von einem Kundentermin, bewertest du ihn und hältst ihn fest —
   ungefragt. Ehrlich, nicht schmeichelnd: ein nettes Gespräch ohne Abschluss
   war kein gutes Gespräch, und das sagst du auch.
@@ -7165,6 +8606,63 @@ class JarvisAgent:
         return ("Ich habe es %d Mal versucht und komme nicht weiter. Sag mir bitte "
                 "genauer, was du brauchst." % MAX_RUNDEN)
 
+    def arbeiten(self, systemtext: str, auftrag: str, werkzeugnamen: list = None,
+                 max_runden: int = 6) -> str:
+        """Eine abgeschlossene Arbeitsschleife ohne eigenen Gesprächsverlauf.
+
+        Damit arbeitet eine Fachkraft ihren Auftrag ab: eigener Systemprompt,
+        eigener Werkzeugsatz, eigenes Ende. Der Verlauf des Hauptgesprächs
+        bleibt davon unberührt - sonst würde jeder Zwischenschritt einer
+        Fachkraft den Kontext des Chefs zumüllen.
+        """
+        if not self.einsatzbereit():
+            return ("Es ist kein Anthropic-Schlüssel hinterlegt.")
+
+        katalog = self.tools.katalog()
+        if werkzeugnamen:
+            erlaubt = set(werkzeugnamen)
+            katalog = [w for w in katalog if w["name"] in erlaubt]
+            if not katalog:
+                return "Für diesen Auftrag stehen keine Werkzeuge bereit."
+
+        nachrichten = [{"role": "user", "content": auftrag}]
+        for _ in range(max(1, int(max_runden))):
+            antwort = self._anfrage({
+                "model": CLAUDE_MODEL,
+                "max_tokens": CLAUDE_MAX_TOKENS,
+                "system": systemtext,
+                "tools": katalog,
+                "messages": nachrichten,
+            })
+            if not antwort.get("ok"):
+                return antwort.get("fehler", "Der Auftrag ist fehlgeschlagen.")
+
+            inhalt = antwort["daten"].get("content", [])
+            nachrichten.append({"role": "assistant", "content": inhalt})
+            aufrufe = [b for b in inhalt if b.get("type") == "tool_use"]
+            if not aufrufe:
+                return "\n".join(b.get("text", "") for b in inhalt
+                                  if b.get("type") == "text").strip()
+
+            ergebnisse = []
+            for aufruf in aufrufe:
+                name = aufruf.get("name", "")
+                print("[fachkraft] %s" % name)
+                ergebnis = self.tools.run(name, aufruf.get("input") or {})
+                try:
+                    text = json.dumps(ergebnis, ensure_ascii=False,
+                                      default=str)[:6000]
+                except (TypeError, ValueError):
+                    text = str(ergebnis)[:6000]
+                ergebnisse.append({"type": "tool_result",
+                                   "tool_use_id": aufruf.get("id"),
+                                   "content": text,
+                                   "is_error": not bool(ergebnis.get("ok"))})
+            nachrichten.append({"role": "user", "content": ergebnisse})
+
+        return ("Ich bin nach %d Schritten nicht fertig geworden und höre auf."
+                % max_runden)
+
     def antworten(self, eingabe: str) -> str:
         """Denken und die Antwort aussprechen."""
         antwort = self.denken(eingabe)
@@ -7260,6 +8758,7 @@ class JarvisAgent:
 #     python3 jarvis.py briefing    Briefing sofort
 #     python3 jarvis.py abend       Abendrückblick sofort
 #     python3 jarvis.py dashboard   Dashboard bauen
+#     python3 jarvis.py status      voller Stand des Betriebs
 #     python3 jarvis.py export      Buchhaltung als CSV
 #     python3 jarvis.py stimme      Stimmprofil einlernen
 #     python3 jarvis.py stimmen     ElevenLabs-Stimme aussuchen
@@ -7475,6 +8974,25 @@ def dashboard_bauen():
             if _shutil.which("open"):
                 subprocess.run(["open", ergebnis["datei"]], shell=False,
                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    finally:
+        agent.tools.mcp.stoppen()
+
+
+def lage_sagen():
+    """Sagt den vollständigen aktuellen Stand des Betriebs."""
+    agent, stimme = agent_aufbauen()
+    try:
+        lage = agent.tools.team.lagebericht(agent.tools)
+        text = lage.get("text") or lage.get("fehler", "Kein Stand abrufbar.")
+        print("\n%s\n" % text)
+        for name, bereich in (lage.get("bereiche") or {}).items():
+            if isinstance(bereich, dict) and bereich.get("text"):
+                print("  %-14s %s" % (name + ":", bereich["text"][:100]))
+            elif isinstance(bereich, dict) and not bereich.get("ok", True):
+                print("  %-14s nicht abrufbar: %s"
+                      % (name + ":", bereich.get("fehler", "")[:70]))
+        stimme.sprich(text)
+        return 0
     finally:
         agent.tools.mcp.stoppen()
 
@@ -7829,6 +9347,8 @@ def hauptprogramm(argumente=None) -> int:
         dashboard_bauen()
     elif modus == "export":
         return buchhaltung_exportieren(argumente[1:])
+    elif modus in ("status", "lage"):
+        return lage_sagen()
     elif modus == "stimme":
         stimmprofil_einlernen()
     elif modus == "stimmen":

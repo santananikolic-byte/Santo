@@ -8,6 +8,7 @@
     python3 jarvis.py briefing    Briefing sofort
     python3 jarvis.py abend       Abendrückblick sofort
     python3 jarvis.py dashboard   Dashboard bauen
+    python3 jarvis.py status      voller Stand des Betriebs
     python3 jarvis.py export      Buchhaltung als CSV
     python3 jarvis.py stimme      Stimmprofil einlernen
     python3 jarvis.py stimmen     ElevenLabs-Stimme aussuchen
@@ -235,6 +236,25 @@ def dashboard_bauen():
             if _shutil.which("open"):
                 subprocess.run(["open", ergebnis["datei"]], shell=False,
                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    finally:
+        agent.tools.mcp.stoppen()
+
+
+def lage_sagen():
+    """Sagt den vollständigen aktuellen Stand des Betriebs."""
+    agent, stimme = agent_aufbauen()
+    try:
+        lage = agent.tools.team.lagebericht(agent.tools)
+        text = lage.get("text") or lage.get("fehler", "Kein Stand abrufbar.")
+        print("\n%s\n" % text)
+        for name, bereich in (lage.get("bereiche") or {}).items():
+            if isinstance(bereich, dict) and bereich.get("text"):
+                print("  %-14s %s" % (name + ":", bereich["text"][:100]))
+            elif isinstance(bereich, dict) and not bereich.get("ok", True):
+                print("  %-14s nicht abrufbar: %s"
+                      % (name + ":", bereich.get("fehler", "")[:70]))
+        stimme.sprich(text)
+        return 0
     finally:
         agent.tools.mcp.stoppen()
 
@@ -589,6 +609,8 @@ def hauptprogramm(argumente=None) -> int:
         dashboard_bauen()
     elif modus == "export":
         return buchhaltung_exportieren(argumente[1:])
+    elif modus in ("status", "lage"):
+        return lage_sagen()
     elif modus == "stimme":
         stimmprofil_einlernen()
     elif modus == "stimmen":
