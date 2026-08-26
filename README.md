@@ -180,6 +180,7 @@ src/run.py                 Betriebsarten
 src/modules/               ein Modul je Aufgabe
 src/modules/dashboard_teile.py  Farben, Zahlenformate, SVG-Grafiken
 landing/index.html         Verkaufsseite, eigenständig, ohne externe Anfragen
+landing/anleitung.html     Bauanleitung als Unterseite, beide gegenseitig verlinkt
 tests/abnahme.py           führt die Abnahmeliste wirklich aus
 tests/mcp_testserver.py    MCP-Server zum Prüfen der Freigabelogik
 config/mcp_servers.json    externe Dienste (wird beim ersten Start angelegt)

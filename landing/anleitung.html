@@ -1,0 +1,573 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Jarvis in drei Schritten</title>
+<meta name="description" content="Mit Claude Code in drei Schritten vom leeren Ordner zum laufenden Sprachassistenten auf dem Mac.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Sora:wght@600;700;800&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+
+<style>
+/* Jarvis ist durchgehend dunkel - Landingpage und beide Dashboards ebenso.
+   Deshalb bewusst ein einziges Farbklima, aber jede Farbe explizit gesetzt,
+   damit die Seite auf jedem Untergrund haelt. */
+:root {
+  --grund:      #08090B;
+  --panel:      #0F1113;
+  --erhoben:    #14171A;
+  --rand:       #1C1F23;
+  --rand-hell:  #262B31;
+  --akzent:     #E8622C;
+  --kupfer:     #F0A882;
+  --text:       #F2EFEA;
+  --gedaempft:  #A0A6AC;
+  --grau:       #7E858C;
+  --gruen:      #4CC38A;
+
+  --display: "Sora", "Helvetica Neue", Arial, sans-serif;
+  --body: "IBM Plex Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+
+  --spalte: 41rem;
+}
+
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0;
+  background: var(--grund);
+  color: var(--text);
+  font-family: var(--body);
+  font-size: 17px;
+  line-height: 1.68;
+  -webkit-font-smoothing: antialiased;
+}
+
+.bahn { width: min(100% - 2.5rem, var(--spalte)); margin-inline: auto; }
+.bahn-weit { width: min(100% - 2.5rem, 54rem); margin-inline: auto; }
+
+/* ---------- Kopf ---------- */
+.kopf {
+  padding: clamp(3.5rem, 9vw, 6.5rem) 0 clamp(2.5rem, 5vw, 3.5rem);
+  border-bottom: 1px solid var(--rand);
+  background:
+    radial-gradient(ellipse 70% 120% at 12% -10%, rgba(232,98,44,.13), transparent 62%),
+    var(--grund);
+}
+.augenbraue a { color: var(--akzent); text-decoration: none; }
+.augenbraue a:hover { text-decoration: underline; }
+.augenbraue {
+  font-family: var(--mono);
+  font-size: .72rem;
+  letter-spacing: .24em;
+  text-transform: uppercase;
+  color: var(--akzent);
+  margin: 0 0 1.4rem;
+}
+h1 {
+  font-family: var(--display);
+  font-weight: 800;
+  font-size: clamp(2.6rem, 8vw, 4.4rem);
+  line-height: 1.02;
+  letter-spacing: -.03em;
+  margin: 0;
+  text-wrap: balance;
+}
+h1 .zahl { color: var(--akzent); }
+.vorspann {
+  margin: 1.5rem 0 0;
+  font-size: 1.16rem;
+  line-height: 1.62;
+  color: var(--gedaempft);
+  max-width: 34rem;
+}
+.vorspann strong { color: var(--text); font-weight: 500; }
+
+.zutaten {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .5rem;
+  margin-top: 2.2rem;
+  padding: 0;
+  list-style: none;
+}
+.zutaten li {
+  font-family: var(--mono);
+  font-size: .78rem;
+  letter-spacing: .02em;
+  color: var(--gedaempft);
+  border: 1px solid var(--rand-hell);
+  border-radius: 999px;
+  padding: .38rem .9rem;
+  background: var(--panel);
+}
+.zutaten li b { color: var(--kupfer); font-weight: 500; }
+
+/* ---------- Abschnitte ---------- */
+section { padding: clamp(3rem, 7vw, 5rem) 0; }
+section + section { border-top: 1px solid var(--rand); }
+
+h2 {
+  font-family: var(--display);
+  font-weight: 700;
+  font-size: clamp(1.55rem, 3.6vw, 2.05rem);
+  letter-spacing: -.02em;
+  line-height: 1.16;
+  margin: 0 0 1.6rem;
+  text-wrap: balance;
+}
+h3 {
+  font-family: var(--display);
+  font-weight: 600;
+  font-size: 1.14rem;
+  letter-spacing: -.01em;
+  margin: 0 0 .5rem;
+}
+p { margin: 0 0 1.05rem; }
+p:last-child { margin-bottom: 0; }
+
+/* Dateinamen und Tasten sind in dieser Anleitung tragend - sie muessen sich
+   vom Fliesstext absetzen, sonst ueberliest man sie. */
+:not(pre) > code {
+  font-family: var(--mono);
+  font-size: .86em;
+  color: var(--kupfer);
+  background: var(--erhoben);
+  border: 1px solid var(--rand);
+  border-radius: 4px;
+  padding: .08em .36em;
+  white-space: nowrap;
+}
+.merk :not(pre) > code { background: var(--grund); }
+a { color: var(--kupfer); text-decoration-thickness: 1px; text-underline-offset: .18em; }
+a:hover { color: var(--akzent); }
+:focus-visible { outline: 2px solid var(--akzent); outline-offset: 3px; border-radius: 3px; }
+
+/* ---------- Die drei Schritte ---------- */
+/* Nummeriert, weil die Reihenfolge hier wirklich zaehlt: ohne Ordner kein
+   Auftrag, ohne Auftrag kein Programm. */
+.schritte { list-style: none; margin: 0; padding: 0; }
+.schritt {
+  position: relative;
+  padding: 0 0 3.2rem 4.2rem;
+}
+.schritt::before {
+  content: "";
+  position: absolute;
+  left: 1.32rem;
+  top: 2.6rem;
+  bottom: -.4rem;
+  width: 1px;
+  background: linear-gradient(180deg, var(--akzent), rgba(232,98,44,.12));
+}
+.schritt:last-child { padding-bottom: 0; }
+.schritt:last-child::before { display: none; }
+.schritt .nr {
+  position: absolute;
+  left: 0;
+  top: .1rem;
+  width: 2.7rem;
+  height: 2.7rem;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-family: var(--display);
+  font-weight: 700;
+  font-size: 1.02rem;
+  color: var(--akzent);
+  background: var(--panel);
+  border: 1px solid var(--rand-hell);
+  box-shadow: 0 0 0 5px rgba(232,98,44,.06);
+}
+.schritt h3 { margin-top: .35rem; font-size: 1.32rem; }
+.schritt > p { color: var(--gedaempft); }
+
+/* ---------- Terminal ---------- */
+.konsole {
+  margin: 1.35rem 0;
+  border: 1px solid var(--rand-hell);
+  border-radius: 9px;
+  background: var(--panel);
+  overflow: hidden;
+}
+.konsole-kopf {
+  display: flex;
+  align-items: center;
+  gap: .6rem;
+  padding: .5rem .85rem;
+  border-bottom: 1px solid var(--rand);
+  background: var(--erhoben);
+}
+.ampeln { display: flex; gap: .3rem; }
+.ampeln i { width: 8px; height: 8px; border-radius: 50%; background: var(--rand-hell); }
+.konsole-kopf span {
+  font-family: var(--mono);
+  font-size: .68rem;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--grau);
+}
+.kopieren {
+  margin-left: auto;
+  font-family: var(--mono);
+  font-size: .68rem;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: var(--gedaempft);
+  background: transparent;
+  border: 1px solid var(--rand-hell);
+  border-radius: 5px;
+  padding: .26rem .6rem;
+  cursor: pointer;
+  transition: color .15s ease, border-color .15s ease;
+}
+.kopieren:hover { color: var(--kupfer); border-color: var(--akzent); }
+.kopieren[data-fertig="ja"] { color: var(--gruen); border-color: var(--gruen); }
+.konsole pre {
+  margin: 0;
+  padding: .95rem 1.05rem;
+  overflow-x: auto;
+  font-family: var(--mono);
+  font-size: .88rem;
+  line-height: 1.72;
+  color: var(--kupfer);
+}
+.konsole pre .kommentar { color: var(--grau); }
+.konsole.zitat pre { color: var(--text); white-space: pre-wrap; }
+
+/* ---------- Merksatz ---------- */
+.merk {
+  margin: 1.35rem 0;
+  padding: 1rem 1.15rem;
+  border: 1px solid var(--rand-hell);
+  border-left: 2px solid var(--akzent);
+  border-radius: 0 8px 8px 0;
+  background: var(--panel);
+  font-size: .96rem;
+  color: var(--gedaempft);
+}
+.merk b { color: var(--text); font-weight: 600; }
+
+/* ---------- Faehigkeiten ---------- */
+.faehigkeiten { display: grid; gap: 1px; background: var(--rand);
+  border: 1px solid var(--rand); border-radius: 10px; overflow: hidden;
+  grid-template-columns: repeat(auto-fit, minmax(15.5rem, 1fr)); }
+.faehig { background: var(--panel); padding: 1.35rem 1.4rem 1.5rem; }
+.faehig h3 { color: var(--text); }
+.faehig p { font-size: .92rem; color: var(--grau); line-height: 1.6; margin: 0; }
+.faehig .marke {
+  display: inline-block;
+  font-family: var(--mono);
+  font-size: .64rem;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  color: var(--akzent);
+  border: 1px solid rgba(232,98,44,.35);
+  border-radius: 4px;
+  padding: .1rem .42rem;
+  margin-top: .7rem;
+}
+
+/* ---------- Klemmt ---------- */
+.klemmt { border: 1px solid var(--rand); border-radius: 10px;
+  background: var(--panel); padding: 1.5rem 1.5rem 1.6rem; }
+
+/* ---------- Fuss ---------- */
+footer {
+  border-top: 1px solid var(--rand);
+  padding: 2.6rem 0 3.4rem;
+  color: var(--grau);
+  font-size: .88rem;
+  line-height: 1.72;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .anhebung { animation: hoch .6s cubic-bezier(.22,.61,.36,1) both; }
+  .anhebung:nth-child(2) { animation-delay: .07s; }
+  .anhebung:nth-child(3) { animation-delay: .13s; }
+  @keyframes hoch { from { opacity: 0; transform: translateY(12px); } }
+}
+</style>
+</head>
+<body>
+
+<header class="kopf">
+  <div class="bahn">
+    <p class="augenbraue anhebung"><a href="index.html">Jarvis</a> &nbsp;/&nbsp; Anleitung</p>
+    <h1 class="anhebung">Jarvis in <span class="zahl">drei</span> Schritten.</h1>
+    <p class="vorspann anhebung">
+      Du hast Claude Code schon. Damit baust du den echten Jarvis — der dich
+      durch die Kamera sieht, deine Mails sortiert, ein Gedächtnis hat und auf
+      deinem Mac arbeitet. <strong>Mit echten Zugriffen, kein Browser-Spielzeug.</strong>
+    </p>
+    <ul class="zutaten">
+      <li><b>Mac</b> mit Terminal</li>
+      <li><b>Claude Code</b> installiert</li>
+      <li><b>1</b> Anthropic-Schlüssel</li>
+      <li>ungefähr <b>30</b> Minuten</li>
+    </ul>
+  </div>
+</header>
+
+<section>
+  <div class="bahn">
+    <ol class="schritte">
+
+      <li class="schritt">
+        <span class="nr">1</span>
+        <h3>Ordner anlegen</h3>
+        <p>Öffne das Terminal — Programme, dann Dienstprogramme, dann Terminal — und tippe:</p>
+        <figure class="konsole">
+          <figcaption class="konsole-kopf">
+            <span class="ampeln"><i></i><i></i><i></i></span>
+            <span>Terminal</span>
+            <button class="kopieren" type="button">Kopieren</button>
+          </figcaption>
+          <pre><code>mkdir jarvis &amp;&amp; cd jarvis</code></pre>
+        </figure>
+        <p>
+          Dann leg die Datei <code>BAUAUFTRAG-jarvis.md</code> in genau diesen Ordner.
+          Am einfachsten: herunterladen, dann im Finder in den Ordner
+          <code>jarvis</code> ziehen.
+        </p>
+      </li>
+
+      <li class="schritt">
+        <span class="nr">2</span>
+        <h3>Den Auftrag geben</h3>
+        <p>Im selben Fenster, im Ordner <code>jarvis</code>:</p>
+        <figure class="konsole">
+          <figcaption class="konsole-kopf">
+            <span class="ampeln"><i></i><i></i><i></i></span>
+            <span>Terminal</span>
+            <button class="kopieren" type="button">Kopieren</button>
+          </figcaption>
+          <pre><code>claude</code></pre>
+        </figure>
+        <p>Wenn Claude Code läuft, schreib genau das:</p>
+        <figure class="konsole zitat">
+          <figcaption class="konsole-kopf">
+            <span class="ampeln"><i></i><i></i><i></i></span>
+            <span>Auftrag</span>
+            <button class="kopieren" type="button">Kopieren</button>
+          </figcaption>
+          <pre><code>Lies BAUAUFTRAG-jarvis.md komplett und bau das System Schritt für Schritt.
+Halte dich an die Sicherheitsregeln und arbeite die Abnahmeliste am Ende
+wirklich ab, bevor du fertig meldest.</code></pre>
+        </figure>
+        <p>
+          Jetzt arbeitet Claude Code für dich. Es schreibt die Dateien,
+          installiert was fehlt und prüft sich am Ende selbst. Das dauert eine
+          Weile — lass es laufen.
+        </p>
+        <div class="merk">
+          <b>Wenn es nachfragt,</b> ob es einen Befehl ausführen darf: kurz lesen,
+          dann ja sagen. Soll es ohne ständiges Nachfragen durchlaufen, drück
+          <code>Shift + Tab</code>, bis „auto“ dasteht — aber nur, wenn du dabei bleibst.
+        </div>
+      </li>
+
+      <li class="schritt">
+        <span class="nr">3</span>
+        <h3>Jarvis starten</h3>
+        <p>
+          Wenn Claude Code fertig ist, liegt im Ordner eine Datei
+          <code>JARVIS.command</code>. Doppelklick drauf. Beim ersten Mal
+          stattdessen Rechtsklick, dann „Öffnen“ — macOS lässt selbst gebaute
+          Programme erst bestätigen.
+        </p>
+        <figure class="konsole">
+          <figcaption class="konsole-kopf">
+            <span class="ampeln"><i></i><i></i><i></i></span>
+            <span>Finder</span>
+            <button class="kopieren" type="button">Kopieren</button>
+          </figcaption>
+          <pre><code>JARVIS.command   <span class="kommentar"># Rechtsklick → Öffnen</span></code></pre>
+        </figure>
+        <p>
+          Beim ersten Start richtet er sich selbst ein und liest dir jeden
+          Schritt vor. Du musst nichts mitlesen.
+        </p>
+      </li>
+
+    </ol>
+  </div>
+</section>
+
+<section>
+  <div class="bahn">
+    <h2>Beim ersten Start</h2>
+    <p>
+      Er fragt nach deinen Zugängen: dem Anthropic-Schlüssel, Telegram und
+      deinem Postfach. Nur der Schlüssel ist Pflicht, alles andere kannst du
+      überspringen und später nachholen.
+    </p>
+
+    <h3>E-Mail</h3>
+    <p>
+      Es genügt deine Adresse — die Servernamen kennt er selbst. Er meldet sich
+      einmal an und sagt dir, wie viele ungelesene Mails dort liegen. So merkst
+      du sofort, ob es stimmt, statt es am nächsten Morgen zu merken.
+    </p>
+    <div class="merk">
+      <b>Bei Gmail, iCloud und Outlook</b> funktioniert dein normales Passwort
+      nicht. Du brauchst ein App-Passwort. Er öffnet dir die Seite dafür.
+    </div>
+
+    <h3>Kamera</h3>
+    <p>
+      Damit er sich umsehen kann, braucht das Terminal das Kamera-Recht:
+      Systemeinstellungen, Datenschutz, Kamera. Er prüft das selbst, indem er
+      ein Testbild macht und wieder löscht, und öffnet dir die Einstellung,
+      falls das Recht fehlt.
+    </p>
+
+    <div class="merk">
+      <b>Danach das Terminal einmal schließen und neu öffnen.</b>
+      Sonst greifen die erteilten Rechte nicht — das ist der häufigste Grund,
+      warum es beim ersten Versuch nicht klappt.
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="bahn-weit">
+    <h2>Was er dann kann</h2>
+    <div class="faehigkeiten">
+
+      <div class="faehig">
+        <h3>Sehen</h3>
+        <p>„Hey Jarvis, schau mal“ — er nimmt ein Kamerabild auf und beschreibt,
+           was darauf ist. Ein Bild auf Zuruf, kein Dauervideo.</p>
+      </div>
+
+      <div class="faehig">
+        <h3>Mails sortieren</h3>
+        <p>Wichtig, Später, Rauschen. Er formuliert Antworten vor und löscht
+           nie etwas von selbst.</p>
+      </div>
+
+      <div class="faehig">
+        <h3>Buchhaltung</h3>
+        <p>Beleg vor die Kamera, er bucht ihn vor. Kann er den Betrag nicht
+           zweifelsfrei lesen, trägt er nichts ein und fragt nach.</p>
+      </div>
+
+      <div class="faehig">
+        <h3>Gedächtnis</h3>
+        <p>Tagesberichte, Kontakte, Notizen. Er vergisst nichts und findet
+           wieder, was vor Wochen nebenbei gesagt wurde.</p>
+      </div>
+
+      <div class="faehig">
+        <h3>Nachrichten senden</h3>
+        <p>Telegram, Mail, SMS und WhatsApp — jedes Mal erst, wenn du zugestimmt
+           hast. Keine Antwort gilt als Nein.</p>
+      </div>
+
+      <div class="faehig">
+        <h3>Dein Mac bedienen</h3>
+        <p>Er sieht den Bildschirm und klickt sich durch. Jeden Schritt zeigt er
+           vorher an und wartet auf dein Enter.</p>
+      </div>
+
+      <div class="faehig">
+        <h3>Recherchieren</h3>
+        <p>Wetter sofort. Für Preise und Flüge schaltest du einmal den
+           Such-Dienst ein.</p>
+        <span class="marke">einmal einschalten</span>
+      </div>
+
+      <div class="faehig">
+        <h3>Zwei Übersichten</h3>
+        <p>Ein Command Center mit deinen Zahlen und eine Sales-Analyse, die
+           jedes Kundengespräch einzeln aufschlüsselt.</p>
+      </div>
+
+      <div class="faehig">
+        <h3>Reden</h3>
+        <p>Er hört zu und antwortet gesprochen. Sachlich und ruhig, in zwei bis
+           vier Sätzen.</p>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="bahn">
+    <h2>Wenn etwas klemmt</h2>
+    <div class="klemmt">
+      <p>
+        Sag es Claude Code direkt im selben Fenster — wörtlich das, was auf dem
+        Bildschirm steht:
+      </p>
+      <figure class="konsole zitat" style="margin-bottom:0">
+        <figcaption class="konsole-kopf">
+          <span class="ampeln"><i></i><i></i><i></i></span>
+          <span>Auftrag</span>
+          <button class="kopieren" type="button">Kopieren</button>
+        </figcaption>
+        <pre><code>Beim Start kommt dieser Fehler: [Text einfügen]. Behebe ihn.</code></pre>
+      </figure>
+    </div>
+    <p style="margin-top:1.35rem;color:var(--gedaempft)">
+      Claude Code sieht deinen echten Rechner und kann den Fehler wirklich
+      finden — anders als ein Chat, der raten muss. Das ist der ganze Vorteil.
+    </p>
+    <p style="color:var(--gedaempft)">
+      Für alles andere: Doppelklick auf <code>EXTRAS.command</code>, dann
+      Punkt 1. Das ist der Selbsttest — er geht jeden Baustein durch und sagt
+      dir, welcher fehlt.
+    </p>
+  </div>
+</section>
+
+<footer>
+  <div class="bahn">
+    Alles läuft lokal auf deinem Rechner. Nichts geht nach außen ohne dein Ja.<br>
+    Jarvis ist ein privates Werkzeug, kein Produkt und keine Dienstleistung.
+  </div>
+</footer>
+
+<script>
+document.querySelectorAll(".kopieren").forEach(function (knopf) {
+  knopf.addEventListener("click", function () {
+    var block = knopf.closest(".konsole").querySelector("code");
+    var text = block.innerText.replace(/\s+#\s.*$/gm, "").trim();
+
+    function gelungen() {
+      knopf.textContent = "Kopiert";
+      knopf.dataset.fertig = "ja";
+      setTimeout(function () {
+        knopf.textContent = "Kopieren";
+        delete knopf.dataset.fertig;
+      }, 1800);
+    }
+
+    // In manchen Ansichten ist die Zwischenablage gesperrt. Dann wird der
+    // Befehl markiert, damit er von Hand kopiert werden kann - statt so zu
+    // tun, als haette es geklappt.
+    function markieren() {
+      var auswahl = window.getSelection();
+      var bereich = document.createRange();
+      bereich.selectNodeContents(block);
+      auswahl.removeAllRanges();
+      auswahl.addRange(bereich);
+      knopf.textContent = "Markiert";
+      setTimeout(function () { knopf.textContent = "Kopieren"; }, 2200);
+    }
+
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(gelungen).catch(markieren);
+    } else {
+      markieren();
+    }
+  });
+});
+</script>
+
+</body>
+</html>

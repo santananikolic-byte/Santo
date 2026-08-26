@@ -416,6 +416,38 @@ def pruefung_ansichten(agent):
                 ("offen: %s" % (pruefer.stapel + pruefer.fehler)[:3])
                 if (pruefer.stapel or pruefer.fehler) else "alle Tags geschlossen")
 
+    # Die Anleitung ist eine Unterseite derselben Website.
+    anleitung = os.path.join(WURZEL, "landing", "anleitung.html")
+    text = ""
+    if os.path.exists(anleitung):
+        with open(anleitung, encoding="utf-8") as datei:
+            text = datei.read()
+    pruefen("Anleitungsseite vorhanden", bool(text), "%d Zeichen" % len(text))
+    if text:
+        import re as _re2
+        hosts = sorted(set(_re2.findall(r"https?://([^/\"]+)", text)))
+        erlaubt = {"fonts.googleapis.com", "fonts.gstatic.com"}
+        pruefen("Anleitungsseite lädt nur Schriften nach",
+                set(hosts) <= erlaubt, ", ".join(hosts) or "gar nichts")
+        pruefen("Anleitungsseite führt zurück zur Startseite",
+                'href="index.html"' in text)
+        pruefen("Startseite verweist auf die Anleitung",
+                'href="anleitung.html"' in roh)
+        pruefer2 = _Pruefer()
+        pruefer2.feed(text)
+        pruefen("Anleitungsseite ist wohlgeformtes HTML",
+                not pruefer2.fehler and not pruefer2.stapel,
+                ("offen: %s" % (pruefer2.stapel + pruefer2.fehler)[:3])
+                if (pruefer2.stapel or pruefer2.fehler) else "alle Tags geschlossen")
+        for befehl in ("mkdir jarvis &amp;&amp; cd jarvis", "claude",
+                       "JARVIS.command"):
+            if befehl not in text:
+                pruefen("Anleitung enthält den Befehl %s" % befehl, False)
+                break
+        else:
+            pruefen("Anleitung enthält alle drei Befehle", True,
+                    "Ordner, Auftrag, Start")
+
 
 def pruefung_sicherheit(agent):
     abschnitt("Sicherheit")
