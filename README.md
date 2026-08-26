@@ -9,6 +9,9 @@ ausdrücklicher Freigabe.
 
 ---
 
+Weiterzugeben ist das als Paket aus `BAUAUFTRAG-jarvis.md` und `ANLEITUNG.md` —
+die Anleitung führt in drei Schritten von Claude Code zum laufenden Jarvis.
+
 ## Loslegen
 
 1. Den Ordner an einen festen Platz legen, zum Beispiel in **Dokumente**.
@@ -152,6 +155,7 @@ Der **Selbsttest** geht jeden Baustein durch:
 | Klicks landen daneben | Sollte nicht vorkommen — der Retina-Faktor wird gemessen. Selbsttest zeigt ihn an |
 | Er redet englisch oder klingt falsch | `EXTRAS.command` → 9, deutsche Stimme installieren lassen |
 | Kamera geht nicht | `brew install imagesnap`, dann Kamera-Recht erteilen |
+| Mail geht nicht | Bei Gmail, iCloud und Outlook braucht es ein **App-Passwort**, nicht das normale |
 | Irgendetwas anderes | `EXTRAS.command` → 1 (Selbsttest) |
 
 ---

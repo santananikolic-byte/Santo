@@ -4938,7 +4938,31 @@ EINSTELLUNG_BILDSCHIRM = ("x-apple.systempreferences:com.apple.preference.securi
                           "?Privacy_ScreenCapture")
 EINSTELLUNG_BEDIENHILFEN = ("x-apple.systempreferences:com.apple.preference.security"
                             "?Privacy_Accessibility")
+EINSTELLUNG_KAMERA = ("x-apple.systempreferences:com.apple.preference.security"
+                      "?Privacy_Camera")
 EINSTELLUNG_SPRACHE = "x-apple.systempreferences:com.apple.preference.speech"
+
+# Kein Einzelunternehmer kennt seinen IMAP-Servernamen. Er tippt seine
+# Mailadresse ein, den Rest wissen wir selbst.
+MAIL_ANBIETER = {
+    "gmail.com": ("imap.gmail.com", 993, "smtp.gmail.com", 587, True),
+    "googlemail.com": ("imap.gmail.com", 993, "smtp.gmail.com", 587, True),
+    "gmx.at": ("imap.gmx.net", 993, "mail.gmx.net", 587, False),
+    "gmx.de": ("imap.gmx.net", 993, "mail.gmx.net", 587, False),
+    "gmx.net": ("imap.gmx.net", 993, "mail.gmx.net", 587, False),
+    "web.de": ("imap.web.de", 993, "smtp.web.de", 587, False),
+    "outlook.com": ("outlook.office365.com", 993, "smtp-mail.outlook.com", 587, True),
+    "hotmail.com": ("outlook.office365.com", 993, "smtp-mail.outlook.com", 587, True),
+    "live.com": ("outlook.office365.com", 993, "smtp-mail.outlook.com", 587, True),
+    "live.at": ("outlook.office365.com", 993, "smtp-mail.outlook.com", 587, True),
+    "icloud.com": ("imap.mail.me.com", 993, "smtp.mail.me.com", 587, True),
+    "me.com": ("imap.mail.me.com", 993, "smtp.mail.me.com", 587, True),
+    "t-online.de": ("secureimap.t-online.de", 993, "securesmtp.t-online.de", 587, False),
+    "yahoo.com": ("imap.mail.yahoo.com", 993, "smtp.mail.yahoo.com", 587, True),
+    "yahoo.de": ("imap.mail.yahoo.com", 993, "smtp.mail.yahoo.com", 587, True),
+    "a1.net": ("imap.a1.net", 993, "smtp.a1.net", 587, False),
+    "aon.at": ("imap.a1.net", 993, "smtp.a1.net", 587, False),
+}
 
 # Drei Routinen, die von Anfang an da sind.
 STARTROUTINEN = [
@@ -5195,6 +5219,27 @@ class Einrichtung:
         self.ergebnisse["bedienhilfen"] = "nicht erlaubt"
         return False
 
+    def recht_kamera(self) -> bool:
+        """Prüft die Kamera, indem wirklich ein Bild aufgenommen wird.
+
+        Ein Test ist ehrlicher als ein Hinweis: Fehlt das Recht, liefert macOS
+        keine Fehlermeldung, sondern eine unbrauchbare Datei.
+        """
+        kamera = Kamera()
+        if not kamera.verfuegbar():
+            self.ergebnisse["kamera"] = "kein Aufnahmeprogramm"
+            return False
+        ergebnis = kamera.bild_aufnehmen()
+        if ergebnis.get("ok"):
+            try:
+                os.remove(ergebnis["pfad"])
+            except OSError:
+                pass
+            self.ergebnisse["kamera"] = "erlaubt"
+            return True
+        self.ergebnisse["kamera"] = "nicht erlaubt"
+        return False
+
     def schritt_rechte(self):
         """Prüft alle drei Rechte einzeln und öffnet nur die fehlenden."""
         self.sagen("Jetzt prüfe ich die drei Rechte, die ich brauche.")
@@ -5218,6 +5263,19 @@ class Einrichtung:
             print("[!!] Bedienungshilfen: %s" % self.ergebnisse["bedienhilfen"])
             fehlend.append(("Bedienungshilfen", EINSTELLUNG_BEDIENHILFEN,
                             "damit ich klicken und tippen kann"))
+
+        # Die Kamera ist ein eigenes Recht - ohne sie kann ich mich nicht umsehen.
+        if self.recht_kamera():
+            print("[ok] Kamera")
+        elif self.ergebnisse["kamera"] == "kein Aufnahmeprogramm":
+            print("[--] Kamera: es fehlt das Programm imagesnap")
+            self.sagen("Zum Fotografieren fehlt noch ein kleines Programm. Führe "
+                       "später im Terminal brew install imagesnap aus, dann kann "
+                       "ich mich für dich umsehen.")
+        else:
+            print("[!!] Kamera: %s" % self.ergebnisse["kamera"])
+            fehlend.append(("Kamera", EINSTELLUNG_KAMERA,
+                            "damit ich einen Beleg oder ein Objekt ansehen kann"))
 
         if not fehlend:
             self.sagen("Alle drei Rechte sind bereits erteilt.")
@@ -5316,6 +5374,110 @@ class Einrichtung:
         except (urllib.error.URLError, OSError, ValueError):
             pass
 
+    # -- Schritt 5b: E-Mail -------------------------------------------------
+
+    def mail_testen(self, host: str, port: int, benutzer: str, passwort: str) -> dict:
+        """Meldet sich wirklich am Posteingang an, statt es nur zu hoffen."""
+        try:
+            verbindung = imaplib.IMAP4_SSL(host, int(port),
+                                           ssl_context=ssl.create_default_context())
+            try:
+                verbindung.login(benutzer, passwort)
+                verbindung.select("INBOX")
+                status, daten = verbindung.search(None, "UNSEEN")
+                anzahl = len(daten[0].split()) if status == "OK" and daten[0] else 0
+            finally:
+                try:
+                    verbindung.logout()
+                except (imaplib.IMAP4.error, OSError):
+                    pass
+            return {"ok": True, "ungelesen": anzahl}
+        except imaplib.IMAP4.error as fehler:
+            meldung = str(fehler).lower()
+            if "credential" in meldung or "auth" in meldung or "login" in meldung:
+                return {"ok": False, "grund": "zugang",
+                        "text": "Der Mailserver lehnt Benutzer oder Passwort ab."}
+            return {"ok": False, "grund": "sonstiges",
+                    "text": "Der Posteingang antwortet nicht wie erwartet: %s"
+                            % str(fehler)[:150]}
+        except (ssl.SSLError, OSError) as fehler:
+            return {"ok": False, "grund": "netz",
+                    "text": "Der Server %s ist nicht erreichbar: %s" % (host, fehler)}
+
+    def schritt_mail(self):
+        """Richtet Posteingang und Versand ein - mit Servererkennung aus der Adresse."""
+        self.sagen("Jetzt dein Postfach. Damit lese ich morgens deine Mails und "
+                   "sortiere sie vor. Das ist freiwillig.")
+        antwort = self.fragen("E-Mail jetzt einrichten? (ja/nein)").lower()
+        if antwort not in ("ja", "j", "yes", "y"):
+            self.ergebnisse["email"] = "übersprungen"
+            return
+
+        for versuch in range(1, 4):
+            adresse = self.fragen("Deine E-Mail-Adresse:")
+            if "@" not in adresse:
+                self.sagen("Das sieht nicht nach einer Mailadresse aus.")
+                continue
+            domain = adresse.split("@")[-1].strip().lower()
+            bekannt = MAIL_ANBIETER.get(domain)
+
+            if bekannt:
+                imap_host, imap_port, smtp_host, smtp_port, app_passwort = bekannt
+                self.sagen("Deinen Anbieter kenne ich, die Servernamen trage ich "
+                           "selbst ein.")
+            else:
+                app_passwort = False
+                self.sagen("Deinen Anbieter kenne ich nicht. Die beiden Servernamen "
+                           "stehen bei deinem Anbieter unter Mail-Einstellungen.")
+                imap_host = self.fragen("Posteingangs-Server (IMAP), z.B. imap.firma.at:")
+                smtp_host = self.fragen("Postausgangs-Server (SMTP), z.B. smtp.firma.at:")
+                imap_port, smtp_port = 993, 587
+                if not imap_host or not smtp_host:
+                    self.ergebnisse["email"] = "keine Server angegeben"
+                    return
+
+            if app_passwort:
+                self.sagen("Wichtig bei diesem Anbieter: Das normale Passwort "
+                           "funktioniert nicht. Du brauchst ein sogenanntes "
+                           "App-Passwort. Ich öffne die Seite, auf der du es "
+                           "erzeugst.")
+                self.oeffnen({"gmail.com": "https://myaccount.google.com/apppasswords",
+                              "googlemail.com": "https://myaccount.google.com/apppasswords",
+                              "icloud.com": "https://account.apple.com/account/manage",
+                              "me.com": "https://account.apple.com/account/manage",
+                              }.get(domain, "https://account.live.com/proofs/manage"))
+
+            passwort = self.fragen("Passwort (oder App-Passwort):")
+            if not passwort:
+                self.sagen("Ohne Passwort geht es nicht.")
+                continue
+
+            self.sagen("Ich melde mich einmal an, um zu sehen, ob es stimmt.")
+            probe = self.mail_testen(imap_host, imap_port, adresse, passwort)
+            if probe.get("ok"):
+                env_setzen("IMAP_HOST", imap_host)
+                env_setzen("IMAP_PORT", imap_port)
+                env_setzen("IMAP_USER", adresse)
+                env_setzen("IMAP_PASSWORT", passwort)
+                env_setzen("SMTP_HOST", smtp_host)
+                env_setzen("SMTP_PORT", smtp_port)
+                env_setzen("SMTP_USER", adresse)
+                env_setzen("SMTP_PASSWORT", passwort)
+                env_setzen("SMTP_ABSENDER", adresse)
+                self.ergebnisse["email"] = "eingerichtet"
+                self.sagen("Das Postfach ist verbunden. Gerade liegen dort %d "
+                           "ungelesene Mails." % probe["ungelesen"])
+                return
+            self.sagen(probe["text"])
+            if probe.get("grund") == "zugang" and app_passwort:
+                self.sagen("Bei diesem Anbieter ist das fast immer das normale "
+                           "Passwort statt des App-Passworts. Versuch %d von 3."
+                           % versuch)
+
+        self.ergebnisse["email"] = "fehlgeschlagen"
+        self.sagen("Das Postfach hat nicht funktioniert. Alles andere richte ich "
+                   "trotzdem ein. Du kannst es später nachholen.")
+
     # -- Schritt 6: Startroutinen ------------------------------------------
 
     def schritt_routinen(self):
@@ -5369,6 +5531,7 @@ class Einrichtung:
         self.schritt_schluessel()
         self.schritt_rechte()
         self.schritt_telegram()
+        self.schritt_mail()
         self.schritt_routinen()
         self.schritt_stimmprofil()
 
