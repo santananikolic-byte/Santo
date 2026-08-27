@@ -88,19 +88,29 @@ gutes Gespräch, und das sagt er auch. Über viele Gespräche hinweg erkennt er
 Muster: Kommt derselbe Einwand dreimal, ist das kein Zufall, sondern eine Lücke
 im Angebot.
 
-**Ein Team statt eines Alleskönners.** Acht Fachkräfte mit eigenem Auftrag und
+**Ein Team statt eines Alleskönners.** Neun Fachkräfte mit eigenem Auftrag und
 **eigenem Werkzeugsatz**: Buchhalter, Verkäufer, Terminplaner, Postbearbeiter,
-Kundenberater, Rechercheur, Controller, Programmierer. Die Trennung ist echt —
-der Verkäufer sieht 11 von 50 Werkzeugen und kann weder buchen noch mailen, der
+Kundenberater, Rechercheur, Controller, Programmierer, Privatsekretär. Die
+Trennung ist echt — der Verkäufer sieht 11 von 58 Werkzeugen und kann weder buchen noch mailen, der
 Rechercheur kann gar nichts eintragen. Wer alles darf, macht irgendwann alles,
 auch das Falsche.
+
+**Was der Betrieb tragen muss.** Ein Einzelunternehmer hat kein Gehalt. Jarvis
+führt private und betriebliche Fixkosten getrennt — beim Steuerberater dürfen
+sie sich nicht vermischen — und rechnet daraus rückwärts den **nötigen
+Monatsumsatz**: Firmenkosten plus Privatkosten geteilt durch eins minus
+Steuerrücklage. Dann stellt er dem gegenüber, was gesichert hereinkommt, und
+sagt die Lücke. Dazu Erinnerungen an das, was einmal im Jahr kommt und trotzdem
+jedes Jahr überrascht.
 
 **Akquise und Cashflow.** Eine Pipeline von „neu“ bis „gewonnen“, eine
 Nachfassliste, die sagt wer heute dran ist, und eine Angebotskalkulation, die
 über **Leistungswerte** rechnet statt einen Quadratmeterpreis zu raten: Fläche
 geteilt durch m² pro Stunde ergibt Stunden, mal Stundensatz ergibt den Preis.
 Die Cashflow-Vorschau trennt Gesichertes von Erhofftem — ein Angebot ist kein
-Geld und wird gewichtet, nicht voll angesetzt.
+Geld und wird gewichtet, nicht voll angesetzt. Mit eingeschaltetem Such-Dienst
+findet er auch neue Betriebe in einem Ort und nimmt sie auf — mit Wert null,
+bis jemand angerufen hat.
 
 **Werkstatt.** Der Programmierer schreibt kleine Python-Skripte und legt sie ab.
 Ausgeführt wird nur nach Freigabe, und die Freigabefrage zeigt vorher den
@@ -213,6 +223,7 @@ src/modules/dashboard_teile.py  Farben, Zahlenformate, SVG-Grafiken
 src/modules/team.py        acht Fachkräfte mit eigenem Werkzeugsatz
 src/modules/akquise.py     Pipeline, Angebotskalkulation, Cashflow
 src/modules/werkstatt.py   Skripte schreiben und nach Freigabe ausführen
+src/modules/privat.py      Fixkosten, Bedarfsrechnung, Erinnerungen
 landing/index.html         Verkaufsseite, eigenständig, ohne externe Anfragen
 landing/anleitung.html     Bauanleitung als Unterseite, beide gegenseitig verlinkt
 tests/abnahme.py           führt die Abnahmeliste wirklich aus

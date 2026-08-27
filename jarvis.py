@@ -249,6 +249,9 @@ BRIEFING_ABENDS = _text("BRIEFING_ABENDS", "19:30")
 
 # Buchhaltung
 STANDARD_MWST = _zahl("STANDARD_MWST", 20.0)
+# Rücklage für Einkommensteuer und Sozialversicherung zusammen. Grob, aber
+# besser als keine Rücklage - der Steuerberater nennt den genauen Satz.
+STEUER_RUECKLAGE = _zahl("STEUER_RUECKLAGE", 30.0)
 WAEHRUNG = _text("WAEHRUNG", "EUR")
 
 # Welt
@@ -3467,6 +3470,90 @@ class Akquise:
         return {"ok": True, "anzahl": len(eintraege), "eintraege": eintraege,
                 "text": text}
 
+    # -- Neue Interessenten finden -----------------------------------------
+
+    def leads_finden(self, ort: str, branche: str = "", anzahl: int = 8,
+                     welt=None, agent=None) -> dict:
+        """Sucht Betriebe in einem Ort, die Reinigung brauchen könnten.
+
+        Der Weg: über den Such-Dienst nach Betrieben suchen, die Trefferliste
+        von Claude in Name, Adresse und Telefon zerlegen lassen und daraus
+        Interessenten anlegen. Was schon in der Liste steht, wird übersprungen.
+
+        **Was das ist und was nicht:** Das sind Betriebe, die es gibt - keine
+        Interessenten. Ob sie überhaupt Bedarf haben, weiß niemand, bis
+        angerufen wurde. Deshalb landen sie auf der Stufe 'neu' mit dem
+        nächsten Schritt "anrufen", und ihr Wert steht auf null, bis die
+        Quadratmeter bekannt sind. Eine Pipeline mit geschätzten Werten für
+        Betriebe, mit denen nie jemand gesprochen hat, wäre eine Lüge.
+        """
+        ort = (ort or "").strip()
+        if not ort:
+            return {"ok": False, "fehler": "In welchem Ort soll ich suchen?"}
+        if welt is None:
+            return {"ok": False, "fehler": "Die Suche ist nicht verfügbar."}
+        if agent is None or not getattr(agent, "einsatzbereit", lambda: False)():
+            return {"ok": False,
+                    "fehler": "Ohne Anthropic-Schlüssel kann ich die Treffer nicht "
+                              "auswerten."}
+
+        branchen = branche.strip() if branche else \
+            "Arztpraxen, Steuerberater, Kanzleien, Autohäuser, Fitnessstudios"
+        anfrage = ("%s in %s mit Adresse und Telefonnummer" % (branchen, ort))
+        gefunden = welt.recherche(anfrage)
+        if not gefunden.get("ok"):
+            return {"ok": False,
+                    "fehler": "Für die Suche fehlt der Such-Dienst. In "
+                              "config/mcp_servers.json den Eintrag 'suche' auf "
+                              "\"aus\": false stellen und einen Brave-Schlüssel "
+                              "eintragen. (%s)" % gefunden.get("fehler", "")[:80]}
+
+        auftrag = (
+            "Aus dieser Trefferliste sollen Betriebe für die Kaltakquise einer "
+            "Gebäudereinigung herausgezogen werden.\n\n"
+            "Gib ausschließlich JSON zurück: {\"betriebe\": [{\"firma\": ..., "
+            "\"branche\": ..., \"adresse\": ..., \"telefon\": ...}]}\n\n"
+            "Nimm höchstens %d Betriebe. Nimm nur echte, benannte Betriebe mit "
+            "Ortsbezug - keine Verzeichnisse, keine Portale, keine "
+            "Sammelseiten. Fehlt eine Telefonnummer oder Adresse, lass das Feld "
+            "leer, statt etwas zu erfinden.\n\nTrefferliste:\n%s"
+            % (int(anzahl or 8), gefunden.get("text", "")[:6000]))
+        antwort = agent.json_anfrage(auftrag)
+        if not antwort.get("ok"):
+            return {"ok": False,
+                    "fehler": "Die Trefferliste war nicht auswertbar: %s"
+                              % antwort.get("fehler", "")}
+
+        betriebe = (antwort["daten"] or {}).get("betriebe") or []
+        neu, bekannt = [], []
+        for eintrag in betriebe[:int(anzahl or 8)]:
+            firma = str(eintrag.get("firma") or "").strip()
+            if not firma:
+                continue
+            ergebnis = self.lead_anlegen(
+                firma, telefon=str(eintrag.get("telefon") or ""),
+                adresse=str(eintrag.get("adresse") or ""),
+                quelle="Recherche %s" % ort,
+                notiz=str(eintrag.get("branche") or ""),
+                naechster_schritt="anrufen und fragen, wer die Reinigung macht")
+            if ergebnis.get("ok"):
+                neu.append(firma)
+            else:
+                bekannt.append(firma)
+
+        if not neu:
+            text = ("Ich habe %d Betriebe gefunden, aber keiner ist neu%s."
+                    % (len(betriebe), " - alle stehen schon in der Liste"
+                       if bekannt else ""))
+        else:
+            text = ("%d neue Betriebe in %s aufgenommen: %s. Sie stehen auf 'neu' "
+                    "mit Wert null - was sie wert sind, weißt du erst nach dem "
+                    "Anruf.%s"
+                    % (len(neu), ort, ", ".join(neu[:5]),
+                       (" %d kanntest du schon." % len(bekannt)) if bekannt else ""))
+        return {"ok": True, "neu": neu, "bekannt": bekannt,
+                "gefunden": len(betriebe), "text": text}
+
     # -- Cashflow -----------------------------------------------------------
 
     def cashflow_prognose(self, monate: int = 6, bookkeeping=None) -> dict:
@@ -3559,6 +3646,380 @@ class Akquise:
                 "text": "Angebot über %s im Monat abgelegt%s."
                         % (geld_akquise(kalkulation["netto_monat"]),
                            (" für %s" % lead["firma"]) if lead else "")}
+
+
+# =========================================================================
+# privat  -  Privat - das Leben neben der Firma, und wie beides zusammenhängt.
+# 
+# Ein Einzelunternehmer hat kein Gehalt. Er hat Umsatz, davon gehen Kosten und
+# Steuern ab, und was übrig bleibt, muss die Miete zahlen. Genau diese Rechnung
+# macht kaum jemand - und deshalb weiß kaum jemand, wie viel der Betrieb
+# eigentlich abwerfen **muss**.
+# 
+# Das ist die Aufgabe dieses Moduls:
+# 
+# * Private Fixkosten und Firmenfixkosten getrennt führen, denn beim
+#   Steuerberater dürfen sie sich nicht vermischen.
+# * Daraus den **nötigen Monatsumsatz** ausrechnen: was hereinkommen muss, damit
+#   nach Kosten und Steuerrücklage das Private gedeckt ist.
+# * Erinnerungen an das, was einmal im Jahr kommt und trotzdem jedes Jahr
+#   überrascht: Versicherung, Pickerl, Geburtstage, Vorauszahlung.
+# =========================================================================
+
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+
+
+SCHEMA_PRIVAT = """
+CREATE TABLE IF NOT EXISTS fixkosten (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    betrag REAL NOT NULL,
+    rhythmus TEXT DEFAULT 'monatlich',
+    bereich TEXT DEFAULT 'privat',
+    kategorie TEXT DEFAULT '',
+    faellig_am TEXT DEFAULT '',
+    aktiv INTEGER DEFAULT 1,
+    notiz TEXT DEFAULT '',
+    angelegt TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS erinnerungen (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    was TEXT NOT NULL,
+    datum TEXT NOT NULL,
+    wiederholung TEXT DEFAULT 'einmalig',
+    bereich TEXT DEFAULT 'privat',
+    notiz TEXT DEFAULT '',
+    erledigt INTEGER DEFAULT 0,
+    angelegt TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_erinnerungen_datum ON erinnerungen(datum);
+"""
+
+# Wie oft etwas anfällt, umgerechnet auf einen Monat.
+RHYTHMEN = {
+    "woechentlich": 4.333, "wöchentlich": 4.333,
+    "monatlich": 1.0,
+    "zweimonatlich": 0.5,
+    "quartalsweise": 1 / 3.0, "vierteljaehrlich": 1 / 3.0, "vierteljährlich": 1 / 3.0,
+    "halbjaehrlich": 1 / 6.0, "halbjährlich": 1 / 6.0,
+    "jaehrlich": 1 / 12.0, "jährlich": 1 / 12.0,
+}
+BEREICHE = ("privat", "firma")
+WIEDERHOLUNGEN = ("einmalig", "monatlich", "jaehrlich")
+
+
+def monatsanteil(betrag: float, rhythmus: str) -> float:
+    """Rechnet einen Betrag auf den Monat um."""
+    try:
+        betrag = float(betrag)
+    except (TypeError, ValueError):
+        return 0.0
+    faktor = RHYTHMEN.get((rhythmus or "monatlich").strip().lower(), 1.0)
+    return round(betrag * faktor, 2)
+
+
+def euro_privat(betrag) -> str:
+    """Deutscher Betrag mit Euro-Zeichen."""
+    try:
+        betrag = float(betrag)
+    except (TypeError, ValueError):
+        betrag = 0.0
+    return ("{:,.2f}".format(betrag).replace(",", "#").replace(".", ",")
+            .replace("#", ".")) + " €"
+
+
+class Privat:
+    """Fixkosten, Erinnerungen und die Brücke zwischen Firma und Privatleben."""
+
+    def __init__(self, memory: Memory = None, steuersatz: float = None):
+        self.memory = memory or Memory()
+        # Rücklage für Einkommensteuer und Sozialversicherung zusammen.
+        self.steuersatz = float(steuersatz if steuersatz is not None
+                                else getattr(config, "STEUER_RUECKLAGE", 30.0))
+        db_schema_anlegen(SCHEMA_PRIVAT, self.memory.db_pfad)
+
+    # -- Fixkosten ----------------------------------------------------------
+
+    def fixkosten_anlegen(self, name: str, betrag: float,
+                          rhythmus: str = "monatlich", bereich: str = "privat",
+                          kategorie: str = "", faellig_am: str = "",
+                          notiz: str = "") -> dict:
+        """Trägt eine wiederkehrende Verpflichtung ein."""
+        name = (name or "").strip()
+        if not name:
+            return {"ok": False, "fehler": "Die Fixkosten brauchen einen Namen."}
+        try:
+            betrag = round(float(betrag), 2)
+        except (TypeError, ValueError):
+            return {"ok": False, "fehler": "Der Betrag ist keine Zahl."}
+        if betrag <= 0:
+            return {"ok": False, "fehler": "Der Betrag muss größer als null sein."}
+        rhythmus = (rhythmus or "monatlich").strip().lower()
+        if rhythmus not in RHYTHMEN:
+            return {"ok": False,
+                    "fehler": "Den Rhythmus '%s' kenne ich nicht. Möglich: %s."
+                              % (rhythmus, ", ".join(sorted(set(RHYTHMEN))))}
+        bereich = (bereich or "privat").strip().lower()
+        if bereich not in BEREICHE:
+            return {"ok": False,
+                    "fehler": "Der Bereich muss privat oder firma sein."}
+
+        vorhanden = self.memory._lesen(
+            "SELECT id FROM fixkosten WHERE lower(name)=lower(?) AND bereich=? "
+            "AND aktiv=1 LIMIT 1", (name, bereich))
+        if vorhanden:
+            self.memory._schreiben(
+                "UPDATE fixkosten SET betrag=?, rhythmus=?, kategorie=?, "
+                "faellig_am=?, notiz=? WHERE id=?",
+                (betrag, rhythmus, kategorie, faellig_am, notiz, vorhanden[0]["id"]))
+            nummer, geaendert = vorhanden[0]["id"], True
+        else:
+            nummer = self.memory._schreiben(
+                "INSERT INTO fixkosten (name, betrag, rhythmus, bereich, kategorie, "
+                "faellig_am, aktiv, notiz, angelegt) VALUES (?,?,?,?,?,?,1,?,?)",
+                (name, betrag, rhythmus, bereich, kategorie, faellig_am, notiz,
+                 zeitstempel()))
+            geaendert = False
+
+        je_monat = monatsanteil(betrag, rhythmus)
+        return {"ok": True, "id": nummer, "je_monat": je_monat,
+                "text": "%s %s: %s %s, das sind %s im Monat."
+                        % ("Geändert" if geaendert else "Eingetragen",
+                           name, euro_privat(betrag), rhythmus,
+                           euro_privat(je_monat))}
+
+    def fixkosten_streichen(self, name: str, bereich: str = "") -> dict:
+        """Setzt eine Verpflichtung auf inaktiv."""
+        bedingung = "lower(name)=lower(?) AND aktiv=1"
+        werte = [name]
+        if bereich:
+            bedingung += " AND bereich=?"
+            werte.append(bereich.lower())
+        zeilen = self.memory._lesen(
+            "SELECT * FROM fixkosten WHERE %s" % bedingung, tuple(werte))
+        if not zeilen:
+            return {"ok": False, "fehler": "'%s' steht nicht in den Fixkosten." % name}
+        for zeile in zeilen:
+            self.memory._schreiben("UPDATE fixkosten SET aktiv=0 WHERE id=?",
+                                   (zeile["id"],))
+        return {"ok": True,
+                "text": "%s ist gestrichen. Das spart %s im Monat."
+                        % (zeilen[0]["name"],
+                           euro_privat(sum(monatsanteil(z["betrag"], z["rhythmus"])
+                                           for z in zeilen)))}
+
+    def fixkosten(self, bereich: str = "") -> dict:
+        """Alle laufenden Verpflichtungen, auf den Monat gerechnet."""
+        if bereich:
+            zeilen = self.memory._lesen(
+                "SELECT * FROM fixkosten WHERE aktiv=1 AND bereich=? ORDER BY betrag DESC",
+                (bereich.lower(),))
+        else:
+            zeilen = self.memory._lesen(
+                "SELECT * FROM fixkosten WHERE aktiv=1 ORDER BY bereich, betrag DESC")
+
+        eintraege, privat_summe, firma_summe = [], 0.0, 0.0
+        for zeile in zeilen:
+            je_monat = monatsanteil(zeile["betrag"], zeile["rhythmus"])
+            eintraege.append({"id": zeile["id"], "name": zeile["name"],
+                              "betrag": zeile["betrag"], "rhythmus": zeile["rhythmus"],
+                              "bereich": zeile["bereich"], "je_monat": je_monat,
+                              "faellig_am": zeile["faellig_am"]})
+            if zeile["bereich"] == "firma":
+                firma_summe += je_monat
+            else:
+                privat_summe += je_monat
+
+        return {"ok": True, "eintraege": eintraege, "anzahl": len(eintraege),
+                "privat_je_monat": round(privat_summe, 2),
+                "firma_je_monat": round(firma_summe, 2),
+                "gesamt_je_monat": round(privat_summe + firma_summe, 2),
+                "text": ("Privat %s im Monat, Firma %s, zusammen %s."
+                         % (euro_privat(privat_summe), euro_privat(firma_summe),
+                            euro_privat(privat_summe + firma_summe))) if eintraege
+                        else "Es sind noch keine Fixkosten erfasst."}
+
+    # -- Die entscheidende Rechnung ----------------------------------------
+
+    def bedarfsrechnung(self, akquise=None) -> dict:
+        """Wie viel Umsatz der Betrieb monatlich braucht, damit privat alles gedeckt ist.
+
+        Der Weg rückwärts vom Privatleben zum Umsatz::
+
+            Umsatz netto - Firmenkosten           = Gewinn
+            Gewinn - Steuerrücklage               = was entnommen werden kann
+            das muss mindestens die Privatkosten decken
+
+        Aufgelöst nach Umsatz::
+
+            Umsatz = Firmenkosten + Privatkosten / (1 - Steuersatz)
+
+        Das ist die Zahl, die ein Einzelunternehmer eigentlich täglich kennen
+        müsste und fast nie kennt.
+        """
+        kosten = self.fixkosten()
+        privat = kosten["privat_je_monat"]
+        firma = kosten["firma_je_monat"]
+        anteil = max(0.0, min(0.9, self.steuersatz / 100.0))
+
+        if privat <= 0 and firma <= 0:
+            return {"ok": True, "berechenbar": False,
+                    "text": "Ich kenne deine Fixkosten noch nicht. Sag mir, was "
+                            "monatlich fix rausgeht - Miete, Versicherungen, Auto, "
+                            "Telefon - dann rechne ich aus, was der Betrieb "
+                            "abwerfen muss."}
+
+        noetiger_umsatz = firma + (privat / (1.0 - anteil) if anteil < 1 else privat)
+        noetiger_umsatz = round(noetiger_umsatz, 2)
+        gewinn = round(noetiger_umsatz - firma, 2)
+        steuer = round(gewinn * anteil, 2)
+
+        gesichert = None
+        luecke = None
+        if akquise is not None:
+            try:
+                pipeline = akquise.pipeline()
+                gesichert = pipeline["laufender_umsatz_monat"]
+                luecke = round(noetiger_umsatz - gesichert, 2)
+            except Exception:
+                gesichert = None
+
+        text = ("Damit privat alles gedeckt ist, muss der Betrieb %s netto im Monat "
+                "machen. Davon gehen %s Firmenkosten ab, bleiben %s Gewinn, davon "
+                "%s Steuerrücklage bei %g Prozent - übrig bleiben die %s, die du "
+                "privat brauchst."
+                % (euro_privat(noetiger_umsatz), euro_privat(firma),
+                   euro_privat(gewinn), euro_privat(steuer), self.steuersatz,
+                   euro_privat(privat)))
+        if gesichert is not None:
+            if luecke > 0:
+                text += (" Gesichert laufen %s. Dir fehlen %s im Monat - das sind "
+                         "etwa %s im Jahr."
+                         % (euro_privat(gesichert), euro_privat(luecke),
+                            euro_privat(luecke * 12)))
+            else:
+                text += (" Gesichert laufen %s, du liegst %s darüber."
+                         % (euro_privat(gesichert), euro_privat(-luecke)))
+
+        return {"ok": True, "berechenbar": True,
+                "privat_je_monat": privat, "firma_je_monat": firma,
+                "steuersatz": self.steuersatz,
+                "noetiger_umsatz": noetiger_umsatz,
+                "gewinn": gewinn, "steuerruecklage": steuer,
+                "gesichert": gesichert, "luecke": luecke,
+                "text": text}
+
+    # -- Erinnerungen -------------------------------------------------------
+
+    def erinnerung_anlegen(self, was: str, datum: str,
+                           wiederholung: str = "einmalig",
+                           bereich: str = "privat", notiz: str = "") -> dict:
+        """Merkt sich etwas mit Datum - auch jährlich wiederkehrend."""
+        was = (was or "").strip()
+        if not was:
+            return {"ok": False, "fehler": "Woran soll ich erinnern?"}
+        datum = (datum or "").strip()
+        try:
+            datetime.strptime(datum, "%Y-%m-%d")
+        except ValueError:
+            return {"ok": False,
+                    "fehler": "Das Datum muss als JJJJ-MM-TT kommen, bekommen habe "
+                              "ich '%s'." % datum}
+        wiederholung = (wiederholung or "einmalig").strip().lower()
+        if wiederholung not in WIEDERHOLUNGEN:
+            return {"ok": False,
+                    "fehler": "Die Wiederholung muss %s sein."
+                              % " oder ".join(WIEDERHOLUNGEN)}
+        nummer = self.memory._schreiben(
+            "INSERT INTO erinnerungen (was, datum, wiederholung, bereich, notiz, "
+            "erledigt, angelegt) VALUES (?,?,?,?,?,0,?)",
+            (was, datum, wiederholung, (bereich or "privat").lower(), notiz,
+             zeitstempel()))
+        return {"ok": True, "id": nummer,
+                "text": "Gemerkt: %s am %s%s." % (was, datum,
+                        (", %s" % wiederholung) if wiederholung != "einmalig" else "")}
+
+    def _naechster_termin(self, zeile, ab: datetime):
+        """Wann eine Erinnerung das nächste Mal fällig ist."""
+        try:
+            datum = datetime.strptime(zeile["datum"], "%Y-%m-%d")
+        except (ValueError, TypeError):
+            return None
+        if zeile["wiederholung"] == "jaehrlich":
+            kandidat = datum.replace(year=ab.year)
+            if kandidat.date() < ab.date():
+                kandidat = datum.replace(year=ab.year + 1)
+            return kandidat
+        if zeile["wiederholung"] == "monatlich":
+            kandidat = datum
+            while kandidat.date() < ab.date():
+                jahr = kandidat.year + (1 if kandidat.month == 12 else 0)
+                monat = 1 if kandidat.month == 12 else kandidat.month + 1
+                tag = min(kandidat.day, 28)
+                kandidat = kandidat.replace(year=jahr, month=monat, day=tag)
+            return kandidat
+        return datum
+
+    def erinnerungen_faellig(self, tage: int = 14, ab: str = "") -> dict:
+        """Was in den nächsten Tagen ansteht."""
+        heute = datetime.strptime(ab, "%Y-%m-%d") if ab else datetime.now()
+        grenze = heute + timedelta(days=max(1, int(tage or 14)))
+        zeilen = self.memory._lesen("SELECT * FROM erinnerungen WHERE erledigt=0")
+
+        faellig = []
+        for zeile in zeilen:
+            termin = self._naechster_termin(zeile, heute)
+            if termin is None:
+                continue
+            if termin.date() > grenze.date():
+                continue
+            tage_hin = (termin.date() - heute.date()).days
+            faellig.append({"id": zeile["id"], "was": zeile["was"],
+                            "datum": termin.strftime("%Y-%m-%d"),
+                            "in_tagen": tage_hin, "bereich": zeile["bereich"],
+                            "wiederholung": zeile["wiederholung"],
+                            "notiz": zeile["notiz"]})
+        faellig.sort(key=lambda e: e["in_tagen"])
+
+        if not faellig:
+            text = "In den nächsten %d Tagen steht nichts an." % tage
+        else:
+            erste = faellig[0]
+            wann = ("heute" if erste["in_tagen"] == 0
+                    else "morgen" if erste["in_tagen"] == 1
+                    else "in %d Tagen" % erste["in_tagen"]
+                    if erste["in_tagen"] > 0 else "seit %d Tagen überfällig"
+                    % abs(erste["in_tagen"]))
+            text = ("%d Termine in den nächsten %d Tagen. Als nächstes: %s %s."
+                    % (len(faellig), tage, erste["was"], wann))
+        return {"ok": True, "anzahl": len(faellig), "eintraege": faellig,
+                "text": text}
+
+    def erinnerung_erledigen(self, nummer: int) -> dict:
+        """Hakt eine einmalige Erinnerung ab."""
+        zeilen = self.memory._lesen(
+            "SELECT * FROM erinnerungen WHERE id=? AND erledigt=0", (nummer,))
+        if not zeilen:
+            return {"ok": False, "fehler": "Diese Erinnerung gibt es nicht."}
+        if zeilen[0]["wiederholung"] != "einmalig":
+            return {"ok": True,
+                    "text": "%s wiederholt sich %s - ich lasse sie stehen."
+                            % (zeilen[0]["was"], zeilen[0]["wiederholung"])}
+        self.memory._schreiben("UPDATE erinnerungen SET erledigt=1 WHERE id=?",
+                               (nummer,))
+        return {"ok": True, "text": "%s ist abgehakt." % zeilen[0]["was"]}
+
+    def uebersicht(self, akquise=None) -> dict:
+        """Alles Private auf einen Blick."""
+        kosten = self.fixkosten()
+        bedarf = self.bedarfsrechnung(akquise)
+        anstehend = self.erinnerungen_faellig(21)
+        teile = [t for t in (kosten.get("text"), bedarf.get("text"),
+                             anstehend.get("text")) if t]
+        return {"ok": True, "fixkosten": kosten, "bedarf": bedarf,
+                "erinnerungen": anstehend, "text": " ".join(teile)}
 
 
 # =========================================================================
@@ -5396,6 +5857,26 @@ Hebel.""",
                       "fehlende_belege", "kennzahl_setzen", "dashboard_bauen",
                       "verkaufsmuster", "gedaechtnis_durchsuchen"],
     },
+    "privatsekretaer": {
+        "name": "der Privatsekretär",
+        "fachliches": """Deine Aufgabe ist das Leben neben der Firma.
+
+Du führst die privaten Fixkosten getrennt von den betrieblichen. Beim
+Steuerberater dürfen sich die beiden nicht vermischen - deshalb fragst du im
+Zweifel nach, ob etwas privat oder betrieblich ist, statt es zuzuordnen.
+
+Deine wichtigste Rechnung ist die Bedarfsrechnung: wie viel der Betrieb im
+Monat abwerfen muss, damit nach Kosten und Steuerrücklage das Private gedeckt
+ist. Ein Einzelunternehmer hat kein Gehalt - diese Zahl ist sein Gehaltszettel.
+
+Du erinnerst an das, was einmal im Jahr kommt und trotzdem jedes Jahr
+überrascht: Versicherung, Pickerl, Vorauszahlung, Geburtstage.""",
+        "werkzeuge": ["fixkosten_anlegen", "fixkosten_liste",
+                      "fixkosten_streichen", "bedarfsrechnung",
+                      "erinnerung_anlegen", "erinnerungen_faellig",
+                      "notiz_speichern", "punkt_anlegen",
+                      "gedaechtnis_durchsuchen"],
+    },
     "programmierer": {
         "name": "der Programmierer",
         "fachliches": """Deine Aufgabe sind kleine Programme und Auswertungen.
@@ -5552,6 +6033,8 @@ class Team:
         bereich("cashflow", lambda: werkzeuge.akquise.cashflow_prognose(
             3, werkzeuge.bookkeeping))
         bereich("gespraeche", lambda: werkzeuge.call_analysis.verkaufsmuster(30))
+        bereich("bedarf", lambda: werkzeuge.privat.bedarfsrechnung(werkzeuge.akquise))
+        bereich("anstehend", lambda: werkzeuge.privat.erinnerungen_faellig(14))
         bereich("offene_punkte", lambda: {
             "ok": True,
             "punkte": [p["text"] for p in werkzeuge.memory.punkte_offen()]})
@@ -5573,6 +6056,17 @@ class Team:
             teile.append("Laufend gesichert %s im Monat, %d Interessenten offen."
                          % (_euro(pipeline["laufender_umsatz_monat"]),
                             pipeline["offen"]))
+        bedarf = stand["bereiche"].get("bedarf") or {}
+        if bedarf.get("berechenbar") and bedarf.get("luecke") is not None:
+            if bedarf["luecke"] > 0:
+                teile.append("Zum Decken deiner Fixkosten fehlen %s im Monat."
+                             % _euro(bedarf["luecke"]))
+            else:
+                teile.append("Deine Fixkosten sind gedeckt, %s darüber."
+                             % _euro(-bedarf["luecke"]))
+        anstehend = stand["bereiche"].get("anstehend") or {}
+        if anstehend.get("anzahl"):
+            teile.append(anstehend["text"])
         nachfassen = stand["bereiche"].get("nachfassen") or {}
         if nachfassen.get("anzahl"):
             teile.append("Heute sind %d Interessenten zum Nachfassen fällig."
@@ -5966,7 +6460,8 @@ class Dashboard:
 
     def __init__(self, memory=None, bookkeeping=None, call_analysis=None,
                  recall=None, kalender=None, mail=None, routines=None,
-                 scheduler=None, mcp=None, akquise=None, team=None):
+                 scheduler=None, mcp=None, akquise=None, team=None,
+                 privat=None):
         self.memory = memory
         self.bookkeeping = bookkeeping
         self.call_analysis = call_analysis
@@ -5978,6 +6473,7 @@ class Dashboard:
         self.mcp = mcp
         self.akquise = akquise
         self.team = team
+        self.privat = privat
         # Die Sales-Analyse ist eine eigene Seite, wird aber immer mitgebaut -
         # sonst zeigt der Verweis im Kopf auf eine Datei, die es nicht gibt.
         self.verkaufsansicht = Verkaufsansicht(call_analysis, memory)
@@ -6025,6 +6521,14 @@ class Dashboard:
                     6, self.bookkeeping)
             except Exception as fehler:
                 daten["pipeline_fehler"] = str(fehler)
+
+        if self.privat is not None:
+            try:
+                daten["bedarf"] = self.privat.bedarfsrechnung(self.akquise)
+                daten["fixkosten"] = self.privat.fixkosten()
+                daten["erinnerungen"] = self.privat.erinnerungen_faellig(21)
+            except Exception as fehler:
+                daten["bedarf_fehler"] = str(fehler)
 
         if self.team is not None:
             try:
@@ -6222,6 +6726,88 @@ class Dashboard:
             balken(name, betrag, groesster, euro(betrag))
             for name, betrag in list(nach_kategorie.items())[:8])
         return self._panel("Ausgaben je Kategorie", inhalt)
+
+    def _panel_bedarf(self, daten: dict) -> str:
+        """Was der Betrieb abwerfen muss, damit privat alles gedeckt ist.
+
+        Das ist der Gehaltszettel eines Einzelunternehmers - er hat keinen.
+        """
+        bedarf = daten.get("bedarf")
+        if not bedarf or not bedarf.get("berechenbar"):
+            return self._panel(
+                "Was der Betrieb tragen muss",
+                '<p class="leer">Fixkosten sind noch nicht erfasst. Sag Jarvis, '
+                'was monatlich fix rausgeht, dann steht hier, was der Betrieb '
+                'abwerfen muss.</p>', "breit")
+
+        noetig = bedarf["noetiger_umsatz"]
+        gesichert = bedarf.get("gesichert")
+        deckung = prozent(gesichert, noetig) if gesichert is not None else None
+        farbe = ampelfarbe(deckung if deckung is not None else 0, 100, 60)
+
+        if gesichert is None:
+            beschreibung = ("<div class=\"klein\">Noch keine Auftragslage erfasst.</div>")
+        elif bedarf["luecke"] > 0:
+            beschreibung = ('<div class="gross" style="color:%s">%s fehlen</div>'
+                            '<div class="klein">Gesichert laufen %s von %s.<br>'
+                            'Das sind %s im Jahr, die noch hereinkommen müssen.</div>'
+                            % (FARBE_SCHLECHT, euro(bedarf["luecke"]),
+                               euro(gesichert), euro(noetig),
+                               euro(bedarf["luecke"] * 12)))
+        else:
+            beschreibung = ('<div class="gross" style="color:%s">%s darüber</div>'
+                            '<div class="klein">Gesichert laufen %s, nötig sind %s.'
+                            '</div>'
+                            % (FARBE_GUT, euro(-bedarf["luecke"]),
+                               euro(gesichert), euro(noetig)))
+
+        inhalt = ('<div class="ringfeld">%s<div class="ringtext">%s</div></div>'
+                  % (ring(deckung, "gedeckt", 132, farbe), beschreibung))
+        inhalt += self._kacheln([
+            ("Nötig je Monat", euro(noetig), "akzent"),
+            ("Privat fix", euro(bedarf["privat_je_monat"]), ""),
+            ("Firma fix", euro(bedarf["firma_je_monat"]), ""),
+            ("Steuerrücklage", euro(bedarf["steuerruecklage"]), "warn"),
+        ])
+        return self._panel("Was der Betrieb tragen muss", inhalt, "breit",
+                           "%g Prozent Rücklage" % bedarf["steuersatz"])
+
+    def _panel_erinnerungen(self, daten: dict) -> str:
+        """Was in den nächsten Wochen ansteht - privat wie betrieblich."""
+        anstehend = daten.get("erinnerungen")
+        if not anstehend or not anstehend.get("anzahl"):
+            return self._panel("Steht an",
+                               '<p class="leer">In den nächsten drei Wochen '
+                               'steht nichts an.</p>')
+        zeilen = []
+        for eintrag in anstehend["eintraege"][:8]:
+            wann = ("heute" if eintrag["in_tagen"] == 0
+                    else "morgen" if eintrag["in_tagen"] == 1
+                    else "in %d Tagen" % eintrag["in_tagen"])
+            klasse = "warnung" if eintrag["in_tagen"] <= 3 else "grau"
+            zeilen.append('<span class="zeit">%s</span>%s '
+                          '<span class="%s">%s</span> '
+                          '<span class="grau">%s</span>'
+                          % (sicher(eintrag["datum"][5:]), sicher(eintrag["was"]),
+                             klasse, wann, sicher(eintrag["bereich"])))
+        return self._panel("Steht an", self._liste(zeilen, ""), "",
+                           "%d Termine" % anstehend["anzahl"])
+
+    def _panel_fixkosten(self, daten: dict) -> str:
+        """Die laufenden Verpflichtungen, größte zuerst."""
+        kosten = daten.get("fixkosten")
+        if not kosten or not kosten.get("anzahl"):
+            return ""
+        groesster = max([e["je_monat"] for e in kosten["eintraege"]] or [1])
+        inhalt = ""
+        for eintrag in kosten["eintraege"][:9]:
+            inhalt += balken(
+                "%s%s" % (eintrag["name"],
+                          " (Firma)" if eintrag["bereich"] == "firma" else ""),
+                eintrag["je_monat"], groesster, euro(eintrag["je_monat"]),
+                FARBE_AKZENT if eintrag["bereich"] == "firma" else FARBE_WARNUNG)
+        return self._panel("Fixkosten je Monat", inhalt, "",
+                           euro(kosten["gesamt_je_monat"]))
 
     def _panel_pipeline(self, daten: dict) -> str:
         """Die Auftragspipeline nach Stufen - wo Geld auf der Straße liegt."""
@@ -6431,6 +7017,14 @@ class Dashboard:
         if quote is not None:
             marke = "b" if quote >= 90 else "b class=\"rot\""
             teile.append("Belegquote <%s>%d%%</b>" % (marke, round(quote)))
+        bedarf = daten.get("bedarf")
+        if bedarf and bedarf.get("berechenbar"):
+            if bedarf.get("luecke") is not None and bedarf["luecke"] > 0:
+                teile.append('Es fehlen <b class="rot">%s</b> je Monat'
+                             % euro(bedarf["luecke"]))
+            else:
+                teile.append("Nötig <b>%s</b> je Monat"
+                             % euro(bedarf["noetiger_umsatz"]))
         pipeline = daten.get("pipeline")
         if pipeline and pipeline.get("ok") and pipeline.get("offen"):
             teile.append("Gesichert <b>%s</b> je Monat"
@@ -6473,6 +7067,8 @@ class Dashboard:
         panels = "".join(teil for teil in [
             self._panel_belegquote(daten),
             self._panel_zahlen(daten),
+            self._panel_bedarf(daten),
+            self._panel_erinnerungen(daten),
             self._panel_verlauf(daten),
             self._panel_vertrieb(daten),
             self._panel_pipeline(daten),
@@ -6483,6 +7079,7 @@ class Dashboard:
             self._panel_offen(daten),
             self._panel_belege(daten),
             self._panel_kategorien(daten),
+            self._panel_fixkosten(daten),
             self._panel_mail(daten),
             self._panel_notizen(daten),
             self._panel_protokoll(daten),
@@ -7710,6 +8307,7 @@ class Werkzeuge:
         self.call_analysis = CallAnalysis(self.memory)
         self.akquise = Akquise(self.memory, STANDARD_MWST)
         self.werkstatt = Werkstatt(self.memory)
+        self.privat = Privat(self.memory, STEUER_RUECKLAGE)
         self.routines = Routines(self.memory)
         self.mail = Mail()
         self.kalender = Kalender()
@@ -7724,7 +8322,8 @@ class Werkzeuge:
                                    call_analysis=self.call_analysis, recall=self.recall,
                                    kalender=self.kalender, mail=self.mail,
                                    routines=self.routines, mcp=self.mcp,
-                                   akquise=self.akquise, team=self.team)
+                                   akquise=self.akquise, team=self.team,
+                                   privat=self.privat)
         self.stimme = None
 
     def stimme_setzen(self, stimme):
@@ -7868,6 +8467,46 @@ class Werkzeuge:
                      "Was in den nächsten Monaten hereinkommt: gesichert aus "
                      "Aufträgen, gewichtet aus der Pipeline, abzüglich Kosten.",
                      {"monate": ganz}),
+
+            werkzeug("leads_finden",
+                     "Sucht über den Such-Dienst Betriebe in einem Ort, die "
+                     "Reinigung brauchen könnten, und nimmt sie als neue "
+                     "Interessenten auf. Sie stehen auf Wert null, bis "
+                     "angerufen wurde.",
+                     {"ort": text, "branche": text, "anzahl": ganz}, ["ort"]),
+
+            # -- Privat --
+            werkzeug("fixkosten_anlegen",
+                     "Trägt eine wiederkehrende Verpflichtung ein - privat oder "
+                     "betrieblich. Im Zweifel nachfragen, welches von beiden.",
+                     {"name": text, "betrag": zahl,
+                      "rhythmus": {"type": "string",
+                                   "enum": sorted(set(RHYTHMEN))},
+                      "bereich": {"type": "string", "enum": list(BEREICHE)},
+                      "kategorie": text, "faellig_am": text, "notiz": text},
+                     ["name", "betrag"]),
+            werkzeug("fixkosten_liste",
+                     "Alle laufenden Verpflichtungen, auf den Monat gerechnet.",
+                     {"bereich": {"type": "string", "enum": list(BEREICHE)}}),
+            werkzeug("fixkosten_streichen", "Setzt eine Verpflichtung auf inaktiv.",
+                     {"name": text,
+                      "bereich": {"type": "string", "enum": list(BEREICHE)}},
+                     ["name"]),
+            werkzeug("bedarfsrechnung",
+                     "Wie viel Umsatz der Betrieb im Monat braucht, damit nach "
+                     "Kosten und Steuerrücklage das Private gedeckt ist. Die "
+                     "wichtigste Zahl für einen Einzelunternehmer.", {}),
+            werkzeug("erinnerung_anlegen",
+                     "Merkt sich etwas mit Datum, auch jährlich wiederkehrend.",
+                     {"was": text, "datum": text,
+                      "wiederholung": {"type": "string",
+                                       "enum": list(WIEDERHOLUNGEN)},
+                      "bereich": {"type": "string", "enum": list(BEREICHE)},
+                      "notiz": text}, ["was", "datum"]),
+            werkzeug("erinnerungen_faellig",
+                     "Was in den nächsten Tagen ansteht.", {"tage": ganz}),
+            werkzeug("erinnerung_erledigen", "Hakt eine Erinnerung ab.",
+                     {"id": ganz}, ["id"]),
 
             # -- Team --
             werkzeug("mitarbeiter_beauftragen",
@@ -8148,6 +8787,33 @@ class Werkzeuge:
         if name == "cashflow_prognose":
             return self.akquise.cashflow_prognose(int(a.get("monate") or 6),
                                                   self.bookkeeping)
+
+        if name == "leads_finden":
+            return self.akquise.leads_finden(
+                a.get("ort"), a.get("branche", ""), int(a.get("anzahl") or 8),
+                self.welt, self.agent)
+
+        # -- Privat --
+        if name == "fixkosten_anlegen":
+            return self.privat.fixkosten_anlegen(
+                a.get("name"), a.get("betrag"), a.get("rhythmus", "monatlich"),
+                a.get("bereich", "privat"), a.get("kategorie", ""),
+                a.get("faellig_am", ""), a.get("notiz", ""))
+        if name == "fixkosten_liste":
+            return self.privat.fixkosten(a.get("bereich", ""))
+        if name == "fixkosten_streichen":
+            return self.privat.fixkosten_streichen(a.get("name"),
+                                                   a.get("bereich", ""))
+        if name == "bedarfsrechnung":
+            return self.privat.bedarfsrechnung(self.akquise)
+        if name == "erinnerung_anlegen":
+            return self.privat.erinnerung_anlegen(
+                a.get("was"), a.get("datum"), a.get("wiederholung", "einmalig"),
+                a.get("bereich", "privat"), a.get("notiz", ""))
+        if name == "erinnerungen_faellig":
+            return self.privat.erinnerungen_faellig(int(a.get("tage") or 14))
+        if name == "erinnerung_erledigen":
+            return self.privat.erinnerung_erledigen(a.get("id"))
 
         # -- Team --
         if name == "mitarbeiter_beauftragen":

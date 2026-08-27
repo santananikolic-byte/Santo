@@ -161,6 +161,26 @@ Hebel.""",
                       "fehlende_belege", "kennzahl_setzen", "dashboard_bauen",
                       "verkaufsmuster", "gedaechtnis_durchsuchen"],
     },
+    "privatsekretaer": {
+        "name": "der Privatsekretär",
+        "fachliches": """Deine Aufgabe ist das Leben neben der Firma.
+
+Du führst die privaten Fixkosten getrennt von den betrieblichen. Beim
+Steuerberater dürfen sich die beiden nicht vermischen - deshalb fragst du im
+Zweifel nach, ob etwas privat oder betrieblich ist, statt es zuzuordnen.
+
+Deine wichtigste Rechnung ist die Bedarfsrechnung: wie viel der Betrieb im
+Monat abwerfen muss, damit nach Kosten und Steuerrücklage das Private gedeckt
+ist. Ein Einzelunternehmer hat kein Gehalt - diese Zahl ist sein Gehaltszettel.
+
+Du erinnerst an das, was einmal im Jahr kommt und trotzdem jedes Jahr
+überrascht: Versicherung, Pickerl, Vorauszahlung, Geburtstage.""",
+        "werkzeuge": ["fixkosten_anlegen", "fixkosten_liste",
+                      "fixkosten_streichen", "bedarfsrechnung",
+                      "erinnerung_anlegen", "erinnerungen_faellig",
+                      "notiz_speichern", "punkt_anlegen",
+                      "gedaechtnis_durchsuchen"],
+    },
     "programmierer": {
         "name": "der Programmierer",
         "fachliches": """Deine Aufgabe sind kleine Programme und Auswertungen.
@@ -317,6 +337,8 @@ class Team:
         bereich("cashflow", lambda: werkzeuge.akquise.cashflow_prognose(
             3, werkzeuge.bookkeeping))
         bereich("gespraeche", lambda: werkzeuge.call_analysis.verkaufsmuster(30))
+        bereich("bedarf", lambda: werkzeuge.privat.bedarfsrechnung(werkzeuge.akquise))
+        bereich("anstehend", lambda: werkzeuge.privat.erinnerungen_faellig(14))
         bereich("offene_punkte", lambda: {
             "ok": True,
             "punkte": [p["text"] for p in werkzeuge.memory.punkte_offen()]})
@@ -338,6 +360,17 @@ class Team:
             teile.append("Laufend gesichert %s im Monat, %d Interessenten offen."
                          % (_euro(pipeline["laufender_umsatz_monat"]),
                             pipeline["offen"]))
+        bedarf = stand["bereiche"].get("bedarf") or {}
+        if bedarf.get("berechenbar") and bedarf.get("luecke") is not None:
+            if bedarf["luecke"] > 0:
+                teile.append("Zum Decken deiner Fixkosten fehlen %s im Monat."
+                             % _euro(bedarf["luecke"]))
+            else:
+                teile.append("Deine Fixkosten sind gedeckt, %s darüber."
+                             % _euro(-bedarf["luecke"]))
+        anstehend = stand["bereiche"].get("anstehend") or {}
+        if anstehend.get("anzahl"):
+            teile.append(anstehend["text"])
         nachfassen = stand["bereiche"].get("nachfassen") or {}
         if nachfassen.get("anzahl"):
             teile.append("Heute sind %d Interessenten zum Nachfassen fällig."

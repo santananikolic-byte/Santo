@@ -32,7 +32,8 @@ class Dashboard:
 
     def __init__(self, memory=None, bookkeeping=None, call_analysis=None,
                  recall=None, kalender=None, mail=None, routines=None,
-                 scheduler=None, mcp=None, akquise=None, team=None):
+                 scheduler=None, mcp=None, akquise=None, team=None,
+                 privat=None):
         self.memory = memory
         self.bookkeeping = bookkeeping
         self.call_analysis = call_analysis
@@ -44,6 +45,7 @@ class Dashboard:
         self.mcp = mcp
         self.akquise = akquise
         self.team = team
+        self.privat = privat
         # Die Sales-Analyse ist eine eigene Seite, wird aber immer mitgebaut -
         # sonst zeigt der Verweis im Kopf auf eine Datei, die es nicht gibt.
         self.verkaufsansicht = Verkaufsansicht(call_analysis, memory)
@@ -91,6 +93,14 @@ class Dashboard:
                     6, self.bookkeeping)
             except Exception as fehler:
                 daten["pipeline_fehler"] = str(fehler)
+
+        if self.privat is not None:
+            try:
+                daten["bedarf"] = self.privat.bedarfsrechnung(self.akquise)
+                daten["fixkosten"] = self.privat.fixkosten()
+                daten["erinnerungen"] = self.privat.erinnerungen_faellig(21)
+            except Exception as fehler:
+                daten["bedarf_fehler"] = str(fehler)
 
         if self.team is not None:
             try:
@@ -288,6 +298,88 @@ class Dashboard:
             balken(name, betrag, groesster, euro(betrag))
             for name, betrag in list(nach_kategorie.items())[:8])
         return self._panel("Ausgaben je Kategorie", inhalt)
+
+    def _panel_bedarf(self, daten: dict) -> str:
+        """Was der Betrieb abwerfen muss, damit privat alles gedeckt ist.
+
+        Das ist der Gehaltszettel eines Einzelunternehmers - er hat keinen.
+        """
+        bedarf = daten.get("bedarf")
+        if not bedarf or not bedarf.get("berechenbar"):
+            return self._panel(
+                "Was der Betrieb tragen muss",
+                '<p class="leer">Fixkosten sind noch nicht erfasst. Sag Jarvis, '
+                'was monatlich fix rausgeht, dann steht hier, was der Betrieb '
+                'abwerfen muss.</p>', "breit")
+
+        noetig = bedarf["noetiger_umsatz"]
+        gesichert = bedarf.get("gesichert")
+        deckung = prozent(gesichert, noetig) if gesichert is not None else None
+        farbe = ampelfarbe(deckung if deckung is not None else 0, 100, 60)
+
+        if gesichert is None:
+            beschreibung = ("<div class=\"klein\">Noch keine Auftragslage erfasst.</div>")
+        elif bedarf["luecke"] > 0:
+            beschreibung = ('<div class="gross" style="color:%s">%s fehlen</div>'
+                            '<div class="klein">Gesichert laufen %s von %s.<br>'
+                            'Das sind %s im Jahr, die noch hereinkommen müssen.</div>'
+                            % (FARBE_SCHLECHT, euro(bedarf["luecke"]),
+                               euro(gesichert), euro(noetig),
+                               euro(bedarf["luecke"] * 12)))
+        else:
+            beschreibung = ('<div class="gross" style="color:%s">%s darüber</div>'
+                            '<div class="klein">Gesichert laufen %s, nötig sind %s.'
+                            '</div>'
+                            % (FARBE_GUT, euro(-bedarf["luecke"]),
+                               euro(gesichert), euro(noetig)))
+
+        inhalt = ('<div class="ringfeld">%s<div class="ringtext">%s</div></div>'
+                  % (ring(deckung, "gedeckt", 132, farbe), beschreibung))
+        inhalt += self._kacheln([
+            ("Nötig je Monat", euro(noetig), "akzent"),
+            ("Privat fix", euro(bedarf["privat_je_monat"]), ""),
+            ("Firma fix", euro(bedarf["firma_je_monat"]), ""),
+            ("Steuerrücklage", euro(bedarf["steuerruecklage"]), "warn"),
+        ])
+        return self._panel("Was der Betrieb tragen muss", inhalt, "breit",
+                           "%g Prozent Rücklage" % bedarf["steuersatz"])
+
+    def _panel_erinnerungen(self, daten: dict) -> str:
+        """Was in den nächsten Wochen ansteht - privat wie betrieblich."""
+        anstehend = daten.get("erinnerungen")
+        if not anstehend or not anstehend.get("anzahl"):
+            return self._panel("Steht an",
+                               '<p class="leer">In den nächsten drei Wochen '
+                               'steht nichts an.</p>')
+        zeilen = []
+        for eintrag in anstehend["eintraege"][:8]:
+            wann = ("heute" if eintrag["in_tagen"] == 0
+                    else "morgen" if eintrag["in_tagen"] == 1
+                    else "in %d Tagen" % eintrag["in_tagen"])
+            klasse = "warnung" if eintrag["in_tagen"] <= 3 else "grau"
+            zeilen.append('<span class="zeit">%s</span>%s '
+                          '<span class="%s">%s</span> '
+                          '<span class="grau">%s</span>'
+                          % (sicher(eintrag["datum"][5:]), sicher(eintrag["was"]),
+                             klasse, wann, sicher(eintrag["bereich"])))
+        return self._panel("Steht an", self._liste(zeilen, ""), "",
+                           "%d Termine" % anstehend["anzahl"])
+
+    def _panel_fixkosten(self, daten: dict) -> str:
+        """Die laufenden Verpflichtungen, größte zuerst."""
+        kosten = daten.get("fixkosten")
+        if not kosten or not kosten.get("anzahl"):
+            return ""
+        groesster = max([e["je_monat"] for e in kosten["eintraege"]] or [1])
+        inhalt = ""
+        for eintrag in kosten["eintraege"][:9]:
+            inhalt += balken(
+                "%s%s" % (eintrag["name"],
+                          " (Firma)" if eintrag["bereich"] == "firma" else ""),
+                eintrag["je_monat"], groesster, euro(eintrag["je_monat"]),
+                FARBE_AKZENT if eintrag["bereich"] == "firma" else FARBE_WARNUNG)
+        return self._panel("Fixkosten je Monat", inhalt, "",
+                           euro(kosten["gesamt_je_monat"]))
 
     def _panel_pipeline(self, daten: dict) -> str:
         """Die Auftragspipeline nach Stufen - wo Geld auf der Straße liegt."""
@@ -497,6 +589,14 @@ class Dashboard:
         if quote is not None:
             marke = "b" if quote >= 90 else "b class=\"rot\""
             teile.append("Belegquote <%s>%d%%</b>" % (marke, round(quote)))
+        bedarf = daten.get("bedarf")
+        if bedarf and bedarf.get("berechenbar"):
+            if bedarf.get("luecke") is not None and bedarf["luecke"] > 0:
+                teile.append('Es fehlen <b class="rot">%s</b> je Monat'
+                             % euro(bedarf["luecke"]))
+            else:
+                teile.append("Nötig <b>%s</b> je Monat"
+                             % euro(bedarf["noetiger_umsatz"]))
         pipeline = daten.get("pipeline")
         if pipeline and pipeline.get("ok") and pipeline.get("offen"):
             teile.append("Gesichert <b>%s</b> je Monat"
@@ -539,6 +639,8 @@ class Dashboard:
         panels = "".join(teil for teil in [
             self._panel_belegquote(daten),
             self._panel_zahlen(daten),
+            self._panel_bedarf(daten),
+            self._panel_erinnerungen(daten),
             self._panel_verlauf(daten),
             self._panel_vertrieb(daten),
             self._panel_pipeline(daten),
@@ -549,6 +651,7 @@ class Dashboard:
             self._panel_offen(daten),
             self._panel_belege(daten),
             self._panel_kategorien(daten),
+            self._panel_fixkosten(daten),
             self._panel_mail(daten),
             self._panel_notizen(daten),
             self._panel_protokoll(daten),

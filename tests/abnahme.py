@@ -39,6 +39,7 @@ from modules.calendar_mod import ics_termine_lesen, konflikte_finden  # noqa: E4
 from modules.mcp_client import MCPClient, MCPServer  # noqa: E402
 from modules.akquise import Akquise  # noqa: E402
 from modules.scheduler import Scheduler, ist_faellig  # noqa: E402
+from modules.privat import Privat, monatsanteil  # noqa: E402
 from modules.team import ROLLEN, Team  # noqa: E402
 from modules.werkstatt import Werkstatt, name_saeubern  # noqa: E402
 from modules.voice import weckwort_pruefen  # noqa: E402
@@ -320,11 +321,132 @@ def pruefung_akquise(agent):
                                               letzter["aus_pipeline"]))
 
 
+def pruefung_privat(agent):
+    """Das Leben neben der Firma und die Brücke zum Umsatz."""
+    abschnitt("Privat")
+    privat = agent.tools.privat
+
+    proben = [("monatlich", 1200, 1200.0), ("jaehrlich", 1200, 100.0),
+              ("quartalsweise", 300, 100.0), ("halbjaehrlich", 600, 100.0)]
+    falsch = [r for r, b, e in proben if abs(monatsanteil(b, r) - e) > 0.01]
+    pruefen("Rhythmen werden auf den Monat gerechnet", not falsch,
+            ", ".join(falsch) or "vier Rhythmen geprüft")
+
+    pruefen("Ohne Fixkosten wird nichts erfunden",
+            privat.bedarfsrechnung().get("berechenbar") is False,
+            "es wird nach den Fixkosten gefragt")
+
+    for name, betrag, rhythmus, bereich in (
+            ("Miete Wohnung", 950, "monatlich", "privat"),
+            ("Krankenversicherung", 420, "monatlich", "privat"),
+            ("Auto Leasing", 289, "monatlich", "privat"),
+            ("Haushaltsversicherung", 360, "jaehrlich", "privat"),
+            ("Handy", 45, "monatlich", "privat"),
+            ("Strom Gas", 180, "monatlich", "privat"),
+            ("Lager Miete", 250, "monatlich", "firma"),
+            ("Firmenwagen Versicherung", 1080, "jaehrlich", "firma"),
+            ("Buchhaltungssoftware", 29, "monatlich", "firma")):
+        privat.fixkosten_anlegen(name, betrag, rhythmus, bereich)
+
+    kosten = privat.fixkosten()
+    pruefen("Privat und Firma bleiben getrennt",
+            kosten["privat_je_monat"] == 1914.0 and kosten["firma_je_monat"] == 369.0,
+            "privat %.2f, firma %.2f" % (kosten["privat_je_monat"],
+                                         kosten["firma_je_monat"]))
+
+    # Von Hand: Umsatz = Firmenkosten + Privatkosten / (1 - Steuersatz)
+    bedarf = privat.bedarfsrechnung()
+    erwartet = round(369 + 1914 / (1 - privat.steuersatz / 100.0), 2)
+    pruefen("Nötiger Monatsumsatz stimmt",
+            abs(bedarf["noetiger_umsatz"] - erwartet) < 0.02,
+            "%.2f Euro bei %g Prozent Rücklage" % (bedarf["noetiger_umsatz"],
+                                                   privat.steuersatz))
+    # Gegenprobe: Umsatz minus Firmenkosten minus Steuer muss das Private decken
+    gewinn = bedarf["noetiger_umsatz"] - bedarf["firma_je_monat"]
+    uebrig = gewinn * (1 - privat.steuersatz / 100.0)
+    pruefen("Gegenprobe: nach Steuer bleibt genau das Private übrig",
+            abs(uebrig - bedarf["privat_je_monat"]) < 0.02,
+            "%.2f gegen %.2f" % (uebrig, bedarf["privat_je_monat"]))
+
+    mit_lage = privat.bedarfsrechnung(agent.tools.akquise)
+    pruefen("Die Lücke zur Auftragslage wird benannt",
+            mit_lage.get("luecke") is not None,
+            "Lücke %.2f je Monat" % (mit_lage.get("luecke") or 0))
+
+    pruefen("Falsches Datum wird abgewiesen",
+            privat.erinnerung_anlegen("x", "4.9.2026").get("ok") is False)
+    privat.erinnerung_anlegen("Pickerl Firmenwagen", "2026-09-04", "jaehrlich", "firma")
+    privat.erinnerung_anlegen("Geburtstag Mama", "2026-09-12", "jaehrlich")
+    faellig = privat.erinnerungen_faellig(21, ab="2026-08-26")
+    pruefen("Anstehendes wird nach Nähe sortiert",
+            faellig["anzahl"] == 2 and faellig["eintraege"][0]["in_tagen"] == 9,
+            faellig["text"][:52])
+    spaeter = privat.erinnerungen_faellig(400, ab="2026-09-20")
+    pruefen("Jährliche Termine rollen ins Folgejahr",
+            all(e["datum"].startswith("2027") for e in spaeter["eintraege"]
+                if e["wiederholung"] == "jaehrlich"),
+            "nach dem Termin zählt das nächste Jahr")
+
+
+def pruefung_leadfinder(agent):
+    """Neue Betriebe finden - ohne Werte zu erfinden."""
+    abschnitt("Lead-Finder")
+    akquise = agent.tools.akquise
+
+    pruefen("Ohne Ort wird nicht gesucht",
+            akquise.leads_finden("").get("ok") is False)
+
+    class _WeltOhne(object):
+        @staticmethod
+        def recherche(frage):
+            del frage
+            return {"ok": False, "fehler": "Such-Dienst fehlt"}
+
+    class _AgentJa(object):
+        @staticmethod
+        def einsatzbereit():
+            return True
+
+        @staticmethod
+        def json_anfrage(auftrag, **rest):
+            del auftrag, rest
+            return {"ok": True, "daten": {"betriebe": [
+                {"firma": "Ordination Dr. Weber", "branche": "Arztpraxis",
+                 "adresse": "Hauptstr. 3", "telefon": "01 5551234"},
+                {"firma": "Kanzlei Reiter", "branche": "Kanzlei",
+                 "adresse": "Ring 12", "telefon": ""}]}}
+
+    ohne = akquise.leads_finden("Wien", welt=_WeltOhne(), agent=_AgentJa())
+    pruefen("Ohne Such-Dienst kommt ein brauchbarer Hinweis",
+            ohne.get("ok") is False and "mcp_servers.json" in ohne.get("fehler", ""),
+            "es wird gesagt, was einzuschalten ist")
+
+    class _WeltMit(object):
+        @staticmethod
+        def recherche(frage):
+            del frage
+            return {"ok": True, "text": "Dr. Weber ... Kanzlei Reiter ..."}
+
+    erster = akquise.leads_finden("Wien", welt=_WeltMit(), agent=_AgentJa())
+    pruefen("Gefundene Betriebe landen in der Pipeline",
+            erster.get("ok") and len(erster["neu"]) == 2, erster.get("text", "")[:52])
+
+    neue = [z for z in agent.tools.memory._lesen(
+        "SELECT * FROM leads WHERE quelle LIKE 'Recherche%'")]
+    pruefen("Gefundene Betriebe bekommen keinen erfundenen Wert",
+            all(z["wert_monat"] == 0 and z["stufe"] == "neu" for z in neue),
+            "Wert null bis zum Anruf")
+
+    zweiter = akquise.leads_finden("Wien", welt=_WeltMit(), agent=_AgentJa())
+    pruefen("Zweiter Lauf legt nichts doppelt an",
+            zweiter.get("ok") and not zweiter["neu"] and len(zweiter["bekannt"]) == 2)
+
+
 def pruefung_team(agent):
     """Die Fachkräfte - vor allem, dass die Werkzeugtrennung wirklich greift."""
     abschnitt("Team")
     team = agent.tools.team
-    pruefen("Acht Fachkräfte vorhanden", len(ROLLEN) == 8,
+    pruefen("Neun Fachkräfte vorhanden", len(ROLLEN) == 9,
             ", ".join(sorted(ROLLEN)))
     treffer = {"buchhaltung": "buchhalter", "vertrieb": "akquisiteur",
                "mails sortieren": "postmeister", "cashflow": "controller",
@@ -414,6 +536,8 @@ def pruefung_werkzeugvertrag(agent):
         "routinen_liste": {}, "pipeline": {}, "nachfassliste": {},
         "cashflow_prognose": {"monate": 3}, "team_liste": {}, "lagebericht": {},
         "werkstatt_liste": {}, "gedaechtnis_durchsuchen": {"frage": "Berger"},
+        "fixkosten_liste": {}, "bedarfsrechnung": {},
+        "erinnerungen_faellig": {"tage": 14},
         "angebot_kalkulieren": {"qm": 300, "intervall_pro_woche": 1},
     }
     ohne = []
@@ -721,7 +845,7 @@ def pruefung_einzeldatei():
                "Telegram", "Bookkeeping", "CallAnalysis", "Routines", "Kamera",
                "MCPServer", "MCPClient", "Welt", "Messenger", "Bildschirm",
                "Dashboard", "Verkaufsansicht", "Scheduler", "Einrichtung",
-               "Werkzeuge", "JarvisAgent", "Akquise", "Team", "Werkstatt"]
+               "Werkzeuge", "JarvisAgent", "Akquise", "Team", "Werkstatt", "Privat"]
     fehlend = [k for k in klassen if inhalt.count("\nclass %s" % k) != 1]
     pruefen("Einzeldatei enthält alle Klassen genau einmal", not fehlend,
             ", ".join(fehlend) or "%d Klassen" % len(klassen))
@@ -749,6 +873,8 @@ def main() -> int:
     pruefung_buchhaltung(agent)
     pruefung_vertrieb(agent)
     pruefung_akquise(agent)
+    pruefung_leadfinder(agent)
+    pruefung_privat(agent)
     pruefung_team(agent)
     pruefung_werkstatt(agent)
     pruefung_werkzeugvertrag(agent)

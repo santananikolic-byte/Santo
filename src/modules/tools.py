@@ -32,6 +32,7 @@ from modules.dashboard import Dashboard
 from modules.mail import Mail
 from modules.mcp_client import MCPClient
 from modules.memory import Memory, heute_datum
+from modules.privat import BEREICHE, Privat, WIEDERHOLUNGEN, RHYTHMEN
 from modules.messenger import Messenger
 from modules.recall import Recall
 from modules.routines import Routines
@@ -99,6 +100,7 @@ class Werkzeuge:
         self.call_analysis = CallAnalysis(self.memory)
         self.akquise = Akquise(self.memory, config.STANDARD_MWST)
         self.werkstatt = Werkstatt(self.memory)
+        self.privat = Privat(self.memory, config.STEUER_RUECKLAGE)
         self.routines = Routines(self.memory)
         self.mail = Mail()
         self.kalender = Kalender()
@@ -113,7 +115,8 @@ class Werkzeuge:
                                    call_analysis=self.call_analysis, recall=self.recall,
                                    kalender=self.kalender, mail=self.mail,
                                    routines=self.routines, mcp=self.mcp,
-                                   akquise=self.akquise, team=self.team)
+                                   akquise=self.akquise, team=self.team,
+                                   privat=self.privat)
         self.stimme = None
 
     def stimme_setzen(self, stimme):
@@ -257,6 +260,46 @@ class Werkzeuge:
                      "Was in den nächsten Monaten hereinkommt: gesichert aus "
                      "Aufträgen, gewichtet aus der Pipeline, abzüglich Kosten.",
                      {"monate": ganz}),
+
+            werkzeug("leads_finden",
+                     "Sucht über den Such-Dienst Betriebe in einem Ort, die "
+                     "Reinigung brauchen könnten, und nimmt sie als neue "
+                     "Interessenten auf. Sie stehen auf Wert null, bis "
+                     "angerufen wurde.",
+                     {"ort": text, "branche": text, "anzahl": ganz}, ["ort"]),
+
+            # -- Privat --
+            werkzeug("fixkosten_anlegen",
+                     "Trägt eine wiederkehrende Verpflichtung ein - privat oder "
+                     "betrieblich. Im Zweifel nachfragen, welches von beiden.",
+                     {"name": text, "betrag": zahl,
+                      "rhythmus": {"type": "string",
+                                   "enum": sorted(set(RHYTHMEN))},
+                      "bereich": {"type": "string", "enum": list(BEREICHE)},
+                      "kategorie": text, "faellig_am": text, "notiz": text},
+                     ["name", "betrag"]),
+            werkzeug("fixkosten_liste",
+                     "Alle laufenden Verpflichtungen, auf den Monat gerechnet.",
+                     {"bereich": {"type": "string", "enum": list(BEREICHE)}}),
+            werkzeug("fixkosten_streichen", "Setzt eine Verpflichtung auf inaktiv.",
+                     {"name": text,
+                      "bereich": {"type": "string", "enum": list(BEREICHE)}},
+                     ["name"]),
+            werkzeug("bedarfsrechnung",
+                     "Wie viel Umsatz der Betrieb im Monat braucht, damit nach "
+                     "Kosten und Steuerrücklage das Private gedeckt ist. Die "
+                     "wichtigste Zahl für einen Einzelunternehmer.", {}),
+            werkzeug("erinnerung_anlegen",
+                     "Merkt sich etwas mit Datum, auch jährlich wiederkehrend.",
+                     {"was": text, "datum": text,
+                      "wiederholung": {"type": "string",
+                                       "enum": list(WIEDERHOLUNGEN)},
+                      "bereich": {"type": "string", "enum": list(BEREICHE)},
+                      "notiz": text}, ["was", "datum"]),
+            werkzeug("erinnerungen_faellig",
+                     "Was in den nächsten Tagen ansteht.", {"tage": ganz}),
+            werkzeug("erinnerung_erledigen", "Hakt eine Erinnerung ab.",
+                     {"id": ganz}, ["id"]),
 
             # -- Team --
             werkzeug("mitarbeiter_beauftragen",
@@ -537,6 +580,33 @@ class Werkzeuge:
         if name == "cashflow_prognose":
             return self.akquise.cashflow_prognose(int(a.get("monate") or 6),
                                                   self.bookkeeping)
+
+        if name == "leads_finden":
+            return self.akquise.leads_finden(
+                a.get("ort"), a.get("branche", ""), int(a.get("anzahl") or 8),
+                self.welt, self.agent)
+
+        # -- Privat --
+        if name == "fixkosten_anlegen":
+            return self.privat.fixkosten_anlegen(
+                a.get("name"), a.get("betrag"), a.get("rhythmus", "monatlich"),
+                a.get("bereich", "privat"), a.get("kategorie", ""),
+                a.get("faellig_am", ""), a.get("notiz", ""))
+        if name == "fixkosten_liste":
+            return self.privat.fixkosten(a.get("bereich", ""))
+        if name == "fixkosten_streichen":
+            return self.privat.fixkosten_streichen(a.get("name"),
+                                                   a.get("bereich", ""))
+        if name == "bedarfsrechnung":
+            return self.privat.bedarfsrechnung(self.akquise)
+        if name == "erinnerung_anlegen":
+            return self.privat.erinnerung_anlegen(
+                a.get("was"), a.get("datum"), a.get("wiederholung", "einmalig"),
+                a.get("bereich", "privat"), a.get("notiz", ""))
+        if name == "erinnerungen_faellig":
+            return self.privat.erinnerungen_faellig(int(a.get("tage") or 14))
+        if name == "erinnerung_erledigen":
+            return self.privat.erinnerung_erledigen(a.get("id"))
 
         # -- Team --
         if name == "mitarbeiter_beauftragen":

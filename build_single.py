@@ -50,6 +50,7 @@ BAULISTE = [
     "modules/bookkeeping",
     "modules/call_analysis",
     "modules/akquise",
+    "modules/privat",
     "modules/routines",
     "modules/camera",
     "modules/mcp_client",

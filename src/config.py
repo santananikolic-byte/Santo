@@ -147,6 +147,9 @@ BRIEFING_ABENDS = _text("BRIEFING_ABENDS", "19:30")
 
 # Buchhaltung
 STANDARD_MWST = _zahl("STANDARD_MWST", 20.0)
+# Rücklage für Einkommensteuer und Sozialversicherung zusammen. Grob, aber
+# besser als keine Rücklage - der Steuerberater nennt den genauen Satz.
+STEUER_RUECKLAGE = _zahl("STEUER_RUECKLAGE", 30.0)
 WAEHRUNG = _text("WAEHRUNG", "EUR")
 
 # Welt

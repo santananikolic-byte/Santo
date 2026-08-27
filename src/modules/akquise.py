@@ -441,6 +441,90 @@ class Akquise:
         return {"ok": True, "anzahl": len(eintraege), "eintraege": eintraege,
                 "text": text}
 
+    # -- Neue Interessenten finden -----------------------------------------
+
+    def leads_finden(self, ort: str, branche: str = "", anzahl: int = 8,
+                     welt=None, agent=None) -> dict:
+        """Sucht Betriebe in einem Ort, die Reinigung brauchen könnten.
+
+        Der Weg: über den Such-Dienst nach Betrieben suchen, die Trefferliste
+        von Claude in Name, Adresse und Telefon zerlegen lassen und daraus
+        Interessenten anlegen. Was schon in der Liste steht, wird übersprungen.
+
+        **Was das ist und was nicht:** Das sind Betriebe, die es gibt - keine
+        Interessenten. Ob sie überhaupt Bedarf haben, weiß niemand, bis
+        angerufen wurde. Deshalb landen sie auf der Stufe 'neu' mit dem
+        nächsten Schritt "anrufen", und ihr Wert steht auf null, bis die
+        Quadratmeter bekannt sind. Eine Pipeline mit geschätzten Werten für
+        Betriebe, mit denen nie jemand gesprochen hat, wäre eine Lüge.
+        """
+        ort = (ort or "").strip()
+        if not ort:
+            return {"ok": False, "fehler": "In welchem Ort soll ich suchen?"}
+        if welt is None:
+            return {"ok": False, "fehler": "Die Suche ist nicht verfügbar."}
+        if agent is None or not getattr(agent, "einsatzbereit", lambda: False)():
+            return {"ok": False,
+                    "fehler": "Ohne Anthropic-Schlüssel kann ich die Treffer nicht "
+                              "auswerten."}
+
+        branchen = branche.strip() if branche else \
+            "Arztpraxen, Steuerberater, Kanzleien, Autohäuser, Fitnessstudios"
+        anfrage = ("%s in %s mit Adresse und Telefonnummer" % (branchen, ort))
+        gefunden = welt.recherche(anfrage)
+        if not gefunden.get("ok"):
+            return {"ok": False,
+                    "fehler": "Für die Suche fehlt der Such-Dienst. In "
+                              "config/mcp_servers.json den Eintrag 'suche' auf "
+                              "\"aus\": false stellen und einen Brave-Schlüssel "
+                              "eintragen. (%s)" % gefunden.get("fehler", "")[:80]}
+
+        auftrag = (
+            "Aus dieser Trefferliste sollen Betriebe für die Kaltakquise einer "
+            "Gebäudereinigung herausgezogen werden.\n\n"
+            "Gib ausschließlich JSON zurück: {\"betriebe\": [{\"firma\": ..., "
+            "\"branche\": ..., \"adresse\": ..., \"telefon\": ...}]}\n\n"
+            "Nimm höchstens %d Betriebe. Nimm nur echte, benannte Betriebe mit "
+            "Ortsbezug - keine Verzeichnisse, keine Portale, keine "
+            "Sammelseiten. Fehlt eine Telefonnummer oder Adresse, lass das Feld "
+            "leer, statt etwas zu erfinden.\n\nTrefferliste:\n%s"
+            % (int(anzahl or 8), gefunden.get("text", "")[:6000]))
+        antwort = agent.json_anfrage(auftrag)
+        if not antwort.get("ok"):
+            return {"ok": False,
+                    "fehler": "Die Trefferliste war nicht auswertbar: %s"
+                              % antwort.get("fehler", "")}
+
+        betriebe = (antwort["daten"] or {}).get("betriebe") or []
+        neu, bekannt = [], []
+        for eintrag in betriebe[:int(anzahl or 8)]:
+            firma = str(eintrag.get("firma") or "").strip()
+            if not firma:
+                continue
+            ergebnis = self.lead_anlegen(
+                firma, telefon=str(eintrag.get("telefon") or ""),
+                adresse=str(eintrag.get("adresse") or ""),
+                quelle="Recherche %s" % ort,
+                notiz=str(eintrag.get("branche") or ""),
+                naechster_schritt="anrufen und fragen, wer die Reinigung macht")
+            if ergebnis.get("ok"):
+                neu.append(firma)
+            else:
+                bekannt.append(firma)
+
+        if not neu:
+            text = ("Ich habe %d Betriebe gefunden, aber keiner ist neu%s."
+                    % (len(betriebe), " - alle stehen schon in der Liste"
+                       if bekannt else ""))
+        else:
+            text = ("%d neue Betriebe in %s aufgenommen: %s. Sie stehen auf 'neu' "
+                    "mit Wert null - was sie wert sind, weißt du erst nach dem "
+                    "Anruf.%s"
+                    % (len(neu), ort, ", ".join(neu[:5]),
+                       (" %d kanntest du schon." % len(bekannt)) if bekannt else ""))
+        return {"ok": True, "neu": neu, "bekannt": bekannt,
+                "gefunden": len(betriebe), "text": text}
+
     # -- Cashflow -----------------------------------------------------------
 
     def cashflow_prognose(self, monate: int = 6, bookkeeping=None) -> dict:
