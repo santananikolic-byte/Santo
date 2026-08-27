@@ -249,7 +249,8 @@ src/modules/webapp.py      Server, Freigabe-Brücke, Schnittstelle
 src/modules/webseite.py    die Oberfläche als eine Datei
 landing/index.html         Verkaufsseite, eigenständig, ohne externe Anfragen
 landing/anleitung.html     Bauanleitung als Unterseite, beide gegenseitig verlinkt
-tests/abnahme.py           führt die Abnahmeliste wirklich aus
+tests/bauauftrag.py        die 29 Punkte der Abnahmeliste, wörtlich
+tests/abnahme.py           die volle Prüfung, 114 Punkte
 tests/mcp_testserver.py    MCP-Server zum Prüfen der Freigabelogik
 config/mcp_servers.json    externe Dienste (wird beim ersten Start angelegt)
 ```
@@ -258,7 +259,8 @@ Bearbeitet werden die Module unter `src/`. Danach:
 
 ```bash
 python3 build_single.py     # baut jarvis.py neu
-python3 tests/abnahme.py    # führt die Abnahmeliste aus
+python3 tests/bauauftrag.py # die Abnahmeliste aus dem Bauauftrag, 29 Punkte
+python3 tests/abnahme.py    # die volle Prüfung, 114 Punkte
 python3 jarvis.py test      # Selbsttest
 ```
 

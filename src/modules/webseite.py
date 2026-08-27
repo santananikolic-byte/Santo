@@ -515,6 +515,17 @@ main,.gespraech,.verlauf,.eingabe,.blase,.kachel{min-width:0}
     el("schnell").appendChild(knopf);
   });
 
+  /* ---------- Was Jarvis von selbst sagt ---------- */
+  function meldungenHolen() {
+    holen("/api/meldungen").then(function (a) {
+      (a.meldungen || []).forEach(function (m) {
+        blase("jarvis", m.text);
+        sprich(m.text);
+      });
+      if ((a.meldungen || []).length) { lageHolen(); kachelnHolen(); }
+    }).catch(function () {});
+  }
+
   /* ---------- Freigaben ---------- */
   function freigabenHolen() {
     holen("/api/freigaben").then(function (a) {
@@ -561,6 +572,7 @@ main,.gespraech,.verlauf,.eingabe,.blase,.kachel{min-width:0}
   lageHolen();
   kachelnHolen();
   setInterval(freigabenHolen, 1500);
+  setInterval(meldungenHolen, 5000);
   setInterval(lageHolen, 45000);
   setInterval(kachelnHolen, 60000);
   feld.focus();

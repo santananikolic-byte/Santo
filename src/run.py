@@ -261,9 +261,13 @@ def webbetrieb(argumente=None):
     del stimme
     web = JarvisWeb(agent, port=port, offen=offen)
 
+    # Der Zeitplan meldet in die Web-App, nicht ins Terminal - dort schaut
+    # um 6:45 niemand hin.
     zeitplan = Scheduler(agent=agent, routines=agent.tools.routines,
-                         ausgabe=lambda text: print("[zeitplan] %s" % text))
+                         ausgabe=web.melden)
     zeitplan.start()
+    print("  Briefings: morgens %s, abends %s"
+          % (config.BRIEFING_MORGENS, config.BRIEFING_ABENDS))
 
     adresse = web.adresse()
     print("  Jarvis läuft jetzt im Browser:")

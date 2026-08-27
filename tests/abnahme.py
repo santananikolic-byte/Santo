@@ -840,6 +840,22 @@ def pruefung_webapp(agent):
         code, inhalt = rufen("/api/werkzeug", koerper={"name": "pipeline"})
         pruefen("Ein Werkzeug lässt sich über die Schnittstelle aufrufen",
                 code == 200 and json.loads(inhalt).get("ok") is True)
+
+        # Der Zeitplan meldet in die Web-App. Ein Briefing, das nur ins
+        # Terminal geht, hört um 6:45 niemand.
+        web.melden("Guten Morgen. Heute drei Termine.")
+        code, inhalt = rufen("/api/meldungen")
+        meldungen = json.loads(inhalt).get("meldungen", []) if code == 200 else []
+        pruefen("Briefings des Zeitplans erreichen den Browser",
+                len(meldungen) == 1 and "Guten Morgen" in meldungen[0]["text"],
+                "wird geholt und vorgelesen")
+        code, inhalt = rufen("/api/meldungen")
+        pruefen("Eine abgeholte Meldung kommt nicht doppelt",
+                json.loads(inhalt).get("meldungen") == [])
+        pruefen("Die Meldung steht auch im Gesprächsverlauf",
+                any("Guten Morgen" in z["text"]
+                    for z in agent.memory.verlauf_letzte(5)),
+                "geht nicht verloren, wenn der Browser zu war")
     finally:
         web.stoppen()
 

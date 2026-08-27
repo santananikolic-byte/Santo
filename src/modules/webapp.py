@@ -112,9 +112,40 @@ class JarvisWeb:
         # Im WLAN ist ein Schlüssel Pflicht - dieser Server darf zu viel.
         self.token = token or (secrets.token_urlsafe(18) if self.offen else "")
         self.freigabe = WebFreigabe()
+        # Was Jarvis von sich aus sagt - Briefings, Routinen, Zeitplan. Der
+        # Browser holt es ab, liest es vor und zeigt es im Gespraech.
+        self.meldungen = []
+        self._meldesperre = threading.Lock()
         self.server = None
         self._denkt = threading.Lock()
         agent.tools.freigabe_kanal_setzen(self.freigabe)
+
+    def melden(self, text: str):
+        """Nimmt eine Meldung des Zeitplans auf.
+
+        Sie wird zusaetzlich in den Gespraechsverlauf geschrieben. Ist der
+        Browser gerade zu, geht das Morgenbriefing sonst verloren - und ein
+        Briefing, das niemand hoert, ist keines.
+        """
+        text = (text or "").strip()
+        if not text:
+            return
+        print("[jarvis] %s" % text)
+        try:
+            self.agent.memory.verlauf_anhaengen("assistant", text)
+        except Exception:
+            pass
+        with self._meldesperre:
+            self.meldungen.append({"text": text, "zeit": zeitstempel()})
+            # Mehr als zwanzig ungelesene Meldungen sind ohnehin unlesbar.
+            del self.meldungen[:-20]
+
+    def meldungen_abholen(self) -> list:
+        """Gibt die offenen Meldungen zurueck und leert die Liste."""
+        with self._meldesperre:
+            offen = list(self.meldungen)
+            self.meldungen = []
+        return offen
 
     # -- Adressen -----------------------------------------------------------
 
@@ -239,6 +270,9 @@ class JarvisWeb:
                 "werkzeuge": len(werkzeuge.namen()),
                 "rollen": [r["rolle"] for r in werkzeuge.team.rollen_liste()],
                 "dienste": config.konfig_uebersicht()})
+        if pfad == "/api/meldungen":
+            return self._antworten(behandler, 200,
+                                   {"ok": True, "meldungen": self.meldungen_abholen()})
         if pfad == "/api/freigaben":
             return self._antworten(behandler, 200,
                                    {"ok": True, "offen": self.freigabe.offene()})
