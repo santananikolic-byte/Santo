@@ -47,6 +47,7 @@ BAULISTE = [
     "modules/mail",
     "modules/calendar_mod",
     "modules/telegram_mod",
+    "modules/telefon",
     "modules/bookkeeping",
     "modules/call_analysis",
     "modules/akquise",

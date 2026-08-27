@@ -92,7 +92,8 @@ Du bist ehrlich über Chancen. Ein Angebot ist kein Auftrag.""",
         "werkzeuge": ["lead_anlegen", "lead_weiterstufen", "angebot_kalkulieren",
                       "angebot_ablegen", "nachfassliste", "pipeline",
                       "kontakt_anlegen", "kontakt_suchen", "notiz_speichern",
-                      "punkt_anlegen", "gedaechtnis_durchsuchen"],
+                      "punkt_anlegen", "gedaechtnis_durchsuchen",
+                      "anrufen", "sms_senden", "anrufliste"],
     },
     "terminplaner": {
         "name": "der Terminplaner",
@@ -105,7 +106,7 @@ Du denkst an die Fahrzeit zwischen zwei Objekten mit. Liegen zwei Termine
 räumlich weit auseinander und zeitlich eng, weist du darauf hin.""",
         "werkzeuge": ["termine_lesen", "termin_anlegen", "punkt_anlegen",
                       "punkte_offen", "punkt_erledigen", "kontakt_suchen",
-                      "gedaechtnis_durchsuchen"],
+                      "gedaechtnis_durchsuchen", "sms_senden", "anrufen"],
     },
     "postmeister": {
         "name": "der Postbearbeiter",
@@ -134,6 +135,7 @@ die ist kein Preis kalkulierbar".
 Kommt derselbe Einwand dreimal, ist das kein Zufall, sondern eine Lücke im
 Angebot. Darauf weist du hin.""",
         "werkzeuge": ["gespraech_festhalten", "offene_leads", "verkaufsmuster",
+                      "anrufliste",
                       "kontakt_suchen", "kontakt_anlegen", "notiz_speichern",
                       "gedaechtnis_durchsuchen"],
     },

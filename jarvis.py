@@ -60,6 +60,8 @@ import urllib.parse
 import urllib.request
 import uuid
 import wave
+import xml.sax.saxutils
+from base64 import b64encode
 from datetime import datetime, timedelta
 from email.message import EmailMessage
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -262,6 +264,12 @@ STANDARD_MWST = _zahl("STANDARD_MWST", 20.0)
 STEUER_RUECKLAGE = _zahl("STEUER_RUECKLAGE", 30.0)
 WAEHRUNG = _text("WAEHRUNG", "EUR")
 
+# Telefon (Twilio)
+TWILIO_SID = _text("TWILIO_SID")
+TWILIO_TOKEN = _text("TWILIO_TOKEN")
+TWILIO_NUMMER = _text("TWILIO_NUMMER")
+LANDESVORWAHL = _text("LANDESVORWAHL", "+43")
+
 # Welt
 WETTER_ORT = _text("WETTER_ORT", "Wien")
 
@@ -339,6 +347,7 @@ def konfig_uebersicht() -> dict:
         "E-Mail senden": bool(SMTP_HOST and SMTP_USER),
         "Kalender": bool(CALDAV_URL),
         "Supabase": bool(SUPABASE_URL and SUPABASE_KEY),
+        "Telefon": bool(TWILIO_SID and TWILIO_TOKEN and TWILIO_NUMMER),
     }
 
 
@@ -2342,6 +2351,220 @@ class Telegram:
         if eingabe in JA_WOERTER:
             return {"erlaubt": True, "kanal": "terminal", "grund": "Freigabe erteilt"}
         return {"erlaubt": False, "kanal": "terminal", "grund": "abgelehnt"}
+
+
+# =========================================================================
+# telefon  -  Telefon - anrufen und SMS schicken über Twilio.
+# 
+# Bewusst ohne das Paket ``twilio``: Die Schnittstelle ist gewöhnliches HTTP mit
+# Basic-Auth. Ein Paket weniger, das bei der Installation schiefgehen kann.
+# 
+# Was hier geht und was nicht, ehrlich:
+# 
+# * **Anrufen und etwas ansagen** geht. Jarvis ruft eine Nummer an und spricht
+#   einen Text - etwa eine Terminerinnerung an einen Kunden.
+# * **Ein Gespräch führen** geht damit noch nicht. Dafür müsste Twilio den
+#   Rechner von außen erreichen können, und der steht hinter dem Router. Das
+#   braucht eine öffentliche Adresse; solange die fehlt, sagt das Modul das,
+#   statt so zu tun.
+# * **SMS** geht.
+# 
+# Jeder Anruf und jede SMS ist eine Wirkung nach außen und braucht deshalb eine
+# Freigabe. Die holt der Werkzeugkatalog ein, bevor hier etwas passiert.
+# =========================================================================
+
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+
+
+TWILIO_BASIS = "https://api.twilio.com/2010-04-01"
+
+SCHEMA_TELEFON = """
+CREATE TABLE IF NOT EXISTS anrufe (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    richtung TEXT DEFAULT 'raus',
+    nummer TEXT NOT NULL,
+    art TEXT DEFAULT 'anruf',
+    text TEXT DEFAULT '',
+    kennung TEXT DEFAULT '',
+    status TEXT DEFAULT '',
+    angelegt TEXT NOT NULL
+);
+"""
+
+
+def nummer_pruefen(nummer: str):
+    """Prüft eine Telefonnummer und bringt sie in die internationale Form.
+
+    Twilio nimmt nur E.164, also ``+43664...``. Eine Nummer mit 0 vorne wird
+    sonst kommentarlos abgelehnt - deshalb wird hier übersetzt, solange die
+    Landesvorwahl bekannt ist.
+    """
+    eingabe = str(nummer or "").strip()
+    if not eingabe:
+        return None, "Es fehlt die Telefonnummer."
+    roh = "".join(z for z in eingabe if z.isdigit() or z == "+")
+    if not roh:
+        return None, ("In '%s' steckt keine einzige Ziffer - das ist keine "
+                      "Telefonnummer." % eingabe[:60])
+    if roh.startswith("+"):
+        ziffern = roh[1:]
+        if not (8 <= len(ziffern) <= 15):
+            return None, "Die Nummer %s hat keine plausible Länge." % nummer
+        return "+" + ziffern, ""
+    if roh.startswith("00"):
+        return nummer_pruefen("+" + roh[2:])
+    if roh.startswith("0"):
+        vorwahl = (LANDESVORWAHL or "").strip()
+        if not vorwahl:
+            return None, ("Die Nummer %s beginnt mit null. Ich brauche die "
+                          "Landesvorwahl - trag LANDESVORWAHL in die "
+                          "Einstellungen ein, zum Beispiel +43." % nummer)
+        return nummer_pruefen(vorwahl + roh[1:])
+    return None, ("Die Nummer %s verstehe ich nicht. Schreib sie international, "
+                  "zum Beispiel +43664123456." % nummer)
+
+
+class Telefon:
+    """Ruft an und schickt SMS. Ohne Zugangsdaten meldet sich alles sauber ab."""
+
+    def __init__(self, memory: Memory = None):
+        self.memory = memory or Memory()
+        db_schema_anlegen(SCHEMA_TELEFON, self.memory.db_pfad)
+
+    # -- Verfügbarkeit ------------------------------------------------------
+
+    def verfuegbar(self) -> bool:
+        """Ist Twilio eingerichtet?"""
+        return bool(TWILIO_SID and TWILIO_TOKEN
+                    and TWILIO_NUMMER)
+
+    def zustand(self) -> dict:
+        """Kurzer Überblick für den Selbsttest."""
+        return {"eingerichtet": self.verfuegbar(),
+                "eigene_nummer": TWILIO_NUMMER or "nicht gesetzt",
+                "gespraech_moeglich": False,
+                "hinweis": "Ansagen und SMS gehen. Für ein echtes Gespräch "
+                           "bräuchte Twilio eine öffentliche Adresse zu diesem "
+                           "Rechner."}
+
+    # -- Schnittstelle ------------------------------------------------------
+
+    def _aufruf(self, pfad: str, felder: dict) -> dict:
+        """Ruft die Twilio-Schnittstelle auf."""
+        if not self.verfuegbar():
+            return {"ok": False,
+                    "fehler": "Das Telefon ist nicht eingerichtet. In den "
+                              "Einstellungen TWILIO_SID, TWILIO_TOKEN und "
+                              "TWILIO_NUMMER eintragen."}
+        ziel = "%s/Accounts/%s/%s" % (TWILIO_BASIS, TWILIO_SID, pfad)
+        zugang = b64encode(("%s:%s" % (TWILIO_SID, TWILIO_TOKEN))
+                           .encode("utf-8")).decode("ascii")
+        anfrage = urllib.request.Request(
+            ziel, data=urllib.parse.urlencode(felder).encode("utf-8"),
+            method="POST",
+            headers={"Authorization": "Basic %s" % zugang,
+                     "Content-Type": "application/x-www-form-urlencoded"})
+        try:
+            with urllib.request.urlopen(anfrage, timeout=30) as antwort:
+                return {"ok": True, "daten": json.loads(antwort.read().decode("utf-8"))}
+        except urllib.error.HTTPError as fehler:
+            try:
+                inhalt = json.loads(fehler.read().decode("utf-8"))
+                meldung = inhalt.get("message", str(fehler))
+                code = inhalt.get("code")
+            except (ValueError, OSError):
+                meldung, code = str(fehler), None
+            if fehler.code == 401:
+                return {"ok": False,
+                        "fehler": "Twilio lehnt die Zugangsdaten ab. Bitte SID und "
+                                  "Token neu kopieren."}
+            if code == 21608:
+                return {"ok": False,
+                        "fehler": "Dein Twilio-Konto ist noch ein Testkonto. Es darf "
+                                  "nur an Nummern anrufen, die du dort bestätigt hast."}
+            if code == 21211:
+                return {"ok": False,
+                        "fehler": "Twilio hält die Nummer für ungültig."}
+            return {"ok": False, "fehler": "Twilio meldet: %s" % meldung[:200]}
+        except (urllib.error.URLError, OSError, ValueError) as fehler:
+            return {"ok": False, "fehler": "Twilio ist nicht erreichbar: %s" % fehler}
+
+    # -- Anrufen ------------------------------------------------------------
+
+    def anrufen(self, nummer: str, ansage: str) -> dict:
+        """Ruft eine Nummer an und sagt einen Text an.
+
+        Die Freigabe holt der Werkzeugkatalog ein, bevor diese Methode läuft.
+        """
+        ansage = (ansage or "").strip()
+        if not ansage:
+            return {"ok": False, "fehler": "Was soll ich am Telefon sagen?"}
+        ziel, fehler = nummer_pruefen(nummer)
+        if ziel is None:
+            return {"ok": False, "fehler": fehler}
+
+        # Der Text wird als XML übergeben - er muss maskiert werden, sonst
+        # zerlegt ein Kundenname mit Ampersand die ganze Ansage.
+        sicher = xml.sax.saxutils.escape(ansage[:1500])
+        twiml = ('<?xml version="1.0" encoding="UTF-8"?><Response>'
+                 '<Pause length="1"/>'
+                 '<Say language="de-DE" voice="Polly.Vicki">%s</Say>'
+                 '<Pause length="1"/>'
+                 '<Say language="de-DE" voice="Polly.Vicki">%s</Say>'
+                 '</Response>' % (sicher, sicher))
+
+        ergebnis = self._aufruf("Calls.json", {
+            "To": ziel, "From": TWILIO_NUMMER, "Twiml": twiml})
+        if not ergebnis.get("ok"):
+            self._merken("raus", ziel, "anruf", ansage, "", "fehlgeschlagen")
+            return ergebnis
+
+        kennung = (ergebnis["daten"] or {}).get("sid", "")
+        self._merken("raus", ziel, "anruf", ansage, kennung,
+                     (ergebnis["daten"] or {}).get("status", "gestartet"))
+        return {"ok": True, "nummer": ziel, "kennung": kennung,
+                "text": "Ich rufe %s an und sage die Nachricht zweimal an." % ziel}
+
+    def sms_senden(self, nummer: str, text: str) -> dict:
+        """Schickt eine SMS."""
+        text = (text or "").strip()
+        if not text:
+            return {"ok": False, "fehler": "Die SMS ist leer."}
+        ziel, fehler = nummer_pruefen(nummer)
+        if ziel is None:
+            return {"ok": False, "fehler": fehler}
+
+        ergebnis = self._aufruf("Messages.json", {
+            "To": ziel, "From": TWILIO_NUMMER, "Body": text[:1500]})
+        if not ergebnis.get("ok"):
+            self._merken("raus", ziel, "sms", text, "", "fehlgeschlagen")
+            return ergebnis
+        kennung = (ergebnis["daten"] or {}).get("sid", "")
+        self._merken("raus", ziel, "sms", text, kennung, "gesendet")
+        return {"ok": True, "nummer": ziel, "kennung": kennung,
+                "text": "SMS an %s ist raus." % ziel}
+
+    def anrufliste(self, limit: int = 20) -> dict:
+        """Was zuletzt telefoniert wurde."""
+        zeilen = self.memory._lesen(
+            "SELECT * FROM anrufe ORDER BY id DESC LIMIT ?", (limit,))
+        return {"ok": True, "anzahl": len(zeilen),
+                "anrufe": [{"nummer": z["nummer"], "art": z["art"],
+                            "status": z["status"], "zeit": z["angelegt"],
+                            "text": (z["text"] or "")[:120]} for z in zeilen],
+                "text": ("Zuletzt: %s" % ", ".join(
+                    "%s an %s" % (z["art"], z["nummer"]) for z in zeilen[:4]))
+                        if zeilen else "Es wurde noch nicht telefoniert."}
+
+    def _merken(self, richtung, nummer, art, text, kennung, status):
+        """Schreibt einen Anruf ins Protokoll."""
+        self.memory._schreiben(
+            "INSERT INTO anrufe (richtung, nummer, art, text, kennung, status, "
+            "angelegt) VALUES (?,?,?,?,?,?,?)",
+            (richtung, nummer, art, (text or "")[:2000], kennung, status,
+             zeitstempel()))
 
 
 # =========================================================================
@@ -5796,7 +6019,8 @@ Du bist ehrlich über Chancen. Ein Angebot ist kein Auftrag.""",
         "werkzeuge": ["lead_anlegen", "lead_weiterstufen", "angebot_kalkulieren",
                       "angebot_ablegen", "nachfassliste", "pipeline",
                       "kontakt_anlegen", "kontakt_suchen", "notiz_speichern",
-                      "punkt_anlegen", "gedaechtnis_durchsuchen"],
+                      "punkt_anlegen", "gedaechtnis_durchsuchen",
+                      "anrufen", "sms_senden", "anrufliste"],
     },
     "terminplaner": {
         "name": "der Terminplaner",
@@ -5809,7 +6033,7 @@ Du denkst an die Fahrzeit zwischen zwei Objekten mit. Liegen zwei Termine
 räumlich weit auseinander und zeitlich eng, weist du darauf hin.""",
         "werkzeuge": ["termine_lesen", "termin_anlegen", "punkt_anlegen",
                       "punkte_offen", "punkt_erledigen", "kontakt_suchen",
-                      "gedaechtnis_durchsuchen"],
+                      "gedaechtnis_durchsuchen", "sms_senden", "anrufen"],
     },
     "postmeister": {
         "name": "der Postbearbeiter",
@@ -5838,6 +6062,7 @@ die ist kein Preis kalkulierbar".
 Kommt derselbe Einwand dreimal, ist das kein Zufall, sondern eine Lücke im
 Angebot. Darauf weist du hin.""",
         "werkzeuge": ["gespraech_festhalten", "offene_leads", "verkaufsmuster",
+                      "anrufliste",
                       "kontakt_suchen", "kontakt_anlegen", "notiz_speichern",
                       "gedaechtnis_durchsuchen"],
     },
@@ -8994,6 +9219,45 @@ class Einrichtung:
             self.sagen("Ich habe keine Nachricht gefunden. Du kannst das später "
                        "nachholen.")
 
+    # -- Schritt 5b: Telefon ------------------------------------------------
+
+    def schritt_telefon(self):
+        """Richtet das Telefon ein - Anrufe und SMS über Twilio."""
+        self.sagen("Wenn du willst, kann ich für dich anrufen und SMS schicken - zum "
+                   "Beispiel eine Terminbestätigung an einen Kunden. Das läuft über "
+                   "einen Dienst namens Twilio und kostet ein paar Cent pro Anruf. "
+                   "Freiwillig. Ohne das funktioniert alles andere genauso.")
+        antwort = self.fragen("Telefon jetzt einrichten? (ja/nein)").lower()
+        if antwort not in ("ja", "j", "yes", "y"):
+            self.ergebnisse["telefon"] = "übersprungen"
+            return
+        self.sagen("Geh auf twilio Punkt com, melde dich an und kauf dir dort eine "
+                   "Telefonnummer. Auf der Startseite stehen dann zwei Werte: Account "
+                   "SID und Auth Token.")
+        sid = self.fragen("Account SID (beginnt mit AC):")
+        if not sid.startswith("AC"):
+            self.ergebnisse["telefon"] = "SID sieht nicht richtig aus"
+            self.sagen("Die SID beginnt normalerweise mit A C. Ich lasse das Telefon "
+                       "erst mal aus, du kannst es später nachholen.")
+            return
+        token = self.fragen("Auth Token:")
+        if not token:
+            self.ergebnisse["telefon"] = "kein Token"
+            return
+        nummer = self.fragen("Deine gekaufte Twilio-Nummer (international, z.B. +43...):")
+        geprueft, fehler = nummer_pruefen(nummer)
+        if geprueft is None:
+            self.ergebnisse["telefon"] = "Nummer unklar"
+            self.sagen(fehler)
+            return
+        env_setzen("TWILIO_SID", sid)
+        env_setzen("TWILIO_TOKEN", token)
+        env_setzen("TWILIO_NUMMER", geprueft)
+        TWILIO_SID, TWILIO_TOKEN, TWILIO_NUMMER = sid, token, geprueft
+        self.ergebnisse["telefon"] = "eingerichtet"
+        self.sagen("Das Telefon ist eingerichtet. Ich frage dich vor jedem Anruf und "
+                   "vor jeder SMS um Erlaubnis.")
+
     @staticmethod
     def _chat_id_holen(token: str) -> str:
         """Liest die Chat-Nummer aus der ersten Nachricht an den Bot."""
@@ -9181,6 +9445,7 @@ class Einrichtung:
         self.schritt_schluessel()
         self.schritt_rechte()
         self.schritt_telegram()
+        self.schritt_telefon()
         self.schritt_mail()
         self.schritt_routinen()
         self.schritt_stimmprofil()
@@ -9258,7 +9523,8 @@ PARAMETER_AKTIONEN = {
 
 # Alles hier drin fragt vor der Ausführung nach einer Freigabe.
 FREIGABE_PFLICHTIG = {"mail_senden", "termin_anlegen", "bildschirm_bedienen",
-                      "nachricht_senden", "skript_ausfuehren"}
+                      "nachricht_senden", "skript_ausfuehren", "anrufen",
+                      "sms_senden"}
 
 
 def parameter_pruefen(wert: str):
@@ -9293,6 +9559,7 @@ class Werkzeuge:
         self.kalender = Kalender()
         self.telegram = Telegram()
         self.kamera = Kamera()
+        self.telefon = Telefon(self.memory)
         self.mcp = MCPClient()
         self.welt = Welt(self.mcp)
         self.bildschirm = Bildschirm(agent)
@@ -9561,6 +9828,18 @@ class Werkzeuge:
                      "Nimmt ein Einzelbild der Kamera auf und beschreibt, was zu sehen "
                      "ist. Kein Dauervideo.",
                      {"frage": text, "behalten": wahr}),
+
+            # -- Telefon --
+            werkzeug("anrufen",
+                     "Ruft eine Nummer an und sagt dort einen Satz an - zum Beispiel "
+                     "eine Terminbestätigung oder einen Rückruf. Braucht eine Freigabe.",
+                     {"nummer": text, "ansage": text}, ["nummer", "ansage"]),
+            werkzeug("sms_senden",
+                     "Schickt eine SMS an eine Nummer. Braucht eine Freigabe.",
+                     {"nummer": text, "text": text}, ["nummer", "text"]),
+            werkzeug("anrufliste",
+                     "Zeigt die letzten Anrufe und SMS mit Nummer, Zeitpunkt und Status.",
+                     {"limit": ganz}),
 
             # -- Bildschirm --
             werkzeug("bildschirm_bedienen",
@@ -9861,6 +10140,14 @@ class Werkzeuge:
             return self.kamera.umschauen(a.get("frage", ""), self.agent,
                                          bool(a.get("behalten")))
 
+        # -- Telefon --
+        if name == "anrufen":
+            return self.telefon.anrufen(a.get("nummer"), a.get("ansage"))
+        if name == "sms_senden":
+            return self.telefon.sms_senden(a.get("nummer"), a.get("text"))
+        if name == "anrufliste":
+            return self.telefon.anrufliste(int(a.get("limit") or 20))
+
         # -- Bildschirm --
         if name == "bildschirm_bedienen":
             return self.bildschirm.bedienen(a.get("ziel", ""))
@@ -9937,6 +10224,7 @@ class Werkzeuge:
             "kalender": self.kalender.zustand(),
             "telegram": self.telegram.verfuegbar(),
             "kamera": self.kamera.zustand(),
+            "telefon": self.telefon.zustand(),
             "bildschirm": self.bildschirm.zustand(),
             "versand": self.messenger.zustand(),
         }

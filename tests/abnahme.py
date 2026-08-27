@@ -537,6 +537,7 @@ def pruefung_werkzeugvertrag(agent):
         "punkte_offen": {}, "auswertung": {}, "fehlende_belege": {},
         "csv_export": {}, "offene_leads": {}, "verkaufsmuster": {},
         "routinen_liste": {}, "pipeline": {}, "nachfassliste": {},
+        "anrufliste": {},
         "cashflow_prognose": {"monate": 3}, "team_liste": {}, "lagebericht": {},
         "werkstatt_liste": {}, "gedaechtnis_durchsuchen": {"frage": "Berger"},
         "fixkosten_liste": {}, "bedarfsrechnung": {},
@@ -550,6 +551,73 @@ def pruefung_werkzeugvertrag(agent):
             ohne.append(name)
     pruefen("Alle geprüften Werkzeuge melden ok", not ohne,
             ", ".join(ohne) or "%d Werkzeuge geprüft" % len(proben))
+
+
+def pruefung_telefon(agent):
+    """Telefon: Nummern, Fehlerwege und die Freigabepflicht."""
+    abschnitt("Telefon")
+    from modules.telefon import nummer_pruefen
+    import config as konfig
+
+    alte_vorwahl = konfig.LANDESVORWAHL
+    konfig.LANDESVORWAHL = "+43"
+    faelle = {
+        "0664 123 4567": "+436641234567",
+        "00436641234567": "+436641234567",
+        "+43 664 123 4567": "+436641234567",
+        "+436641234567": "+436641234567",
+    }
+    falsch = [roh for roh, erwartet in faelle.items()
+              if nummer_pruefen(roh)[0] != erwartet]
+    pruefen("Nummern kommen in internationaler Form an", not falsch,
+            ", ".join(falsch) or "4 Schreibweisen geprüft")
+
+    abgelehnt = ["Unsinn", "", "   ", "+4312", "+4366412345678901234"]
+    durchgerutscht = [x for x in abgelehnt if nummer_pruefen(x)[0] is not None]
+    pruefen("Unbrauchbare Nummern werden abgelehnt", not durchgerutscht,
+            ", ".join(repr(x) for x in durchgerutscht) or "5 Fälle geprüft")
+
+    ohne_grund = [x for x in abgelehnt if not nummer_pruefen(x)[1].strip()]
+    pruefen("Jede Ablehnung nennt einen Grund", not ohne_grund,
+            ", ".join(repr(x) for x in ohne_grund) or "jeder Fall erklärt")
+
+    konfig.LANDESVORWAHL = ""
+    ziel, meldung = nummer_pruefen("0664 123 4567")
+    pruefen("Ohne Landesvorwahl wird nicht geraten",
+            ziel is None and "LANDESVORWAHL" in meldung, meldung[:70])
+    konfig.LANDESVORWAHL = alte_vorwahl
+
+    pruefen("Anrufen und SMS brauchen eine Freigabe",
+            agent.tools.braucht_freigabe("anrufen")
+            and agent.tools.braucht_freigabe("sms_senden"),
+            "beide freigabepflichtig")
+    pruefen("Die Anrufliste braucht keine Freigabe",
+            not agent.tools.braucht_freigabe("anrufliste"), "nur Lesen")
+
+    namen = agent.tools.namen()
+    fehlend = [x for x in ("anrufen", "sms_senden", "anrufliste") if x not in namen]
+    pruefen("Die Telefonwerkzeuge stehen im Katalog", not fehlend,
+            ", ".join(fehlend) or "3 Werkzeuge")
+
+    # Ohne Zugangsdaten darf nichts halb passieren - es muss sauber scheitern.
+    ergebnis = agent.tools.telefon.sms_senden("+436641234567", "Probe")
+    pruefen("Ohne Twilio-Daten scheitert die SMS mit Klartext",
+            not ergebnis.get("ok") and "TWILIO_SID" in ergebnis.get("fehler", ""),
+            ergebnis.get("fehler", "")[:70])
+
+    ergebnis = agent.tools.telefon.anrufen("+436641234567", "")
+    pruefen("Ein Anruf ohne Ansage wird abgelehnt",
+            not ergebnis.get("ok"), ergebnis.get("fehler", "")[:70])
+
+    zustand = agent.tools.telefon.zustand()
+    pruefen("Der Zustand behauptet kein Gespräch, das nicht geht",
+            zustand.get("gespraech_moeglich") is False,
+            "Ansage und SMS ja, Dialog nein")
+
+    liste = agent.tools.run("anrufliste", {})
+    pruefen("Die Anrufliste antwortet auch leer sauber",
+            liste.get("ok") and "anrufe" in liste,
+            "%d Einträge" % liste.get("anzahl", -1))
 
 
 def pruefung_routinen(agent):
@@ -1048,6 +1116,7 @@ def main() -> int:
     pruefung_team(agent)
     pruefung_werkstatt(agent)
     pruefung_werkzeugvertrag(agent)
+    pruefung_telefon(agent)
     pruefung_webapp(agent)
     pruefung_routinen(agent)
     pruefung_zeitplan()

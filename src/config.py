@@ -152,6 +152,12 @@ STANDARD_MWST = _zahl("STANDARD_MWST", 20.0)
 STEUER_RUECKLAGE = _zahl("STEUER_RUECKLAGE", 30.0)
 WAEHRUNG = _text("WAEHRUNG", "EUR")
 
+# Telefon (Twilio)
+TWILIO_SID = _text("TWILIO_SID")
+TWILIO_TOKEN = _text("TWILIO_TOKEN")
+TWILIO_NUMMER = _text("TWILIO_NUMMER")
+LANDESVORWAHL = _text("LANDESVORWAHL", "+43")
+
 # Welt
 WETTER_ORT = _text("WETTER_ORT", "Wien")
 
@@ -229,6 +235,7 @@ def konfig_uebersicht() -> dict:
         "E-Mail senden": bool(SMTP_HOST and SMTP_USER),
         "Kalender": bool(CALDAV_URL),
         "Supabase": bool(SUPABASE_URL and SUPABASE_KEY),
+        "Telefon": bool(TWILIO_SID and TWILIO_TOKEN and TWILIO_NUMMER),
     }
 
 

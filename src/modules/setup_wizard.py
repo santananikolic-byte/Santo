@@ -30,6 +30,7 @@ from modules.mcp_client import vorlage_schreiben
 from modules.memory import Memory
 from modules.routines import Routines
 from modules.speaker import Sprecherprofil
+from modules.telefon import nummer_pruefen
 from modules.voice import Stimme
 
 ANTHROPIC_SEITE = "https://console.anthropic.com/settings/keys"
@@ -447,6 +448,45 @@ class Einrichtung:
             self.sagen("Ich habe keine Nachricht gefunden. Du kannst das später "
                        "nachholen.")
 
+    # -- Schritt 5b: Telefon ------------------------------------------------
+
+    def schritt_telefon(self):
+        """Richtet das Telefon ein - Anrufe und SMS über Twilio."""
+        self.sagen("Wenn du willst, kann ich für dich anrufen und SMS schicken - zum "
+                   "Beispiel eine Terminbestätigung an einen Kunden. Das läuft über "
+                   "einen Dienst namens Twilio und kostet ein paar Cent pro Anruf. "
+                   "Freiwillig. Ohne das funktioniert alles andere genauso.")
+        antwort = self.fragen("Telefon jetzt einrichten? (ja/nein)").lower()
+        if antwort not in ("ja", "j", "yes", "y"):
+            self.ergebnisse["telefon"] = "übersprungen"
+            return
+        self.sagen("Geh auf twilio Punkt com, melde dich an und kauf dir dort eine "
+                   "Telefonnummer. Auf der Startseite stehen dann zwei Werte: Account "
+                   "SID und Auth Token.")
+        sid = self.fragen("Account SID (beginnt mit AC):")
+        if not sid.startswith("AC"):
+            self.ergebnisse["telefon"] = "SID sieht nicht richtig aus"
+            self.sagen("Die SID beginnt normalerweise mit A C. Ich lasse das Telefon "
+                       "erst mal aus, du kannst es später nachholen.")
+            return
+        token = self.fragen("Auth Token:")
+        if not token:
+            self.ergebnisse["telefon"] = "kein Token"
+            return
+        nummer = self.fragen("Deine gekaufte Twilio-Nummer (international, z.B. +43...):")
+        geprueft, fehler = nummer_pruefen(nummer)
+        if geprueft is None:
+            self.ergebnisse["telefon"] = "Nummer unklar"
+            self.sagen(fehler)
+            return
+        config.env_setzen("TWILIO_SID", sid)
+        config.env_setzen("TWILIO_TOKEN", token)
+        config.env_setzen("TWILIO_NUMMER", geprueft)
+        config.TWILIO_SID, config.TWILIO_TOKEN, config.TWILIO_NUMMER = sid, token, geprueft
+        self.ergebnisse["telefon"] = "eingerichtet"
+        self.sagen("Das Telefon ist eingerichtet. Ich frage dich vor jedem Anruf und "
+                   "vor jeder SMS um Erlaubnis.")
+
     @staticmethod
     def _chat_id_holen(token: str) -> str:
         """Liest die Chat-Nummer aus der ersten Nachricht an den Bot."""
@@ -634,6 +674,7 @@ class Einrichtung:
         self.schritt_schluessel()
         self.schritt_rechte()
         self.schritt_telegram()
+        self.schritt_telefon()
         self.schritt_mail()
         self.schritt_routinen()
         self.schritt_stimmprofil()

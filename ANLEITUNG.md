@@ -70,6 +70,9 @@ Recht fehlt.
 - **Recherchieren** — echtes Wetter sofort; für Preise und Flüge einmalig den
   Such-Dienst einschalten (`config/mcp_servers.json`, Eintrag `suche`)
 - **Nachrichten senden** — Telegram, Mail, SMS, WhatsApp (immer mit deinem Ja)
+- **Telefonieren** — „Ruf den Berger an und sag ihm, ich komme um zehn": er
+  wählt und sagt den Satz an. Auch SMS. Vor jedem Anruf fragt er dich.
+  Dafür brauchst du einmalig ein Twilio-Konto — die Einrichtung fragt danach.
 - **Buchhaltung** — Beleg vor die Kamera, er bucht ihn vor
 - **Gedächtnis** — er vergisst nichts, durchsucht alles Frühere
 - **Dein Mac** — mit Bestätigung Dinge bedienen, sortieren

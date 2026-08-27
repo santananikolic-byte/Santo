@@ -37,6 +37,7 @@ from modules.messenger import Messenger
 from modules.recall import Recall
 from modules.routines import Routines
 from modules.team import ROLLEN, Team
+from modules.telefon import Telefon
 from modules.telegram_mod import Telegram
 from modules.werkstatt import Werkstatt
 from modules.world import Welt
@@ -71,7 +72,8 @@ PARAMETER_AKTIONEN = {
 
 # Alles hier drin fragt vor der Ausführung nach einer Freigabe.
 FREIGABE_PFLICHTIG = {"mail_senden", "termin_anlegen", "bildschirm_bedienen",
-                      "nachricht_senden", "skript_ausfuehren"}
+                      "nachricht_senden", "skript_ausfuehren", "anrufen",
+                      "sms_senden"}
 
 
 def parameter_pruefen(wert: str):
@@ -106,6 +108,7 @@ class Werkzeuge:
         self.kalender = Kalender()
         self.telegram = Telegram()
         self.kamera = Kamera()
+        self.telefon = Telefon(self.memory)
         self.mcp = MCPClient()
         self.welt = Welt(self.mcp)
         self.bildschirm = Bildschirm(agent)
@@ -374,6 +377,18 @@ class Werkzeuge:
                      "Nimmt ein Einzelbild der Kamera auf und beschreibt, was zu sehen "
                      "ist. Kein Dauervideo.",
                      {"frage": text, "behalten": wahr}),
+
+            # -- Telefon --
+            werkzeug("anrufen",
+                     "Ruft eine Nummer an und sagt dort einen Satz an - zum Beispiel "
+                     "eine Terminbestätigung oder einen Rückruf. Braucht eine Freigabe.",
+                     {"nummer": text, "ansage": text}, ["nummer", "ansage"]),
+            werkzeug("sms_senden",
+                     "Schickt eine SMS an eine Nummer. Braucht eine Freigabe.",
+                     {"nummer": text, "text": text}, ["nummer", "text"]),
+            werkzeug("anrufliste",
+                     "Zeigt die letzten Anrufe und SMS mit Nummer, Zeitpunkt und Status.",
+                     {"limit": ganz}),
 
             # -- Bildschirm --
             werkzeug("bildschirm_bedienen",
@@ -674,6 +689,14 @@ class Werkzeuge:
             return self.kamera.umschauen(a.get("frage", ""), self.agent,
                                          bool(a.get("behalten")))
 
+        # -- Telefon --
+        if name == "anrufen":
+            return self.telefon.anrufen(a.get("nummer"), a.get("ansage"))
+        if name == "sms_senden":
+            return self.telefon.sms_senden(a.get("nummer"), a.get("text"))
+        if name == "anrufliste":
+            return self.telefon.anrufliste(int(a.get("limit") or 20))
+
         # -- Bildschirm --
         if name == "bildschirm_bedienen":
             return self.bildschirm.bedienen(a.get("ziel", ""))
@@ -750,6 +773,7 @@ class Werkzeuge:
             "kalender": self.kalender.zustand(),
             "telegram": self.telegram.verfuegbar(),
             "kamera": self.kamera.zustand(),
+            "telefon": self.telefon.zustand(),
             "bildschirm": self.bildschirm.zustand(),
             "versand": self.messenger.zustand(),
         }
