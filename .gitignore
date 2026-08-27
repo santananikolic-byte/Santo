@@ -17,3 +17,7 @@ export/
 sprachnachrichten/
 config/mcp_servers.json
 werkstatt/
+
+# Browserprofil - bleibt lokal, enthaelt Anmeldungen
+browserprofil/
+browser_aufnahme.png

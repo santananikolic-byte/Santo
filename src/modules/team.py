@@ -147,6 +147,7 @@ Du nennst, woher eine Angabe stammt. Findest du etwas nicht, sagst du das,
 statt eine plausible Zahl zu nennen. Bei Preisen und Wetter nennst du Datum
 und Quelle mit.""",
         "werkzeuge": ["recherche", "wetter", "flug_suchen", "notiz_speichern",
+                      "browser_oeffnen", "browser_lesen", "browser_auftrag",
                       "gedaechtnis_durchsuchen"],
     },
     "controller": {

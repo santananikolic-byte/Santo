@@ -612,6 +612,14 @@ def selbsttest() -> int:
         melden("Bildschirmsteuerung",
                "ok" if bildschirm.get("pyautogui") and bildschirm.get("pillow") else "fehlt",
                "Skalierung %s" % bildschirm.get("skalierung"))
+        telefon = agent.tools.telefon.zustand()
+        melden("Telefon", "ok" if telefon["eingerichtet"] else "fehlt",
+               ("eigene Nummer %s" % telefon["eigene_nummer"])
+               if telefon["eingerichtet"]
+               else "fuer Anrufe und SMS: TWILIO_SID, TWILIO_TOKEN, TWILIO_NUMMER")
+        browser = agent.tools.browser.zustand()
+        melden("Browser-Steuerung", "ok" if browser["verfuegbar"] else "fehlt",
+               browser["hinweis"])
         wetter = agent.tools.welt.wetter(config.WETTER_ORT)
         melden("Wetter", "ok" if wetter.get("ok") else "fehlt",
                (wetter.get("text") or wetter.get("fehler", ""))[:60])

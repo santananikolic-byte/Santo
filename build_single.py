@@ -56,6 +56,7 @@ BAULISTE = [
     "modules/camera",
     "modules/mcp_client",
     "modules/world",
+    "modules/browser",
     "modules/messenger",
     "modules/computer_use",
     "modules/werkstatt",
@@ -234,6 +235,25 @@ def config_bezug_aufloesen(quelltext: str) -> str:
     return re.sub(r"\bconfig\.([A-Za-z_][A-Za-z0-9_]*)", r"\1", quelltext)
 
 
+def config_reste_finden(quelltext: str) -> list:
+    """Sucht nach ``config``, das die Umschreibung nicht erwischt hat.
+
+    ``config.WERT`` wird ersetzt, ``getattr(config, "WERT")`` aber nicht - dort
+    steht ``config`` als blosser Name. In der Einzeldatei gibt es dieses Modul
+    nicht mehr, und die Zeile stuerzt ab, sobald jemand sie erreicht. Genau so
+    ein Rest hat den Selbsttest der Einzeldatei einmal lautlos zerlegt.
+    Solche Stellen sollen beim Bauen auffallen, nicht beim Nutzer.
+    """
+    reste = []
+    ohne_zeichenketten = re.compile(
+        r'''("""(?:.|\n)*?"""|\'\'\'(?:.|\n)*?\'\'\'|"[^"\n]*"|\'[^\'\n]*\')''')
+    for nummer, zeile in enumerate(quelltext.splitlines(), start=1):
+        nackt = ohne_zeichenketten.sub("", zeile).split("#", 1)[0]
+        if re.search(r"\bconfig\b", nackt):
+            reste.append("Zeile %d: %s" % (nummer, zeile.strip()[:90]))
+    return reste
+
+
 # ---------------------------------------------------------------------------
 # Einlesen
 # ---------------------------------------------------------------------------
@@ -393,6 +413,16 @@ def bauen(ziel: Path = None) -> int:
     for modul in module:
         if modul["name"] != "config":
             modul["rumpf"] = config_bezug_aufloesen(modul["rumpf"])
+            reste = config_reste_finden(modul["rumpf"])
+            if reste:
+                # Abbruch statt Warnung: eine solche Zeile stuerzt spaeter beim
+                # Nutzer ab, und zwar erst dann, wenn er sie zufaellig erreicht.
+                raise SystemExit(
+                    "\nABBRUCH: In '%s' bleibt nach dem Umschreiben ein Bezug auf "
+                    "das Modul 'config' stehen:\n  %s\n\nIn der Einzeldatei gibt es "
+                    "dieses Modul nicht mehr. Schreib die Stelle als config.NAME, "
+                    "dann wird sie ersetzt.\n"
+                    % (modul["name"], "\n  ".join(reste)))
 
     # -- Importe zusammenlegen ---------------------------------------------
     schlichte, aus_modulen = [], {}

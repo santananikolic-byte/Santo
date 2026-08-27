@@ -99,7 +99,7 @@ if [ ! -f "$PAKET_MARKE" ]; then
 
     # numpy und sounddevice: Mikrofon. faster-whisper: Spracherkennung ohne
     # Kosten. pyautogui und pillow: Bildschirmsteuerung.
-    for PAKET in numpy sounddevice faster-whisper pyautogui pillow; do
+    for PAKET in numpy sounddevice faster-whisper pyautogui pillow playwright; do
         printf "  %-16s " "$PAKET"
         if "$PYTHON" -m pip install "$PAKET" >/dev/null 2>&1; then
             echo "[ok]"
@@ -107,6 +107,16 @@ if [ ! -f "$PAKET_MARKE" ]; then
             echo "[--] nicht installiert, Jarvis läuft ohne diese Funktion"
         fi
     done
+    # Playwright braucht nach dem Paket noch den Browser selbst. Ohne diesen
+    # zweiten Schritt ist das Paket da, aber nichts laesst sich oeffnen.
+    if "$PYTHON" -c "import playwright" >/dev/null 2>&1; then
+        printf "  %-16s " "Browser"
+        if "$PYTHON" -m playwright install chromium >/dev/null 2>&1; then
+            echo "[ok]"
+        else
+            echo "[--] Jarvis kann dann keine Webseiten selbst bedienen"
+        fi
+    fi
     touch "$PAKET_MARKE"
     echo ""
     echo "  Für die Stimmerkennung gibt es noch das Paket resemblyzer."

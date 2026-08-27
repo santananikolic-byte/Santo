@@ -158,7 +158,7 @@ fi
 "$PYTHON" -m pip install --quiet --upgrade pip >/dev/null 2>&1
 printf "\n"
 sage "Pakete - jedes einzeln, damit ein Fehlschlag nicht alles mitreisst:"
-for PAKET in numpy sounddevice faster-whisper pyautogui pillow; do
+for PAKET in numpy sounddevice faster-whisper pyautogui pillow playwright; do
     printf "  %-16s\r" "$PAKET"
     if "$PYTHON" -m pip install --quiet "$PAKET" >/dev/null 2>&1; then
         gut "$PAKET            "
@@ -166,6 +166,16 @@ for PAKET in numpy sounddevice faster-whisper pyautogui pillow; do
         ohne "$PAKET - Jarvis laeuft ohne diese Funktion"
     fi
 done
+
+# Playwright bringt den Browser nicht mit - der kommt in einem zweiten Schritt.
+if "$PYTHON" -c "import playwright" >/dev/null 2>&1; then
+    printf "  %-16s\r" "Browser"
+    if "$PYTHON" -m playwright install chromium >/dev/null 2>&1; then
+        gut "Browser            "
+    else
+        ohne "Browser - Jarvis kann dann keine Webseiten selbst bedienen"
+    fi
+fi
 
 # --- 6. Verknuepfung auf dem Schreibtisch ----------------------------------
 

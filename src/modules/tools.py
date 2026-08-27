@@ -24,6 +24,7 @@ import subprocess
 import config
 from modules.akquise import Akquise, SONDERLEISTUNGEN, STUFEN
 from modules.bookkeeping import Bookkeeping, KATEGORIEN
+from modules.browser import Browser
 from modules.calendar_mod import Kalender
 from modules.call_analysis import CallAnalysis
 from modules.camera import Kamera
@@ -73,7 +74,7 @@ PARAMETER_AKTIONEN = {
 # Alles hier drin fragt vor der Ausführung nach einer Freigabe.
 FREIGABE_PFLICHTIG = {"mail_senden", "termin_anlegen", "bildschirm_bedienen",
                       "nachricht_senden", "skript_ausfuehren", "anrufen",
-                      "sms_senden"}
+                      "sms_senden", "browser_auftrag"}
 
 
 def parameter_pruefen(wert: str):
@@ -112,6 +113,7 @@ class Werkzeuge:
         self.mcp = MCPClient()
         self.welt = Welt(self.mcp)
         self.bildschirm = Bildschirm(agent)
+        self.browser = Browser(agent)
         self.messenger = Messenger(self.telegram, self.mail, self.mcp, None)
         self.team = Team(agent, self.memory)
         self.dashboard = Dashboard(memory=self.memory, bookkeeping=self.bookkeeping,
@@ -378,6 +380,21 @@ class Werkzeuge:
                      "ist. Kein Dauervideo.",
                      {"frage": text, "behalten": wahr}),
 
+            # -- Browser --
+            werkzeug("browser_oeffnen",
+                     "Öffnet eine Webseite im Browser und liest, was darauf steht - "
+                     "samt aller Knöpfe und Felder mit ihren Nummern.",
+                     {"adresse": text}, ["adresse"]),
+            werkzeug("browser_lesen",
+                     "Liest die gerade offene Seite noch einmal.", {}),
+            werkzeug("browser_auftrag",
+                     "Erledigt etwas im Browser: sucht, füllt Formulare aus, klickt "
+                     "sich durch. Klickt auf Beschriftungen, nicht auf Bildpunkte. "
+                     "Meldet sich nirgends an und schließt keinen Kauf ab. Braucht "
+                     "eine Freigabe.",
+                     {"ziel": text, "start": text, "schritte_max": ganz}, ["ziel"]),
+            werkzeug("browser_schliessen", "Macht den Browser zu.", {}),
+
             # -- Telefon --
             werkzeug("anrufen",
                      "Ruft eine Nummer an und sagt dort einen Satz an - zum Beispiel "
@@ -436,6 +453,21 @@ class Werkzeuge:
         if self.freigabe_kanal is not None:
             return self.freigabe_kanal.anfordern(name, details)
         return self.telegram.freigabe_einholen(name, details)
+
+    def _zwischenfrage(self, frage: str) -> bool:
+        """Fragt mitten in einem laufenden Vorgang nach - etwa vor dem Bezahlen.
+
+        Wie überall gilt: nur ein klares Ja zählt. Ein Fehler auf dem Weg zur
+        Frage ist ein Nein.
+        """
+        try:
+            if self.freigabe_kanal is not None:
+                entscheidung = self.freigabe_kanal.anfordern("browser_schritt", frage)
+            else:
+                entscheidung = self.telegram.freigabe_einholen("browser_schritt", frage)
+        except Exception:
+            return False
+        return bool(entscheidung.get("erlaubt"))
 
     # -- Ausführung ---------------------------------------------------------
 
@@ -689,6 +721,21 @@ class Werkzeuge:
             return self.kamera.umschauen(a.get("frage", ""), self.agent,
                                          bool(a.get("behalten")))
 
+        # -- Browser --
+        if name == "browser_oeffnen":
+            return self.browser.oeffnen(a.get("adresse"))
+        if name == "browser_lesen":
+            return self.browser.seite_lesen()
+        if name == "browser_auftrag":
+            # Haltepunkte wie ein Bezahlvorgang gehen über denselben Weg wie
+            # jede andere Freigabe - Telegram, Terminal oder Browserfenster.
+            return self.browser.erledigen(
+                a.get("ziel", ""), a.get("start", ""),
+                int(a.get("schritte_max") or 15),
+                bestaetigen=self._zwischenfrage)
+        if name == "browser_schliessen":
+            return self.browser.schliessen()
+
         # -- Telefon --
         if name == "anrufen":
             return self.telefon.anrufen(a.get("nummer"), a.get("ansage"))
@@ -775,5 +822,6 @@ class Werkzeuge:
             "kamera": self.kamera.zustand(),
             "telefon": self.telefon.zustand(),
             "bildschirm": self.bildschirm.zustand(),
+            "browser": self.browser.zustand(),
             "versand": self.messenger.zustand(),
         }

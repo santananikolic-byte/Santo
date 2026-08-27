@@ -88,7 +88,7 @@ class Privat:
         self.memory = memory or Memory()
         # Rücklage für Einkommensteuer und Sozialversicherung zusammen.
         self.steuersatz = float(steuersatz if steuersatz is not None
-                                else getattr(config, "STEUER_RUECKLAGE", 30.0))
+                                else config.STEUER_RUECKLAGE)
         db_schema_anlegen(SCHEMA_PRIVAT, self.memory.db_pfad)
 
     # -- Fixkosten ----------------------------------------------------------

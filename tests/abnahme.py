@@ -15,6 +15,7 @@ nicht bloß behauptet.
 import copy
 import json
 import os
+import pathlib
 import pty
 import select
 import shutil
@@ -551,6 +552,176 @@ def pruefung_werkzeugvertrag(agent):
             ohne.append(name)
     pruefen("Alle geprüften Werkzeuge melden ok", not ohne,
             ", ".join(ohne) or "%d Werkzeuge geprüft" % len(proben))
+
+
+def pruefung_browser(agent):
+    """Browser: Adressen, Haltepunkte und - wenn möglich - eine echte Seite."""
+    abschnitt("Browser")
+    import http.server
+    import socketserver
+    import threading
+    import config as konfig
+    from modules.browser import Browser, adresse_pruefen, haltepunkt
+
+    gut = {"orf.at": "https://orf.at", "https://x.de": "https://x.de",
+           "www.a.at/pfad?q=1": "https://www.a.at/pfad?q=1"}
+    falsch = [roh for roh, erwartet in gut.items() if adresse_pruefen(roh)[0] != erwartet]
+    pruefen("Adressen werden vervollständigt", not falsch,
+            ", ".join(falsch) or "3 Schreibweisen geprüft")
+
+    # file:// und javascript: würden den Browser irgendwohin schicken, nur nicht
+    # ins Netz - beide müssen abprallen.
+    abgelehnt = ["file:///etc/passwd", "javascript:alert(1)", "ftp://x", "", "x y"]
+    durch = [x for x in abgelehnt if adresse_pruefen(x)[0] is not None]
+    pruefen("Nur http und https kommen durch", not durch,
+            ", ".join(durch) or "5 Fälle abgewiesen")
+
+    pruefen("Bezahlknöpfe lösen einen Haltepunkt aus",
+            haltepunkt("Jetzt kostenpflichtig bestellen") == "kostenpflichtig"
+            and haltepunkt("Weiter zur Übersicht") == "",
+            "kostenpflichtig erkannt, Weiter nicht")
+
+    pruefen("browser_auftrag ist freigabepflichtig",
+            agent.tools.braucht_freigabe("browser_auftrag"), "Freigabe nötig")
+    pruefen("Lesen braucht keine Freigabe",
+            not agent.tools.braucht_freigabe("browser_oeffnen")
+            and not agent.tools.braucht_freigabe("browser_lesen"), "nur Lesen")
+
+    # Eine kaputte Freigabe darf nie als Ja durchgehen.
+    class KaputterKanal:
+        @staticmethod
+        def anfordern(aktion, details):
+            raise OSError("Netz weg")
+    alter = agent.tools.freigabe_kanal
+    agent.tools.freigabe_kanal = KaputterKanal()
+    pruefen("Fehler beim Nachfragen gilt als Nein",
+            agent.tools._zwischenfrage("Bezahlen?") is False, "Fehler = Ablehnung")
+    agent.tools.freigabe_kanal = alter
+
+    if not Browser.verfuegbar():
+        pruefen("Ohne Playwright sagt der Browser, was fehlt",
+                "playwright" in Browser(None)._fehlt()["fehler"].lower(),
+                "Klartext statt Absturz")
+        return
+
+    # Ab hier läuft ein echter Browser gegen eine echte Seite.
+    ordner = pathlib.Path(ARBEITSVERZEICHNIS) / "web"
+    ordner.mkdir(parents=True, exist_ok=True)
+    (ordner / "index.html").write_text(
+        '<!doctype html><meta charset="utf-8"><title>Anfrage</title>'
+        '<input type="hidden" name="geheim" value="x">'
+        '<input type="text" name="firma" placeholder="Firmenname">'
+        '<button style="display:none">Unsichtbar</button>'
+        '<button disabled>Gesperrt</button>'
+        '<a href="/zwei.html">Weiter</a>'
+        '<button onclick="document.title=\'Gespeichert\'">Anfrage senden</button>',
+        encoding="utf-8")
+    (ordner / "zwei.html").write_text(
+        '<!doctype html><meta charset="utf-8"><title>Zwei</title>'
+        '<button>Jetzt kostenpflichtig bestellen</button>', encoding="utf-8")
+
+    class Stiller(http.server.SimpleHTTPRequestHandler):
+        def __init__(self, *a, **k):
+            super().__init__(*a, directory=str(ordner), **k)
+
+        def log_message(self, *a):
+            pass
+
+    dienst = socketserver.TCPServer(("127.0.0.1", 0), Stiller)
+    threading.Thread(target=dienst.serve_forever, daemon=True).start()
+    basis = "http://127.0.0.1:%d/" % dienst.server_address[1]
+
+    # In manchen Umgebungen liegt Chromium woanders als Playwright erwartet.
+    alte_wahl = konfig.BROWSER_PROGRAMM
+    if not alte_wahl and os.path.exists("/opt/pw-browsers/chromium"):
+        konfig.BROWSER_PROGRAMM = "/opt/pw-browsers/chromium"
+
+    browser = Browser(None, sichtbar=bool(os.environ.get("DISPLAY")))
+    try:
+        seite = browser.oeffnen(basis)
+        if not seite.get("ok"):
+            pruefen("Der Browser meldet sauber, warum er nicht startet",
+                    "playwright" in seite["fehler"].lower()
+                    or "chromium" in seite["fehler"].lower(), seite["fehler"][:60])
+            return
+
+        namen = [e["name"] for e in seite["elemente"]]
+        pruefen("Nur echt bedienbare Elemente werden gelistet",
+                namen == ["Firmenname", "Weiter", "Anfrage senden"], ", ".join(namen))
+
+        nummer = [e["nummer"] for e in seite["elemente"] if e["name"] == "Firmenname"][0]
+        getippt = browser.tippen(nummer, "Reiter & Partner GmbH")
+        inhalt = [e["inhalt"] for e in getippt.get("elemente", [])
+                  if e["nummer"] == nummer]
+        pruefen("Text landet wirklich im Feld",
+                getippt.get("ok") and inhalt == ["Reiter & Partner GmbH"], str(inhalt))
+
+        nummer = [e["nummer"] for e in getippt["elemente"]
+                  if e["name"] == "Anfrage senden"][0]
+        geklickt = browser.klicken(nummer)
+        pruefen("Ein Klick auf die Beschriftung wirkt",
+                geklickt.get("ok") and geklickt.get("titel") == "Gespeichert",
+                geklickt.get("titel", geklickt.get("fehler", "")))
+
+        pruefen("Eine Nummer, die es nicht gibt, stürzt nicht ab",
+                not browser.klicken(999).get("ok")
+                and not browser.klicken("abc").get("ok"), "beide abgewiesen")
+
+        # Der Agent will bezahlen - ohne Ja darf das nicht passieren.
+        class FalscherAgent:
+            @staticmethod
+            def einsatzbereit():
+                return True
+
+            @staticmethod
+            def json_anfrage(system, anfrage):
+                return {"gedanke": "jetzt bestellen", "aktion": "klicken",
+                        "ziel": 1, "text": ""}
+
+        browser.agent = FalscherAgent()
+        gefragt = []
+        ergebnis = browser.erledigen("bestellen", basis + "zwei.html",
+                                     bestaetigen=lambda f: (gefragt.append(f), False)[1])
+        pruefen("Vor dem Bezahlen wird gefragt und bei nein gestoppt",
+                not ergebnis.get("ok") and gefragt
+                and "kostenpflichtig" in gefragt[0].lower(),
+                (gefragt[0][:60] if gefragt else "gar nicht gefragt"))
+
+        ohne = Browser(FalscherAgent(), sichtbar=False)
+        ohne._seite, ohne._browser, ohne._spiel = (browser._seite, browser._browser,
+                                                   browser._spiel)
+        ergebnis = ohne.erledigen("bestellen", basis + "zwei.html")
+        pruefen("Ohne Rückfragemöglichkeit wird nicht bezahlt",
+                not ergebnis.get("ok") and "kostenpflichtig" in ergebnis["fehler"],
+                ergebnis["fehler"][:60])
+        ohne._seite = ohne._browser = ohne._spiel = None
+
+        class Endlos(FalscherAgent):
+            @staticmethod
+            def json_anfrage(system, anfrage):
+                return {"gedanke": "warten", "aktion": "warten", "text": ""}
+
+        browser.agent = Endlos()
+        ergebnis = browser.erledigen("endlos", basis, schritte_max=2)
+        pruefen("Nach der Schrittgrenze ist Schluss",
+                not ergebnis.get("ok") and len(ergebnis["schritte"]) == 2,
+                "%d Schritte" % len(ergebnis["schritte"]))
+
+        class Muell(FalscherAgent):
+            @staticmethod
+            def json_anfrage(system, anfrage):
+                return "kein JSON"
+
+        browser.agent = Muell()
+        ergebnis = browser.erledigen("x", basis)
+        pruefen("Unbrauchbare Antworten des Modells stürzen nicht ab",
+                not ergebnis.get("ok") and ergebnis.get("fehler"),
+                ergebnis.get("fehler", "")[:60])
+    finally:
+        browser.schliessen()
+        dienst.shutdown()
+        dienst.server_close()
+        konfig.BROWSER_PROGRAMM = alte_wahl
 
 
 def pruefung_telefon(agent):
@@ -1117,6 +1288,7 @@ def main() -> int:
     pruefung_werkstatt(agent)
     pruefung_werkzeugvertrag(agent)
     pruefung_telefon(agent)
+    pruefung_browser(agent)
     pruefung_webapp(agent)
     pruefung_routinen(agent)
     pruefung_zeitplan()
