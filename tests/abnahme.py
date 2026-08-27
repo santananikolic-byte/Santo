@@ -791,6 +791,27 @@ def pruefung_webapp(agent):
                 'xmlns="http://www.w3.org/2000/svg"', ""),
             "alles in der Seite selbst")
 
+    # Sprachsteuerung: die Oberflaeche muss von selbst zuhoeren.
+    pruefen("Die Oberfläche hört von selbst zu",
+            "continuous = true" in SEITE_HTML and "hoerenStart" in SEITE_HTML,
+            "kein Knopfdruck nötig")
+    weckwoerter = ["hey jarvis", "hey javis", "hey dscharvis", "hey charvis",
+                   "hey travis", "jarvis", "javis"]
+    pruefen("Alle Weckwörter kennt auch der Browser",
+            all(w in SEITE_HTML for w in weckwoerter),
+            "%d Schreibweisen" % len(weckwoerter))
+    pruefen("Freigaben lassen sich sprechen",
+            '"ja"' in SEITE_HTML and '"nein"' in SEITE_HTML
+            and "JA.indexOf(wort)" in SEITE_HTML,
+            "ja oder nein genügt")
+    pruefen("Beim Sprechen wird das Mikrofon angehalten",
+            "hoerenPause();" in SEITE_HTML,
+            "sonst hört Jarvis sich selbst zu")
+    pruefen("Tippen ist nur der Notweg",
+            'class="tippen"' in SEITE_HTML and ".tippen{" in SEITE_HTML
+            and "display:none" in SEITE_HTML,
+            "standardmäßig ausgeblendet")
+
     # Jetzt der Server.
     web = JarvisWeb(agent, port=8794)
     web.starten(blockierend=False)

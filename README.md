@@ -52,9 +52,12 @@ Kalender kann man einrichten, muss man aber nicht.
 ## Die Web-App
 
 Der Normalfall: `python3 jarvis.py` startet einen kleinen Server und öffnet
-Jarvis im Browser. Dort drückst du auf das Mikrofon und sprichst — die
-Spracherkennung kommt vom Browser, also ohne PortAudio und ohne Systemrechte
-fürs Terminal. Er antwortet gesprochen zurück.
+Jarvis im Browser. **Er hört von selbst zu.** Du sagst „Hey Jarvis" und dann,
+was du brauchst — kein Knopf, kein Textfeld. Er antwortet laut.
+
+Auch Freigaben sprichst du: er liest die Frage vor, du sagst *ja* oder *nein*.
+Getippt wird nur, wenn das Mikrofon streikt — dafür gibt es oben rechts einen
+Notweg.
 
 Rechts steht der Stand: was der Betrieb tragen muss, die Kasse, wer heute
 nachzufassen ist. Braucht eine Aktion deine Freigabe, kommt ein Fenster mit

@@ -6113,15 +6113,15 @@ def _euro(betrag) -> str:
 
 
 # =========================================================================
-# webseite  -  Die Oberfläche der Web-App als eine einzige Seite.
+# webseite  -  Die Oberfläche - Sprache, sonst nichts.
 # 
-# Bewusst ohne Baukasten und ohne Nachladen aus dem Netz: Der Server liefert
-# genau diese Datei aus, und sie läuft. Kein Build, keine Abhängigkeit, die in
-# zwei Jahren nicht mehr da ist.
+# Kein Textfeld als Hauptweg, kein Knopf zum Drücken. Die Seite hört dauerhaft
+# zu, wartet auf das Weckwort und antwortet laut. Tippen geht nur als Notweg,
+# wenn das Mikrofon streikt.
 # 
-# Das Mikrofon läuft über die Spracherkennung des Browsers. Safari und Chrome
-# können Deutsch, Firefox nicht - das sagt die Seite dann auch, statt einen
-# Knopf zu zeigen, der nichts tut.
+# Die Spracherkennung läuft im Browser. Wichtig dabei: Während Jarvis spricht,
+# wird die Erkennung angehalten - sonst hört er sich selbst zu und antwortet
+# auf seine eigene Stimme.
 # =========================================================================
 
 #!/usr/bin/env python3
@@ -6136,245 +6136,206 @@ SEITE_HTML = r"""<!DOCTYPE html>
 <link rel="icon" href="/symbol.svg" type="image/svg+xml">
 <title>Jarvis</title>
 <style>
-:root {
-  --grund:#08090B; --panel:#0F1113; --erhoben:#14171A; --rand:#1C1F23;
+:root{
+  --grund:#08090B; --tief:#0A0D14; --panel:#0F1113; --rand:#1C1F23;
   --rand-hell:#2A3036; --akzent:#E8622C; --kupfer:#F0A882; --text:#F2EFEA;
   --gedaempft:#A0A6AC; --grau:#7E858C; --gruen:#4CC38A; --rot:#E5484D;
-  --gelb:#E8A33C;
   --sans:-apple-system,BlinkMacSystemFont,"Helvetica Neue",Arial,sans-serif;
   --mono:ui-monospace,"SF Mono",Menlo,monospace;
 }
 *{box-sizing:border-box;margin:0;padding:0}
-html,body{height:100%}
+html,body{height:100%;overflow:hidden}
 body{
-  background:var(--grund);color:var(--text);font-family:var(--sans);
-  font-size:16px;line-height:1.55;-webkit-font-smoothing:antialiased;
-  display:flex;flex-direction:column;overflow:hidden;
+  background:radial-gradient(ellipse 120% 80% at 50% 120%,#0E1220 0%,var(--grund) 62%);
+  color:var(--text);font-family:var(--sans);-webkit-font-smoothing:antialiased;
+  display:flex;flex-direction:column;user-select:none;
 }
 button{font-family:inherit;cursor:pointer;border:none;background:none;color:inherit}
-:focus-visible{outline:2px solid var(--akzent);outline-offset:2px;border-radius:6px}
+:focus-visible{outline:2px solid var(--akzent);outline-offset:3px;border-radius:6px}
 
-/* Kopf */
-header{
-  display:flex;align-items:center;gap:14px;padding:11px 18px;
-  border-bottom:1px solid var(--rand);background:var(--panel);flex:none;
+/* ---- Ticker ---- */
+.ticker{
+  flex:none;display:flex;gap:22px;flex-wrap:wrap;align-items:center;
+  padding:10px 20px;font-size:11px;letter-spacing:.11em;text-transform:uppercase;
+  color:var(--grau);border-bottom:1px solid var(--rand);
+  background:linear-gradient(90deg,rgba(232,98,44,.13),transparent 68%);
 }
-.marke{font-size:13px;font-weight:700;letter-spacing:.2em;text-transform:uppercase}
-.marke span{color:var(--akzent)}
-.ampel{width:8px;height:8px;border-radius:50%;background:var(--grau);flex:none}
-.ampel.an{background:var(--gruen);box-shadow:0 0 8px var(--gruen)}
-.ampel.aus{background:var(--rot);box-shadow:0 0 8px var(--rot)}
-header nav{margin-left:auto;display:flex;gap:7px}
-header nav a,header nav button{
-  font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--grau);
-  border:1px solid var(--rand-hell);border-radius:6px;padding:6px 11px;
-  text-decoration:none;
+.ticker b{color:var(--akzent);font-weight:600}
+.ticker b.rot{color:var(--rot)}
+.ticker .pkt{width:7px;height:7px;border-radius:50%;background:var(--grau);
+             box-shadow:0 0 8px transparent}
+.ticker .pkt.an{background:var(--gruen);box-shadow:0 0 9px var(--gruen)}
+.ticker .pkt.aus{background:var(--rot);box-shadow:0 0 9px var(--rot)}
+.ticker .rechts{margin-left:auto;display:flex;gap:14px;align-items:center}
+.ticker a,.ticker .mini{color:var(--grau);text-decoration:none;font-size:10px;
+                        letter-spacing:.12em}
+.ticker a:hover,.ticker .mini:hover{color:var(--kupfer)}
+
+/* ---- Bühne ---- */
+main{flex:1;display:flex;flex-direction:column;align-items:center;
+     justify-content:center;gap:26px;padding:20px;min-height:0;position:relative}
+
+.kugel{position:relative;width:min(46vmin,260px);height:min(46vmin,260px);
+       flex:none;display:grid;place-items:center;cursor:pointer}
+.kugel .ring{position:absolute;inset:0;border-radius:50%;
+             border:1px solid var(--rand-hell);transition:border-color .4s}
+.kugel .ring2{inset:9%;opacity:.6}
+.kugel .ring3{inset:19%;opacity:.35}
+.kugel .kern{
+  width:42%;height:42%;border-radius:50%;
+  background:radial-gradient(circle at 34% 30%,#F3B593,#D9764B 46%,#A34F2C);
+  box-shadow:0 0 40px -6px rgba(232,98,44,.5);transition:transform .35s,box-shadow .35s;
 }
-header nav a:hover,header nav button:hover{color:var(--kupfer);border-color:var(--akzent)}
+.kugel .welle{position:absolute;inset:0;border-radius:50%;border:1px solid var(--akzent);
+              opacity:0;pointer-events:none}
 
-/* Lageleiste */
-.lage{
-  padding:9px 18px;font-size:13px;color:var(--gedaempft);
-  border-bottom:1px solid var(--rand);
-  background:linear-gradient(90deg,rgba(232,98,44,.10),transparent 70%);
-  flex:none;
-}
-.lage b{color:var(--kupfer);font-weight:600}
+/* Zustände */
+body[data-zustand="schlaeft"] .kugel .kern{transform:scale(.82);
+  box-shadow:0 0 26px -10px rgba(232,98,44,.4);filter:saturate(.55)}
+body[data-zustand="wach"] .ring{border-color:rgba(232,98,44,.55)}
+body[data-zustand="wach"] .kugel .kern{transform:scale(1.08);
+  box-shadow:0 0 70px -4px rgba(232,98,44,.75)}
+body[data-zustand="wach"] .welle{animation:welle 1.7s ease-out infinite}
+body[data-zustand="wach"] .welle.w2{animation-delay:.55s}
+body[data-zustand="wach"] .welle.w3{animation-delay:1.1s}
+@keyframes welle{0%{opacity:.55;transform:scale(.55)}100%{opacity:0;transform:scale(1.05)}}
+body[data-zustand="denkt"] .ring{border-color:rgba(232,98,44,.45);
+  border-top-color:var(--akzent);animation:dreh 1.1s linear infinite}
+body[data-zustand="denkt"] .ring2{animation:dreh 1.6s linear infinite reverse}
+body[data-zustand="denkt"] .ring3{animation:dreh 2.2s linear infinite}
+@keyframes dreh{to{transform:rotate(360deg)}}
+body[data-zustand="spricht"] .kugel .kern{animation:reden .5s ease-in-out infinite alternate}
+@keyframes reden{from{transform:scale(1)}to{transform:scale(1.16)}}
+body[data-zustand="aus"] .kugel .kern{filter:grayscale(.85) saturate(.3);transform:scale(.75)}
 
-/* Hauptbereich */
-main{flex:1;display:grid;grid-template-columns:1fr 320px;min-height:0}
+.zustandstext{font-size:12px;letter-spacing:.22em;text-transform:uppercase;
+              color:var(--grau);text-align:center;min-height:16px}
+body[data-zustand="wach"] .zustandstext{color:var(--akzent)}
 
-.gespraech{display:flex;flex-direction:column;min-height:0}
-.verlauf{flex:1;overflow-y:auto;padding:20px 18px 8px;display:flex;
-         flex-direction:column;gap:12px}
-.blase{max-width:min(78%,640px);padding:11px 15px;border-radius:14px;
-       font-size:15px;line-height:1.6;white-space:pre-wrap;word-wrap:break-word}
-.blase.du{align-self:flex-end;background:var(--erhoben);
-          border:1px solid var(--rand-hell);border-bottom-right-radius:5px}
-.blase.jarvis{align-self:flex-start;background:var(--panel);
-              border:1px solid var(--rand);border-bottom-left-radius:5px}
-.blase.jarvis.fehler{border-color:rgba(229,72,77,.5);color:#F3B0B2}
-.blase .wer{font-size:10px;letter-spacing:.13em;text-transform:uppercase;
-            color:var(--grau);margin-bottom:5px}
-.blase.jarvis .wer{color:var(--akzent)}
-.leerzustand{margin:auto;text-align:center;color:var(--grau);max-width:400px;padding:20px}
-.leerzustand h2{font-size:22px;color:var(--text);margin-bottom:10px;font-weight:700}
-.leerzustand p{font-size:14px;line-height:1.7}
-.leerzustand code{font-family:var(--mono);font-size:13px;color:var(--kupfer)}
+/* ---- Text ---- */
+.buehne{width:min(100%,780px);text-align:center;display:flex;flex-direction:column;
+        gap:14px;min-height:0}
+.gesagt{font-size:clamp(15px,2.1vw,19px);color:var(--gedaempft);min-height:26px;
+        font-style:italic}
+.gesagt.vorlaeufig{opacity:.55}
+.antwort{font-size:clamp(19px,3.1vw,30px);line-height:1.42;font-weight:500;
+         letter-spacing:-.01em;max-height:38vh;overflow-y:auto;padding:0 4px}
+.antwort.fehler{color:#F3B0B2}
+.antwort::-webkit-scrollbar{width:5px}
+.antwort::-webkit-scrollbar-thumb{background:var(--rand-hell);border-radius:3px}
 
-.denkt{align-self:flex-start;display:flex;gap:5px;padding:12px 16px}
-.denkt i{width:7px;height:7px;border-radius:50%;background:var(--akzent);
-         animation:pulsen 1.2s ease-in-out infinite}
-.denkt i:nth-child(2){animation-delay:.18s}
-.denkt i:nth-child(3){animation-delay:.36s}
-@keyframes pulsen{0%,100%{opacity:.25;transform:translateY(0)}
-                  50%{opacity:1;transform:translateY(-3px)}}
+.hinweis{font-size:13px;color:var(--grau);line-height:1.6;max-width:440px;
+         margin:0 auto}
+.hinweis b{color:var(--kupfer);font-weight:600}
 
-/* Eingabe */
-.eingabe{flex:none;padding:12px 18px 16px;border-top:1px solid var(--rand);
-         background:var(--panel);display:flex;gap:10px;align-items:flex-end}
-.eingabe textarea{
-  flex:1;resize:none;background:var(--erhoben);color:var(--text);
-  border:1px solid var(--rand-hell);border-radius:11px;padding:11px 14px;
-  font-family:inherit;font-size:15px;line-height:1.5;max-height:140px;min-height:46px;
-}
-.eingabe textarea::placeholder{color:var(--grau)}
-.knopf{
-  width:46px;height:46px;border-radius:50%;flex:none;display:grid;place-items:center;
-  background:var(--erhoben);border:1px solid var(--rand-hell);
-  transition:background .15s,border-color .15s,transform .1s;
-}
-.knopf:hover{border-color:var(--akzent)}
-.knopf:active{transform:scale(.94)}
-.knopf svg{width:20px;height:20px;fill:currentColor}
-.knopf.mikro.hoert{background:var(--akzent);border-color:var(--akzent);color:#1A0E08;
-                   animation:atmen 1.4s ease-in-out infinite}
-@keyframes atmen{0%,100%{box-shadow:0 0 0 0 rgba(232,98,44,.55)}
-                 70%{box-shadow:0 0 0 13px rgba(232,98,44,0)}}
-.knopf.senden{background:var(--akzent);border-color:var(--akzent);color:#1A0E08}
-.knopf[disabled]{opacity:.4;cursor:default}
+/* ---- Zahlenleiste unten ---- */
+.zahlen{flex:none;display:flex;gap:1px;background:var(--rand);
+        border-top:1px solid var(--rand)}
+.zahl{flex:1;background:var(--panel);padding:11px 14px;min-width:0}
+.zahl .wert{font-size:17px;font-weight:700;font-variant-numeric:tabular-nums;
+            white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.zahl .wert.gut{color:var(--gruen)} .zahl .wert.schlecht{color:var(--rot)}
+.zahl .wert.akzent{color:var(--akzent)}
+.zahl .name{font-size:9.5px;letter-spacing:.12em;text-transform:uppercase;
+            color:var(--grau);margin-top:3px;white-space:nowrap;overflow:hidden;
+            text-overflow:ellipsis}
 
-/* Seitenspalte */
-.seite{border-left:1px solid var(--rand);background:var(--panel);overflow-y:auto;
-       padding:14px;display:flex;flex-direction:column;gap:11px}
-.kachel{background:var(--erhoben);border:1px solid var(--rand);border-radius:10px;
-        padding:12px 14px}
-.kachel h3{font-size:10px;letter-spacing:.14em;text-transform:uppercase;
-           color:var(--grau);margin-bottom:8px;font-weight:600}
-.kachel .zahl{font-size:21px;font-weight:700;letter-spacing:-.01em;
-              font-variant-numeric:tabular-nums}
-.kachel .zahl.gut{color:var(--gruen)} .kachel .zahl.schlecht{color:var(--rot)}
-.kachel .zahl.akzent{color:var(--akzent)}
-.kachel .neben{font-size:12px;color:var(--grau);margin-top:3px;line-height:1.5}
-.kachel ul{list-style:none} .kachel li{font-size:13px;padding:5px 0;
-           border-bottom:1px solid var(--rand)}
-.kachel li:last-child{border-bottom:none}
-.kachel li small{display:block;color:var(--grau);font-size:11.5px}
-.leer{color:#4A5157;font-style:italic;font-size:12.5px}
-.schnell{display:flex;flex-wrap:wrap;gap:6px}
-.schnell button{font-size:12px;border:1px solid var(--rand-hell);border-radius:999px;
-                padding:6px 12px;color:var(--gedaempft)}
-.schnell button:hover{border-color:var(--akzent);color:var(--kupfer)}
+/* ---- Notweg Tippen ---- */
+.tippen{position:fixed;left:50%;transform:translateX(-50%);bottom:88px;
+        width:min(92vw,620px);display:none;gap:9px}
+.tippen.zeigen{display:flex}
+.tippen input{flex:1;background:var(--panel);border:1px solid var(--rand-hell);
+              border-radius:11px;padding:12px 15px;color:var(--text);
+              font-family:inherit;font-size:15px}
+.tippen button{background:var(--akzent);color:#1A0E08;border-radius:11px;
+               padding:12px 20px;font-weight:700}
 
-/* Freigabe */
-.schleier{position:fixed;inset:0;background:rgba(4,5,6,.86);display:none;
-          place-items:center;padding:20px;z-index:50;backdrop-filter:blur(3px)}
+/* ---- Freigabe ---- */
+.schleier{position:fixed;inset:0;background:rgba(4,5,6,.9);display:none;
+          place-items:center;padding:20px;z-index:60;backdrop-filter:blur(4px)}
 .schleier.zeigen{display:grid}
-.frage{background:var(--panel);border:1px solid var(--akzent);border-radius:14px;
-       max-width:560px;width:100%;overflow:hidden;
-       box-shadow:0 24px 70px -20px rgba(232,98,44,.4)}
-.frage header{background:rgba(232,98,44,.11);border-bottom:1px solid var(--rand)}
-.frage h2{font-size:13px;letter-spacing:.16em;text-transform:uppercase;
-          color:var(--akzent);font-weight:700}
+.frage{background:var(--panel);border:1px solid var(--akzent);border-radius:16px;
+       max-width:620px;width:100%;overflow:hidden;
+       box-shadow:0 30px 90px -24px rgba(232,98,44,.5)}
+.frage .kopf{display:flex;align-items:center;gap:12px;padding:13px 20px;
+             background:rgba(232,98,44,.12);border-bottom:1px solid var(--rand)}
+.frage .kopf h2{font-size:12px;letter-spacing:.18em;text-transform:uppercase;
+                color:var(--akzent);font-weight:700}
 .frage .rest{margin-left:auto;font-family:var(--mono);font-size:12px;color:var(--grau)}
-.frage .inhalt{padding:16px 18px}
-.frage .aktion{font-size:19px;font-weight:700;margin-bottom:9px}
-.frage pre{background:var(--erhoben);border:1px solid var(--rand);border-radius:8px;
-           padding:11px 13px;font-family:var(--mono);font-size:12.5px;line-height:1.6;
-           color:var(--kupfer);max-height:240px;overflow:auto;white-space:pre-wrap;
+.frage .inhalt{padding:20px}
+.frage .aktion{font-size:24px;font-weight:700;margin-bottom:12px}
+.frage pre{background:var(--tief);border:1px solid var(--rand);border-radius:9px;
+           padding:13px 15px;font-family:var(--mono);font-size:12.5px;line-height:1.65;
+           color:var(--kupfer);max-height:230px;overflow:auto;white-space:pre-wrap;
            word-break:break-word}
-.frage .knoepfe{display:flex;gap:10px;padding:0 18px 18px}
-.frage .knoepfe button{flex:1;padding:13px;border-radius:9px;font-weight:700;
-                       font-size:15px}
+.frage .sagen{padding:0 20px 8px;font-size:14px;color:var(--gedaempft);text-align:center}
+.frage .sagen b{color:var(--akzent)}
+.frage .knoepfe{display:flex;gap:11px;padding:12px 20px 20px}
+.frage .knoepfe button{flex:1;padding:15px;border-radius:10px;font-weight:700;font-size:16px}
 .frage .ja{background:var(--akzent);color:#1A0E08}
-.frage .nein{background:var(--erhoben);border:1px solid var(--rand-hell);
-             color:var(--text)}
-.frage .hinweis{padding:0 18px 14px;font-size:12px;color:var(--grau)}
+.frage .nein{background:var(--tief);border:1px solid var(--rand-hell);color:var(--text)}
 
-/* Schmale Fenster ganz zum Schluss: gleiche Genauigkeit gewinnt die spaetere
-   Regel, deshalb duerfen diese hier nicht weiter oben stehen. */
-main,.gespraech,.verlauf,.eingabe,.blase,.kachel{min-width:0}
-@media(max-width:900px){
-  main{grid-template-columns:1fr}
-  .seite{display:none}
-  .blase{max-width:88%}
-  header{padding:10px 12px;gap:10px}
-  header nav a,header nav button{padding:6px 9px;font-size:10px}
-  .lage{padding:8px 12px;font-size:12.5px}
-  .verlauf{padding:16px 12px 6px}
-  .eingabe{padding:10px 12px 14px}
-}
-@media(max-width:430px){
-  .marke{font-size:11px;letter-spacing:.12em}
-  #wer{display:none}
-  header nav a[href="/sales"]{display:none}
+@media(max-width:640px){
+  .ticker{gap:12px;padding:8px 12px;font-size:10px}
+  .ticker .rechts{width:100%;margin-left:0;justify-content:flex-start}
+  .zahl{padding:9px 10px}.zahl .wert{font-size:15px}
+  main{gap:18px;padding:14px}
 }
 </style>
 </head>
-<body>
+<body data-zustand="aus">
 
-<header>
-  <span class="ampel" id="ampel"></span>
-  <span class="marke">Jarvis <span id="wer"></span></span>
-  <nav>
-    <button id="sprechenAn" title="Antworten vorlesen">Stimme an</button>
-    <button id="neu">Neu</button>
+<div class="ticker">
+  <span class="pkt" id="pkt"></span>
+  <span id="lage">Stand wird geholt …</span>
+  <span class="rechts">
+    <button class="mini" id="tippenAn" title="Notweg, falls das Mikrofon streikt">Tippen</button>
     <a href="/dashboard" target="_blank" rel="noopener">Cockpit</a>
     <a href="/sales" target="_blank" rel="noopener">Sales</a>
-  </nav>
-</header>
-
-<div class="lage" id="lage">Stand wird geholt …</div>
+  </span>
+</div>
 
 <main>
-  <section class="gespraech">
-    <div class="verlauf" id="verlauf">
-      <div class="leerzustand" id="leerzustand">
-        <h2>Sag etwas.</h2>
-        <p>Drück auf das Mikrofon und sprich, oder tippe unten.<br>
-           Zum Beispiel: <code>Wie steht es?</code> ·
-           <code>Was muss ich heute nachfassen?</code> ·
-           <code>Trag 59,90 Tankstelle als Ausgabe ein</code></p>
-      </div>
-    </div>
+  <div class="kugel" id="kugel" role="button" tabindex="0"
+       title="Antippen weckt Jarvis auch ohne Weckwort">
+    <span class="ring"></span><span class="ring ring2"></span><span class="ring ring3"></span>
+    <span class="welle"></span><span class="welle w2"></span><span class="welle w3"></span>
+    <span class="kern"></span>
+  </div>
+  <div class="zustandstext" id="zustandstext">Mikrofon wird gefragt …</div>
 
-    <div class="eingabe">
-      <button class="knopf mikro" id="mikro" title="Sprechen" aria-label="Sprechen">
-        <svg viewBox="0 0 24 24"><path d="M12 14a3 3 0 0 0 3-3V5a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11z"/></svg>
-      </button>
-      <textarea id="feld" rows="1" placeholder="Schreib oder sprich …"></textarea>
-      <button class="knopf senden" id="senden" title="Senden" aria-label="Senden">
-        <svg viewBox="0 0 24 24"><path d="M3 20.5v-6l9-2.5-9-2.5v-6l19 8.5z"/></svg>
-      </button>
+  <div class="buehne">
+    <div class="gesagt" id="gesagt"></div>
+    <div class="antwort" id="antwort"></div>
+    <div class="hinweis" id="hinweis">
+      Sag <b>„Hey Jarvis“</b> und dann, was du brauchst.
     </div>
-  </section>
-
-  <aside class="seite">
-    <div class="kachel">
-      <h3>Was der Betrieb tragen muss</h3>
-      <div class="zahl" id="bedarfZahl">–</div>
-      <div class="neben" id="bedarfText">wird geholt …</div>
-    </div>
-    <div class="kachel">
-      <h3>Kasse diesen Monat</h3>
-      <div class="zahl" id="kasseZahl">–</div>
-      <div class="neben" id="kasseText">wird geholt …</div>
-    </div>
-    <div class="kachel">
-      <h3>Heute nachfassen</h3>
-      <div id="nachfassen"><span class="leer">wird geholt …</span></div>
-    </div>
-    <div class="kachel">
-      <h3>Schnell</h3>
-      <div class="schnell" id="schnell"></div>
-    </div>
-  </aside>
+  </div>
 </main>
+
+<div class="tippen" id="tippen">
+  <input id="feld" placeholder="Notweg: hier tippen und Enter" autocomplete="off">
+  <button id="senden">Senden</button>
+</div>
+
+<div class="zahlen">
+  <div class="zahl"><div class="wert" id="z1">–</div><div class="name" id="n1">Kasse</div></div>
+  <div class="zahl"><div class="wert" id="z2">–</div><div class="name" id="n2">Fehlt je Monat</div></div>
+  <div class="zahl"><div class="wert" id="z3">–</div><div class="name" id="n3">Nachfassen</div></div>
+  <div class="zahl"><div class="wert" id="z4">–</div><div class="name" id="n4">Gesichert</div></div>
+</div>
 
 <div class="schleier" id="schleier">
   <div class="frage">
-    <header>
-      <h2>Freigabe nötig</h2>
-      <span class="rest" id="freigabeRest"></span>
-    </header>
+    <div class="kopf"><h2>Freigabe</h2><span class="rest" id="rest"></span></div>
     <div class="inhalt">
-      <div class="aktion" id="freigabeAktion"></div>
-      <pre id="freigabeDetails"></pre>
+      <div class="aktion" id="fAktion"></div>
+      <pre id="fDetails"></pre>
     </div>
-    <p class="hinweis">Ohne dein Ja passiert nichts. Keine Antwort gilt als Nein.</p>
+    <p class="sagen">Sag <b>ja</b> oder <b>nein</b>.</p>
     <div class="knoepfe">
-      <button class="nein" id="freigabeNein">Nein</button>
-      <button class="ja" id="freigabeJa">Ja, mach</button>
+      <button class="nein" id="fNein">Nein</button>
+      <button class="ja" id="fJa">Ja, mach</button>
     </div>
   </div>
 </div>
@@ -6383,60 +6344,44 @@ main,.gespraech,.verlauf,.eingabe,.blase,.kachel{min-width:0}
 (function () {
   "use strict";
   var SCHLUESSEL = "{{SCHLUESSEL}}";
+  var WECKWOERTER = ["hey jarvis","hey javis","hey dscharvis","hey charvis",
+                     "hey travis","hey jervis","hey service","hey chavis",
+                     "jarvis","javis"];
+  var JA = ["ja","jo","jup","okay","ok","passt","mach","machen","los","sicher",
+            "einverstanden","erlaubt","freigabe","yes"];
+  var NEIN = ["nein","ne","nee","no","stop","stopp","abbrechen","abbruch",
+              "lass","nicht","niemals","nope"];
 
   var el = function (id) { return document.getElementById(id); };
-  var verlauf = el("verlauf"), feld = el("feld");
-  var sprechen = true, hoertZu = false, laeuft = false;
-  var aktuelleFreigabe = null, restZaehler = null;
+  var zustand = "aus", wachBis = 0, laeuft = false;
+  var freigabe = null, sprichtGerade = false;
+
+  function setzeZustand(neu, text) {
+    zustand = neu;
+    document.body.dataset.zustand = neu;
+    el("zustandstext").textContent = text || {
+      aus: "Mikrofon aus", schlaeft: "Sag Hey Jarvis",
+      wach: "Ich höre", denkt: "Ich arbeite", spricht: "…"
+    }[neu];
+  }
 
   /* ---------- Netz ---------- */
-  function url(pfad) {
-    return pfad + (SCHLUESSEL ? (pfad.indexOf("?") < 0 ? "?" : "&") +
+  function url(p) {
+    return p + (SCHLUESSEL ? (p.indexOf("?") < 0 ? "?" : "&") +
       "schluessel=" + encodeURIComponent(SCHLUESSEL) : "");
   }
-  function holen(pfad, koerper) {
-    var einstellungen = { headers: { "Content-Type": "application/json" } };
-    if (koerper !== undefined) {
-      einstellungen.method = "POST";
-      einstellungen.body = JSON.stringify(koerper);
-    }
-    return fetch(url(pfad), einstellungen).then(function (a) { return a.json(); });
+  function holen(p, k) {
+    var o = { headers: { "Content-Type": "application/json" } };
+    if (k !== undefined) { o.method = "POST"; o.body = JSON.stringify(k); }
+    return fetch(url(p), o).then(function (a) { return a.json(); });
   }
   function euro(n) {
     if (typeof n !== "number") { return "–"; }
-    return n.toLocaleString("de-DE", { minimumFractionDigits: 2,
-      maximumFractionDigits: 2 }) + " €";
+    return n.toLocaleString("de-DE", { minimumFractionDigits: 0,
+      maximumFractionDigits: 0 }) + " €";
   }
 
-  /* ---------- Gespräch ---------- */
-  function blase(wer, text, fehler) {
-    var leerzustand = el("leerzustand");
-    if (leerzustand) { leerzustand.remove(); }
-    var knoten = document.createElement("div");
-    knoten.className = "blase " + (wer === "du" ? "du" : "jarvis") +
-                       (fehler ? " fehler" : "");
-    var kopf = document.createElement("div");
-    kopf.className = "wer";
-    kopf.textContent = wer === "du" ? "Du" : "Jarvis";
-    knoten.appendChild(kopf);
-    knoten.appendChild(document.createTextNode(text));
-    verlauf.appendChild(knoten);
-    verlauf.scrollTop = verlauf.scrollHeight;
-    return knoten;
-  }
-  function denktAn() {
-    var k = document.createElement("div");
-    k.className = "denkt"; k.id = "denkt";
-    k.innerHTML = "<i></i><i></i><i></i>";
-    verlauf.appendChild(k);
-    verlauf.scrollTop = verlauf.scrollHeight;
-  }
-  function denktAus() {
-    var k = el("denkt");
-    if (k) { k.remove(); }
-  }
-
-  /* ---------- Stimme ---------- */
+  /* ---------- Sprechen ---------- */
   var stimmen = [];
   function stimmenLaden() {
     stimmen = window.speechSynthesis ? window.speechSynthesis.getVoices() : [];
@@ -6445,253 +6390,294 @@ main,.gespraech,.verlauf,.eingabe,.blase,.kachel{min-width:0}
     stimmenLaden();
     window.speechSynthesis.onvoiceschanged = stimmenLaden;
   }
-  function sprich(text) {
-    if (!sprechen || !window.speechSynthesis || !text) { return; }
+  function sprich(text, danach) {
+    if (!window.speechSynthesis || !text) { if (danach) { danach(); } return; }
+    // Erkennung anhalten, sonst hört Jarvis sich selbst zu.
+    hoerenPause();
+    sprichtGerade = true;
+    setzeZustand("spricht");
     window.speechSynthesis.cancel();
     var satz = new SpeechSynthesisUtterance(text);
-    satz.lang = "de-DE";
-    satz.rate = 1.05;
-    var deutsch = stimmen.filter(function (s) { return /^de/i.test(s.lang); });
-    var lieber = deutsch.filter(function (s) {
-      return /markus|yannick|petra|anna|viktor|google/i.test(s.name);
-    });
-    if (lieber.length) { satz.voice = lieber[0]; }
-    else if (deutsch.length) { satz.voice = deutsch[0]; }
+    satz.lang = "de-DE"; satz.rate = 1.06;
+    var de = stimmen.filter(function (s) { return /^de/i.test(s.lang); });
+    var gut = de.filter(function (s) {
+      return /markus|yannick|petra|anna|viktor|google/i.test(s.name); });
+    if (gut.length) { satz.voice = gut[0]; } else if (de.length) { satz.voice = de[0]; }
+    satz.onend = satz.onerror = function () {
+      sprichtGerade = false;
+      hoerenWeiter();
+      if (danach) { danach(); }
+    };
     window.speechSynthesis.speak(satz);
+    // Sicherheitsnetz: manche Browser feuern onend nicht.
+    setTimeout(function () {
+      if (sprichtGerade) { sprichtGerade = false; hoerenWeiter(); }
+    }, Math.min(45000, 2500 + text.length * 90));
   }
 
-  /* ---------- Senden ---------- */
-  function senden(text) {
-    text = (text || feld.value).trim();
+  /* ---------- Reden ---------- */
+  function fragen(text) {
+    text = (text || "").trim();
     if (!text || laeuft) { return; }
     laeuft = true;
-    feld.value = "";
-    feld.style.height = "auto";
-    blase("du", text);
-    denktAn();
-    el("senden").disabled = true;
+    wachBis = 0;
+    el("gesagt").textContent = "„" + text + "“";
+    el("gesagt").className = "gesagt";
+    el("hinweis").style.display = "none";
+    setzeZustand("denkt");
     holen("/api/reden", { text: text }).then(function (a) {
-      denktAus();
-      var antwort = a.antwort || a.fehler || "Keine Antwort bekommen.";
-      blase("jarvis", antwort, !a.ok);
-      if (a.ok) { sprich(antwort); }
-      lageHolen();
-      kachelnHolen();
-    }).catch(function (fehler) {
-      denktAus();
-      blase("jarvis", "Ich erreiche den Server nicht: " + fehler.message, true);
-    }).then(function () {
+      var antwort = a.antwort || a.fehler || "Ich habe keine Antwort bekommen.";
+      el("antwort").textContent = antwort;
+      el("antwort").className = "antwort" + (a.ok ? "" : " fehler");
       laeuft = false;
-      el("senden").disabled = false;
+      sprich(antwort, function () { setzeZustand("schlaeft"); });
+      lageHolen(); zahlenHolen();
+    }).catch(function (f) {
+      el("antwort").textContent = "Ich erreiche den Server nicht: " + f.message;
+      el("antwort").className = "antwort fehler";
+      laeuft = false;
+      setzeZustand("schlaeft");
     });
   }
 
-  el("senden").addEventListener("click", function () { senden(); });
-  feld.addEventListener("keydown", function (e) {
-    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); senden(); }
-  });
-  feld.addEventListener("input", function () {
-    feld.style.height = "auto";
-    feld.style.height = Math.min(feld.scrollHeight, 140) + "px";
-  });
+  /* ---------- Zuhören ---------- */
+  var Erk = window.SpeechRecognition || window.webkitSpeechRecognition;
+  var erk = null, laeuftErk = false, willHoeren = false;
 
-  /* ---------- Mikrofon ---------- */
-  var Erkennung = window.SpeechRecognition || window.webkitSpeechRecognition;
-  var erkennung = null;
-  if (!Erkennung) {
-    var mikro = el("mikro");
-    mikro.disabled = true;
-    mikro.title = "Dieser Browser kann keine Spracherkennung. Safari oder Chrome nehmen.";
+  function hoerenStart() {
+    if (!erk || laeuftErk || !willHoeren || sprichtGerade) { return; }
+    try { erk.start(); laeuftErk = true; } catch (f) { laeuftErk = false; }
+  }
+  function hoerenPause() {
+    willHoeren = false;
+    if (erk && laeuftErk) { try { erk.stop(); } catch (f) {} }
+  }
+  function hoerenWeiter() {
+    willHoeren = true;
+    setTimeout(hoerenStart, 320);
+    if (zustand === "spricht") { setzeZustand("schlaeft"); }
+  }
+
+  function saeubern(t) {
+    return (t || "").toLowerCase().replace(/[^a-zäöüß0-9 ]+/g, " ")
+      .replace(/\s+/g, " ").trim();
+  }
+  function weckwortAb(text) {
+    var k = saeubern(text);
+    for (var i = 0; i < WECKWOERTER.length; i++) {
+      var w = WECKWOERTER[i];
+      if (k === w) { return { wach: true, rest: "" }; }
+      if (k.indexOf(w + " ") === 0) {
+        return { wach: true, rest: text.substr(text.length - (k.length - w.length - 1)).trim() };
+      }
+    }
+    return { wach: false, rest: "" };
+  }
+
+  if (!Erk) {
+    setzeZustand("aus", "Browser ohne Spracherkennung");
+    el("hinweis").innerHTML = "Dieser Browser kann keine Spracherkennung. " +
+      "Nimm <b>Safari</b> oder <b>Chrome</b> — oder tipp oben rechts.";
+    el("tippen").classList.add("zeigen");
   } else {
-    erkennung = new Erkennung();
-    erkennung.lang = "de-DE";
-    erkennung.interimResults = true;
-    erkennung.continuous = false;
-    erkennung.onresult = function (e) {
-      var text = "";
+    erk = new Erk();
+    erk.lang = "de-DE";
+    erk.continuous = true;
+    erk.interimResults = true;
+
+    erk.onstart = function () {
+      laeuftErk = true;
+      if (zustand === "aus") { setzeZustand("schlaeft"); }
+    };
+    erk.onend = function () {
+      laeuftErk = false;
+      if (willHoeren) { setTimeout(hoerenStart, 300); }
+    };
+    erk.onerror = function (e) {
+      laeuftErk = false;
+      if (e.error === "not-allowed" || e.error === "service-not-allowed") {
+        willHoeren = false;
+        setzeZustand("aus", "Mikrofon nicht erlaubt");
+        el("hinweis").innerHTML = "Der Browser lässt mich nicht ans Mikrofon. " +
+          "Erlaub es in der Adressleiste und lad die Seite neu.";
+        el("hinweis").style.display = "";
+        el("tippen").classList.add("zeigen");
+      }
+    };
+
+    erk.onresult = function (e) {
+      var fertig = "", vorlaeufig = "";
       for (var i = e.resultIndex; i < e.results.length; i++) {
-        text += e.results[i][0].transcript;
+        if (e.results[i].isFinal) { fertig += e.results[i][0].transcript; }
+        else { vorlaeufig += e.results[i][0].transcript; }
       }
-      feld.value = text;
-      if (e.results[e.results.length - 1].isFinal) {
-        hoertAuf();
-        senden(text);
+
+      if (vorlaeufig && !laeuft) {
+        el("gesagt").textContent = vorlaeufig;
+        el("gesagt").className = "gesagt vorlaeufig";
       }
+      if (!fertig) { return; }
+      var text = fertig.trim();
+      var k = saeubern(text);
+      if (!k) { return; }
+
+      // Bei offener Freigabe zählt nur ja oder nein.
+      if (freigabe) {
+        var wort = k.split(" ").filter(function (w) {
+          return JA.indexOf(w) >= 0 || NEIN.indexOf(w) >= 0; })[0];
+        if (wort) { antworten(JA.indexOf(wort) >= 0); }
+        return;
+      }
+      if (laeuft || sprichtGerade) { return; }
+
+      var probe = weckwortAb(text);
+      if (probe.wach) {
+        if (probe.rest) { fragen(probe.rest); }
+        else {
+          wachBis = Date.now() + 9000;
+          setzeZustand("wach");
+          el("gesagt").textContent = "";
+        }
+        return;
+      }
+      if (Date.now() < wachBis) { fragen(text); }
     };
-    erkennung.onerror = function (e) {
-      hoertAuf();
-      if (e.error === "not-allowed") {
-        blase("jarvis", "Der Browser lässt mich nicht ans Mikrofon. Erlaub den " +
-          "Zugriff in der Adressleiste, dann geht es.", true);
-      } else if (e.error !== "aborted" && e.error !== "no-speech") {
-        blase("jarvis", "Mit dem Mikrofon stimmt etwas nicht: " + e.error, true);
-      }
-    };
-    erkennung.onend = function () { hoertAuf(); };
-    el("mikro").addEventListener("click", function () {
-      if (hoertZu) { erkennung.stop(); hoertAuf(); return; }
+
+    willHoeren = true;
+    hoerenStart();
+    setzeZustand("schlaeft");
+
+    // Wach werden ohne Weckwort: Kugel antippen.
+    el("kugel").addEventListener("click", function () {
+      if (laeuft || freigabe) { return; }
       if (window.speechSynthesis) { window.speechSynthesis.cancel(); }
-      try { erkennung.start(); hoertZu = true; el("mikro").classList.add("hoert"); }
-      catch (fehler) { hoertAuf(); }
+      wachBis = Date.now() + 9000;
+      setzeZustand("wach");
+      hoerenWeiter();
     });
-  }
-  function hoertAuf() {
-    hoertZu = false;
-    el("mikro").classList.remove("hoert");
-  }
-
-  /* ---------- Kopfzeile ---------- */
-  el("sprechenAn").addEventListener("click", function () {
-    sprechen = !sprechen;
-    this.textContent = sprechen ? "Stimme an" : "Stimme aus";
-    if (!sprechen && window.speechSynthesis) { window.speechSynthesis.cancel(); }
-  });
-  el("neu").addEventListener("click", function () {
-    holen("/api/verlauf/neu", {}).then(function () {
-      verlauf.innerHTML = "";
-      blase("jarvis", "Neues Gespräch. Was brauchst du?");
+    el("kugel").addEventListener("keydown", function (e) {
+      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); this.click(); }
     });
+
+    // Wachfenster läuft ab
+    setInterval(function () {
+      if (zustand === "wach" && wachBis && Date.now() > wachBis) {
+        wachBis = 0;
+        setzeZustand("schlaeft");
+      }
+    }, 500);
+  }
+
+  /* ---------- Notweg Tippen ---------- */
+  el("tippenAn").addEventListener("click", function () {
+    el("tippen").classList.toggle("zeigen");
+    if (el("tippen").classList.contains("zeigen")) { el("feld").focus(); }
   });
-
-  /* ---------- Stand ---------- */
-  function lageHolen() {
-    holen("/api/lage").then(function (a) {
-      el("lage").textContent = a.text || a.fehler || "Kein Stand abrufbar.";
-    }).catch(function () {
-      el("lage").textContent = "Der Server antwortet nicht.";
-    });
-  }
-  function zustandHolen() {
-    holen("/api/zustand").then(function (a) {
-      el("ampel").className = "ampel " + (a.einsatzbereit ? "an" : "aus");
-      el("ampel").title = a.einsatzbereit
-        ? "Bereit · " + a.werkzeuge + " Werkzeuge"
-        : "Kein Anthropic-Schlüssel hinterlegt";
-      el("wer").textContent = "// " + (a.firma || "");
-      if (!a.einsatzbereit) {
-        blase("jarvis", "Es ist kein Anthropic-Schlüssel hinterlegt. Ohne ihn " +
-          "kann ich nicht denken. Starte einmal die Einrichtung.", true);
-      }
-    }).catch(function () {});
-  }
-  function kachelnHolen() {
-    holen("/api/bedarf").then(function (a) {
-      if (!a.berechenbar) {
-        el("bedarfZahl").textContent = "–";
-        el("bedarfText").textContent = "Fixkosten noch nicht erfasst.";
-        return;
-      }
-      if (typeof a.luecke === "number" && a.luecke > 0) {
-        el("bedarfZahl").textContent = euro(a.luecke) + " fehlen";
-        el("bedarfZahl").className = "zahl schlecht";
-        el("bedarfText").textContent = "Nötig " + euro(a.noetiger_umsatz) +
-          " je Monat, gesichert " + euro(a.gesichert) + ".";
-      } else {
-        el("bedarfZahl").textContent = euro(a.noetiger_umsatz);
-        el("bedarfZahl").className = "zahl gut";
-        el("bedarfText").textContent = "nötig je Monat – gedeckt.";
-      }
-    }).catch(function () {});
-
-    holen("/api/kasse").then(function (a) {
-      el("kasseZahl").textContent = euro(a.ergebnis);
-      el("kasseZahl").className = "zahl " + (a.ergebnis >= 0 ? "gut" : "schlecht");
-      el("kasseText").textContent = "Ein " + euro(a.einnahmen) + " · Aus " +
-        euro(a.ausgaben) + " · Zahllast " + euro(a.zahllast);
-    }).catch(function () {});
-
-    holen("/api/nachfassen").then(function (a) {
-      var ziel = el("nachfassen");
-      if (!a.anzahl) {
-        ziel.innerHTML = '<span class="leer">Heute ist niemand fällig.</span>';
-        return;
-      }
-      var liste = document.createElement("ul");
-      a.eintraege.slice(0, 5).forEach(function (e) {
-        var zeile = document.createElement("li");
-        zeile.textContent = e.firma + " · " + euro(e.wert_monat);
-        var klein = document.createElement("small");
-        klein.textContent = e.schritt +
-          (e.seit_tagen > 0 ? " · " + e.seit_tagen + " Tage überfällig" : "");
-        zeile.appendChild(klein);
-        liste.appendChild(zeile);
-      });
-      ziel.innerHTML = "";
-      ziel.appendChild(liste);
-    }).catch(function () {});
-  }
-
-  var SCHNELL = ["Wie steht es?", "Was muss ich heute nachfassen?",
-                 "Was fehlt mir zum Decken?", "Welche Belege fehlen?",
-                 "Was steht an?"];
-  SCHNELL.forEach(function (text) {
-    var knopf = document.createElement("button");
-    knopf.textContent = text;
-    knopf.addEventListener("click", function () { senden(text); });
-    el("schnell").appendChild(knopf);
+  el("senden").addEventListener("click", function () {
+    fragen(el("feld").value); el("feld").value = "";
   });
-
-  /* ---------- Was Jarvis von selbst sagt ---------- */
-  function meldungenHolen() {
-    holen("/api/meldungen").then(function (a) {
-      (a.meldungen || []).forEach(function (m) {
-        blase("jarvis", m.text);
-        sprich(m.text);
-      });
-      if ((a.meldungen || []).length) { lageHolen(); kachelnHolen(); }
-    }).catch(function () {});
-  }
+  el("feld").addEventListener("keydown", function (e) {
+    if (e.key === "Enter") { fragen(this.value); this.value = ""; }
+  });
 
   /* ---------- Freigaben ---------- */
   function freigabenHolen() {
     holen("/api/freigaben").then(function (a) {
       var offen = (a.offen || [])[0];
-      if (!offen) {
-        if (aktuelleFreigabe) { freigabeSchliessen(); }
-        return;
+      if (!offen) { if (freigabe) { schliessen(); } return; }
+      if (freigabe && freigabe.id === offen.id) {
+        el("rest").textContent = offen.rest + " s"; return;
       }
-      if (aktuelleFreigabe && aktuelleFreigabe.id === offen.id) {
-        el("freigabeRest").textContent = offen.rest + " s";
-        return;
-      }
-      aktuelleFreigabe = offen;
-      el("freigabeAktion").textContent = offen.aktion;
-      el("freigabeDetails").textContent = offen.details || "(ohne Angaben)";
-      el("freigabeRest").textContent = offen.rest + " s";
+      freigabe = offen;
+      el("fAktion").textContent = offen.aktion;
+      el("fDetails").textContent = offen.details || "(ohne Angaben)";
+      el("rest").textContent = offen.rest + " s";
       el("schleier").classList.add("zeigen");
-      if (window.speechSynthesis) { window.speechSynthesis.cancel(); }
-      sprich("Ich brauche eine Freigabe für " + offen.aktion);
+      sprich("Ich brauche eine Freigabe für " + offen.aktion + ". Ja oder nein?");
     }).catch(function () {});
   }
-  function freigabeSchliessen() {
-    aktuelleFreigabe = null;
+  function schliessen() {
+    freigabe = null;
     el("schleier").classList.remove("zeigen");
-    if (restZaehler) { clearInterval(restZaehler); restZaehler = null; }
   }
   function antworten(ja) {
-    if (!aktuelleFreigabe) { return; }
-    var kennung = aktuelleFreigabe.id;
-    freigabeSchliessen();
-    holen("/api/freigabe", { id: kennung, ja: ja }).then(function () {
-      lageHolen();
-    });
+    if (!freigabe) { return; }
+    var id = freigabe.id;
+    schliessen();
+    if (window.speechSynthesis) { window.speechSynthesis.cancel(); }
+    sprichtGerade = false; hoerenWeiter();
+    holen("/api/freigabe", { id: id, ja: ja }).then(function () { lageHolen(); });
   }
-  el("freigabeJa").addEventListener("click", function () { antworten(true); });
-  el("freigabeNein").addEventListener("click", function () { antworten(false); });
+  el("fJa").addEventListener("click", function () { antworten(true); });
+  el("fNein").addEventListener("click", function () { antworten(false); });
   document.addEventListener("keydown", function (e) {
-    if (!aktuelleFreigabe) { return; }
-    if (e.key === "Escape") { antworten(false); }
+    if (freigabe && e.key === "Escape") { antworten(false); }
   });
 
-  /* ---------- Start ---------- */
-  zustandHolen();
-  lageHolen();
-  kachelnHolen();
-  setInterval(freigabenHolen, 1500);
-  setInterval(meldungenHolen, 5000);
+  /* ---------- Was Jarvis von selbst sagt ---------- */
+  function meldungenHolen() {
+    if (laeuft || sprichtGerade || freigabe) { return; }
+    holen("/api/meldungen").then(function (a) {
+      var m = (a.meldungen || [])[0];
+      if (!m) { return; }
+      el("gesagt").textContent = "";
+      el("antwort").textContent = m.text;
+      el("antwort").className = "antwort";
+      el("hinweis").style.display = "none";
+      sprich(m.text, function () { setzeZustand("schlaeft"); });
+      lageHolen(); zahlenHolen();
+    }).catch(function () {});
+  }
+
+  /* ---------- Stand ---------- */
+  function lageHolen() {
+    holen("/api/lage").then(function (a) {
+      el("lage").textContent = a.text || "Kein Stand abrufbar.";
+    }).catch(function () { el("lage").textContent = "Server antwortet nicht."; });
+  }
+  function zustandHolen() {
+    holen("/api/zustand").then(function (a) {
+      el("pkt").className = "pkt " + (a.einsatzbereit ? "an" : "aus");
+      el("pkt").title = a.einsatzbereit ? a.werkzeuge + " Werkzeuge bereit"
+                                        : "Kein Anthropic-Schlüssel";
+      if (!a.einsatzbereit) {
+        el("antwort").textContent = "Es ist kein Anthropic-Schlüssel hinterlegt. " +
+          "Ohne ihn kann ich nicht denken.";
+        el("antwort").className = "antwort fehler";
+      }
+    }).catch(function () {});
+  }
+  function setzeZahl(nr, wert, name, klasse) {
+    el("z" + nr).textContent = wert;
+    el("z" + nr).className = "wert" + (klasse ? " " + klasse : "");
+    el("n" + nr).textContent = name;
+  }
+  function zahlenHolen() {
+    holen("/api/kasse").then(function (a) {
+      setzeZahl(1, euro(a.ergebnis), "Ergebnis Monat",
+                a.ergebnis >= 0 ? "gut" : "schlecht");
+    }).catch(function () {});
+    holen("/api/bedarf").then(function (a) {
+      if (a.berechenbar && typeof a.luecke === "number" && a.luecke > 0) {
+        setzeZahl(2, euro(a.luecke), "fehlt je Monat", "schlecht");
+      } else if (a.berechenbar) {
+        setzeZahl(2, euro(a.noetiger_umsatz), "nötig je Monat", "gut");
+      } else { setzeZahl(2, "–", "Fixkosten fehlen"); }
+    }).catch(function () {});
+    holen("/api/nachfassen").then(function (a) {
+      setzeZahl(3, String(a.anzahl || 0), a.anzahl ? "heute nachfassen" : "nichts fällig",
+                a.anzahl ? "akzent" : "");
+    }).catch(function () {});
+    holen("/api/pipeline").then(function (a) {
+      setzeZahl(4, euro(a.laufender_umsatz_monat), "gesichert je Monat", "gut");
+    }).catch(function () {});
+  }
+
+  zustandHolen(); lageHolen(); zahlenHolen();
+  setInterval(freigabenHolen, 1200);
+  setInterval(meldungenHolen, 4000);
   setInterval(lageHolen, 45000);
-  setInterval(kachelnHolen, 60000);
-  feld.focus();
+  setInterval(zahlenHolen, 60000);
 })();
 </script>
 </body>
