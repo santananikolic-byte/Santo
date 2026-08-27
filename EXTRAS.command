@@ -24,6 +24,7 @@ while true; do
     echo "   3  Briefing sofort sprechen"
     echo "   4  Abendrückblick sofort sprechen"
     echo "   5  Tippbetrieb statt Sprache"
+    echo "  13  Web-App fuers Handy oeffnen (im eigenen WLAN)"
     echo "   6  Vom Handy aus über Telegram"
     echo "   7  Stimmprofil einlernen"
     echo "   8  ElevenLabs-Stimme aussuchen"
@@ -58,6 +59,7 @@ while true; do
             fi ;;
         11) "$PYTHON" "$PROJEKT/jarvis.py" export ;;
         12) "$PYTHON" "$PROJEKT/build_single.py" ;;
+        13) "$PYTHON" "$PROJEKT/jarvis.py" web --offen ;;
         0)  exit 0 ;;
         *)  echo "  Die Eingabe '$WAHL' kenne ich nicht." ;;
     esac

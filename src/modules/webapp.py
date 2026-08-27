@@ -1,0 +1,374 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""Web-App - Jarvis im Browser statt im Terminal.
+
+Ein kleiner Server aus der Python-Standardbibliothek, kein Fremdpaket. Er
+liefert eine Seite aus, die im Browser läuft: dort spricht der Nutzer, dort
+antwortet Jarvis, dort steht sein Stand, und dort erteilt er Freigaben.
+
+**Warum das Mikrofon im Browser besser ist:** Der Browser darf auf das Mikrofon
+zugreifen, sobald der Nutzer einmal erlaubt hat - ohne PortAudio, ohne
+Systemrechte fürs Terminal, und auch vom Handy aus. Die Spracherkennung von
+Safari und Chrome ist für Deutsch gut genug und kostet nichts.
+
+**Sicherheit.** Der Server hört standardmäßig nur auf 127.0.0.1, also nur auf
+diesem Rechner. Wer ihn ins WLAN stellt, um vom Handy zuzugreifen, braucht
+zwingend einen Schlüssel in der Adresse - denn dieser Server darf Mails lesen,
+Skripte ausführen und Geld verbuchen. Ein offener Port ohne Schlüssel wäre
+fahrlässig. Zusätzlich wird der Host-Kopf geprüft, damit keine fremde Webseite
+über den Namen des Rechners hereinredet.
+"""
+
+import json
+import mimetypes
+import os
+import secrets
+import threading
+import time
+import uuid
+from datetime import datetime
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import parse_qs, urlparse
+
+import config
+from modules.memory import zeitstempel
+from modules.webseite import SEITE_HTML
+
+STANDARD_PORT = 8765
+MAX_KOERPER = 512 * 1024
+
+# Ohne eigenes Symbol fragt jeder Browser nach /favicon.ico und bekommt einen
+# Fehler in die Konsole. Ein kleines SVG kostet nichts und räumt das weg.
+SYMBOL_SVG = (
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">'
+    '<rect width="64" height="64" rx="14" fill="#0F1113"/>'
+    '<circle cx="32" cy="32" r="17" fill="none" stroke="#E8622C" stroke-width="5"/>'
+    '<circle cx="32" cy="32" r="6" fill="#E8622C"/></svg>')
+
+
+class WebFreigabe:
+    """Freigaben über den Browser statt über Telegram oder das Terminal.
+
+    Eine Anfrage wird abgelegt und blockiert den Werkzeugaufruf, bis der Nutzer
+    im Browser antwortet oder die Zeit abläuft. **Zeitablauf gilt als Nein** -
+    wie überall sonst im Programm.
+    """
+
+    def __init__(self, timeout: int = None):
+        self.timeout = int(timeout if timeout is not None else config.FREIGABE_TIMEOUT)
+        self._offen = {}
+        self._sperre = threading.Lock()
+
+    def anfordern(self, aktion: str, details: str = "") -> dict:
+        """Legt eine Freigabefrage ab und wartet auf die Antwort."""
+        kennung = uuid.uuid4().hex[:12]
+        ereignis = threading.Event()
+        eintrag = {"id": kennung, "aktion": aktion, "details": details,
+                   "gestellt": zeitstempel(), "ereignis": ereignis,
+                   "antwort": None,
+                   "laeuft_ab": time.time() + self.timeout}
+        with self._sperre:
+            self._offen[kennung] = eintrag
+
+        erhalten = ereignis.wait(timeout=self.timeout)
+        with self._sperre:
+            self._offen.pop(kennung, None)
+
+        if not erhalten or eintrag["antwort"] is not True:
+            grund = ("abgelehnt" if erhalten
+                     else "keine Antwort innerhalb von %d Sekunden" % self.timeout)
+            return {"erlaubt": False, "kanal": "web", "grund": grund}
+        return {"erlaubt": True, "kanal": "web", "grund": "Freigabe erteilt"}
+
+    def offene(self) -> list:
+        """Alle wartenden Freigabefragen - die holt sich der Browser ab."""
+        jetzt = time.time()
+        with self._sperre:
+            return [{"id": e["id"], "aktion": e["aktion"], "details": e["details"],
+                     "gestellt": e["gestellt"],
+                     "rest": max(0, int(e["laeuft_ab"] - jetzt))}
+                    for e in self._offen.values()]
+
+    def beantworten(self, kennung: str, ja: bool) -> bool:
+        """Beantwortet eine Freigabefrage."""
+        with self._sperre:
+            eintrag = self._offen.get(kennung)
+            if eintrag is None:
+                return False
+            eintrag["antwort"] = bool(ja)
+        eintrag["ereignis"].set()
+        return True
+
+
+class JarvisWeb:
+    """Der Webserver. Startet den Agenten im Browser."""
+
+    def __init__(self, agent, host: str = "127.0.0.1", port: int = STANDARD_PORT,
+                 offen: bool = False, token: str = ""):
+        self.agent = agent
+        self.offen = bool(offen)
+        self.host = "0.0.0.0" if self.offen else (host or "127.0.0.1")
+        self.port = int(port or STANDARD_PORT)
+        # Im WLAN ist ein Schlüssel Pflicht - dieser Server darf zu viel.
+        self.token = token or (secrets.token_urlsafe(18) if self.offen else "")
+        self.freigabe = WebFreigabe()
+        self.server = None
+        self._denkt = threading.Lock()
+        agent.tools.freigabe_kanal_setzen(self.freigabe)
+
+    # -- Adressen -----------------------------------------------------------
+
+    def adresse(self) -> str:
+        """Die Adresse, die der Nutzer im Browser öffnet."""
+        gastgeber = "localhost" if not self.offen else self._eigene_ip()
+        ziel = "http://%s:%d/" % (gastgeber, self.port)
+        return ziel + ("?schluessel=%s" % self.token if self.token else "")
+
+    @staticmethod
+    def _eigene_ip() -> str:
+        """Die IP dieses Rechners im eigenen Netz."""
+        import socket
+        verbindung = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            verbindung.connect(("192.168.1.1", 1))
+            return verbindung.getsockname()[0]
+        except OSError:
+            return "127.0.0.1"
+        finally:
+            verbindung.close()
+
+    # -- Betrieb ------------------------------------------------------------
+
+    def starten(self, blockierend: bool = True):
+        """Startet den Server."""
+        anwendung = self
+
+        class Behandler(BaseHTTPRequestHandler):
+            protocol_version = "HTTP/1.1"
+            server_version = "Jarvis"
+
+            def log_message(self, format, *args):
+                del format, args   # Die Konsole gehört Jarvis, nicht dem Server.
+
+            def do_GET(self):
+                anwendung._behandeln(self, "GET")
+
+            def do_POST(self):
+                anwendung._behandeln(self, "POST")
+
+        self.server = ThreadingHTTPServer((self.host, self.port), Behandler)
+        self.server.daemon_threads = True
+        if blockierend:
+            try:
+                self.server.serve_forever()
+            except KeyboardInterrupt:
+                pass
+            finally:
+                self.stoppen()
+        else:
+            threading.Thread(target=self.server.serve_forever, daemon=True,
+                             name="jarvis-web").start()
+        return self.server
+
+    def stoppen(self):
+        """Hält den Server an."""
+        if self.server is not None:
+            try:
+                self.server.shutdown()
+            except Exception:
+                pass
+            try:
+                self.server.server_close()
+            except Exception:
+                pass
+            self.server = None
+
+    # -- Anfragen -----------------------------------------------------------
+
+    def _erlaubt(self, behandler) -> bool:
+        """Prüft Schlüssel und Host-Kopf.
+
+        Der Host-Kopf muss auf diesen Rechner zeigen. Sonst könnte eine fremde
+        Webseite den Browser des Nutzers dazu bringen, hier anzuklopfen - der
+        Browser schickt die Anfrage brav mit, und der Server hielte sie für
+        echt.
+        """
+        kopf = (behandler.headers.get("Host") or "").split(":")[0].lower()
+        erlaubte = {"localhost", "127.0.0.1", "::1", ""}
+        if self.offen:
+            erlaubte.add(self._eigene_ip())
+            erlaubte.add("0.0.0.0")
+        if kopf not in erlaubte:
+            return False
+        if not self.token:
+            return True
+        gefragt = parse_qs(urlparse(behandler.path).query).get("schluessel", [""])[0]
+        kopfschluessel = behandler.headers.get("X-Jarvis-Schluessel", "")
+        return secrets.compare_digest(gefragt or kopfschluessel, self.token)
+
+    def _behandeln(self, behandler, methode: str):
+        """Verteilt eine Anfrage auf die passende Antwort."""
+        pfad = urlparse(behandler.path).path.rstrip("/") or "/"
+        if not self._erlaubt(behandler):
+            return self._antworten(behandler, 403,
+                                   {"fehler": "Kein Zugang. Der Schlüssel fehlt "
+                                              "oder stimmt nicht."})
+        try:
+            if methode == "GET":
+                return self._get(behandler, pfad)
+            return self._post(behandler, pfad)
+        except Exception as fehler:
+            print("[web] Fehler bei %s: %s" % (pfad, fehler))
+            return self._antworten(behandler, 500, {"fehler": str(fehler)})
+
+    def _get(self, behandler, pfad: str):
+        werkzeuge = self.agent.tools
+
+        if pfad == "/":
+            return self._html(behandler, SEITE_HTML.replace(
+                "{{SCHLUESSEL}}", self.token))
+        if pfad == "/api/lage":
+            return self._antworten(behandler, 200,
+                                   werkzeuge.team.lagebericht(werkzeuge))
+        if pfad == "/api/zustand":
+            return self._antworten(behandler, 200, {
+                "ok": True,
+                "einsatzbereit": self.agent.einsatzbereit(),
+                "nutzer": config.NUTZER_NAME, "firma": config.FIRMA,
+                "modell": config.CLAUDE_MODEL,
+                "werkzeuge": len(werkzeuge.namen()),
+                "rollen": [r["rolle"] for r in werkzeuge.team.rollen_liste()],
+                "dienste": config.konfig_uebersicht()})
+        if pfad == "/api/freigaben":
+            return self._antworten(behandler, 200,
+                                   {"ok": True, "offen": self.freigabe.offene()})
+        if pfad == "/api/verlauf":
+            zeilen = werkzeuge.memory.verlauf_letzte(30)
+            return self._antworten(behandler, 200, {"ok": True, "verlauf": [
+                {"rolle": z["rolle"], "text": z["text"], "zeit": z["zeit"]}
+                for z in zeilen]})
+        if pfad == "/api/pipeline":
+            return self._antworten(behandler, 200, werkzeuge.akquise.pipeline())
+        if pfad == "/api/nachfassen":
+            return self._antworten(behandler, 200, werkzeuge.akquise.nachfassliste())
+        if pfad == "/api/bedarf":
+            return self._antworten(behandler, 200,
+                                   werkzeuge.privat.bedarfsrechnung(werkzeuge.akquise))
+        if pfad == "/api/kasse":
+            return self._antworten(behandler, 200, werkzeuge.bookkeeping.auswertung())
+        if pfad == "/api/team":
+            return self._antworten(behandler, 200, {
+                "ok": True, "rollen": werkzeuge.team.rollen_liste(),
+                "auftraege": [dict(z) for z in werkzeuge.team.auftraege_letzte(10)]})
+        if pfad in ("/favicon.ico", "/symbol.svg"):
+            roh = SYMBOL_SVG.encode("utf-8")
+            self._kopf_setzen(behandler, 200, "image/svg+xml", len(roh))
+            return behandler.wfile.write(roh)
+        if pfad in ("/dashboard", "/sales"):
+            werkzeuge.dashboard.bauen()
+            datei = config.DASHBOARD_VERZEICHNIS / (
+                "dashboard.html" if pfad == "/dashboard" else "sales.html")
+            return self._datei(behandler, str(datei))
+        return self._antworten(behandler, 404, {"fehler": "Diese Seite gibt es nicht."})
+
+    def _post(self, behandler, pfad: str):
+        daten = self._koerper(behandler)
+        werkzeuge = self.agent.tools
+
+        if pfad == "/api/reden":
+            text = str(daten.get("text") or "").strip()
+            if not text:
+                return self._antworten(behandler, 400,
+                                       {"fehler": "Es kam kein Text an."})
+            if not self.agent.einsatzbereit():
+                return self._antworten(behandler, 200, {
+                    "ok": False,
+                    "antwort": "Es ist kein Anthropic-Schlüssel hinterlegt. "
+                               "Ohne ihn kann ich nicht denken."})
+            # Nur ein Gedanke gleichzeitig: sonst mischen sich zwei Gespräche
+            # im selben Verlauf.
+            with self._denkt:
+                antwort = self.agent.denken(text)
+            return self._antworten(behandler, 200,
+                                   {"ok": True, "antwort": antwort,
+                                    "zeit": zeitstempel()})
+
+        if pfad == "/api/freigabe":
+            kennung = str(daten.get("id") or "")
+            ja = bool(daten.get("ja"))
+            erledigt = self.freigabe.beantworten(kennung, ja)
+            return self._antworten(behandler, 200, {
+                "ok": erledigt,
+                "text": ("Freigabe erteilt." if ja else "Abgelehnt.") if erledigt
+                        else "Diese Frage ist nicht mehr offen."})
+
+        if pfad == "/api/werkzeug":
+            name = str(daten.get("name") or "")
+            if name not in werkzeuge.namen():
+                return self._antworten(behandler, 400,
+                                       {"fehler": "Das Werkzeug gibt es nicht."})
+            return self._antworten(behandler, 200,
+                                   werkzeuge.run(name, daten.get("argumente") or {}))
+
+        if pfad == "/api/verlauf/neu":
+            self.agent.verlauf_leeren()
+            return self._antworten(behandler, 200,
+                                   {"ok": True, "text": "Neues Gespräch."})
+
+        return self._antworten(behandler, 404, {"fehler": "Das gibt es nicht."})
+
+    # -- Antworten ----------------------------------------------------------
+
+    @staticmethod
+    def _koerper(behandler) -> dict:
+        """Liest den JSON-Körper einer Anfrage."""
+        try:
+            laenge = min(int(behandler.headers.get("Content-Length") or 0), MAX_KOERPER)
+        except (TypeError, ValueError):
+            laenge = 0
+        if laenge <= 0:
+            return {}
+        try:
+            return json.loads(behandler.rfile.read(laenge).decode("utf-8")) or {}
+        except (ValueError, UnicodeDecodeError):
+            return {}
+
+    @staticmethod
+    def _kopf_setzen(behandler, code: int, typ: str, laenge: int):
+        behandler.send_response(code)
+        behandler.send_header("Content-Type", typ)
+        behandler.send_header("Content-Length", str(laenge))
+        behandler.send_header("Cache-Control", "no-store")
+        behandler.send_header("X-Content-Type-Options", "nosniff")
+        behandler.send_header("Referrer-Policy", "no-referrer")
+        behandler.end_headers()
+
+    def _antworten(self, behandler, code: int, nutzlast: dict):
+        """Schickt eine JSON-Antwort."""
+        try:
+            roh = json.dumps(nutzlast, ensure_ascii=False, default=str).encode("utf-8")
+        except (TypeError, ValueError):
+            roh = json.dumps({"fehler": "Antwort nicht darstellbar"}).encode("utf-8")
+        self._kopf_setzen(behandler, code, "application/json; charset=utf-8", len(roh))
+        behandler.wfile.write(roh)
+
+    def _html(self, behandler, text: str):
+        roh = text.encode("utf-8")
+        self._kopf_setzen(behandler, 200, "text/html; charset=utf-8", len(roh))
+        behandler.wfile.write(roh)
+
+    def _datei(self, behandler, pfad: str):
+        """Liefert eine erzeugte Datei aus - nur aus dem Dashboard-Ordner."""
+        wurzel = config.DASHBOARD_VERZEICHNIS.resolve()
+        try:
+            ziel = os.path.realpath(pfad)
+            if not ziel.startswith(str(wurzel)):
+                return self._antworten(behandler, 403, {"fehler": "Nicht erlaubt."})
+            with open(ziel, "rb") as datei:
+                roh = datei.read()
+        except OSError:
+            return self._antworten(behandler, 404,
+                                   {"fehler": "Die Seite ist noch nicht gebaut."})
+        typ = mimetypes.guess_type(ziel)[0] or "application/octet-stream"
+        self._kopf_setzen(behandler, 200, "%s; charset=utf-8" % typ, len(roh))
+        behandler.wfile.write(roh)

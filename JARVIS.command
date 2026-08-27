@@ -144,7 +144,7 @@ if [ "$BRAUCHT_EINRICHTUNG" = "ja" ]; then
     exit 0
 fi
 
-echo "  Ich starte. Abbrechen mit Strg und C."
+echo "  Ich starte und oeffne mich im Browser. Abbrechen mit Strg und C."
 echo ""
 "$PYTHON" "$PROJEKT/jarvis.py" "$@"
 ERGEBNIS=$?

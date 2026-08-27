@@ -2,13 +2,19 @@
 # -*- coding: utf-8 -*-
 """Betriebsarten - was passiert, wenn Jarvis gestartet wird.
 
-    python3 jarvis.py             Dauerbetrieb: hört zu und meldet sich von selbst
-    python3 jarvis.py chat        tippen statt sprechen (Notfall)
+Ohne Angabe startet die Web-App: Jarvis läuft dann im Browser, das Mikrofon
+kommt vom Browser, und vom Handy im selben WLAN geht es auch. Wer lieber im
+Terminal spricht, nimmt ``hoeren``.
+
+    python3 jarvis.py             Web-App im Browser - der Normalfall
+    python3 jarvis.py web --offen auch vom Handy im eigenen WLAN
+    python3 jarvis.py hoeren      im Terminal zuhören, ohne Browser
+    python3 jarvis.py chat        tippen statt sprechen
     python3 jarvis.py telegram    vom Handy aus
+    python3 jarvis.py status      voller Stand des Betriebs
     python3 jarvis.py briefing    Briefing sofort
     python3 jarvis.py abend       Abendrückblick sofort
     python3 jarvis.py dashboard   Dashboard bauen
-    python3 jarvis.py status      voller Stand des Betriebs
     python3 jarvis.py export      Buchhaltung als CSV
     python3 jarvis.py stimme      Stimmprofil einlernen
     python3 jarvis.py stimmen     ElevenLabs-Stimme aussuchen
@@ -32,6 +38,7 @@ from modules.scheduler import Scheduler, ist_faellig
 from modules.setup_wizard import einrichtung_starten
 from modules.speaker import Sprecherprofil
 from modules.voice import Stimme, weckwort_pruefen
+from modules.webapp import JarvisWeb, STANDARD_PORT
 
 BANNER = r"""
    _   _   ___  _   _ ___ ___
@@ -238,6 +245,56 @@ def dashboard_bauen():
                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     finally:
         agent.tools.mcp.stoppen()
+
+
+def webbetrieb(argumente=None):
+    """Startet Jarvis als Web-App im Browser."""
+    argumente = argumente or []
+    offen = "--offen" in argumente or "offen" in argumente
+    port = STANDARD_PORT
+    for teil in argumente:
+        if teil.isdigit():
+            port = int(teil)
+
+    print(BANNER)
+    agent, stimme = agent_aufbauen(mit_stimme=False)
+    del stimme
+    web = JarvisWeb(agent, port=port, offen=offen)
+
+    zeitplan = Scheduler(agent=agent, routines=agent.tools.routines,
+                         ausgabe=lambda text: print("[zeitplan] %s" % text))
+    zeitplan.start()
+
+    adresse = web.adresse()
+    print("  Jarvis läuft jetzt im Browser:")
+    print("     %s" % adresse)
+    if offen:
+        print("\n  Der Zugang ist offen im WLAN - deshalb steht ein Schlüssel in")
+        print("  der Adresse. Ohne ihn kommt niemand herein. Gib die Adresse nur")
+        print("  weiter, wenn du willst, dass jemand alles darf, was du darfst.")
+    else:
+        print("     (nur auf diesem Rechner erreichbar)")
+    print("\n  Beenden mit Strg und C.\n")
+
+    import shutil as _shutil
+    import subprocess as _subprocess
+    if _shutil.which("open"):
+        try:
+            _subprocess.run(["open", adresse], shell=False, timeout=15,
+                            stdout=_subprocess.DEVNULL, stderr=_subprocess.DEVNULL)
+        except (OSError, _subprocess.SubprocessError):
+            pass
+
+    try:
+        web.starten(blockierend=True)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        zeitplan.stop()
+        web.stoppen()
+        agent.tools.mcp.stoppen()
+    print("\nBeendet.")
+    return 0
 
 
 def lage_sagen():
@@ -591,7 +648,13 @@ def hauptprogramm(argumente=None) -> int:
     config.verzeichnisse_anlegen()
     vorlage_schreiben()
 
-    if modus in ("", "start", "dauerbetrieb"):
+    if modus in ("", "start", "web", "browser", "app"):
+        if not config.EINRICHTUNG_FERTIG and not config.ANTHROPIC_API_KEY:
+            print("Jarvis ist noch nicht eingerichtet. Ich starte die Einrichtung.")
+            einrichtung_starten()
+            return 0
+        return webbetrieb(argumente[1:] if argumente else [])
+    elif modus in ("hoeren", "hören", "dauerbetrieb", "sprechen"):
         if not config.EINRICHTUNG_FERTIG and not config.ANTHROPIC_API_KEY:
             print("Jarvis ist noch nicht eingerichtet. Ich starte die Einrichtung.")
             einrichtung_starten()

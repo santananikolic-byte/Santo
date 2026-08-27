@@ -49,6 +49,25 @@ Kalender kann man einrichten, muss man aber nicht.
 
 ---
 
+## Die Web-App
+
+Der Normalfall: `python3 jarvis.py` startet einen kleinen Server und öffnet
+Jarvis im Browser. Dort drückst du auf das Mikrofon und sprichst — die
+Spracherkennung kommt vom Browser, also ohne PortAudio und ohne Systemrechte
+fürs Terminal. Er antwortet gesprochen zurück.
+
+Rechts steht der Stand: was der Betrieb tragen muss, die Kasse, wer heute
+nachzufassen ist. Braucht eine Aktion deine Freigabe, kommt ein Fenster mit
+dem vollen Wortlaut — bei einem Skript mit dem ganzen Code.
+
+Vom Handy im selben WLAN: `python3 jarvis.py web --offen`. Dann steht ein
+Schlüssel in der Adresse, und **ohne ihn kommt niemand herein** — dieser Server
+darf Mails lesen, Skripte ausführen und Geld verbuchen. Ohne `--offen` hört er
+nur auf diesen Rechner.
+
+Braucht Safari oder Chrome; Firefox kann keine deutsche Spracherkennung und
+bekommt deshalb keinen Mikrofonknopf, sondern einen Hinweis.
+
 ## So redet man mit ihm
 
 > „Hey Jarvis, wie sieht mein Tag aus?“
@@ -175,7 +194,9 @@ CSV-Export.
 Oder im Terminal:
 
 ```
-python3 jarvis.py             Dauerbetrieb: hört zu und meldet sich von selbst
+python3 jarvis.py             Web-App im Browser - der Normalfall
+python3 jarvis.py web --offen auch vom Handy im eigenen WLAN
+python3 jarvis.py hoeren      im Terminal zuhören, ohne Browser
 python3 jarvis.py chat        tippen statt sprechen
 python3 jarvis.py telegram    vom Handy aus
 python3 jarvis.py briefing    Briefing sofort
@@ -224,6 +245,8 @@ src/modules/team.py        acht Fachkräfte mit eigenem Werkzeugsatz
 src/modules/akquise.py     Pipeline, Angebotskalkulation, Cashflow
 src/modules/werkstatt.py   Skripte schreiben und nach Freigabe ausführen
 src/modules/privat.py      Fixkosten, Bedarfsrechnung, Erinnerungen
+src/modules/webapp.py      Server, Freigabe-Brücke, Schnittstelle
+src/modules/webseite.py    die Oberfläche als eine Datei
 landing/index.html         Verkaufsseite, eigenständig, ohne externe Anfragen
 landing/anleitung.html     Bauanleitung als Unterseite, beide gegenseitig verlinkt
 tests/abnahme.py           führt die Abnahmeliste wirklich aus

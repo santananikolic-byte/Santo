@@ -118,6 +118,17 @@ class Werkzeuge:
                                    akquise=self.akquise, team=self.team,
                                    privat=self.privat)
         self.stimme = None
+        # Ein anderer Weg, Freigaben einzuholen - die Web-App setzt sich hier ein.
+        self.freigabe_kanal = None
+
+    def freigabe_kanal_setzen(self, kanal):
+        """Setzt einen anderen Freigabeweg, etwa den Browser.
+
+        Der Kanal braucht nur eine Methode ``anfordern(aktion, details)``, die
+        ein Wörterbuch mit ``erlaubt`` zurückgibt. Ohne Kanal bleibt es bei
+        Telegram beziehungsweise dem Terminal.
+        """
+        self.freigabe_kanal = kanal
 
     def stimme_setzen(self, stimme):
         """Reicht die Sprachausgabe durch - für Sprachnachrichten."""
@@ -407,6 +418,8 @@ class Werkzeuge:
                 details = json.dumps(argumente or {}, ensure_ascii=False)[:600]
             except (TypeError, ValueError):
                 details = str(argumente)[:600]
+        if self.freigabe_kanal is not None:
+            return self.freigabe_kanal.anfordern(name, details)
         return self.telegram.freigabe_einholen(name, details)
 
     # -- Ausführung ---------------------------------------------------------

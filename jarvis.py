@@ -8,12 +8,16 @@ Diese Datei ist erzeugt. Bearbeite die Module unter src/ und baue neu mit:
 
 Betriebsarten:
 
-    python3 jarvis.py             Dauerbetrieb: hört zu und meldet sich von selbst
+    python3 jarvis.py             Web-App im Browser - der Normalfall
+    python3 jarvis.py web --offen auch vom Handy im eigenen WLAN
+    python3 jarvis.py hoeren      im Terminal zuhören, ohne Browser
     python3 jarvis.py chat        tippen statt sprechen
     python3 jarvis.py telegram    vom Handy aus
+    python3 jarvis.py status      voller Stand des Betriebs
     python3 jarvis.py briefing    Briefing sofort
     python3 jarvis.py abend       Abendrückblick sofort
     python3 jarvis.py dashboard   Dashboard bauen
+    python3 jarvis.py export      Buchhaltung als CSV
     python3 jarvis.py stimme      Stimmprofil einlernen
     python3 jarvis.py stimmen     ElevenLabs-Stimme aussuchen
     python3 jarvis.py test        Selbsttest
@@ -35,9 +39,11 @@ import importlib.util
 import io
 import json
 import math
+import mimetypes
 import os
 import queue
 import re
+import secrets
 import select
 import shutil
 import smtplib
@@ -56,7 +62,9 @@ import uuid
 import wave
 from datetime import datetime, timedelta
 from email.message import EmailMessage
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from urllib.parse import parse_qs, urlparse
 
 
 
@@ -6105,6 +6113,581 @@ def _euro(betrag) -> str:
 
 
 # =========================================================================
+# webseite  -  Die Oberfläche der Web-App als eine einzige Seite.
+# 
+# Bewusst ohne Baukasten und ohne Nachladen aus dem Netz: Der Server liefert
+# genau diese Datei aus, und sie läuft. Kein Build, keine Abhängigkeit, die in
+# zwei Jahren nicht mehr da ist.
+# 
+# Das Mikrofon läuft über die Spracherkennung des Browsers. Safari und Chrome
+# können Deutsch, Firefox nicht - das sagt die Seite dann auch, statt einen
+# Knopf zu zeigen, der nichts tut.
+# =========================================================================
+
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+SEITE_HTML = r"""<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#08090B">
+<link rel="icon" href="/symbol.svg" type="image/svg+xml">
+<title>Jarvis</title>
+<style>
+:root {
+  --grund:#08090B; --panel:#0F1113; --erhoben:#14171A; --rand:#1C1F23;
+  --rand-hell:#2A3036; --akzent:#E8622C; --kupfer:#F0A882; --text:#F2EFEA;
+  --gedaempft:#A0A6AC; --grau:#7E858C; --gruen:#4CC38A; --rot:#E5484D;
+  --gelb:#E8A33C;
+  --sans:-apple-system,BlinkMacSystemFont,"Helvetica Neue",Arial,sans-serif;
+  --mono:ui-monospace,"SF Mono",Menlo,monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{
+  background:var(--grund);color:var(--text);font-family:var(--sans);
+  font-size:16px;line-height:1.55;-webkit-font-smoothing:antialiased;
+  display:flex;flex-direction:column;overflow:hidden;
+}
+button{font-family:inherit;cursor:pointer;border:none;background:none;color:inherit}
+:focus-visible{outline:2px solid var(--akzent);outline-offset:2px;border-radius:6px}
+
+/* Kopf */
+header{
+  display:flex;align-items:center;gap:14px;padding:11px 18px;
+  border-bottom:1px solid var(--rand);background:var(--panel);flex:none;
+}
+.marke{font-size:13px;font-weight:700;letter-spacing:.2em;text-transform:uppercase}
+.marke span{color:var(--akzent)}
+.ampel{width:8px;height:8px;border-radius:50%;background:var(--grau);flex:none}
+.ampel.an{background:var(--gruen);box-shadow:0 0 8px var(--gruen)}
+.ampel.aus{background:var(--rot);box-shadow:0 0 8px var(--rot)}
+header nav{margin-left:auto;display:flex;gap:7px}
+header nav a,header nav button{
+  font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--grau);
+  border:1px solid var(--rand-hell);border-radius:6px;padding:6px 11px;
+  text-decoration:none;
+}
+header nav a:hover,header nav button:hover{color:var(--kupfer);border-color:var(--akzent)}
+
+/* Lageleiste */
+.lage{
+  padding:9px 18px;font-size:13px;color:var(--gedaempft);
+  border-bottom:1px solid var(--rand);
+  background:linear-gradient(90deg,rgba(232,98,44,.10),transparent 70%);
+  flex:none;
+}
+.lage b{color:var(--kupfer);font-weight:600}
+
+/* Hauptbereich */
+main{flex:1;display:grid;grid-template-columns:1fr 320px;min-height:0}
+
+.gespraech{display:flex;flex-direction:column;min-height:0}
+.verlauf{flex:1;overflow-y:auto;padding:20px 18px 8px;display:flex;
+         flex-direction:column;gap:12px}
+.blase{max-width:min(78%,640px);padding:11px 15px;border-radius:14px;
+       font-size:15px;line-height:1.6;white-space:pre-wrap;word-wrap:break-word}
+.blase.du{align-self:flex-end;background:var(--erhoben);
+          border:1px solid var(--rand-hell);border-bottom-right-radius:5px}
+.blase.jarvis{align-self:flex-start;background:var(--panel);
+              border:1px solid var(--rand);border-bottom-left-radius:5px}
+.blase.jarvis.fehler{border-color:rgba(229,72,77,.5);color:#F3B0B2}
+.blase .wer{font-size:10px;letter-spacing:.13em;text-transform:uppercase;
+            color:var(--grau);margin-bottom:5px}
+.blase.jarvis .wer{color:var(--akzent)}
+.leerzustand{margin:auto;text-align:center;color:var(--grau);max-width:400px;padding:20px}
+.leerzustand h2{font-size:22px;color:var(--text);margin-bottom:10px;font-weight:700}
+.leerzustand p{font-size:14px;line-height:1.7}
+.leerzustand code{font-family:var(--mono);font-size:13px;color:var(--kupfer)}
+
+.denkt{align-self:flex-start;display:flex;gap:5px;padding:12px 16px}
+.denkt i{width:7px;height:7px;border-radius:50%;background:var(--akzent);
+         animation:pulsen 1.2s ease-in-out infinite}
+.denkt i:nth-child(2){animation-delay:.18s}
+.denkt i:nth-child(3){animation-delay:.36s}
+@keyframes pulsen{0%,100%{opacity:.25;transform:translateY(0)}
+                  50%{opacity:1;transform:translateY(-3px)}}
+
+/* Eingabe */
+.eingabe{flex:none;padding:12px 18px 16px;border-top:1px solid var(--rand);
+         background:var(--panel);display:flex;gap:10px;align-items:flex-end}
+.eingabe textarea{
+  flex:1;resize:none;background:var(--erhoben);color:var(--text);
+  border:1px solid var(--rand-hell);border-radius:11px;padding:11px 14px;
+  font-family:inherit;font-size:15px;line-height:1.5;max-height:140px;min-height:46px;
+}
+.eingabe textarea::placeholder{color:var(--grau)}
+.knopf{
+  width:46px;height:46px;border-radius:50%;flex:none;display:grid;place-items:center;
+  background:var(--erhoben);border:1px solid var(--rand-hell);
+  transition:background .15s,border-color .15s,transform .1s;
+}
+.knopf:hover{border-color:var(--akzent)}
+.knopf:active{transform:scale(.94)}
+.knopf svg{width:20px;height:20px;fill:currentColor}
+.knopf.mikro.hoert{background:var(--akzent);border-color:var(--akzent);color:#1A0E08;
+                   animation:atmen 1.4s ease-in-out infinite}
+@keyframes atmen{0%,100%{box-shadow:0 0 0 0 rgba(232,98,44,.55)}
+                 70%{box-shadow:0 0 0 13px rgba(232,98,44,0)}}
+.knopf.senden{background:var(--akzent);border-color:var(--akzent);color:#1A0E08}
+.knopf[disabled]{opacity:.4;cursor:default}
+
+/* Seitenspalte */
+.seite{border-left:1px solid var(--rand);background:var(--panel);overflow-y:auto;
+       padding:14px;display:flex;flex-direction:column;gap:11px}
+.kachel{background:var(--erhoben);border:1px solid var(--rand);border-radius:10px;
+        padding:12px 14px}
+.kachel h3{font-size:10px;letter-spacing:.14em;text-transform:uppercase;
+           color:var(--grau);margin-bottom:8px;font-weight:600}
+.kachel .zahl{font-size:21px;font-weight:700;letter-spacing:-.01em;
+              font-variant-numeric:tabular-nums}
+.kachel .zahl.gut{color:var(--gruen)} .kachel .zahl.schlecht{color:var(--rot)}
+.kachel .zahl.akzent{color:var(--akzent)}
+.kachel .neben{font-size:12px;color:var(--grau);margin-top:3px;line-height:1.5}
+.kachel ul{list-style:none} .kachel li{font-size:13px;padding:5px 0;
+           border-bottom:1px solid var(--rand)}
+.kachel li:last-child{border-bottom:none}
+.kachel li small{display:block;color:var(--grau);font-size:11.5px}
+.leer{color:#4A5157;font-style:italic;font-size:12.5px}
+.schnell{display:flex;flex-wrap:wrap;gap:6px}
+.schnell button{font-size:12px;border:1px solid var(--rand-hell);border-radius:999px;
+                padding:6px 12px;color:var(--gedaempft)}
+.schnell button:hover{border-color:var(--akzent);color:var(--kupfer)}
+
+/* Freigabe */
+.schleier{position:fixed;inset:0;background:rgba(4,5,6,.86);display:none;
+          place-items:center;padding:20px;z-index:50;backdrop-filter:blur(3px)}
+.schleier.zeigen{display:grid}
+.frage{background:var(--panel);border:1px solid var(--akzent);border-radius:14px;
+       max-width:560px;width:100%;overflow:hidden;
+       box-shadow:0 24px 70px -20px rgba(232,98,44,.4)}
+.frage header{background:rgba(232,98,44,.11);border-bottom:1px solid var(--rand)}
+.frage h2{font-size:13px;letter-spacing:.16em;text-transform:uppercase;
+          color:var(--akzent);font-weight:700}
+.frage .rest{margin-left:auto;font-family:var(--mono);font-size:12px;color:var(--grau)}
+.frage .inhalt{padding:16px 18px}
+.frage .aktion{font-size:19px;font-weight:700;margin-bottom:9px}
+.frage pre{background:var(--erhoben);border:1px solid var(--rand);border-radius:8px;
+           padding:11px 13px;font-family:var(--mono);font-size:12.5px;line-height:1.6;
+           color:var(--kupfer);max-height:240px;overflow:auto;white-space:pre-wrap;
+           word-break:break-word}
+.frage .knoepfe{display:flex;gap:10px;padding:0 18px 18px}
+.frage .knoepfe button{flex:1;padding:13px;border-radius:9px;font-weight:700;
+                       font-size:15px}
+.frage .ja{background:var(--akzent);color:#1A0E08}
+.frage .nein{background:var(--erhoben);border:1px solid var(--rand-hell);
+             color:var(--text)}
+.frage .hinweis{padding:0 18px 14px;font-size:12px;color:var(--grau)}
+
+/* Schmale Fenster ganz zum Schluss: gleiche Genauigkeit gewinnt die spaetere
+   Regel, deshalb duerfen diese hier nicht weiter oben stehen. */
+main,.gespraech,.verlauf,.eingabe,.blase,.kachel{min-width:0}
+@media(max-width:900px){
+  main{grid-template-columns:1fr}
+  .seite{display:none}
+  .blase{max-width:88%}
+  header{padding:10px 12px;gap:10px}
+  header nav a,header nav button{padding:6px 9px;font-size:10px}
+  .lage{padding:8px 12px;font-size:12.5px}
+  .verlauf{padding:16px 12px 6px}
+  .eingabe{padding:10px 12px 14px}
+}
+@media(max-width:430px){
+  .marke{font-size:11px;letter-spacing:.12em}
+  #wer{display:none}
+  header nav a[href="/sales"]{display:none}
+}
+</style>
+</head>
+<body>
+
+<header>
+  <span class="ampel" id="ampel"></span>
+  <span class="marke">Jarvis <span id="wer"></span></span>
+  <nav>
+    <button id="sprechenAn" title="Antworten vorlesen">Stimme an</button>
+    <button id="neu">Neu</button>
+    <a href="/dashboard" target="_blank" rel="noopener">Cockpit</a>
+    <a href="/sales" target="_blank" rel="noopener">Sales</a>
+  </nav>
+</header>
+
+<div class="lage" id="lage">Stand wird geholt …</div>
+
+<main>
+  <section class="gespraech">
+    <div class="verlauf" id="verlauf">
+      <div class="leerzustand" id="leerzustand">
+        <h2>Sag etwas.</h2>
+        <p>Drück auf das Mikrofon und sprich, oder tippe unten.<br>
+           Zum Beispiel: <code>Wie steht es?</code> ·
+           <code>Was muss ich heute nachfassen?</code> ·
+           <code>Trag 59,90 Tankstelle als Ausgabe ein</code></p>
+      </div>
+    </div>
+
+    <div class="eingabe">
+      <button class="knopf mikro" id="mikro" title="Sprechen" aria-label="Sprechen">
+        <svg viewBox="0 0 24 24"><path d="M12 14a3 3 0 0 0 3-3V5a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11z"/></svg>
+      </button>
+      <textarea id="feld" rows="1" placeholder="Schreib oder sprich …"></textarea>
+      <button class="knopf senden" id="senden" title="Senden" aria-label="Senden">
+        <svg viewBox="0 0 24 24"><path d="M3 20.5v-6l9-2.5-9-2.5v-6l19 8.5z"/></svg>
+      </button>
+    </div>
+  </section>
+
+  <aside class="seite">
+    <div class="kachel">
+      <h3>Was der Betrieb tragen muss</h3>
+      <div class="zahl" id="bedarfZahl">–</div>
+      <div class="neben" id="bedarfText">wird geholt …</div>
+    </div>
+    <div class="kachel">
+      <h3>Kasse diesen Monat</h3>
+      <div class="zahl" id="kasseZahl">–</div>
+      <div class="neben" id="kasseText">wird geholt …</div>
+    </div>
+    <div class="kachel">
+      <h3>Heute nachfassen</h3>
+      <div id="nachfassen"><span class="leer">wird geholt …</span></div>
+    </div>
+    <div class="kachel">
+      <h3>Schnell</h3>
+      <div class="schnell" id="schnell"></div>
+    </div>
+  </aside>
+</main>
+
+<div class="schleier" id="schleier">
+  <div class="frage">
+    <header>
+      <h2>Freigabe nötig</h2>
+      <span class="rest" id="freigabeRest"></span>
+    </header>
+    <div class="inhalt">
+      <div class="aktion" id="freigabeAktion"></div>
+      <pre id="freigabeDetails"></pre>
+    </div>
+    <p class="hinweis">Ohne dein Ja passiert nichts. Keine Antwort gilt als Nein.</p>
+    <div class="knoepfe">
+      <button class="nein" id="freigabeNein">Nein</button>
+      <button class="ja" id="freigabeJa">Ja, mach</button>
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  "use strict";
+  var SCHLUESSEL = "{{SCHLUESSEL}}";
+
+  var el = function (id) { return document.getElementById(id); };
+  var verlauf = el("verlauf"), feld = el("feld");
+  var sprechen = true, hoertZu = false, laeuft = false;
+  var aktuelleFreigabe = null, restZaehler = null;
+
+  /* ---------- Netz ---------- */
+  function url(pfad) {
+    return pfad + (SCHLUESSEL ? (pfad.indexOf("?") < 0 ? "?" : "&") +
+      "schluessel=" + encodeURIComponent(SCHLUESSEL) : "");
+  }
+  function holen(pfad, koerper) {
+    var einstellungen = { headers: { "Content-Type": "application/json" } };
+    if (koerper !== undefined) {
+      einstellungen.method = "POST";
+      einstellungen.body = JSON.stringify(koerper);
+    }
+    return fetch(url(pfad), einstellungen).then(function (a) { return a.json(); });
+  }
+  function euro(n) {
+    if (typeof n !== "number") { return "–"; }
+    return n.toLocaleString("de-DE", { minimumFractionDigits: 2,
+      maximumFractionDigits: 2 }) + " €";
+  }
+
+  /* ---------- Gespräch ---------- */
+  function blase(wer, text, fehler) {
+    var leerzustand = el("leerzustand");
+    if (leerzustand) { leerzustand.remove(); }
+    var knoten = document.createElement("div");
+    knoten.className = "blase " + (wer === "du" ? "du" : "jarvis") +
+                       (fehler ? " fehler" : "");
+    var kopf = document.createElement("div");
+    kopf.className = "wer";
+    kopf.textContent = wer === "du" ? "Du" : "Jarvis";
+    knoten.appendChild(kopf);
+    knoten.appendChild(document.createTextNode(text));
+    verlauf.appendChild(knoten);
+    verlauf.scrollTop = verlauf.scrollHeight;
+    return knoten;
+  }
+  function denktAn() {
+    var k = document.createElement("div");
+    k.className = "denkt"; k.id = "denkt";
+    k.innerHTML = "<i></i><i></i><i></i>";
+    verlauf.appendChild(k);
+    verlauf.scrollTop = verlauf.scrollHeight;
+  }
+  function denktAus() {
+    var k = el("denkt");
+    if (k) { k.remove(); }
+  }
+
+  /* ---------- Stimme ---------- */
+  var stimmen = [];
+  function stimmenLaden() {
+    stimmen = window.speechSynthesis ? window.speechSynthesis.getVoices() : [];
+  }
+  if (window.speechSynthesis) {
+    stimmenLaden();
+    window.speechSynthesis.onvoiceschanged = stimmenLaden;
+  }
+  function sprich(text) {
+    if (!sprechen || !window.speechSynthesis || !text) { return; }
+    window.speechSynthesis.cancel();
+    var satz = new SpeechSynthesisUtterance(text);
+    satz.lang = "de-DE";
+    satz.rate = 1.05;
+    var deutsch = stimmen.filter(function (s) { return /^de/i.test(s.lang); });
+    var lieber = deutsch.filter(function (s) {
+      return /markus|yannick|petra|anna|viktor|google/i.test(s.name);
+    });
+    if (lieber.length) { satz.voice = lieber[0]; }
+    else if (deutsch.length) { satz.voice = deutsch[0]; }
+    window.speechSynthesis.speak(satz);
+  }
+
+  /* ---------- Senden ---------- */
+  function senden(text) {
+    text = (text || feld.value).trim();
+    if (!text || laeuft) { return; }
+    laeuft = true;
+    feld.value = "";
+    feld.style.height = "auto";
+    blase("du", text);
+    denktAn();
+    el("senden").disabled = true;
+    holen("/api/reden", { text: text }).then(function (a) {
+      denktAus();
+      var antwort = a.antwort || a.fehler || "Keine Antwort bekommen.";
+      blase("jarvis", antwort, !a.ok);
+      if (a.ok) { sprich(antwort); }
+      lageHolen();
+      kachelnHolen();
+    }).catch(function (fehler) {
+      denktAus();
+      blase("jarvis", "Ich erreiche den Server nicht: " + fehler.message, true);
+    }).then(function () {
+      laeuft = false;
+      el("senden").disabled = false;
+    });
+  }
+
+  el("senden").addEventListener("click", function () { senden(); });
+  feld.addEventListener("keydown", function (e) {
+    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); senden(); }
+  });
+  feld.addEventListener("input", function () {
+    feld.style.height = "auto";
+    feld.style.height = Math.min(feld.scrollHeight, 140) + "px";
+  });
+
+  /* ---------- Mikrofon ---------- */
+  var Erkennung = window.SpeechRecognition || window.webkitSpeechRecognition;
+  var erkennung = null;
+  if (!Erkennung) {
+    var mikro = el("mikro");
+    mikro.disabled = true;
+    mikro.title = "Dieser Browser kann keine Spracherkennung. Safari oder Chrome nehmen.";
+  } else {
+    erkennung = new Erkennung();
+    erkennung.lang = "de-DE";
+    erkennung.interimResults = true;
+    erkennung.continuous = false;
+    erkennung.onresult = function (e) {
+      var text = "";
+      for (var i = e.resultIndex; i < e.results.length; i++) {
+        text += e.results[i][0].transcript;
+      }
+      feld.value = text;
+      if (e.results[e.results.length - 1].isFinal) {
+        hoertAuf();
+        senden(text);
+      }
+    };
+    erkennung.onerror = function (e) {
+      hoertAuf();
+      if (e.error === "not-allowed") {
+        blase("jarvis", "Der Browser lässt mich nicht ans Mikrofon. Erlaub den " +
+          "Zugriff in der Adressleiste, dann geht es.", true);
+      } else if (e.error !== "aborted" && e.error !== "no-speech") {
+        blase("jarvis", "Mit dem Mikrofon stimmt etwas nicht: " + e.error, true);
+      }
+    };
+    erkennung.onend = function () { hoertAuf(); };
+    el("mikro").addEventListener("click", function () {
+      if (hoertZu) { erkennung.stop(); hoertAuf(); return; }
+      if (window.speechSynthesis) { window.speechSynthesis.cancel(); }
+      try { erkennung.start(); hoertZu = true; el("mikro").classList.add("hoert"); }
+      catch (fehler) { hoertAuf(); }
+    });
+  }
+  function hoertAuf() {
+    hoertZu = false;
+    el("mikro").classList.remove("hoert");
+  }
+
+  /* ---------- Kopfzeile ---------- */
+  el("sprechenAn").addEventListener("click", function () {
+    sprechen = !sprechen;
+    this.textContent = sprechen ? "Stimme an" : "Stimme aus";
+    if (!sprechen && window.speechSynthesis) { window.speechSynthesis.cancel(); }
+  });
+  el("neu").addEventListener("click", function () {
+    holen("/api/verlauf/neu", {}).then(function () {
+      verlauf.innerHTML = "";
+      blase("jarvis", "Neues Gespräch. Was brauchst du?");
+    });
+  });
+
+  /* ---------- Stand ---------- */
+  function lageHolen() {
+    holen("/api/lage").then(function (a) {
+      el("lage").textContent = a.text || a.fehler || "Kein Stand abrufbar.";
+    }).catch(function () {
+      el("lage").textContent = "Der Server antwortet nicht.";
+    });
+  }
+  function zustandHolen() {
+    holen("/api/zustand").then(function (a) {
+      el("ampel").className = "ampel " + (a.einsatzbereit ? "an" : "aus");
+      el("ampel").title = a.einsatzbereit
+        ? "Bereit · " + a.werkzeuge + " Werkzeuge"
+        : "Kein Anthropic-Schlüssel hinterlegt";
+      el("wer").textContent = "// " + (a.firma || "");
+      if (!a.einsatzbereit) {
+        blase("jarvis", "Es ist kein Anthropic-Schlüssel hinterlegt. Ohne ihn " +
+          "kann ich nicht denken. Starte einmal die Einrichtung.", true);
+      }
+    }).catch(function () {});
+  }
+  function kachelnHolen() {
+    holen("/api/bedarf").then(function (a) {
+      if (!a.berechenbar) {
+        el("bedarfZahl").textContent = "–";
+        el("bedarfText").textContent = "Fixkosten noch nicht erfasst.";
+        return;
+      }
+      if (typeof a.luecke === "number" && a.luecke > 0) {
+        el("bedarfZahl").textContent = euro(a.luecke) + " fehlen";
+        el("bedarfZahl").className = "zahl schlecht";
+        el("bedarfText").textContent = "Nötig " + euro(a.noetiger_umsatz) +
+          " je Monat, gesichert " + euro(a.gesichert) + ".";
+      } else {
+        el("bedarfZahl").textContent = euro(a.noetiger_umsatz);
+        el("bedarfZahl").className = "zahl gut";
+        el("bedarfText").textContent = "nötig je Monat – gedeckt.";
+      }
+    }).catch(function () {});
+
+    holen("/api/kasse").then(function (a) {
+      el("kasseZahl").textContent = euro(a.ergebnis);
+      el("kasseZahl").className = "zahl " + (a.ergebnis >= 0 ? "gut" : "schlecht");
+      el("kasseText").textContent = "Ein " + euro(a.einnahmen) + " · Aus " +
+        euro(a.ausgaben) + " · Zahllast " + euro(a.zahllast);
+    }).catch(function () {});
+
+    holen("/api/nachfassen").then(function (a) {
+      var ziel = el("nachfassen");
+      if (!a.anzahl) {
+        ziel.innerHTML = '<span class="leer">Heute ist niemand fällig.</span>';
+        return;
+      }
+      var liste = document.createElement("ul");
+      a.eintraege.slice(0, 5).forEach(function (e) {
+        var zeile = document.createElement("li");
+        zeile.textContent = e.firma + " · " + euro(e.wert_monat);
+        var klein = document.createElement("small");
+        klein.textContent = e.schritt +
+          (e.seit_tagen > 0 ? " · " + e.seit_tagen + " Tage überfällig" : "");
+        zeile.appendChild(klein);
+        liste.appendChild(zeile);
+      });
+      ziel.innerHTML = "";
+      ziel.appendChild(liste);
+    }).catch(function () {});
+  }
+
+  var SCHNELL = ["Wie steht es?", "Was muss ich heute nachfassen?",
+                 "Was fehlt mir zum Decken?", "Welche Belege fehlen?",
+                 "Was steht an?"];
+  SCHNELL.forEach(function (text) {
+    var knopf = document.createElement("button");
+    knopf.textContent = text;
+    knopf.addEventListener("click", function () { senden(text); });
+    el("schnell").appendChild(knopf);
+  });
+
+  /* ---------- Freigaben ---------- */
+  function freigabenHolen() {
+    holen("/api/freigaben").then(function (a) {
+      var offen = (a.offen || [])[0];
+      if (!offen) {
+        if (aktuelleFreigabe) { freigabeSchliessen(); }
+        return;
+      }
+      if (aktuelleFreigabe && aktuelleFreigabe.id === offen.id) {
+        el("freigabeRest").textContent = offen.rest + " s";
+        return;
+      }
+      aktuelleFreigabe = offen;
+      el("freigabeAktion").textContent = offen.aktion;
+      el("freigabeDetails").textContent = offen.details || "(ohne Angaben)";
+      el("freigabeRest").textContent = offen.rest + " s";
+      el("schleier").classList.add("zeigen");
+      if (window.speechSynthesis) { window.speechSynthesis.cancel(); }
+      sprich("Ich brauche eine Freigabe für " + offen.aktion);
+    }).catch(function () {});
+  }
+  function freigabeSchliessen() {
+    aktuelleFreigabe = null;
+    el("schleier").classList.remove("zeigen");
+    if (restZaehler) { clearInterval(restZaehler); restZaehler = null; }
+  }
+  function antworten(ja) {
+    if (!aktuelleFreigabe) { return; }
+    var kennung = aktuelleFreigabe.id;
+    freigabeSchliessen();
+    holen("/api/freigabe", { id: kennung, ja: ja }).then(function () {
+      lageHolen();
+    });
+  }
+  el("freigabeJa").addEventListener("click", function () { antworten(true); });
+  el("freigabeNein").addEventListener("click", function () { antworten(false); });
+  document.addEventListener("keydown", function (e) {
+    if (!aktuelleFreigabe) { return; }
+    if (e.key === "Escape") { antworten(false); }
+  });
+
+  /* ---------- Start ---------- */
+  zustandHolen();
+  lageHolen();
+  kachelnHolen();
+  setInterval(freigabenHolen, 1500);
+  setInterval(lageHolen, 45000);
+  setInterval(kachelnHolen, 60000);
+  feld.focus();
+})();
+</script>
+</body>
+</html>
+"""
+
+
+# =========================================================================
 # dashboard_teile  -  Bausteine für die Oberflächen - Farben, Zahlenformate und SVG-Grafiken.
 # 
 # Hier liegt alles, was Command Center und Sales-Ansicht gemeinsam benutzen.
@@ -7582,6 +8165,371 @@ class Scheduler:
 
 
 # =========================================================================
+# webapp  -  Web-App - Jarvis im Browser statt im Terminal.
+# 
+# Ein kleiner Server aus der Python-Standardbibliothek, kein Fremdpaket. Er
+# liefert eine Seite aus, die im Browser läuft: dort spricht der Nutzer, dort
+# antwortet Jarvis, dort steht sein Stand, und dort erteilt er Freigaben.
+# 
+# **Warum das Mikrofon im Browser besser ist:** Der Browser darf auf das Mikrofon
+# zugreifen, sobald der Nutzer einmal erlaubt hat - ohne PortAudio, ohne
+# Systemrechte fürs Terminal, und auch vom Handy aus. Die Spracherkennung von
+# Safari und Chrome ist für Deutsch gut genug und kostet nichts.
+# 
+# **Sicherheit.** Der Server hört standardmäßig nur auf 127.0.0.1, also nur auf
+# diesem Rechner. Wer ihn ins WLAN stellt, um vom Handy zuzugreifen, braucht
+# zwingend einen Schlüssel in der Adresse - denn dieser Server darf Mails lesen,
+# Skripte ausführen und Geld verbuchen. Ein offener Port ohne Schlüssel wäre
+# fahrlässig. Zusätzlich wird der Host-Kopf geprüft, damit keine fremde Webseite
+# über den Namen des Rechners hereinredet.
+# =========================================================================
+
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+
+
+STANDARD_PORT = 8765
+MAX_KOERPER = 512 * 1024
+
+# Ohne eigenes Symbol fragt jeder Browser nach /favicon.ico und bekommt einen
+# Fehler in die Konsole. Ein kleines SVG kostet nichts und räumt das weg.
+SYMBOL_SVG = (
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">'
+    '<rect width="64" height="64" rx="14" fill="#0F1113"/>'
+    '<circle cx="32" cy="32" r="17" fill="none" stroke="#E8622C" stroke-width="5"/>'
+    '<circle cx="32" cy="32" r="6" fill="#E8622C"/></svg>')
+
+
+class WebFreigabe:
+    """Freigaben über den Browser statt über Telegram oder das Terminal.
+
+    Eine Anfrage wird abgelegt und blockiert den Werkzeugaufruf, bis der Nutzer
+    im Browser antwortet oder die Zeit abläuft. **Zeitablauf gilt als Nein** -
+    wie überall sonst im Programm.
+    """
+
+    def __init__(self, timeout: int = None):
+        self.timeout = int(timeout if timeout is not None else FREIGABE_TIMEOUT)
+        self._offen = {}
+        self._sperre = threading.Lock()
+
+    def anfordern(self, aktion: str, details: str = "") -> dict:
+        """Legt eine Freigabefrage ab und wartet auf die Antwort."""
+        kennung = uuid.uuid4().hex[:12]
+        ereignis = threading.Event()
+        eintrag = {"id": kennung, "aktion": aktion, "details": details,
+                   "gestellt": zeitstempel(), "ereignis": ereignis,
+                   "antwort": None,
+                   "laeuft_ab": time.time() + self.timeout}
+        with self._sperre:
+            self._offen[kennung] = eintrag
+
+        erhalten = ereignis.wait(timeout=self.timeout)
+        with self._sperre:
+            self._offen.pop(kennung, None)
+
+        if not erhalten or eintrag["antwort"] is not True:
+            grund = ("abgelehnt" if erhalten
+                     else "keine Antwort innerhalb von %d Sekunden" % self.timeout)
+            return {"erlaubt": False, "kanal": "web", "grund": grund}
+        return {"erlaubt": True, "kanal": "web", "grund": "Freigabe erteilt"}
+
+    def offene(self) -> list:
+        """Alle wartenden Freigabefragen - die holt sich der Browser ab."""
+        jetzt = time.time()
+        with self._sperre:
+            return [{"id": e["id"], "aktion": e["aktion"], "details": e["details"],
+                     "gestellt": e["gestellt"],
+                     "rest": max(0, int(e["laeuft_ab"] - jetzt))}
+                    for e in self._offen.values()]
+
+    def beantworten(self, kennung: str, ja: bool) -> bool:
+        """Beantwortet eine Freigabefrage."""
+        with self._sperre:
+            eintrag = self._offen.get(kennung)
+            if eintrag is None:
+                return False
+            eintrag["antwort"] = bool(ja)
+        eintrag["ereignis"].set()
+        return True
+
+
+class JarvisWeb:
+    """Der Webserver. Startet den Agenten im Browser."""
+
+    def __init__(self, agent, host: str = "127.0.0.1", port: int = STANDARD_PORT,
+                 offen: bool = False, token: str = ""):
+        self.agent = agent
+        self.offen = bool(offen)
+        self.host = "0.0.0.0" if self.offen else (host or "127.0.0.1")
+        self.port = int(port or STANDARD_PORT)
+        # Im WLAN ist ein Schlüssel Pflicht - dieser Server darf zu viel.
+        self.token = token or (secrets.token_urlsafe(18) if self.offen else "")
+        self.freigabe = WebFreigabe()
+        self.server = None
+        self._denkt = threading.Lock()
+        agent.tools.freigabe_kanal_setzen(self.freigabe)
+
+    # -- Adressen -----------------------------------------------------------
+
+    def adresse(self) -> str:
+        """Die Adresse, die der Nutzer im Browser öffnet."""
+        gastgeber = "localhost" if not self.offen else self._eigene_ip()
+        ziel = "http://%s:%d/" % (gastgeber, self.port)
+        return ziel + ("?schluessel=%s" % self.token if self.token else "")
+
+    @staticmethod
+    def _eigene_ip() -> str:
+        """Die IP dieses Rechners im eigenen Netz."""
+        import socket
+        verbindung = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            verbindung.connect(("192.168.1.1", 1))
+            return verbindung.getsockname()[0]
+        except OSError:
+            return "127.0.0.1"
+        finally:
+            verbindung.close()
+
+    # -- Betrieb ------------------------------------------------------------
+
+    def starten(self, blockierend: bool = True):
+        """Startet den Server."""
+        anwendung = self
+
+        class Behandler(BaseHTTPRequestHandler):
+            protocol_version = "HTTP/1.1"
+            server_version = "Jarvis"
+
+            def log_message(self, format, *args):
+                del format, args   # Die Konsole gehört Jarvis, nicht dem Server.
+
+            def do_GET(self):
+                anwendung._behandeln(self, "GET")
+
+            def do_POST(self):
+                anwendung._behandeln(self, "POST")
+
+        self.server = ThreadingHTTPServer((self.host, self.port), Behandler)
+        self.server.daemon_threads = True
+        if blockierend:
+            try:
+                self.server.serve_forever()
+            except KeyboardInterrupt:
+                pass
+            finally:
+                self.stoppen()
+        else:
+            threading.Thread(target=self.server.serve_forever, daemon=True,
+                             name="jarvis-web").start()
+        return self.server
+
+    def stoppen(self):
+        """Hält den Server an."""
+        if self.server is not None:
+            try:
+                self.server.shutdown()
+            except Exception:
+                pass
+            try:
+                self.server.server_close()
+            except Exception:
+                pass
+            self.server = None
+
+    # -- Anfragen -----------------------------------------------------------
+
+    def _erlaubt(self, behandler) -> bool:
+        """Prüft Schlüssel und Host-Kopf.
+
+        Der Host-Kopf muss auf diesen Rechner zeigen. Sonst könnte eine fremde
+        Webseite den Browser des Nutzers dazu bringen, hier anzuklopfen - der
+        Browser schickt die Anfrage brav mit, und der Server hielte sie für
+        echt.
+        """
+        kopf = (behandler.headers.get("Host") or "").split(":")[0].lower()
+        erlaubte = {"localhost", "127.0.0.1", "::1", ""}
+        if self.offen:
+            erlaubte.add(self._eigene_ip())
+            erlaubte.add("0.0.0.0")
+        if kopf not in erlaubte:
+            return False
+        if not self.token:
+            return True
+        gefragt = parse_qs(urlparse(behandler.path).query).get("schluessel", [""])[0]
+        kopfschluessel = behandler.headers.get("X-Jarvis-Schluessel", "")
+        return secrets.compare_digest(gefragt or kopfschluessel, self.token)
+
+    def _behandeln(self, behandler, methode: str):
+        """Verteilt eine Anfrage auf die passende Antwort."""
+        pfad = urlparse(behandler.path).path.rstrip("/") or "/"
+        if not self._erlaubt(behandler):
+            return self._antworten(behandler, 403,
+                                   {"fehler": "Kein Zugang. Der Schlüssel fehlt "
+                                              "oder stimmt nicht."})
+        try:
+            if methode == "GET":
+                return self._get(behandler, pfad)
+            return self._post(behandler, pfad)
+        except Exception as fehler:
+            print("[web] Fehler bei %s: %s" % (pfad, fehler))
+            return self._antworten(behandler, 500, {"fehler": str(fehler)})
+
+    def _get(self, behandler, pfad: str):
+        werkzeuge = self.agent.tools
+
+        if pfad == "/":
+            return self._html(behandler, SEITE_HTML.replace(
+                "{{SCHLUESSEL}}", self.token))
+        if pfad == "/api/lage":
+            return self._antworten(behandler, 200,
+                                   werkzeuge.team.lagebericht(werkzeuge))
+        if pfad == "/api/zustand":
+            return self._antworten(behandler, 200, {
+                "ok": True,
+                "einsatzbereit": self.agent.einsatzbereit(),
+                "nutzer": NUTZER_NAME, "firma": FIRMA,
+                "modell": CLAUDE_MODEL,
+                "werkzeuge": len(werkzeuge.namen()),
+                "rollen": [r["rolle"] for r in werkzeuge.team.rollen_liste()],
+                "dienste": konfig_uebersicht()})
+        if pfad == "/api/freigaben":
+            return self._antworten(behandler, 200,
+                                   {"ok": True, "offen": self.freigabe.offene()})
+        if pfad == "/api/verlauf":
+            zeilen = werkzeuge.memory.verlauf_letzte(30)
+            return self._antworten(behandler, 200, {"ok": True, "verlauf": [
+                {"rolle": z["rolle"], "text": z["text"], "zeit": z["zeit"]}
+                for z in zeilen]})
+        if pfad == "/api/pipeline":
+            return self._antworten(behandler, 200, werkzeuge.akquise.pipeline())
+        if pfad == "/api/nachfassen":
+            return self._antworten(behandler, 200, werkzeuge.akquise.nachfassliste())
+        if pfad == "/api/bedarf":
+            return self._antworten(behandler, 200,
+                                   werkzeuge.privat.bedarfsrechnung(werkzeuge.akquise))
+        if pfad == "/api/kasse":
+            return self._antworten(behandler, 200, werkzeuge.bookkeeping.auswertung())
+        if pfad == "/api/team":
+            return self._antworten(behandler, 200, {
+                "ok": True, "rollen": werkzeuge.team.rollen_liste(),
+                "auftraege": [dict(z) for z in werkzeuge.team.auftraege_letzte(10)]})
+        if pfad in ("/favicon.ico", "/symbol.svg"):
+            roh = SYMBOL_SVG.encode("utf-8")
+            self._kopf_setzen(behandler, 200, "image/svg+xml", len(roh))
+            return behandler.wfile.write(roh)
+        if pfad in ("/dashboard", "/sales"):
+            werkzeuge.dashboard.bauen()
+            datei = DASHBOARD_VERZEICHNIS / (
+                "dashboard.html" if pfad == "/dashboard" else "sales.html")
+            return self._datei(behandler, str(datei))
+        return self._antworten(behandler, 404, {"fehler": "Diese Seite gibt es nicht."})
+
+    def _post(self, behandler, pfad: str):
+        daten = self._koerper(behandler)
+        werkzeuge = self.agent.tools
+
+        if pfad == "/api/reden":
+            text = str(daten.get("text") or "").strip()
+            if not text:
+                return self._antworten(behandler, 400,
+                                       {"fehler": "Es kam kein Text an."})
+            if not self.agent.einsatzbereit():
+                return self._antworten(behandler, 200, {
+                    "ok": False,
+                    "antwort": "Es ist kein Anthropic-Schlüssel hinterlegt. "
+                               "Ohne ihn kann ich nicht denken."})
+            # Nur ein Gedanke gleichzeitig: sonst mischen sich zwei Gespräche
+            # im selben Verlauf.
+            with self._denkt:
+                antwort = self.agent.denken(text)
+            return self._antworten(behandler, 200,
+                                   {"ok": True, "antwort": antwort,
+                                    "zeit": zeitstempel()})
+
+        if pfad == "/api/freigabe":
+            kennung = str(daten.get("id") or "")
+            ja = bool(daten.get("ja"))
+            erledigt = self.freigabe.beantworten(kennung, ja)
+            return self._antworten(behandler, 200, {
+                "ok": erledigt,
+                "text": ("Freigabe erteilt." if ja else "Abgelehnt.") if erledigt
+                        else "Diese Frage ist nicht mehr offen."})
+
+        if pfad == "/api/werkzeug":
+            name = str(daten.get("name") or "")
+            if name not in werkzeuge.namen():
+                return self._antworten(behandler, 400,
+                                       {"fehler": "Das Werkzeug gibt es nicht."})
+            return self._antworten(behandler, 200,
+                                   werkzeuge.run(name, daten.get("argumente") or {}))
+
+        if pfad == "/api/verlauf/neu":
+            self.agent.verlauf_leeren()
+            return self._antworten(behandler, 200,
+                                   {"ok": True, "text": "Neues Gespräch."})
+
+        return self._antworten(behandler, 404, {"fehler": "Das gibt es nicht."})
+
+    # -- Antworten ----------------------------------------------------------
+
+    @staticmethod
+    def _koerper(behandler) -> dict:
+        """Liest den JSON-Körper einer Anfrage."""
+        try:
+            laenge = min(int(behandler.headers.get("Content-Length") or 0), MAX_KOERPER)
+        except (TypeError, ValueError):
+            laenge = 0
+        if laenge <= 0:
+            return {}
+        try:
+            return json.loads(behandler.rfile.read(laenge).decode("utf-8")) or {}
+        except (ValueError, UnicodeDecodeError):
+            return {}
+
+    @staticmethod
+    def _kopf_setzen(behandler, code: int, typ: str, laenge: int):
+        behandler.send_response(code)
+        behandler.send_header("Content-Type", typ)
+        behandler.send_header("Content-Length", str(laenge))
+        behandler.send_header("Cache-Control", "no-store")
+        behandler.send_header("X-Content-Type-Options", "nosniff")
+        behandler.send_header("Referrer-Policy", "no-referrer")
+        behandler.end_headers()
+
+    def _antworten(self, behandler, code: int, nutzlast: dict):
+        """Schickt eine JSON-Antwort."""
+        try:
+            roh = json.dumps(nutzlast, ensure_ascii=False, default=str).encode("utf-8")
+        except (TypeError, ValueError):
+            roh = json.dumps({"fehler": "Antwort nicht darstellbar"}).encode("utf-8")
+        self._kopf_setzen(behandler, code, "application/json; charset=utf-8", len(roh))
+        behandler.wfile.write(roh)
+
+    def _html(self, behandler, text: str):
+        roh = text.encode("utf-8")
+        self._kopf_setzen(behandler, 200, "text/html; charset=utf-8", len(roh))
+        behandler.wfile.write(roh)
+
+    def _datei(self, behandler, pfad: str):
+        """Liefert eine erzeugte Datei aus - nur aus dem Dashboard-Ordner."""
+        wurzel = DASHBOARD_VERZEICHNIS.resolve()
+        try:
+            ziel = os.path.realpath(pfad)
+            if not ziel.startswith(str(wurzel)):
+                return self._antworten(behandler, 403, {"fehler": "Nicht erlaubt."})
+            with open(ziel, "rb") as datei:
+                roh = datei.read()
+        except OSError:
+            return self._antworten(behandler, 404,
+                                   {"fehler": "Die Seite ist noch nicht gebaut."})
+        typ = mimetypes.guess_type(ziel)[0] or "application/octet-stream"
+        self._kopf_setzen(behandler, 200, "%s; charset=utf-8" % typ, len(roh))
+        behandler.wfile.write(roh)
+
+
+# =========================================================================
 # setup_wizard  -  Ersteinrichtung - geführt, gesprochen, ohne Suchen.
 # 
 # Der Nutzer ist kein Entwickler. Er soll nichts nachschlagen müssen. Deshalb:
@@ -8325,6 +9273,17 @@ class Werkzeuge:
                                    akquise=self.akquise, team=self.team,
                                    privat=self.privat)
         self.stimme = None
+        # Ein anderer Weg, Freigaben einzuholen - die Web-App setzt sich hier ein.
+        self.freigabe_kanal = None
+
+    def freigabe_kanal_setzen(self, kanal):
+        """Setzt einen anderen Freigabeweg, etwa den Browser.
+
+        Der Kanal braucht nur eine Methode ``anfordern(aktion, details)``, die
+        ein Wörterbuch mit ``erlaubt`` zurückgibt. Ohne Kanal bleibt es bei
+        Telegram beziehungsweise dem Terminal.
+        """
+        self.freigabe_kanal = kanal
 
     def stimme_setzen(self, stimme):
         """Reicht die Sprachausgabe durch - für Sprachnachrichten."""
@@ -8614,6 +9573,8 @@ class Werkzeuge:
                 details = json.dumps(argumente or {}, ensure_ascii=False)[:600]
             except (TypeError, ValueError):
                 details = str(argumente)[:600]
+        if self.freigabe_kanal is not None:
+            return self.freigabe_kanal.anfordern(name, details)
         return self.telegram.freigabe_einholen(name, details)
 
     # -- Ausführung ---------------------------------------------------------
@@ -9418,13 +10379,19 @@ class JarvisAgent:
 # =========================================================================
 # run  -  Betriebsarten - was passiert, wenn Jarvis gestartet wird.
 # 
-#     python3 jarvis.py             Dauerbetrieb: hört zu und meldet sich von selbst
-#     python3 jarvis.py chat        tippen statt sprechen (Notfall)
+# Ohne Angabe startet die Web-App: Jarvis läuft dann im Browser, das Mikrofon
+# kommt vom Browser, und vom Handy im selben WLAN geht es auch. Wer lieber im
+# Terminal spricht, nimmt ``hoeren``.
+# 
+#     python3 jarvis.py             Web-App im Browser - der Normalfall
+#     python3 jarvis.py web --offen auch vom Handy im eigenen WLAN
+#     python3 jarvis.py hoeren      im Terminal zuhören, ohne Browser
+#     python3 jarvis.py chat        tippen statt sprechen
 #     python3 jarvis.py telegram    vom Handy aus
+#     python3 jarvis.py status      voller Stand des Betriebs
 #     python3 jarvis.py briefing    Briefing sofort
 #     python3 jarvis.py abend       Abendrückblick sofort
 #     python3 jarvis.py dashboard   Dashboard bauen
-#     python3 jarvis.py status      voller Stand des Betriebs
 #     python3 jarvis.py export      Buchhaltung als CSV
 #     python3 jarvis.py stimme      Stimmprofil einlernen
 #     python3 jarvis.py stimmen     ElevenLabs-Stimme aussuchen
@@ -9642,6 +10609,56 @@ def dashboard_bauen():
                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     finally:
         agent.tools.mcp.stoppen()
+
+
+def webbetrieb(argumente=None):
+    """Startet Jarvis als Web-App im Browser."""
+    argumente = argumente or []
+    offen = "--offen" in argumente or "offen" in argumente
+    port = STANDARD_PORT
+    for teil in argumente:
+        if teil.isdigit():
+            port = int(teil)
+
+    print(BANNER)
+    agent, stimme = agent_aufbauen(mit_stimme=False)
+    del stimme
+    web = JarvisWeb(agent, port=port, offen=offen)
+
+    zeitplan = Scheduler(agent=agent, routines=agent.tools.routines,
+                         ausgabe=lambda text: print("[zeitplan] %s" % text))
+    zeitplan.start()
+
+    adresse = web.adresse()
+    print("  Jarvis läuft jetzt im Browser:")
+    print("     %s" % adresse)
+    if offen:
+        print("\n  Der Zugang ist offen im WLAN - deshalb steht ein Schlüssel in")
+        print("  der Adresse. Ohne ihn kommt niemand herein. Gib die Adresse nur")
+        print("  weiter, wenn du willst, dass jemand alles darf, was du darfst.")
+    else:
+        print("     (nur auf diesem Rechner erreichbar)")
+    print("\n  Beenden mit Strg und C.\n")
+
+    import shutil as _shutil
+    import subprocess as _subprocess
+    if _shutil.which("open"):
+        try:
+            _subprocess.run(["open", adresse], shell=False, timeout=15,
+                            stdout=_subprocess.DEVNULL, stderr=_subprocess.DEVNULL)
+        except (OSError, _subprocess.SubprocessError):
+            pass
+
+    try:
+        web.starten(blockierend=True)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        zeitplan.stop()
+        web.stoppen()
+        agent.tools.mcp.stoppen()
+    print("\nBeendet.")
+    return 0
 
 
 def lage_sagen():
@@ -9995,7 +11012,13 @@ def hauptprogramm(argumente=None) -> int:
     verzeichnisse_anlegen()
     vorlage_schreiben()
 
-    if modus in ("", "start", "dauerbetrieb"):
+    if modus in ("", "start", "web", "browser", "app"):
+        if not EINRICHTUNG_FERTIG and not ANTHROPIC_API_KEY:
+            print("Jarvis ist noch nicht eingerichtet. Ich starte die Einrichtung.")
+            einrichtung_starten()
+            return 0
+        return webbetrieb(argumente[1:] if argumente else [])
+    elif modus in ("hoeren", "hören", "dauerbetrieb", "sprechen"):
         if not EINRICHTUNG_FERTIG and not ANTHROPIC_API_KEY:
             print("Jarvis ist noch nicht eingerichtet. Ich starte die Einrichtung.")
             einrichtung_starten()

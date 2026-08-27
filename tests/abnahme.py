@@ -20,6 +20,7 @@ import select
 import shutil
 import subprocess
 import sys
+import threading
 import tempfile
 import time
 from datetime import datetime, timedelta
@@ -41,6 +42,8 @@ from modules.akquise import Akquise  # noqa: E402
 from modules.scheduler import Scheduler, ist_faellig  # noqa: E402
 from modules.privat import Privat, monatsanteil  # noqa: E402
 from modules.team import ROLLEN, Team  # noqa: E402
+from modules.webapp import JarvisWeb, WebFreigabe  # noqa: E402
+from modules.webseite import SEITE_HTML  # noqa: E402
 from modules.werkstatt import Werkstatt, name_saeubern  # noqa: E402
 from modules.voice import weckwort_pruefen  # noqa: E402
 
@@ -739,6 +742,135 @@ def pruefung_ansichten(agent):
                     "Ordner, Auftrag, Start")
 
 
+def pruefung_webapp(agent):
+    """Die Web-App - Zugang, Antworten und die Freigabe über den Browser."""
+    abschnitt("Web-App")
+    import urllib.error as _fehler
+    import urllib.request as _netz
+
+    # Freigabebrücke zuerst allein: Schweigen muss ein Nein sein.
+    bruecke = WebFreigabe(timeout=2)
+    ergebnis = bruecke.anfordern("mail_senden", "an kunde@beispiel.at")
+    pruefen("Freigabe im Browser: keine Antwort gilt als Nein",
+            ergebnis["erlaubt"] is False and "keine Antwort" in ergebnis["grund"])
+
+    bruecke2 = WebFreigabe(timeout=8)
+    antwort = {}
+
+    def fragen():
+        antwort["ergebnis"] = bruecke2.anfordern("skript_ausfuehren", "print(1)")
+
+    faden = threading.Thread(target=fragen, daemon=True)
+    faden.start()
+    time.sleep(0.4)
+    offen = bruecke2.offene()
+    pruefen("Wartende Freigabe erscheint für den Browser",
+            len(offen) == 1 and offen[0]["aktion"] == "skript_ausfuehren")
+    bruecke2.beantworten(offen[0]["id"], False)
+    faden.join(timeout=4)
+    pruefen("Ein Nein im Browser lehnt ab",
+            antwort.get("ergebnis", {}).get("erlaubt") is False)
+
+    bruecke3 = WebFreigabe(timeout=8)
+    antwort3 = {}
+
+    def fragen3():
+        antwort3["ergebnis"] = bruecke3.anfordern("mail_senden", "x")
+
+    faden3 = threading.Thread(target=fragen3, daemon=True)
+    faden3.start()
+    time.sleep(0.4)
+    bruecke3.beantworten(bruecke3.offene()[0]["id"], True)
+    faden3.join(timeout=4)
+    pruefen("Ein Ja im Browser gibt frei",
+            antwort3.get("ergebnis", {}).get("erlaubt") is True)
+
+    pruefen("Die Oberfläche lädt nichts aus dem Netz nach",
+            "http://" not in SEITE_HTML.replace("http-equiv", "")
+            and "https://" not in SEITE_HTML.replace(
+                'xmlns="http://www.w3.org/2000/svg"', ""),
+            "alles in der Seite selbst")
+
+    # Jetzt der Server.
+    web = JarvisWeb(agent, port=8794)
+    web.starten(blockierend=False)
+    time.sleep(0.5)
+
+    def rufen(pfad, host=None, koerper=None, schluessel=None):
+        ziel = "http://127.0.0.1:8794" + pfad
+        if schluessel:
+            ziel += ("&" if "?" in ziel else "?") + "schluessel=" + schluessel
+        anfrage = _netz.Request(ziel)
+        if host:
+            anfrage.add_header("Host", host)
+        if koerper is not None:
+            anfrage.data = json.dumps(koerper).encode("utf-8")
+            anfrage.add_header("Content-Type", "application/json")
+        try:
+            with _netz.urlopen(anfrage, timeout=8) as antwort_roh:
+                return antwort_roh.status, antwort_roh.read().decode("utf-8")
+        except _fehler.HTTPError as ausnahme:
+            return ausnahme.code, ausnahme.read().decode("utf-8")
+
+    try:
+        code, inhalt = rufen("/")
+        pruefen("Die Seite wird ausgeliefert",
+                code == 200 and "<title>Jarvis</title>" in inhalt,
+                "%d, %d Zeichen" % (code, len(inhalt)))
+
+        code, inhalt = rufen("/api/zustand")
+        zustand = json.loads(inhalt) if code == 200 else {}
+        pruefen("Der Zustand kommt als JSON",
+                code == 200 and zustand.get("werkzeuge", 0) > 50,
+                "%d Werkzeuge" % zustand.get("werkzeuge", 0))
+
+        code, _ = rufen("/api/lage")
+        pruefen("Der Lagebericht ist abrufbar", code == 200)
+
+        code, _ = rufen("/api/zustand", host="boese.example.com")
+        pruefen("Fremder Host-Kopf wird abgewiesen", code == 403,
+                "Schutz gegen Umleitung über den Namen")
+
+        code, _ = rufen("/gibtsnicht")
+        pruefen("Unbekannte Pfade geben 404", code == 404)
+
+        code, inhalt = rufen("/api/werkzeug", koerper={"name": "erfundenes_werkzeug"})
+        pruefen("Unbekanntes Werkzeug wird abgewiesen", code == 400)
+
+        code, inhalt = rufen("/api/werkzeug", koerper={"name": "pipeline"})
+        pruefen("Ein Werkzeug lässt sich über die Schnittstelle aufrufen",
+                code == 200 and json.loads(inhalt).get("ok") is True)
+    finally:
+        web.stoppen()
+
+    # Mit offenem Zugang ist der Schlüssel Pflicht.
+    offen_web = JarvisWeb(agent, port=8795, offen=True)
+    pruefen("Offener Zugang erzwingt einen Schlüssel",
+            bool(offen_web.token) and "schluessel=" in offen_web.adresse(),
+            "Schlüssel wird erzeugt und steht in der Adresse")
+    offen_web.starten(blockierend=False)
+    time.sleep(0.5)
+    try:
+        anfrage = _netz.Request("http://127.0.0.1:8795/api/zustand")
+        anfrage.add_header("Host", "localhost")
+        try:
+            with _netz.urlopen(anfrage, timeout=8) as antwort_roh:
+                code = antwort_roh.status
+        except _fehler.HTTPError as ausnahme:
+            code = ausnahme.code
+        pruefen("Ohne Schlüssel kein Zugang", code == 403)
+
+        anfrage = _netz.Request("http://127.0.0.1:8795/api/zustand?schluessel="
+                                + offen_web.token)
+        anfrage.add_header("Host", "localhost")
+        with _netz.urlopen(anfrage, timeout=8) as antwort_roh:
+            code = antwort_roh.status
+        pruefen("Mit Schlüssel geht es", code == 200)
+    finally:
+        offen_web.stoppen()
+        agent.tools.freigabe_kanal_setzen(None)
+
+
 def pruefung_sicherheit(agent):
     abschnitt("Sicherheit")
     ergebnis = agent.tools.run("systeminfo", {"was": "rm -rf /"})
@@ -845,7 +977,8 @@ def pruefung_einzeldatei():
                "Telegram", "Bookkeeping", "CallAnalysis", "Routines", "Kamera",
                "MCPServer", "MCPClient", "Welt", "Messenger", "Bildschirm",
                "Dashboard", "Verkaufsansicht", "Scheduler", "Einrichtung",
-               "Werkzeuge", "JarvisAgent", "Akquise", "Team", "Werkstatt", "Privat"]
+               "Werkzeuge", "JarvisAgent", "Akquise", "Team", "Werkstatt", "Privat", "JarvisWeb",
+               "WebFreigabe"]
     fehlend = [k for k in klassen if inhalt.count("\nclass %s" % k) != 1]
     pruefen("Einzeldatei enthält alle Klassen genau einmal", not fehlend,
             ", ".join(fehlend) or "%d Klassen" % len(klassen))
@@ -878,6 +1011,7 @@ def main() -> int:
     pruefung_team(agent)
     pruefung_werkstatt(agent)
     pruefung_werkzeugvertrag(agent)
+    pruefung_webapp(agent)
     pruefung_routinen(agent)
     pruefung_zeitplan()
     pruefung_kalender()

@@ -59,10 +59,12 @@ BAULISTE = [
     "modules/computer_use",
     "modules/werkstatt",
     "modules/team",
+    "modules/webseite",
     "modules/dashboard_teile",
     "modules/dashboard",
     "modules/sales_view",
     "modules/scheduler",
+    "modules/webapp",
     "modules/setup_wizard",
     "modules/tools",
     "agent",
@@ -83,12 +85,16 @@ Diese Datei ist erzeugt. Bearbeite die Module unter src/ und baue neu mit:
 
 Betriebsarten:
 
-    python3 jarvis.py             Dauerbetrieb: hört zu und meldet sich von selbst
+    python3 jarvis.py             Web-App im Browser - der Normalfall
+    python3 jarvis.py web --offen auch vom Handy im eigenen WLAN
+    python3 jarvis.py hoeren      im Terminal zuhören, ohne Browser
     python3 jarvis.py chat        tippen statt sprechen
     python3 jarvis.py telegram    vom Handy aus
+    python3 jarvis.py status      voller Stand des Betriebs
     python3 jarvis.py briefing    Briefing sofort
     python3 jarvis.py abend       Abendrückblick sofort
     python3 jarvis.py dashboard   Dashboard bauen
+    python3 jarvis.py export      Buchhaltung als CSV
     python3 jarvis.py stimme      Stimmprofil einlernen
     python3 jarvis.py stimmen     ElevenLabs-Stimme aussuchen
     python3 jarvis.py test        Selbsttest
