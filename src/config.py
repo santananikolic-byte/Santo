@@ -108,8 +108,18 @@ FIRMA = _text("FIRMA", "Gebäudereinigung")
 
 # Sprachausgabe
 ELEVENLABS_API_KEY = _text("ELEVENLABS_API_KEY")
-ELEVENLABS_VOICE_ID = _text("ELEVENLABS_VOICE_ID", "21m00Tcm4TlvDq8ikWAM")
+# Voreingestellt ist eine maennliche, trockene Stimme. Die frueher hier
+# stehende Kennung war eine weibliche - genau der Grund, warum Jarvis nicht
+# so klang, wie er sollte.
+ELEVENLABS_VOICE_ID = _text("ELEVENLABS_VOICE_ID", "JBFqnCBsd6RMkjVDRZzb")
 ELEVENLABS_MODEL = _text("ELEVENLABS_MODEL", "eleven_multilingual_v2")
+
+# Klangprofil: ruhig und gleichmaessig (Stability), nah am Original
+# (Similarity), ohne Theatralik (Style). Als Zahlen einstellbar, damit sich
+# das ohne Codeaenderung nachjustieren laesst.
+ELEVENLABS_STABILITY = _zahl("ELEVENLABS_STABILITY", 0.65)
+ELEVENLABS_SIMILARITY = _zahl("ELEVENLABS_SIMILARITY", 0.85)
+ELEVENLABS_STYLE = _zahl("ELEVENLABS_STYLE", 0.10)
 SPEECH_RATE = _ganzzahl("SPEECH_RATE", 185)
 MACOS_STIMME = _text("MACOS_STIMME", "")
 

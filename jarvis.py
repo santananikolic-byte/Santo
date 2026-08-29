@@ -226,8 +226,18 @@ FIRMA = _text("FIRMA", "Gebäudereinigung")
 
 # Sprachausgabe
 ELEVENLABS_API_KEY = _text("ELEVENLABS_API_KEY")
-ELEVENLABS_VOICE_ID = _text("ELEVENLABS_VOICE_ID", "21m00Tcm4TlvDq8ikWAM")
+# Voreingestellt ist eine maennliche, trockene Stimme. Die frueher hier
+# stehende Kennung war eine weibliche - genau der Grund, warum Jarvis nicht
+# so klang, wie er sollte.
+ELEVENLABS_VOICE_ID = _text("ELEVENLABS_VOICE_ID", "JBFqnCBsd6RMkjVDRZzb")
 ELEVENLABS_MODEL = _text("ELEVENLABS_MODEL", "eleven_multilingual_v2")
+
+# Klangprofil: ruhig und gleichmaessig (Stability), nah am Original
+# (Similarity), ohne Theatralik (Style). Als Zahlen einstellbar, damit sich
+# das ohne Codeaenderung nachjustieren laesst.
+ELEVENLABS_STABILITY = _zahl("ELEVENLABS_STABILITY", 0.65)
+ELEVENLABS_SIMILARITY = _zahl("ELEVENLABS_SIMILARITY", 0.85)
+ELEVENLABS_STYLE = _zahl("ELEVENLABS_STYLE", 0.10)
 SPEECH_RATE = _ganzzahl("SPEECH_RATE", 185)
 MACOS_STIMME = _text("MACOS_STIMME", "")
 
@@ -1140,10 +1150,19 @@ class Stimme:
     def _elevenlabs_sprechen(self, text: str) -> bool:
         """Sprachausgabe über ElevenLabs. Scheitert sie, übernimmt ``say``."""
         ziel = "%s/text-to-speech/%s" % (ELEVENLABS_URL, ELEVENLABS_VOICE_ID)
+        # Die Klangwerte standen bisher fest im Code und waren die
+        # Voreinstellung von ElevenLabs - damit klingt jede Stimme gleich
+        # brav. Jetzt kommen sie aus der Konfiguration: ruhig, nah am
+        # Original, ohne Theatralik.
         koerper = json.dumps({
             "text": text[:4000],
             "model_id": ELEVENLABS_MODEL,
-            "voice_settings": {"stability": 0.5, "similarity_boost": 0.75},
+            "voice_settings": {
+                "stability": ELEVENLABS_STABILITY,
+                "similarity_boost": ELEVENLABS_SIMILARITY,
+                "style": ELEVENLABS_STYLE,
+                "use_speaker_boost": True,
+            },
         }).encode("utf-8")
         anfrage = urllib.request.Request(ziel, data=koerper, method="POST", headers={
             "xi-api-key": ELEVENLABS_API_KEY,

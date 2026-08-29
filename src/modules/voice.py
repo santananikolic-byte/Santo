@@ -195,10 +195,19 @@ class Stimme:
     def _elevenlabs_sprechen(self, text: str) -> bool:
         """Sprachausgabe über ElevenLabs. Scheitert sie, übernimmt ``say``."""
         ziel = "%s/text-to-speech/%s" % (ELEVENLABS_URL, config.ELEVENLABS_VOICE_ID)
+        # Die Klangwerte standen bisher fest im Code und waren die
+        # Voreinstellung von ElevenLabs - damit klingt jede Stimme gleich
+        # brav. Jetzt kommen sie aus der Konfiguration: ruhig, nah am
+        # Original, ohne Theatralik.
         koerper = json.dumps({
             "text": text[:4000],
             "model_id": config.ELEVENLABS_MODEL,
-            "voice_settings": {"stability": 0.5, "similarity_boost": 0.75},
+            "voice_settings": {
+                "stability": config.ELEVENLABS_STABILITY,
+                "similarity_boost": config.ELEVENLABS_SIMILARITY,
+                "style": config.ELEVENLABS_STYLE,
+                "use_speaker_boost": True,
+            },
         }).encode("utf-8")
         anfrage = urllib.request.Request(ziel, data=koerper, method="POST", headers={
             "xi-api-key": config.ELEVENLABS_API_KEY,
