@@ -3074,13 +3074,7 @@ function movePlayer(dt){
   if(touchMove){ fwd -= touchMove.dy; str += touchMove.dx; }
   if(mouseDX){ setAngle(P.a + mouseDX * .0022); mouseDX = 0; }
   if(turn) setAngle(P.a + turn * 2.1 * dt);
-  if(!plActive && mouseX !== null){
-    const f = mouseX / innerWidth, dead = .22;
-    let t = 0;
-    if(f < .5 - dead) t = (f - (.5 - dead)) / (.5 - dead);
-    else if(f > .5 + dead) t = (f - (.5 + dead)) / (.5 - dead);
-    if(t) setAngle(P.a + clamp(t, -1, 1) * 2.5 * dt);
-  }
+
 
   const run = ((keys.ShiftLeft || keys.ShiftRight) && fwd > 0) ||
               (touchMove && touchMove.mag > 1.08 && touchMove.dy < -.6);
@@ -3117,12 +3111,17 @@ document.addEventListener('pointerlockchange', () => {
   if(state === 'play' && !plActive && plTried && !plDenied){ state = 'pause'; layer('pause'); }
 });
 view.addEventListener('click', () => { if(state === 'play' && !plActive) lock(); });
-// movementX gibt es auch ohne Sperre — damit dreht die Maus in beiden Faellen
-document.addEventListener('mousemove', (e) => {
-  if(state !== 'play') return;
-  mouseDX += e.movementX || 0;
-  mouseX = e.clientX;
+// Nur echte Mausbewegung dreht. Touch-Geräte erzeugen beim Antippen zusätzlich
+// Maus-Ereignisse — die dürfen die Sicht nicht bewegen.
+let lastMX = null;
+document.addEventListener('pointermove', (e) => {
+  if(e.pointerType !== 'mouse' || TOUCH){ lastMX = null; return; }
+  // mit Sperre liefert movementX die Bewegung; ohne Sperre selbst aus der Position rechnen
+  const dx = plActive ? (e.movementX || 0) : (lastMX === null ? 0 : e.clientX - lastMX);
+  lastMX = e.clientX;
+  if(state === 'play') mouseDX += dx;
 });
+document.addEventListener('pointerleave', () => { lastMX = null; });
 
 addEventListener('keydown', (e) => {
   if(state === 'intro'){
