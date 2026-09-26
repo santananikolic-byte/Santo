@@ -2,7 +2,7 @@
 
 Ein Survival-Horrorspiel in der Machart von Resident Evil 7: ein Haus statt
 eines Labyrinths, Schlüssel und Rätsel, ein Verfolger, den man nicht töten
-kann, und eine Geschichte, die man sich aus vierzehn Dokumenten zusammensetzt.
+kann, und eine Geschichte, die man sich aus sechzehn Fundstücken zusammensetzt.
 
 Läuft komplett im Browser. Kein Kauf, keine Installation, keine externen
 Dateien — Grafik, Kreatur, Gesicht und sämtliche Geräusche entstehen zur
@@ -10,7 +10,18 @@ Laufzeit im Code.
 
 ## Spielen
 
-Doppelklick auf **`spielen.html`**. Kopfhörer auf, Licht aus, Vollbild.
+Am Mac: Doppelklick auf **`spielen.html`**. Kopfhörer auf, Licht aus.
+
+Auf dem iPhone: Link öffnen, **quer halten**, Kopfhörer rein. Der Ton läuft
+auch bei eingeschaltetem Stummschalter.
+
+| Touch | Wirkung |
+|---|---|
+| linke Bildhälfte ziehen | gehen — Daumen bis zum Anschlag nach vorn = rennen |
+| rechte Bildhälfte wischen | umsehen |
+| NEHMEN | benutzen, nehmen, Türen öffnen (leuchtet, wenn etwas in Reichweite ist) |
+| LAMPE / TASCHE / VERBAND | wie am Rechner |
+| II | Pause |
 
 | Taste | Wirkung |
 |---|---|
@@ -32,6 +43,23 @@ Absender ist ein Moorgut, das laut Akten 1974 abgebrannt ist.
 
 Es ist nicht abgebrannt.
 
+## Vorgeschichte und Kapitel
+
+Vor dem Haus steht die Fahrt: Regen, Scheibenwischer, der Brief, das Auto, das
+die Polizei am Moorweg gefunden hat, die Kamera mit dem vollen Film. Danach drei
+Kapitel — **Das Haus**, **Der Keller**, **Der Gast**.
+
+Im Wohnzimmer liegt ein **Tonband** von 1973. Hennigs Stimme kommt über die
+Sprachausgabe des Geräts, tief gestimmt, mit Untertiteln; ohne deutsche Stimme
+laufen nur die Untertitel.
+
+## Musik
+
+Eigener Soundtrack, komplett im Code: die schiefe Spieluhr als Leitmotiv im
+Menü und am Ende, vereinzelte verstimmte Klaviertöne und Cello beim Erkunden,
+und sobald er dich jagt, setzt eine treibende Verfolgungsmusik ein — im Finale
+schneller.
+
 ## Ablauf
 
 Erdgeschoss und Keller, drei Rätsel, zwei Enden:
@@ -52,7 +80,7 @@ verträgst drei Treffer.
 Ob du am Ende allein oder zu zweit hinausgehst, hängt davon ab, ob du Ada
 gefunden hast, bevor du den Schlüssel nimmst.
 
-Wer alle vierzehn Papiere findet, kann den Brief aus dem Menü im Archiv noch
+Wer die beiden entscheidenden Papiere findet, kann den Brief aus dem Menü im Archiv noch
 einmal lesen. Er liest sich dann anders.
 
 ## Technik

@@ -166,12 +166,82 @@ button.red:hover{background:linear-gradient(180deg,#2c0f12,#160709);border-color
   text-transform:uppercase;margin-top:4px}
 
 /* ---------- Touch ---------- */
-#touch{position:absolute;inset:0;z-index:12;display:none}
+:root{--sl:env(safe-area-inset-left,0px);--sr:env(safe-area-inset-right,0px);
+  --st:env(safe-area-inset-top,0px);--sb:env(safe-area-inset-bottom,0px)}
+#stage{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;-webkit-tap-highlight-color:transparent}
+#view{touch-action:none}
+#touch{position:absolute;inset:0;z-index:12;display:none;touch-action:none}
 #touch.on{display:block}
-.tbtn{position:absolute;bottom:24px;width:58px;height:58px;border-radius:50%;border:1px solid #3a2e2f;
-  background:rgba(20,16,17,.75);color:var(--dim);font-family:var(--f-mono);font-size:9px;
-  letter-spacing:.1em;display:grid;place-items:center;padding:0}
-#tUse{right:96px}#tLamp{right:24px}#tBag{right:168px}
+.tbtn{position:absolute;width:58px;height:58px;border-radius:50%;border:1px solid #3a2e2f;
+  background:rgba(20,16,17,.72);color:var(--dim);font-family:var(--f-mono);font-size:8.5px;
+  letter-spacing:.08em;display:grid;place-items:center;padding:0;touch-action:none}
+.tbtn:active{background:rgba(58,40,36,.9);color:var(--tallow)}
+#tUse{width:78px;height:78px;right:calc(22px + var(--sr));bottom:calc(20px + var(--sb));font-size:10px;color:var(--tallow)}
+#tUse.ready{border-color:var(--amber);box-shadow:0 0 18px rgba(217,143,60,.45);color:#fff}
+#tLamp{right:calc(32px + var(--sr));bottom:calc(112px + var(--sb))}
+#tBag{right:calc(112px + var(--sr));bottom:calc(20px + var(--sb))}
+#tHeal{right:calc(112px + var(--sr));bottom:calc(96px + var(--sb))}
+#tPause{width:42px;height:42px;left:calc(14px + var(--sl));top:calc(12px + var(--st));font-size:12px}
+#stick.run{border-color:rgba(217,143,60,.7)}
+#stick.run i{background:rgba(217,143,60,.45)}
+body.touch .desk-only{display:none !important}
+body:not(.touch) .touch-only{display:none !important}
+body.touch .hud-bl{left:auto;right:calc(20px + var(--sr));top:calc(14px + var(--st));bottom:auto;text-align:right}
+body.touch .hud-br{right:calc(20px + var(--sr));top:calc(56px + var(--st));bottom:auto}
+body.touch #oilbar{margin-left:auto}
+body.touch #goal{top:calc(12px + var(--st));max-width:52vw}
+body.touch #goal .txt{font-size:14px}
+body.touch #prompt{top:auto;bottom:calc(110px + var(--sb))}
+
+/* ---------- Vorgeschichte ---------- */
+#intro{position:absolute;inset:0;z-index:30;display:none;background:#000;cursor:pointer;
+  place-items:center;padding:28px}
+#intro.on{display:grid}
+#introText{max-width:620px;font-family:var(--f-old);font-size:clamp(19px,2.6vw,27px);line-height:1.55;
+  color:#cfc3a8;text-align:center;opacity:0;transition:opacity 1.6s ease;text-wrap:balance}
+#introText.on{opacity:1}
+#introText em{color:#a8262b;font-style:italic}
+#introSkip{position:absolute;right:calc(18px + var(--sr));bottom:calc(16px + var(--sb))}
+#introTap{position:absolute;left:50%;bottom:calc(22px + var(--sb));transform:translateX(-50%);
+  font-family:var(--f-mono);font-size:9.5px;letter-spacing:.24em;color:#4d463b;text-transform:uppercase}
+
+/* ---------- Kapitel ---------- */
+#chapter{position:absolute;inset:0;z-index:14;display:grid;place-items:center;pointer-events:none;
+  opacity:0;transition:opacity 1.4s ease}
+#chapter.on{opacity:1}
+#chapter .box{text-align:center;padding:26px 40px;background:radial-gradient(ellipse,rgba(0,0,0,.72),transparent 70%)}
+#chapter .no{font-family:var(--f-mono);font-size:10px;letter-spacing:.42em;color:#8a7f6a;text-transform:uppercase}
+#chapter .t{font-family:var(--f-disp);font-size:clamp(34px,6vw,58px);color:var(--tallow);letter-spacing:.06em;
+  margin-top:8px;text-shadow:0 4px 28px #000}
+
+/* ---------- Untertitel (Tonband) ---------- */
+#sub{position:absolute;left:50%;bottom:calc(18% + var(--sb));transform:translateX(-50%);z-index:13;
+  max-width:min(720px,86vw);text-align:center;font-family:var(--f-old);font-size:clamp(16px,2.1vw,21px);
+  line-height:1.45;color:#e2d6bc;text-shadow:0 2px 10px #000,0 0 3px #000;pointer-events:none;
+  opacity:0;transition:opacity .3s}
+#sub.on{opacity:1}
+#sub b{font-family:var(--f-mono);font-size:.62em;letter-spacing:.2em;color:#8a7f6a;display:block;margin-bottom:4px}
+
+/* ---------- Tastenfeld Tresor ---------- */
+.pad{display:grid;grid-template-columns:repeat(3,62px);gap:8px;justify-content:center;margin:4px 0 16px}
+.pad button{padding:0;height:52px;font-size:22px;font-family:var(--f-disp)}
+.sheet .close{margin-top:18px}
+#docClose{position:absolute;right:calc(16px + var(--sr));top:calc(14px + var(--st));z-index:2;
+  padding:11px 20px;font-size:14px;border-color:#5a4638}
+@media (max-height:520px){
+  .sheet{padding:20px 24px 18px;max-height:92vh}
+  .sheet.old{font-size:15.5px;line-height:1.5}
+  .sheet.typed{font-size:13px;line-height:1.6}
+  .sheet .head{margin-bottom:10px}
+  #doc{padding:10px}
+  .pad{grid-template-columns:repeat(3,54px);gap:6px}
+  .pad button{height:40px;font-size:19px}
+  #safeDig{margin:12px 0 !important}
+}
+.tabs .spacer{flex:1}
+.card .act{margin-top:10px;font-size:12px;padding:8px 14px}
+.hint-touch{width:min(600px,94vw);margin-top:12px;font-family:var(--f-mono);font-size:10.5px;line-height:1.7;
+  color:#9a8f7a;border:1px solid #2a2224;padding:10px 13px;background:rgba(20,16,17,.7)}
 #stick{position:absolute;width:92px;height:92px;border-radius:50%;
   border:1px solid rgba(74,90,78,.45);display:none;pointer-events:none}
 #stick i{position:absolute;left:50%;top:50%;width:32px;height:32px;margin:-16px 0 0 -16px;
@@ -211,9 +281,19 @@ button.red:hover{background:linear-gradient(180deg,#2c0f12,#160709);border-color
   <!-- Touch -->
   <div id="touch">
     <div id="stick"><i></i></div>
+    <button class="tbtn" id="tPause">II</button>
     <button class="tbtn" id="tBag">TASCHE</button>
+    <button class="tbtn" id="tHeal">VERBAND</button>
     <button class="tbtn" id="tUse">NEHMEN</button>
     <button class="tbtn" id="tLamp">LAMPE</button>
+  </div>
+
+  <div id="chapter"><div class="box"><div class="no" id="chNo"></div><div class="t" id="chT"></div></div></div>
+  <div id="sub"></div>
+  <div id="intro">
+    <div id="introText"></div>
+    <div id="introTap"><span class="touch-only">Tippen</span><span class="desk-only">Klick oder Leertaste</span> &mdash; weiter</div>
+    <button class="ghost" id="introSkip">&Uuml;berspringen</button>
   </div>
 
   <!-- Dokument -->
@@ -221,8 +301,9 @@ button.red:hover{background:linear-gradient(180deg,#2c0f12,#160709);border-color
     <div class="sheet old" id="sheet">
       <div class="head"><span id="docTitle"></span><span id="docMeta"></span></div>
       <div id="docBody"></div>
-      <div class="foot">Leertaste &nbsp;·&nbsp; weglegen. Das Haus wartet nicht.</div>
+      <div class="foot"><span class="desk-only">Leertaste &nbsp;&middot;&nbsp; weglegen. </span>Das Haus wartet nicht, w&auml;hrend du liest.</div>
     </div>
+    <button id="docClose">Weglegen</button>
   </div>
 
   <!-- Tasche -->
@@ -231,10 +312,12 @@ button.red:hover{background:linear-gradient(180deg,#2c0f12,#160709);border-color
       <div class="tabs">
         <button class="tab on" data-pane="items">Gegenst&auml;nde</button>
         <button class="tab" data-pane="docs">Archiv</button>
+        <span class="spacer"></span>
+        <button class="ghost" id="bagClose">Schlie&szlig;en</button>
       </div>
       <div class="pane on" id="paneItems"></div>
       <div class="pane" id="paneDocs"></div>
-      <div class="bag-hint">Tab oder Esc &nbsp;·&nbsp; schlie&szlig;en &nbsp;&nbsp;|&nbsp;&nbsp; Im Archiv liegt alles, was du gelesen hast. Lies es noch einmal, wenn du mehr wei&szlig;t.</div>
+      <div class="bag-hint"><span class="desk-only">Tab oder Esc &nbsp;&middot;&nbsp; schlie&szlig;en &nbsp;&nbsp;|&nbsp;&nbsp; </span>Im Archiv liegt alles, was du gelesen hast. Lies es noch einmal, wenn du mehr wei&szlig;t.</div>
     </div>
   </div>
 
@@ -252,9 +335,13 @@ button.red:hover{background:linear-gradient(180deg,#2c0f12,#160709);border-color
         <span class="sig">&mdash; Ada</span>
       </div>
 
-      <div class="keys">
+      <div class="hint-touch touch-only">
+        <strong style="color:#d9cdb4">Auf dem iPhone:</strong> quer halten. Linke Bildh&auml;lfte = gehen (Daumen bis zum Anschlag = rennen), rechte H&auml;lfte wischen = umsehen. Kopfh&ouml;rer rein &mdash; der Ton l&auml;uft auch bei Stummschalter.
+      </div>
+      <div class="keys desk-only">
         <div class="key"><b>W A S D</b> gehen</div>
         <div class="key"><b>Maus</b> umsehen</div>
+        <div class="key"><b>Pfeile</b> umsehen</div>
         <div class="key"><b>Shift</b> rennen</div>
         <div class="key"><b>E</b> benutzen</div>
         <div class="key"><b>F</b> Lampe</div>
@@ -309,7 +396,7 @@ button.red:hover{background:linear-gradient(180deg,#2c0f12,#160709);border-color
       <div class="big out" id="endTitle">Drau&szlig;en</div>
       <div class="body" id="endText"></div>
       <div class="stats">
-        <div class="stat"><div class="v" id="eDocs">0</div><div class="k">von 14 Dokumenten</div></div>
+        <div class="stat"><div class="v" id="eDocs">0</div><div class="k">von 16 Fundst&uuml;cken</div></div>
         <div class="stat"><div class="v" id="eZeit">0:00</div><div class="k">Gebraucht</div></div>
       </div>
       <div class="body" id="endHint" style="font-size:15px;margin-top:20px;color:#6d6558"></div>
@@ -337,6 +424,7 @@ const lerp = (a, b, t) => a + (b - a) * t;
 const at = (x, y) => y * MW + x;
 const fmt = (s) => Math.floor(s / 60) + ':' + String(Math.floor(s % 60)).padStart(2, '0');
 const $ = (id) => document.getElementById(id);
+let TOUCH = false;
 
 /* ==========================================================================
    TON
@@ -349,6 +437,21 @@ const A = {
     if(this.ready) return;
     const AC = window.AudioContext || window.webkitAudioContext;
     if(!AC) return;
+    try{ if(navigator.audioSession) navigator.audioSession.type = 'playback'; }catch(e){}
+    // Stummes <audio> im Loop schaltet iOS in den Wiedergabemodus — sonst bleibt Web Audio
+    // bei eingeschaltetem Stummschalter lautlos.
+    try{
+      const sr = 8000, ns = 800, ab = new ArrayBuffer(44 + ns * 2), v = new DataView(ab);
+      const w = (o, t) => { for(let i = 0; i < t.length; i++) v.setUint8(o + i, t.charCodeAt(i)); };
+      w(0, 'RIFF'); v.setUint32(4, 36 + ns * 2, true); w(8, 'WAVE'); w(12, 'fmt ');
+      v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
+      v.setUint32(24, sr, true); v.setUint32(28, sr * 2, true); v.setUint16(32, 2, true);
+      v.setUint16(34, 16, true); w(36, 'data'); v.setUint32(40, ns * 2, true);
+      const au = new Audio(URL.createObjectURL(new Blob([ab], { type:'audio/wav' })));
+      au.loop = true; au.setAttribute('playsinline', ''); au.volume = .01;
+      const pr = au.play(); if(pr && pr.catch) pr.catch(() => {});
+      this.keepAlive = au;
+    }catch(e){}
     const ctx = this.ctx = new AC();
     this.master = ctx.createGain();
     this.master.gain.value = this.muted ? 0 : 0.92;
@@ -741,10 +844,218 @@ const A = {
     }
   },
 
+  introBed(on){
+    if(!this.ready) return;
+    const ctx = this.ctx, t = ctx.currentTime;
+    if(on && !this.rain){
+      const rn = ctx.createBufferSource(); rn.buffer = this.noise(4); rn.loop = true;
+      const bp = ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 2400; bp.Q.value = .5;
+      const rg = ctx.createGain(); rg.gain.value = 0; rg.gain.setTargetAtTime(.16, t, 1.2);
+      rn.connect(bp); bp.connect(rg); rg.connect(this.dry); rn.start(t);
+      const en = ctx.createOscillator(); en.type = 'sawtooth'; en.frequency.value = 36;
+      const el2 = ctx.createBiquadFilter(); el2.type = 'lowpass'; el2.frequency.value = 110;
+      const eg = ctx.createGain(); eg.gain.value = 0; eg.gain.setTargetAtTime(.2, t, 1.5);
+      const wob = ctx.createOscillator(); wob.frequency.value = .3;
+      const wg = ctx.createGain(); wg.gain.value = 3; wob.connect(wg); wg.connect(en.frequency); wob.start(t);
+      en.connect(el2); el2.connect(eg); eg.connect(this.dry); en.start(t);
+      this.rain = { rn, rg, en, eg, wob };
+      this.wiper = setInterval(() => {
+        const t2 = ctx.currentTime, s = ctx.createBufferSource(); s.buffer = this.noise(.5);
+        const f = ctx.createBiquadFilter(); f.type = 'bandpass'; f.Q.value = 1.4;
+        f.frequency.setValueAtTime(700, t2); f.frequency.linearRampToValueAtTime(1500, t2 + .4);
+        const g = ctx.createGain(); this.env(g, t2, .08, .34, .05);
+        s.connect(f); f.connect(g); g.connect(this.dry); s.start(t2); s.stop(t2 + .6);
+      }, 1450);
+    }
+    if(!on && this.rain){
+      const r = this.rain; this.rain = null;
+      clearInterval(this.wiper);
+      r.rg.gain.setTargetAtTime(0, t, .9); r.eg.gain.setTargetAtTime(0, t, .5);
+      setTimeout(() => { try{ r.rn.stop(); r.en.stop(); r.wob.stop(); }catch(e){} }, 4000);
+    }
+  },
+  engineOff(){
+    if(!this.rain) return;
+    const t = this.ctx.currentTime;
+    this.rain.en.frequency.setTargetAtTime(18, t, .5);
+    this.rain.eg.gain.setTargetAtTime(0, t, .6);
+    clearInterval(this.wiper);
+    this.rain.rg.gain.setTargetAtTime(.07, t, 1.5);
+  },
+  thunder(){
+    if(!this.ready) return;
+    const ctx = this.ctx, t = ctx.currentTime;
+    const s = ctx.createBufferSource(); s.buffer = this.noise(3.2);
+    const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 180;
+    const g = ctx.createGain(); this.env(g, t, .25, 2.8, .5);
+    s.connect(lp); lp.connect(g); g.connect(this.dry); g.connect(this.verb); s.start(t); s.stop(t + 3.3);
+  },
+  tape(on){
+    if(!this.ready) return;
+    const ctx = this.ctx, t = ctx.currentTime;
+    if(on && !this.hiss){
+      const s = ctx.createBufferSource(); s.buffer = this.noise(3); s.loop = true;
+      const hp = ctx.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 3000;
+      const g = ctx.createGain(); g.gain.value = 0; g.gain.setTargetAtTime(.035, t, .2);
+      s.connect(hp); hp.connect(g); g.connect(this.dry); s.start(t);
+      this.hiss = { s, g };
+      this.click(true);
+    }
+    if(!on && this.hiss){
+      const h = this.hiss; this.hiss = null;
+      h.g.gain.setTargetAtTime(0, t, .1); this.click(false);
+      setTimeout(() => { try{ h.s.stop(); }catch(e){} }, 800);
+    }
+  },
+
   toggleMute(){
     this.muted = !this.muted;
     if(this.ready) this.master.gain.setTargetAtTime(this.muted ? 0 : .92, this.ctx.currentTime, .05);
     return this.muted;
+  }
+};
+
+/* ==========================================================================
+   MUSIK — Leitmotiv, Erkundung, Verfolgung. Vorausplanung im Takt, damit nichts stolpert.
+   ========================================================================== */
+const MEL = [0, 4, 7, 4, 0, -3, 0, 4, 7, 12, 7, 4];         // die Spieluhr
+const PIANO = [-24, -21, -17, -14, -12, -10, -9, -5, -2, 0]; // tiefe, schiefe Klaviertöne um D
+const M = {
+  mode:'none', timer:null, next:0, step:0, bus:{},
+  start(){
+    if(!A.ready || this.timer) return;
+    const ctx = A.ctx;
+    for(const k of ['theme', 'explore', 'chase']){
+      const g = ctx.createGain(); g.gain.value = 0;
+      g.connect(A.dry); g.connect(A.verb); this.bus[k] = g;
+    }
+    this.next = ctx.currentTime + .1;
+    this.timer = setInterval(() => this.tick(), 50);
+  },
+  set(mode){
+    if(!this.timer || mode === this.mode) return;
+    this.mode = mode;
+    const t = A.ctx.currentTime;
+    const lv = { theme:0, explore:0, chase:0 };
+    if(mode === 'menu') lv.theme = .85;
+    if(mode === 'intro') lv.theme = .4;
+    if(mode === 'end') lv.theme = .9;
+    if(mode === 'explore') lv.explore = .85;
+    if(mode === 'chase' || mode === 'finale') lv.chase = 1;
+    const fast = mode === 'chase' || mode === 'finale';
+    for(const k in this.bus) this.bus[k].gain.setTargetAtTime(lv[k], t, fast ? .2 : 1.6);
+  },
+  tick(){
+    const ctx = A.ctx, ahead = ctx.currentTime + .3;
+    while(this.next < ahead){
+      this.play(this.next, this.step);
+      const bpm = this.mode === 'finale' ? 150 : this.mode === 'chase' ? 126 : 58;
+      this.next += 60 / bpm / 2;
+      this.step++;
+    }
+  },
+  f(semi){ return 293.66 * Math.pow(2, semi / 12); },       // D4 als Bezug
+  play(t, s){
+    const m = this.mode;
+    if(m === 'menu' || m === 'intro' || m === 'end'){
+      const cyc = s % 36;
+      if(cyc < 24 && cyc % 2 === 0) this.box(t, this.f(MEL[cyc / 2]), .07, this.bus.theme);
+      if(s % 36 === 0) this.cello(t, this.f(-24), 9, .16, this.bus.theme);
+      if(s % 36 === 18) this.cello(t, this.f(-29), 9, .14, this.bus.theme);
+    }
+    if(m === 'explore'){
+      if(Math.random() < .09){
+        const n = PIANO[(Math.random() * PIANO.length) | 0];
+        this.piano(t, this.f(n), .1 + Math.random() * .06, this.bus.explore);
+        if(Math.random() < .3) this.piano(t + .02, this.f(n + 6), .06, this.bus.explore);   // Tritonus
+      }
+      if(s % 40 === 0) this.cello(t, this.f(-26), 11, .11, this.bus.explore);
+      if(s % 56 === 28) this.harm(t, this.f(19 + ((Math.random() * 3) | 0)), 6, .025, this.bus.explore);
+    }
+    if(m === 'chase' || m === 'finale'){
+      const b = s % 8, fin = m === 'finale';
+      if(b === 0 || b === 3 || b === 6 || (fin && b === 4)) this.tom(t, b === 0 ? .55 : .38, this.bus.chase);
+      this.hat(t, b % 2 ? .03 : .05, this.bus.chase);
+      if(b === 0) this.stab(t, fin ? .16 : .12, (s >> 3) % 4, this.bus.chase);
+      if(s % 32 === 0) this.cello(t, this.f(-24), 4, .2, this.bus.chase);
+      if(fin && b === 7) this.stab(t, .08, 3, this.bus.chase);
+    }
+  },
+  box(t, f, v, bus){
+    const ctx = A.ctx;
+    f *= 1 + (Math.random() - .5) * .012;
+    [1, 2.01, 3.03].forEach((h, k) => {
+      const o = ctx.createOscillator(); o.type = 'triangle'; o.frequency.value = f * h;
+      const g = ctx.createGain(); A.env(g, t, .004, 1.1 / (k + 1), v / (k + 1));
+      o.connect(g); g.connect(bus); o.start(t); o.stop(t + 1.3);
+    });
+  },
+  piano(t, f, v, bus){
+    const ctx = A.ctx;
+    const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 2200; lp.connect(bus);
+    [[1, 1], [2.003, .42], [3.01, .2], [4.2, .07]].forEach(([h, a], k) => {
+      const o = ctx.createOscillator(); o.type = 'sine';
+      o.frequency.value = f * h * (1 + (Math.random() - .5) * .008);
+      const g = ctx.createGain(); A.env(g, t, .005, 3.2 / (1 + k * .7), v * a);
+      o.connect(g); g.connect(lp); o.start(t); o.stop(t + 3.6);
+    });
+  },
+  cello(t, f, dur, v, bus){
+    const ctx = A.ctx;
+    const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 650; lp.Q.value = 1.2;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(.0001, t);
+    g.gain.exponentialRampToValueAtTime(v, t + dur * .3);
+    g.gain.setValueAtTime(v, t + dur * .6);
+    g.gain.exponentialRampToValueAtTime(.0001, t + dur);
+    lp.connect(g); g.connect(bus);
+    const vib = ctx.createOscillator(); vib.frequency.value = 4.6;
+    const vg = ctx.createGain(); vg.gain.value = 6; vib.connect(vg);
+    [-7, 7].forEach(dt => {
+      const o = ctx.createOscillator(); o.type = 'sawtooth'; o.frequency.value = f; o.detune.value = dt;
+      vg.connect(o.detune); o.connect(lp); o.start(t); o.stop(t + dur + .1);
+    });
+    vib.start(t); vib.stop(t + dur + .1);
+  },
+  harm(t, f, dur, v, bus){
+    const ctx = A.ctx;
+    const o = ctx.createOscillator(); o.type = 'sine'; o.frequency.value = f;
+    const vib = ctx.createOscillator(); vib.frequency.value = 5.5;
+    const vg = ctx.createGain(); vg.gain.value = f * .006; vib.connect(vg); vg.connect(o.frequency);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(.0001, t);
+    g.gain.exponentialRampToValueAtTime(v, t + dur * .5);
+    g.gain.exponentialRampToValueAtTime(.0001, t + dur);
+    o.connect(g); g.connect(bus); o.start(t); o.stop(t + dur + .1); vib.start(t); vib.stop(t + dur + .1);
+  },
+  tom(t, v, bus){
+    const ctx = A.ctx;
+    const o = ctx.createOscillator(); o.type = 'sine';
+    o.frequency.setValueAtTime(118, t); o.frequency.exponentialRampToValueAtTime(42, t + .3);
+    const g = ctx.createGain(); A.env(g, t, .004, .4, v);
+    o.connect(g); g.connect(bus); o.start(t); o.stop(t + .5);
+    const s = ctx.createBufferSource(); s.buffer = A.noise(.06);
+    const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 900;
+    const g2 = ctx.createGain(); A.env(g2, t, .002, .06, v * .5);
+    s.connect(lp); lp.connect(g2); g2.connect(bus); s.start(t); s.stop(t + .1);
+  },
+  hat(t, v, bus){
+    const ctx = A.ctx;
+    const s = ctx.createBufferSource(); s.buffer = A.noise(.05);
+    const hp = ctx.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 6500;
+    const g = ctx.createGain(); A.env(g, t, .001, .04, v);
+    s.connect(hp); hp.connect(g); g.connect(bus); s.start(t); s.stop(t + .08);
+  },
+  stab(t, v, var_, bus){
+    const ctx = A.ctx;
+    const base = [[0, 1, 6, 7], [0, 3, 6, 11], [0, 1, 5, 6], [0, 6, 7, 13]][var_ % 4];
+    const bp = ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 900; bp.Q.value = 1.3;
+    const g = ctx.createGain(); A.env(g, t, .008, .32, v);
+    bp.connect(g); g.connect(bus);
+    base.forEach(sm => {
+      const o = ctx.createOscillator(); o.type = 'sawtooth'; o.frequency.value = this.f(sm - 7);
+      o.connect(bp); o.start(t); o.stop(t + .45);
+    });
   }
 };
 
@@ -1352,6 +1663,93 @@ function buildSprites(){
     g.restore();
   });
 
+  /* --- Tisch mit geöffnetem Körper: weich schattiert, keine Umrisslinien --- */
+  SPR.table = mkSprite(200, 112, (g, w, h) => {
+    const soft = (x, y, rx, ry, rot, c0, c1) => {
+      g.save(); g.translate(x, y); g.rotate(rot); g.scale(1, ry / rx);
+      const gr = g.createRadialGradient(-rx * .2, -rx * .25, 1, 0, 0, rx);
+      gr.addColorStop(0, c0); gr.addColorStop(1, c1);
+      g.fillStyle = gr; g.beginPath(); g.arc(0, 0, rx, 0, TAU); g.fill(); g.restore();
+    };
+    // Blutlache unter dem Tisch
+    soft(104, 104, 86, 8, 0, 'rgba(96,10,12,.85)', 'rgba(50,4,6,0)');
+    // Beine
+    const lg = g.createLinearGradient(0, 64, 0, 108);
+    lg.addColorStop(0, '#2a1d14'); lg.addColorStop(1, '#120c08');
+    g.fillStyle = lg; g.fillRect(16, 64, 9, 44); g.fillRect(176, 64, 9, 44);
+    g.fillRect(40, 64, 7, 38); g.fillRect(154, 64, 7, 38);
+    // Tischplatte
+    const tg = g.createLinearGradient(0, 56, 0, 68);
+    tg.addColorStop(0, '#4a3524'); tg.addColorStop(1, '#1e150e');
+    g.fillStyle = tg; g.fillRect(6, 56, 188, 11);
+    // Körper — liegt auf dem Rücken, Kopf links
+    const bg = g.createLinearGradient(0, 30, 0, 60);
+    bg.addColorStop(0, '#b3a58e'); bg.addColorStop(.55, '#8c7f6a'); bg.addColorStop(1, '#4e443a');
+    g.fillStyle = bg;
+    g.beginPath();
+    g.moveTo(42, 44); g.bezierCurveTo(58, 30, 120, 30, 132, 36);
+    g.bezierCurveTo(150, 38, 176, 44, 184, 50); g.lineTo(184, 57);
+    g.bezierCurveTo(150, 58, 80, 59, 42, 57); g.closePath(); g.fill();
+    // Kopf, nach hinten überstreckt
+    soft(28, 45, 15, 13, .3, '#b9ab94', '#4a4037');
+    soft(20, 49, 5, 4, 0, 'rgba(0,0,0,.95)', 'rgba(0,0,0,.2)');       // offener Mund
+    soft(31, 39, 4, 3, 0, 'rgba(0,0,0,.9)', 'rgba(0,0,0,.1)');        // Augenhöhle
+    // geöffneter Brustkorb
+    soft(88, 42, 36, 11, 0, '#1c0304', 'rgba(70,6,8,.9)');
+    for(let i = 0; i < 12; i++){                                       // Organe
+      const x = 62 + Math.random() * 52, y = 38 + Math.random() * 9, r = 4 + Math.random() * 7;
+      const c = Math.random() < .5 ? ['#a8403a', '#4a0c0c'] : ['#7a3a52', '#2c0a14'];
+      soft(x, y, r, r * .7, Math.random() * 3, c[0], c[1]);
+    }
+    g.lineCap = 'round';
+    for(let i = 0; i < 8; i++){                                        // Rippen, aufgespreizt
+      const x = 60 + i * 7;
+      const rg = g.createLinearGradient(x, 28, x, 50);
+      rg.addColorStop(0, 'rgba(226,214,188,.95)'); rg.addColorStop(1, 'rgba(150,132,104,.6)');
+      g.strokeStyle = rg; g.lineWidth = 2.6;
+      g.beginPath(); g.moveTo(x - 3, 47); g.quadraticCurveTo(x - 8, 30, x + 4, 27); g.stroke();
+    }
+    soft(88, 49, 36, 3, 0, 'rgba(206,188,160,.5)', 'rgba(140,120,96,0)');   // Brustbein
+    // Darm, der über die Kante hängt
+    g.strokeStyle = 'rgba(150,56,50,.95)'; g.lineWidth = 6;
+    g.beginPath(); g.moveTo(104, 50);
+    g.bezierCurveTo(112, 64, 96, 72, 106, 84); g.bezierCurveTo(112, 92, 102, 98, 108, 102); g.stroke();
+    g.strokeStyle = 'rgba(200,96,86,.35)'; g.lineWidth = 2;
+    g.beginPath(); g.moveTo(103, 52);
+    g.bezierCurveTo(110, 64, 95, 72, 104, 84); g.stroke();
+    // Arm hängt herab
+    const ag = g.createLinearGradient(0, 50, 0, 100);
+    ag.addColorStop(0, '#978a74'); ag.addColorStop(1, '#5b5044');
+    g.strokeStyle = ag; g.lineWidth = 7;
+    g.beginPath(); g.moveTo(52, 54); g.quadraticCurveTo(50, 76, 54, 94); g.stroke();
+    g.lineWidth = 2;
+    for(let i = -2; i <= 2; i++){ g.beginPath(); g.moveTo(54, 94); g.lineTo(54 + i * 2.4, 103); g.stroke(); }
+    // Tropfen von der Kante
+    for(let i = 0; i < 16; i++){
+      const x = 30 + Math.random() * 150, len = 4 + Math.random() * 30;
+      const dg = g.createLinearGradient(0, 66, 0, 66 + len);
+      dg.addColorStop(0, 'rgba(110,10,12,.85)'); dg.addColorStop(1, 'rgba(110,10,12,0)');
+      g.fillStyle = dg; g.fillRect(x, 66, 1.6, len);
+    }
+    // Blut auf der Haut
+    for(let i = 0; i < 10; i++) soft(50 + Math.random() * 120, 44 + Math.random() * 10, 3 + Math.random() * 8, 2 + Math.random() * 4, 0, 'rgba(110,12,14,.7)', 'rgba(80,6,8,0)');
+  });
+
+  /* --- Tonbandgerät --- */
+  SPR.band = mkSprite(56, 44, (g, w, h) => {
+    g.fillStyle = 'rgba(0,0,0,.5)'; g.fillRect(8, 22, 44, 20);
+    const bg = g.createLinearGradient(0, 16, 0, 40);
+    bg.addColorStop(0, '#4a3a2a'); bg.addColorStop(1, '#221810');
+    g.fillStyle = bg; g.fillRect(6, 18, 44, 22);
+    [18, 38].forEach(x => {
+      const rg = g.createRadialGradient(x - 2, 17, 1, x, 19, 9);
+      rg.addColorStop(0, '#8e8a82'); rg.addColorStop(1, '#3a3834');
+      g.fillStyle = rg; g.beginPath(); g.arc(x, 19, 8, 0, TAU); g.fill();
+      g.fillStyle = '#1a1814'; g.beginPath(); g.arc(x, 19, 2, 0, TAU); g.fill();
+    });
+    g.fillStyle = '#6a2a1c'; g.fillRect(24, 32, 8, 4);
+  });
+
   /* --- Lampenschein --- */
   SPR.glow = mkSprite(48, 48, (g) => {
     const gr = g.createRadialGradient(24, 24, 0, 24, 24, 24);
@@ -1659,7 +2057,22 @@ const DOCS = {
     '<p style="text-align:center;font-size:1.5em;color:#5e1418;line-height:1.35">DU H&Auml;TTEST<br>NICHT KOMMEN<br>SOLLEN</p>' +
     '<p>Die Farbe l&auml;uft noch. Wer das geschrieben hat, war vor wenigen Minuten hier.</p>' }
 };
-const DOC_COUNT = 15;
+DOCS.d15 = { t:'Tonband', m:'Magnetband &middot; Hennig Vosskuhl &middot; 1973', era:'typed', body:
+  '<p>[Bandrauschen. Ein Stuhl wird gerückt.]</p>' +
+  '<p>&raquo;Aufnahme. Vierzehnter Juni. Das Landesamt hat angerufen. Ich habe gesagt, der Transport sei unterwegs.&laquo;</p>' +
+  '<p>&raquo;Er liegt unten. Er atmet nicht. Aber das Wasser in der Wanne ist warm, wenn ich morgens runtergehe.&laquo;</p>' +
+  '<p>&raquo;Marlies fragt, warum Mutter nicht mehr hustet. Ich sage ihr, das Moor hat uns etwas geschenkt.&laquo;</p>' +
+  '<p>&raquo;Es will nicht viel. Es will nur regelm&auml;&szlig;ig.&laquo;</p>' +
+  '<p>[Lange Pause. Atmen, sehr nah am Mikrofon.]</p>' +
+  '<p>&raquo;Wer das h&ouml;rt: Geh nicht in den Keller. Und wenn du schon unten bist &mdash; mach das Licht aus.&laquo;</p>' };
+const TAPE = [
+  'Aufnahme. Vierzehnter Juni. Das Landesamt hat angerufen. Ich habe gesagt, der Transport sei unterwegs.',
+  'Er liegt unten. Er atmet nicht. Aber das Wasser in der Wanne ist warm, wenn ich morgens runtergehe.',
+  'Marlies fragt, warum Mutter nicht mehr hustet. Ich sage ihr, das Moor hat uns etwas geschenkt.',
+  'Es will nicht viel. Es will nur regelmäßig.',
+  'Wer das hört: Geh nicht in den Keller. Und wenn du schon unten bist. Mach das Licht aus.'
+];
+const DOC_COUNT = 16;
 
 /* ==========================================================================
    DIE EBENEN
@@ -1704,11 +2117,13 @@ const LEVELS = [
     { x:10.5, y:9.5,  kind:'doc', id:'d06' },
     { x:34.5, y:20.5, kind:'oel' },
     { x:32.5, y:18.5, kind:'doc', id:'d08' },
-    { x:20.5, y:14.5, kind:'doc', id:'d14', hidden:true }
+    { x:20.5, y:14.5, kind:'doc', id:'d14', hidden:true },
+    { x:28.5, y:4.5,  kind:'band', id:'d15' }
   ],
   props:[
     { x:20.5, y:7.5,  s:'guts', h:.34, w:.62 },
-    { x:16.5, y:4.5,  s:'guts', h:.3,  w:.55 }
+    { x:16.5, y:4.5,  s:'guts', h:.3,  w:.55 },
+    { x:18.5, y:7.2,  s:'table', h:1.0, w:1.75 }
   ],
   candles:[ { x:10.5, y:14.5 }, { x:28.5, y:14.5 }, { x:7.5, y:19.5 }, { x:19.5, y:5.5 }, { x:31.5, y:8.5 } ],
   gore:[ [20,8],[20,7],[19,7],[17,4],[16,4],[10,14],[11,14],[12,14] ],
@@ -1756,7 +2171,9 @@ const LEVELS = [
     { x:30.5, y:7.5, s:'guts', h:.36, w:.66 },
     { x:33.5, y:8.5, s:'guts', h:.32, w:.6 },
     { x:28.5, y:10.5, s:'guts', h:.34, w:.62 },
-    { x:34.5, y:22.5, s:'guts', h:.3, w:.58 }
+    { x:34.5, y:22.5, s:'guts', h:.3, w:.58 },
+    { x:31.5, y:9.9,  s:'table', h:1.0, w:1.75 },
+    { x:35.2, y:19.2, s:'table', h:1.0, w:1.75 }
   ],
   candles:[ { x:20.5, y:14.5 }, { x:6.5, y:14.5 }, { x:33.5, y:14.5 }, { x:26.5, y:21.5 } ],
   gore:[ [29,5],[30,5],[31,5],[32,5],[33,5],[29,7],[30,7],[30,8],[33,8],[34,8],[28,10],[29,10],
@@ -1859,7 +2276,7 @@ function buildLight(){
    ========================================================================== */
 const view = $('view'), vctx = view.getContext('2d');
 const rc = document.createElement('canvas'), rctx = rc.getContext('2d');
-let RW = 320, RH = 180, DW = 0, DH = 0, quality = .5, autoQ = true;
+let RW = 320, RH = 180, DW = 0, DH = 0, quality = .5, autoQ = true, PS = 180;
 let frame = null, buf = null, buf32 = null, zbuf = null, coneLUT = null, vignLUT = null;
 const FAR = 15;
 const fallTab = new Float32Array(256);
@@ -1879,6 +2296,7 @@ function resize(){
 function rebuild(){
   RW = clamp(Math.round(DW * quality), 200, 640);
   RH = clamp(Math.round(DH * quality), 120, 400);
+  PS = Math.min(RH, RW * .5625);   // Projektionsmaß: im Hochformat wie ein schmales Querformat
   rc.width = RW; rc.height = RH;
   frame = rctx.createImageData(RW, RH);
   buf = frame.data; buf32 = new Uint32Array(buf.buffer); buf32.fill(0xFF000000);
@@ -1918,7 +2336,7 @@ function renderWorld(P, fl, horizon){
   const r0x = dirX - plX, r0y = dirY - plY, r1x = dirX + plX, r1y = dirY + plY;
   const texF = TEX[W.L.floor], texC = TEX[W.L.ceil], texB = TEX[22];
   const AMB = .046;
-  const eyeH = EYE * H, ceilH = (WALLH - EYE) * H;
+  const eyeH = EYE * PS, ceilH = (WALLH - EYE) * PS;
 
   /* Boden */
   for(let y = horizon + 1; y < H; y++){
@@ -2002,7 +2420,7 @@ function renderWorld(P, fl, horizon){
     let texX = (wallX * TS) | 0;
     if((side === 0 && rdx > 0) || (side === 1 && rdy < 0)) texX = TS - texX - 1;
 
-    const lineH = ((WALLH * H) / pd) | 0;
+    const lineH = ((WALLH * PS) / pd) | 0;
     if(lineH < 1) continue;
     const y1 = (horizon + eyeH / pd) | 0, y0 = y1 - lineH;
     const yS = y0 < 0 ? 0 : y0, yE = y1 > H ? H : y1;
@@ -2033,9 +2451,9 @@ function drawSprite(P, sp, wx, wy, hU, wU, fl, horizon, o){
   if(tY <= .12 || tY >= FAR) return;
   const Wd = RW, H = RH;
   const sx = ((Wd / 2) * (1 + tX / tY)) | 0;
-  const hPx = Math.abs((H / tY) * hU) | 0, wPx = Math.abs((H / tY) * wU) | 0;
+  const hPx = Math.abs((PS / tY) * hU) | 0, wPx = Math.abs((PS / tY) * wU) | 0;
   if(hPx < 1 || wPx < 1) return;
-  const y1 = (horizon + (EYE * H) / tY - (o.lift || 0) * (H / tY)) | 0, y0 = y1 - hPx;
+  const y1 = (horizon + (EYE * PS) / tY - (o.lift || 0) * (PS / tY)) | 0, y0 = y1 - hPx;
   const x0 = (sx - (wPx >> 1)) | 0, x1 = x0 + wPx;
   const df = fall(tY), lamp = lmAt(wx, wy), glow = o.glow || 0, add = !!o.additive, jit = o.jitter || 0;
   const S = sp;
@@ -2066,17 +2484,29 @@ function drawSprite(P, sp, wx, wy, hU, wU, fl, horizon, o){
   }
 }
 
+const GR = new Uint8ClampedArray(768);
+for(let i = 0; i < 256; i++){
+  const x = i / 255, sc = x * x * (3 - 2 * x), c = lerp(x, sc, .45), mid = Math.sin(x * Math.PI);
+  GR[i] = c * 255 + mid * 2;
+  GR[256 + i] = c * 255 + mid * 5;
+  GR[512 + i] = c * 243 + mid * 3;
+}
 function post(fear, stat, flick, red, fn){
   const n = RW * RH, off = (fn * 977) & 16383;
   const ch = fear > .62 ? Math.min(2, Math.round((fear - .62) * 5)) : 0;
-  const cs = ch * 4, sA = stat * 112;
+  const cs = ch * 4, sA = (stat + .024) * 112;
   for(let i = 0, o = 0; i < n; i++, o += 4){
     let r = buf[o], g = buf[o + 1], b = buf[o + 2];
     if(cs && (o + cs) < buf.length) r = buf[o + cs];
     const nz = noiseTab[(i + off) & 16383] - .5, v = vignLUT[i] * flick;
-    buf[o] = r * v + nz * sA + red * 52;
-    buf[o + 1] = g * v + nz * sA * .84;
-    buf[o + 2] = b * v + nz * sA * .9 + red * 5;
+    r = r * v + nz * sA + red * 52;
+    g = g * v + nz * sA * .84;
+    b = b * v + nz * sA * .9 + red * 5;
+    const l = r * .3 + g * .59 + b * .11;
+    r = l + (r - l) * .76; g = l + (g - l) * .76; b = l + (b - l) * .76;
+    buf[o]     = GR[r < 0 ? 0 : r > 255 ? 255 : r | 0];
+    buf[o + 1] = GR[256 + (g < 0 ? 0 : g > 255 ? 255 : g | 0)];
+    buf[o + 2] = GR[512 + (b < 0 ? 0 : b > 255 ? 255 : b | 0)];
   }
 }
 
@@ -2116,6 +2546,7 @@ function setGoal(t){ GS.goal = t; el.goal.innerHTML = t; }
 function layer(n){
   ['menu','pause','dead','end'].forEach(k => el[k].classList.toggle('on', k === n));
   el.stage.classList.toggle('playing', n === null);
+  el.touch.classList.toggle('on', TOUCH && n === null);
 }
 
 /* ---------- Dokument lesen ---------- */
@@ -2134,6 +2565,8 @@ function readDoc(id, fromBag){
   if(!fromBag){ state = 'doc'; document.exitPointerLock && document.exitPointerLock(); }
   A.paper();
 }
+$('docClose').addEventListener('click', (e) => { e.stopPropagation(); closeDoc(); });
+el.doc.addEventListener('click', (e) => { if(e.target === el.doc && docOpen) closeDoc(); });
 function closeDoc(){
   if(!docOpen) return;
   el.doc.classList.remove('on');
@@ -2148,13 +2581,16 @@ function renderBag(){
   if(GS.keys.keller)  inv.push(['Kellerschl&uuml;ssel', 'Schwer, aus Eisen. Lag im Wandtresor.']);
   if(GS.keys.hof)     inv.push(['Hofschl&uuml;ssel', 'Hing um den Hals der Moorleiche. Er ist warm.']);
   if(GS.fuse)         inv.push(['Schmelzsicherung', 'Aus dem Schlachtraum. Irgendwo fehlt sie.']);
-  if(GS.med)          inv.push(['Verbandszeug &times;' + GS.med, 'Alt, aber trocken. Dr&uuml;cke H zum Verbinden.']);
+  if(GS.med)          inv.push(['Verbandszeug &times;' + GS.med, 'Alt, aber trocken. Stoppt die Blutung.', 'heal']);
   inv.push(['Petroleumlampe', Math.round(GS.oil) + '&nbsp;% F&uuml;llstand. Ohne sie siehst du nichts. Mit ihr sieht er dich.']);
   el.paneItems.innerHTML = inv.length
-    ? '<div class="grid">' + inv.map(([t, d]) => '<div class="card"><h3>' + t + '</h3><p>' + d + '</p></div>').join('') + '</div>'
+    ? '<div class="grid">' + inv.map(([t, d, x]) => '<div class="card"><h3>' + t + '</h3><p>' + d + '</p>' +
+        (x === 'heal' && GS.hp < 3 ? '<button class="ghost act" id="bagHeal">Jetzt verbinden</button>' : '') + '</div>').join('') + '</div>'
     : '<div class="empty">Du tr&auml;gst nichts bei dir.</div>';
 
   const ids = Object.keys(DOCS).filter(k => GS.docs[k]);
+  const bh = $('bagHeal');
+  if(bh) bh.addEventListener('click', () => { heal(); renderBag(); hud(); });
   el.paneDocs.innerHTML = ids.length
     ? '<div class="grid">' + ids.map(k =>
         '<div class="card doc" data-doc="' + k + '"><div class="era">' + DOCS[k].m + '</div><h3>' + DOCS[k].t + '</h3>' +
@@ -2188,6 +2624,8 @@ safeBox.innerHTML =
   '<div style="font-family:var(--f-mono);font-size:11px;color:#877f6d;margin-top:8px;letter-spacing:.12em">Vier Ziffern. Tippe sie ein.</div>' +
   '<div id="safeDig" style="display:flex;gap:14px;justify-content:center;margin:26px 0">' +
   '<i></i><i></i><i></i><i></i></div>' +
+  '<div class="pad" id="safePad">' + ['1','2','3','4','5','6','7','8','9','&larr;','0',''].map(k =>
+      k ? '<button data-k="' + k + '">' + k + '</button>' : '<span></span>').join('') + '</div>' +
   '<div id="safeMsg" style="font-family:var(--f-old);font-size:16px;color:#877f6d;min-height:26px"></div>' +
   '<div class="actions" style="justify-content:center"><button class="ghost" id="safeClose">Zur&uuml;cktreten</button></div></div>';
 $('stage').appendChild(safeBox);
@@ -2232,6 +2670,11 @@ function safeDigit(d){
   }
 }
 $('safeClose').addEventListener('click', closeSafe);
+$('safePad').querySelectorAll('button').forEach(b => b.addEventListener('click', () => {
+  const k = b.dataset.k;
+  if(k === '&larr;' || k === '\u2190'){ safeCode = safeCode.slice(0, -1); drawSafe(); A.click(false); }
+  else safeDigit(k);
+}));
 
 /* ---------- Blickstrahl: worauf zeigst du ---------- */
 function lookAt(maxD){
@@ -2265,7 +2708,7 @@ function nearestItem(maxD){
   }
   return best;
 }
-const ITEM_NAME = { doc:'Papier', key:null, oel:'Petroleum', med:'Verbandszeug', sicherung:'Schmelzsicherung' };
+const ITEM_NAME = { doc:'Papier', key:null, oel:'Petroleum', med:'Verbandszeug', sicherung:'Schmelzsicherung', band:'Tonbandger&auml;t abspielen' };
 function itemLabel(it){ return it.kind === 'key' ? it.n : (ITEM_NAME[it.kind] || 'Gegenstand'); }
 
 /* ==========================================================================
@@ -2336,10 +2779,53 @@ function take(it){
   else if(it.kind === 'oel'){ GS.oil = Math.min(100, GS.oil + 45); A.pickup(); toast('Petroleum nachgef&uuml;llt &mdash; ' + Math.round(GS.oil) + '&nbsp;%.', 2.6); }
   else if(it.kind === 'med'){ GS.med++; A.pickup(); toast('Verbandszeug. Dr&uuml;cke H, wenn es n&ouml;tig wird.', 3); }
   else if(it.kind === 'sicherung'){ GS.fuse = true; A.pickup(); toast('Schmelzsicherung. Irgendwo fehlt genau die.', 3); }
+  else if(it.kind === 'band'){ playTape(); }
+}
+
+/* Tonband: Hennigs Stimme per Sprachausgabe, tief gestimmt, mit Untertiteln */
+let tapeOn = false;
+function playTape(){
+  if(tapeOn) return;
+  tapeOn = true;
+  if(!GS.docs.d15){ GS.docs.d15 = true; GS.docCount++; }
+  A.tape(true);
+  const sub = $('sub');
+  const show = (txt) => { sub.innerHTML = '<b>TONBAND &middot; 1973</b>' + txt; sub.classList.add('on'); };
+  let finished = false, started = false;
+  const done = () => { if(finished) return; finished = true;
+    sub.classList.remove('on'); A.tape(false); tapeOn = false;
+    toast('Das Band l&auml;uft aus. Im Archiv liegt die Abschrift.', 3); };
+  show(TAPE[0]);
+  setTimeout(done, 45000);   // Notbremse, falls die Sprachausgabe nie fertig meldet
+  const syn = window.speechSynthesis;
+  let voice = null;
+  try{ voice = syn && syn.getVoices().find(v => /^de/i.test(v.lang)); }catch(e){}
+  if(syn && typeof SpeechSynthesisUtterance !== 'undefined'){
+    try{ syn.cancel(); }catch(e){}
+    TAPE.forEach((line, i) => {
+      const u = new SpeechSynthesisUtterance(line);
+      u.lang = 'de-DE'; if(voice) u.voice = voice;
+      u.pitch = .25; u.rate = .74; u.volume = 1;
+      u.onstart = () => { started = true; show(line); };
+      if(i === TAPE.length - 1){ u.onend = () => { if(started) done(); }; u.onerror = () => { if(started) done(); }; }
+      syn.speak(u);
+    });
+    // falls die Stimme stumm bleibt: Untertitel trotzdem durchlaufen lassen
+    setTimeout(() => { if(tapeOn && !started){ try{ syn.cancel(); }catch(e){} fallback(); } }, 2500);
+  } else fallback();
+  function fallback(){
+    let i = 0;
+    const next = () => {
+      if(finished) return;
+      if(i >= TAPE.length){ done(); return; }
+      show(TAPE[i]); i++; setTimeout(next, 4200);
+    };
+    next();
+  }
 }
 
 function heal(){
-  if(state !== 'play' || !GS.med || GS.hp >= 3) return;
+  if((state !== 'play' && state !== 'bag') || !GS.med || GS.hp >= 3) return;
   GS.med--; GS.hp = Math.min(3, GS.hp + 1);
   A.paper(); toast('Verbunden.', 2);
 }
@@ -2378,6 +2864,7 @@ function beat(k){
   }
   if(k === 'safe'){ V.susp = 2.2; V.state = 'hunt'; V.huntT = 14; A.farScream(); }
   if(k === 'keller'){
+    chapter('II', 'Der Keller');
     V.on = true; V.state = 'patrol'; V.spd = 2.75;
     A.chain(); A.farScream();
     setGoal('Der Keller. Irgendwo hier unten ist Ada.');
@@ -2389,6 +2876,7 @@ function beat(k){
     setGoal('Der Hofschl&uuml;ssel liegt in der Torfkammer. Dann zur Hintert&uuml;r.');
   }
   if(k === 'moor'){
+    setTimeout(() => chapter('III', 'Der Gast'), 1800);
     GS.finale = true;
     A.awaken(); A.stinger();
     buildLight();
@@ -2534,6 +3022,7 @@ function grab(){
 
 const scare = { on:false, t:0, dur:.85, fatal:false };
 function die(){
+  M.set('none');
   scare.on = true; scare.t = 0; scare.dur = 1.5; scare.fatal = true;
   state = 'scare';
   document.exitPointerLock && document.exitPointerLock();
@@ -2541,6 +3030,7 @@ function die(){
 }
 function finish(){
   state = 'end';
+  M.set('end');
   el.hud.classList.remove('on');
   document.exitPointerLock && document.exitPointerLock();
   $('eDocs').textContent = GS.docCount;
@@ -2577,8 +3067,16 @@ function movePlayer(dt){
   if(touchMove){ fwd -= touchMove.dy; str += touchMove.dx; }
   if(mouseDX){ setAngle(P.a + mouseDX * .0022); mouseDX = 0; }
   if(turn) setAngle(P.a + turn * 2.1 * dt);
+  if(!plActive && mouseX !== null){
+    const f = mouseX / innerWidth, dead = .22;
+    let t = 0;
+    if(f < .5 - dead) t = (f - (.5 - dead)) / (.5 - dead);
+    else if(f > .5 + dead) t = (f - (.5 + dead)) / (.5 - dead);
+    if(t) setAngle(P.a + clamp(t, -1, 1) * 2.5 * dt);
+  }
 
-  const run = (keys.ShiftLeft || keys.ShiftRight) && fwd > 0;
+  const run = ((keys.ShiftLeft || keys.ShiftRight) && fwd > 0) ||
+              (touchMove && touchMove.mag > 1.08 && touchMove.dy < -.6);
   const spd = run ? 4.9 : 2.95;
   const len = Math.hypot(fwd, str) || 1;
   const nx = (P.dx * fwd + P.px / .62 * str) / len * spd * dt;
@@ -2596,14 +3094,35 @@ function movePlayer(dt){
   return { moving, running:run };
 }
 
-function lock(){ if(view.requestPointerLock && !matchMedia('(pointer:coarse)').matches) view.requestPointerLock(); }
-view.addEventListener('click', () => { if(state === 'play' && document.pointerLockElement !== view) lock(); });
-document.addEventListener('mousemove', (e) => { if(document.pointerLockElement === view) mouseDX += e.movementX || 0; });
+/* Zeigersperre, wo sie erlaubt ist — sonst Ersatzsteuerung.
+   In eingebetteten Rahmen verweigern Browser die Sperre, dann muss die Maus trotzdem gehen. */
+let plActive = false, plTried = false, plDenied = false, mouseX = null;
+function lock(){
+  if(matchMedia('(pointer:coarse)').matches) return;
+  if(plDenied || !view.requestPointerLock) return;
+  plTried = true;
+  try{ const r = view.requestPointerLock(); if(r && r.catch) r.catch(() => { plDenied = true; }); }
+  catch(e){ plDenied = true; }
+}
+document.addEventListener('pointerlockerror', () => { plDenied = true; plActive = false; });
 document.addEventListener('pointerlockchange', () => {
-  if(state === 'play' && document.pointerLockElement !== view){ state = 'pause'; layer('pause'); }
+  plActive = document.pointerLockElement === view;
+  if(state === 'play' && !plActive && plTried && !plDenied){ state = 'pause'; layer('pause'); }
+});
+view.addEventListener('click', () => { if(state === 'play' && !plActive) lock(); });
+// movementX gibt es auch ohne Sperre — damit dreht die Maus in beiden Faellen
+document.addEventListener('mousemove', (e) => {
+  if(state !== 'play') return;
+  mouseDX += e.movementX || 0;
+  mouseX = e.clientX;
 });
 
 addEventListener('keydown', (e) => {
+  if(state === 'intro'){
+    if(e.code === 'Space' || e.code === 'Enter') nextIntro();
+    if(e.code === 'Escape') endIntro();
+    e.preventDefault(); return;
+  }
   if(state === 'safe'){
     if(e.key >= '0' && e.key <= '9') safeDigit(e.key);
     if(e.code === 'Backspace'){ safeCode = safeCode.slice(0, -1); drawSafe(); }
@@ -2628,34 +3147,45 @@ addEventListener('keydown', (e) => {
 addEventListener('keyup', (e) => { keys[e.code] = false; });
 addEventListener('blur', () => { for(const k in keys) keys[k] = false; });
 
-/* Touch */
+/* Touch — Knöpfe reagieren auf pointerdown, der Rest der Fläche ist Joystick und Blick.
+   Wichtig: preventDefault nur außerhalb der Knöpfe, sonst schluckt iOS jeden Knopfdruck. */
+TOUCH = matchMedia('(pointer:coarse)').matches || (navigator.maxTouchPoints > 0 && 'ontouchstart' in window);
+if(TOUCH) document.body.classList.add('touch');
 let touchMove = null, touchLook = null;
-if(matchMedia('(pointer:coarse)').matches){
-  el.touch.classList.add('on');
+function tap(node, fn){
+  node.addEventListener('pointerdown', (e) => { e.preventDefault(); e.stopPropagation(); fn(e); });
+  node.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); });
+}
+if(TOUCH){
+  const isBtn = (t) => t && t.closest && t.closest('.tbtn');
+  const stick = $('stick');
   const st = (e) => {
     for(const t of e.changedTouches){
+      if(isBtn(t.target)) continue;
       if(t.clientX < innerWidth * .5 && !touchMove){
-        touchMove = { id:t.identifier, ox:t.clientX, oy:t.clientY, dx:0, dy:0 };
-        const s = $('stick'); s.style.display = 'block';
-        s.style.left = (t.clientX - 46) + 'px'; s.style.top = (t.clientY - 46) + 'px';
-      } else if(!touchLook) touchLook = { id:t.identifier, lx:t.clientX };
+        touchMove = { id:t.identifier, ox:t.clientX, oy:t.clientY, dx:0, dy:0, mag:0 };
+        stick.style.display = 'block';
+        stick.style.left = (t.clientX - 46) + 'px'; stick.style.top = (t.clientY - 46) + 'px';
+      } else if(!touchLook && t.clientX >= innerWidth * .5) touchLook = { id:t.identifier, lx:t.clientX };
     }
-    e.preventDefault();
+    if(!isBtn(e.target)) e.preventDefault();
   };
   const mv = (e) => {
     for(const t of e.changedTouches){
       if(touchMove && t.identifier === touchMove.id){
-        touchMove.dx = clamp((t.clientX - touchMove.ox) / 44, -1, 1);
-        touchMove.dy = clamp((t.clientY - touchMove.oy) / 44, -1, 1);
+        const rx = (t.clientX - touchMove.ox) / 44, ry = (t.clientY - touchMove.oy) / 44;
+        touchMove.dx = clamp(rx, -1, 1); touchMove.dy = clamp(ry, -1, 1);
+        touchMove.mag = Math.hypot(rx, ry);
+        stick.classList.toggle('run', touchMove.mag > 1.08 && ry < -.6);
       } else if(touchLook && t.identifier === touchLook.id){
-        mouseDX += (t.clientX - touchLook.lx) * 1.7; touchLook.lx = t.clientX;
+        mouseDX += (t.clientX - touchLook.lx) * 1.8; touchLook.lx = t.clientX;
       }
     }
-    e.preventDefault();
+    if(!isBtn(e.target)) e.preventDefault();
   };
   const en = (e) => {
     for(const t of e.changedTouches){
-      if(touchMove && t.identifier === touchMove.id){ touchMove = null; $('stick').style.display = 'none'; }
+      if(touchMove && t.identifier === touchMove.id){ touchMove = null; stick.style.display = 'none'; stick.classList.remove('run'); }
       if(touchLook && t.identifier === touchLook.id) touchLook = null;
     }
   };
@@ -2663,12 +3193,19 @@ if(matchMedia('(pointer:coarse)').matches){
   el.touch.addEventListener('touchmove', mv, { passive:false });
   el.touch.addEventListener('touchend', en);
   el.touch.addEventListener('touchcancel', en);
-  $('tUse').addEventListener('click', (e) => { e.stopPropagation(); use(); });
-  $('tLamp').addEventListener('click', (e) => { e.stopPropagation(); if(state === 'play'){ GS.lampOn = !GS.lampOn; A.click(GS.lampOn); } });
-  $('tBag').addEventListener('click', (e) => { e.stopPropagation(); state === 'bag' ? closeBag() : openBag(); });
-  el.doc.style.pointerEvents = 'auto';
-  el.doc.addEventListener('click', () => { if(docOpen) closeDoc(); });
+  tap($('tUse'),  () => use());
+  tap($('tLamp'), () => { if(state === 'play'){ GS.lampOn = !GS.lampOn; A.click(GS.lampOn); } });
+  tap($('tBag'),  () => { state === 'bag' ? closeBag() : openBag(); });
+  tap($('tHeal'), () => { if(GS && GS.med && GS.hp < 3) heal(); else if(GS) toast(GS.med ? 'Du bist unverletzt.' : 'Du hast kein Verbandszeug.', 2); });
+  tap($('tPause'),() => { if(state === 'play'){ state = 'pause'; layer('pause'); } });
 }
+$('bagClose').addEventListener('click', () => closeBag());
+
+// iOS setzt Audio bei Unterbrechungen aus — bei jeder Berührung wieder anwerfen
+const wake = () => { if(A.ctx && A.ctx.state !== 'running') A.ctx.resume(); };
+addEventListener('touchend', wake, { passive:true });
+addEventListener('pointerdown', wake, { passive:true });
+document.addEventListener('visibilitychange', () => { if(!document.hidden) wake(); });
 
 /* ==========================================================================
    BILD
@@ -2730,13 +3267,14 @@ function loop(ts){
     }
     return;
   }
-  if(state === 'menu' || state === 'pause' || state === 'dead' || state === 'end') return;
+  if(state === 'menu' || state === 'pause' || state === 'dead' || state === 'end' || state === 'intro') return;
 
   const frozen = state !== 'play';
   GS.elapsed += dt;
 
   const mv = frozen ? { moving:false, running:false } : movePlayer(dt);
   const ent = updateVater(dt, mv.moving, mv.running);
+  if(!scare.on) M.set(GS.finale ? 'finale' : (ent.hunt && ent.d < 22) ? 'chase' : 'explore');
   if(scare.on) return;
 
   /* Lampe */
@@ -2761,12 +3299,14 @@ function loop(ts){
   if(!frozen){
     const it = nearestItem(1.5), look = lookAt(2.4);
     let txt = '';
-    if(adaThere && adaD < 2.2) txt = '<b>E</b> &nbsp;Ada ansprechen';
+    const KB = TOUCH ? '' : '<b>E</b> &nbsp;';
+    if(adaThere && adaD < 2.2) txt = KB + 'Ada ansprechen';
     else if(it && (!look || Math.hypot(it.x - P.x, it.y - P.y) < (look.dist || look.d || 9)))
-      txt = '<b>E</b> &nbsp;' + itemLabel(it);
-    else if(look && look.kind === 'door') txt = '<b>E</b> &nbsp;' + (look.d.n || 'T&uuml;r');
-    else if(look && look.kind === 'act') txt = '<b>E</b> &nbsp;' + look.a.n;
+      txt = KB + itemLabel(it);
+    else if(look && look.kind === 'door') txt = KB + (look.d.n || 'T&uuml;r');
+    else if(look && look.kind === 'act') txt = KB + look.a.n;
     el.prompt.innerHTML = txt;
+    if(TOUCH) $('tUse').classList.toggle('ready', !!txt);
     el.prompt.classList.toggle('on', !!txt);
     el.reticle.classList.toggle('act', !!txt);
   }
@@ -2812,7 +3352,7 @@ function loop(ts){
   for(const it of W.items){
     if(it.taken || it.hidden) continue;
     const s = it.kind === 'doc' ? SPR.doc : it.kind === 'key' ? (it.id === 'messing' ? SPR.keyMessing : it.id === 'keller' ? SPR.keyKeller : SPR.keyHof)
-            : it.kind === 'oel' ? SPR.oel : it.kind === 'med' ? SPR.med : SPR.sicherung;
+            : it.kind === 'oel' ? SPR.oel : it.kind === 'med' ? SPR.med : it.kind === 'band' ? SPR.band : SPR.sicherung;
     const h = it.kind === 'oel' ? .38 : it.kind === 'key' ? .2 : .3;
     list.push({ s, x:it.x, y:it.y, h, w:h * (s.w / s.h), o:{ glow:.07 } });
   }
@@ -2847,6 +3387,57 @@ function loop(ts){
 const ADA = { x:5.5, y:21.5 };
 
 /* ==========================================================================
+   VORGESCHICHTE — die Fahrt ins Moor
+   ========================================================================== */
+const INTRO = [
+  'Drei Monate, nachdem meine Schwester verschwunden ist, liegt ein Brief von ihr im Kasten.',
+  'Ada fotografiert verlassene H&auml;user. Ihr letztes Ziel war ein Gut im Moor bei Diepholz &mdash; <em>abgebrannt vor einem halben Jahrhundert</em>, sagt das Kreisarchiv.',
+  'Die Polizei hat ihr Auto am Rand des Moorwegs gefunden. Der Schl&uuml;ssel steckte. Die Kamera lag auf dem Beifahrersitz, und der Film war voll.',
+  'Auf den Bildern ist immer dasselbe Haus. Auf dem letzten steht jemand im Fenster. Ada hat allein gewohnt, allein gearbeitet, allein fotografiert.',
+  'Der Brief ist in ihrer Schrift. Er ist abgestempelt <em>vier Wochen</em> nachdem man sie zuletzt gesehen hat.',
+  'Ich h&auml;tte die Polizei anrufen sollen. Stattdessen sitze ich um drei Uhr nachts im Auto und fahre in den Regen.',
+  'Der Moorweg endet an einem Tor.<br><br>Es steht offen.'
+];
+let introI = -1, introT = null, introF = null;
+function playIntro(){
+  state = 'intro'; layer('__keins');
+  el.hud.classList.remove('on');
+  $('intro').classList.add('on');
+  A.introBed(true); M.set('intro');
+  introI = -1; nextIntro();
+}
+function nextIntro(){
+  if(state !== 'intro') return;
+  clearTimeout(introT); clearTimeout(introF);
+  const tx = $('introText');
+  introI++;
+  if(introI >= INTRO.length){ endIntro(); return; }
+  tx.classList.remove('on');
+  introF = setTimeout(() => {
+    tx.innerHTML = INTRO[introI]; tx.classList.add('on');
+    if(introI === 2 || introI === 5) A.thunder();
+    if(introI === INTRO.length - 1){ A.engineOff(); setTimeout(() => { A.creak(.16); A.chain(); }, 2200); }
+  }, introI === 0 ? 400 : 900);
+  introT = setTimeout(nextIntro, 900 + 3000 + INTRO[introI].replace(/<[^>]+>|&[a-z]+;/g, '.').length * 48);
+}
+function endIntro(){
+  if(state !== 'intro') return;
+  clearTimeout(introT); clearTimeout(introF);
+  $('intro').classList.remove('on');
+  A.introBed(false);
+  startGame();
+}
+$('intro').addEventListener('click', () => nextIntro());
+$('introSkip').addEventListener('click', (e) => { e.stopPropagation(); endIntro(); });
+
+let chTimer = null;
+function chapter(no, t){
+  $('chNo').textContent = 'Kapitel ' + no; $('chT').innerHTML = t;
+  const c = $('chapter'); c.classList.add('on');
+  clearTimeout(chTimer); chTimer = setTimeout(() => c.classList.remove('on'), 4400);
+}
+
+/* ==========================================================================
    START
    ========================================================================== */
 function startGame(){
@@ -2861,16 +3452,31 @@ function startGame(){
   layer(null); state = 'play';
   setGoal('Finde Ada. Sie muss hier irgendwo sein.');
   A.init(); if(A.ctx && A.ctx.state === 'suspended') A.ctx.resume();
+  M.start(); M.set('explore');
+  $('sub').classList.remove('on'); tapeOn = false;
+  try{ window.speechSynthesis && speechSynthesis.cancel(); }catch(e){}
   setTimeout(() => { A.door(false); toast('Hinter dir f&auml;llt die Haust&uuml;r zu.', 4, true); }, 700);
+  setTimeout(() => chapter('I', 'Das Haus'), 2200);
   setTimeout(() => { A.creak(.1); }, 3400);
   lock();
 }
 
-$('btnStart').addEventListener('click', () => { A.init(); startGame(); });
+$('btnStart').addEventListener('click', () => {
+  A.init(); if(A.ctx && A.ctx.state === 'suspended') A.ctx.resume();
+  M.start(); playIntro();
+});
+// Titelmusik ab der ersten Berührung (Browser erlauben Ton erst danach)
+const firstTouch = () => {
+  if(state !== 'menu') return;
+  A.init(); if(A.ctx && A.ctx.state === 'suspended') A.ctx.resume();
+  M.start(); M.set('menu');
+};
+addEventListener('pointerdown', firstTouch, { passive:true });
+addEventListener('keydown', firstTouch);
 $('btnAgain').addEventListener('click', startGame);
 $('btnAgain2').addEventListener('click', startGame);
-$('btnMenu').addEventListener('click', () => { state = 'menu'; layer('menu'); });
-$('btnMenu2').addEventListener('click', () => { state = 'menu'; layer('menu'); });
+$('btnMenu').addEventListener('click', () => { state = 'menu'; layer('menu'); M.set('menu'); });
+$('btnMenu2').addEventListener('click', () => { state = 'menu'; layer('menu'); M.set('menu'); });
 $('btnResume').addEventListener('click', () => { state = 'play'; layer(null); lock(); if(A.ctx && A.ctx.state === 'suspended') A.ctx.resume(); });
 $('btnQuit').addEventListener('click', () => { state = 'menu'; el.hud.classList.remove('on'); layer('menu'); });
 $('btnFull').addEventListener('click', () => {
@@ -2878,6 +3484,8 @@ $('btnFull').addEventListener('click', () => {
   if(!document.fullscreenElement) (r.requestFullscreen || r.webkitRequestFullscreen || (() => {})).call(r);
   else document.exitFullscreen && document.exitFullscreen();
 });
+if(TOUCH || !(document.documentElement.requestFullscreen || document.documentElement.webkitRequestFullscreen))
+  $('btnFull').style.display = 'none';
 $('btnQuiet').addEventListener('click', (e) => { A.init(); e.target.textContent = A.toggleMute() ? 'Ton an' : 'Ton aus'; });
 addEventListener('resize', resize);
 
