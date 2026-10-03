@@ -143,11 +143,12 @@ def main() -> int:
 
     # 7 -------------------------------------------------------------------
     buch = agent.tools.bookkeeping
-    buch.buchung_eintragen("ausgabe", "2026-08-20", 130.40, "Baumarkt",
+    erster = datetime.now().strftime("%Y-%m-01")  # laufender Monat, wie das Dashboard
+    buch.buchung_eintragen("ausgabe", erster, 130.40, "Baumarkt",
                            "Arbeitsmaterial", 20)
-    buch.buchung_eintragen("einnahme", "2026-08-21", 1200.00, "Berger GmbH",
+    buch.buchung_eintragen("einnahme", erster, 1200.00, "Berger GmbH",
                            "Sonstiges", 20)
-    aus = buch.auswertung("2026-08-01", "2026-08-31")
+    aus = buch.auswertung(erster, datetime.now().strftime("%Y-%m-%d"))
     haken(7, "Auswertung zeigt Einnahmen, Ausgaben, Ergebnis, Zahllast",
           aus["einnahmen"] == 1200.0 and aus["ausgaben"] == 130.40
           and aus["ergebnis"] == 1069.60 and aus["zahllast"] == 178.27,

@@ -200,11 +200,15 @@ def pruefung_buchhaltung(agent):
             "%.2f Euro" % mwst_aus_brutto(130.40, 20))
 
     buch = agent.tools.bookkeeping
-    buch.buchung_eintragen("ausgabe", "2026-08-20", 130.40, "Baumarkt",
+    # Die Buchungen liegen im laufenden Monat, sonst zeigt das Command Center
+    # (es rechnet immer den aktuellen Monat) nichts davon - die Prüfung würde
+    # mit jedem Monatswechsel kippen.
+    erster = datetime.now().strftime("%Y-%m-01")
+    buch.buchung_eintragen("ausgabe", erster, 130.40, "Baumarkt",
                            "Arbeitsmaterial", 20)
-    buch.buchung_eintragen("einnahme", "2026-08-21", 1200.00, "Berger GmbH",
+    buch.buchung_eintragen("einnahme", erster, 1200.00, "Berger GmbH",
                            "Sonstiges", 20)
-    auswertung = buch.auswertung("2026-08-01", "2026-08-31")
+    auswertung = buch.auswertung(erster, datetime.now().strftime("%Y-%m-%d"))
     pruefen("Auswertung zeigt Einnahmen, Ausgaben, Ergebnis, Zahllast",
             auswertung["einnahmen"] == 1200.0 and auswertung["ausgaben"] == 130.40
             and auswertung["ergebnis"] == 1069.60 and auswertung["zahllast"] == 178.27,
