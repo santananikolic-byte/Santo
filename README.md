@@ -17,7 +17,7 @@ die Anleitung führt in drei Schritten von Claude Code zum laufenden Jarvis.
 Der kürzeste Weg — eine Zeile ins Terminal, sonst nichts:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/santananikolic-byte/Santo/claude/jarvis-voice-assistant-70695g/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/santananikolic-byte/Santo/claude/new-session-o54yqu/install.sh | bash
 ```
 
 Das lädt Jarvis nach `~/Jarvis`, holt was fehlt, legt eine Verknüpfung auf den

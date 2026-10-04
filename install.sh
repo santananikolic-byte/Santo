@@ -4,7 +4,7 @@
 #
 # Eine Zeile im Terminal, mehr muss der Nutzer nicht tun:
 #
-#   curl -fsSL https://raw.githubusercontent.com/santananikolic-byte/Santo/claude/jarvis-voice-assistant-70695g/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/santananikolic-byte/Santo/claude/new-session-o54yqu/install.sh | bash
 #
 # Das Skript laedt Jarvis nach ~/Jarvis, holt was fehlt, legt eine
 # Verknuepfung auf den Schreibtisch und startet die Einrichtung.
@@ -15,7 +15,7 @@
 set -u
 
 REPO="https://github.com/santananikolic-byte/Santo"
-ZWEIG="claude/jarvis-voice-assistant-70695g"
+ZWEIG="${JARVIS_ZWEIG:-claude/new-session-o54yqu}"
 ZIEL="${JARVIS_ZIEL:-$HOME/Jarvis}"
 NUR_PRUEFEN="${JARVIS_NUR_PRUEFEN:-0}"
 
