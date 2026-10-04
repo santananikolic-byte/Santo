@@ -174,6 +174,7 @@ body[data-zustand="wach"] .zustandstext{color:var(--akzent)}
   <span id="lage">Stand wird geholt …</span>
   <span class="rechts">
     <button class="mini" id="tippenAn" title="Notweg, falls das Mikrofon streikt">Tippen</button>
+    <a href="/pfad" id="pfadLink">Pfad</a>
     <a href="/dashboard" target="_blank" rel="noopener">Cockpit</a>
     <a href="/sales" target="_blank" rel="noopener">Sales</a>
   </span>
@@ -254,6 +255,9 @@ body[data-zustand="wach"] .zustandstext{color:var(--akzent)}
     return p + (SCHLUESSEL ? (p.indexOf("?") < 0 ? "?" : "&") +
       "schluessel=" + encodeURIComponent(SCHLUESSEL) : "");
   }
+  // Die Verknüpfungen im Kopf brauchen im Handy-Modus den Schlüssel.
+  Array.prototype.forEach.call(document.querySelectorAll(".ticker a[href^='/']"),
+    function (a) { a.href = url(a.getAttribute("href")); });
   function holen(p, k) {
     var o = { headers: { "Content-Type": "application/json" } };
     if (k !== undefined) { o.method = "POST"; o.body = JSON.stringify(k); }

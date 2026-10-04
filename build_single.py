@@ -66,6 +66,7 @@ BAULISTE = [
     "modules/dashboard",
     "modules/sales_view",
     "modules/scheduler",
+    "modules/lernpfad",
     "modules/webapp",
     "modules/setup_wizard",
     "modules/tools",

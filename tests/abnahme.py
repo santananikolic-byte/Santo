@@ -48,6 +48,7 @@ from modules.privat import Privat, monatsanteil  # noqa: E402
 from modules.team import ROLLEN, Team  # noqa: E402
 from modules.webapp import JarvisWeb, WebFreigabe  # noqa: E402
 from modules.webseite import SEITE_HTML  # noqa: E402
+from modules.lernpfad import SEITE_PFAD, lernpfad_stand  # noqa: E402
 from modules.werkstatt import Werkstatt, name_saeubern  # noqa: E402
 from modules.voice import weckwort_pruefen  # noqa: E402
 
@@ -1072,6 +1073,42 @@ def pruefung_ansichten(agent):
                     "Ordner, Auftrag, Start")
 
 
+def pruefung_lernpfad(agent):
+    abschnitt("Lernpfad")
+    echt = (config.ANTHROPIC_API_KEY, config.GEMINI_API_KEY, config.EINRICHTUNG_FERTIG,
+            config.NUTZER_NAME)
+    try:
+        config.ANTHROPIC_API_KEY = config.GEMINI_API_KEY = ""
+        config.EINRICHTUNG_FERTIG = False
+        config.NUTZER_NAME = "Chef"
+        leer = lernpfad_stand(agent.tools)
+        pruefen("Sieben Welten, jede mit Leveln",
+                len(leer["welten"]) == 7 and all(w["level"] for w in leer["welten"]),
+                "%d Haken insgesamt" % leer["gesamt"])
+        pruefen("Ohne Einrichtung ist nur Welt 1 offen, der Rest gesperrt",
+                not leer["welten"][0]["gesperrt"]
+                and all(w["gesperrt"] for w in leer["welten"][1:]), "")
+        claude_haken = [l for l in leer["welten"][1]["level"] if l["kennung"] == "claude"][0]
+        pruefen("Kein Schlüssel, kein Haken", claude_haken["erledigt"] is False, "")
+
+        config.ANTHROPIC_API_KEY, config.GEMINI_API_KEY = "x", "y"
+        config.EINRICHTUNG_FERTIG, config.NUTZER_NAME = True, "Test"
+        voll = lernpfad_stand(agent.tools)
+        pruefen("Mit Schlüsseln und Name öffnet sich Welt 2 und der Haken sitzt",
+                voll["welten"][0]["abgeschlossen"] and not voll["welten"][1]["gesperrt"]
+                and [l for l in voll["welten"][1]["level"]
+                     if l["kennung"] == "gemini"][0]["erledigt"], "")
+        pruefen("Eine offene Pflicht in Welt 2 hält Welt 3 zu",
+                voll["welten"][1]["abgeschlossen"] or voll["welten"][2]["gesperrt"], "")
+    finally:
+        (config.ANTHROPIC_API_KEY, config.GEMINI_API_KEY, config.EINRICHTUNG_FERTIG,
+         config.NUTZER_NAME) = echt
+    pruefen("Die Seite lädt nichts aus dem Netz nach",
+            "https://" not in SEITE_PFAD and "http://" not in SEITE_PFAD, "alles in der Seite")
+    pruefen("Der Pfad ist vom Kopf der Web-App aus erreichbar",
+            'href="/pfad"' in SEITE_HTML, "")
+
+
 def pruefung_webapp(agent):
     """Die Web-App - Zugang, Antworten und die Freigabe über den Browser."""
     abschnitt("Web-App")
@@ -1380,6 +1417,7 @@ def main() -> int:
     pruefung_werkzeugvertrag(agent)
     pruefung_telefon(agent)
     pruefung_browser(agent)
+    pruefung_lernpfad(agent)
     pruefung_webapp(agent)
     pruefung_routinen(agent)
     pruefung_zeitplan()

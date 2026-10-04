@@ -32,6 +32,7 @@ from urllib.parse import parse_qs, urlparse
 
 import config
 from modules.memory import zeitstempel
+from modules.lernpfad import SEITE_PFAD, lernpfad_stand
 from modules.webseite import SEITE_HTML
 
 STANDARD_PORT = 8765
@@ -258,6 +259,11 @@ class JarvisWeb:
         if pfad == "/":
             return self._html(behandler, SEITE_HTML.replace(
                 "{{SCHLUESSEL}}", self.token))
+        if pfad == "/pfad":
+            return self._html(behandler, SEITE_PFAD.replace(
+                "{{SCHLUESSEL}}", self.token))
+        if pfad == "/api/pfad":
+            return self._antworten(behandler, 200, lernpfad_stand(werkzeuge))
         if pfad == "/api/lage":
             return self._antworten(behandler, 200,
                                    werkzeuge.team.lagebericht(werkzeuge))
