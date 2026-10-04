@@ -1437,6 +1437,18 @@ def pruefung_einzeldatei():
                "Dashboard", "Verkaufsansicht", "Scheduler", "Einrichtung",
                "Werkzeuge", "JarvisAgent", "Akquise", "Team", "Werkstatt", "Privat", "JarvisWeb",
                "WebFreigabe"]
+    # Ist jarvis.py frisch gebaut? Jede Klasse und Funktion aus src/ muss darin stehen.
+    import ast
+    veraltet = []
+    for datei_pfad in sorted(pathlib.Path(WURZEL, "src").rglob("*.py")):
+        baum = ast.parse(datei_pfad.read_text(encoding="utf-8"))
+        for knoten in baum.body:
+            if isinstance(knoten, (ast.FunctionDef, ast.ClassDef)):
+                if knoten.name not in inhalt:
+                    veraltet.append("%s.%s" % (datei_pfad.stem, knoten.name))
+    pruefen("jarvis.py ist aktuell (alles aus src/ ist darin)", not veraltet,
+            "veraltet - neu bauen: %s" % ", ".join(veraltet[:3]) if veraltet
+            else "gebaut aus dem jetzigen src/")
     fehlend = [k for k in klassen if inhalt.count("\nclass %s" % k) != 1]
     pruefen("Einzeldatei enthält alle Klassen genau einmal", not fehlend,
             ", ".join(fehlend) or "%d Klassen" % len(klassen))

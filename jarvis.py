@@ -33,6 +33,7 @@ import csv
 import email
 import email.header
 import email.utils
+import getpass
 import html
 import imaplib
 import importlib.util
@@ -241,6 +242,10 @@ MONATSLIMIT_EURO = _zahl("MONATSLIMIT_EURO", 15.0)
 
 # Nutzer
 NUTZER_NAME = _text("NUTZER_NAME", "Chef")
+# Persönliches: was Jarvis über dich wissen soll und wie er klingen soll.
+# Beides landet in jedem Gespräch im Systemprompt - bei Claude und bei Gemini.
+JARVIS_PROFIL = _text("JARVIS_PROFIL")
+JARVIS_STIL = _text("JARVIS_STIL")
 FIRMA = _text("FIRMA", "Gebäudereinigung")
 
 # Sprachausgabe
@@ -7046,6 +7051,7 @@ body[data-zustand="wach"] .zustandstext{color:var(--akzent)}
   <span id="lage">Stand wird geholt …</span>
   <span class="rechts">
     <button class="mini" id="tippenAn" title="Notweg, falls das Mikrofon streikt">Tippen</button>
+    <a href="/pfad" id="pfadLink">Pfad</a>
     <a href="/dashboard" target="_blank" rel="noopener">Cockpit</a>
     <a href="/sales" target="_blank" rel="noopener">Sales</a>
   </span>
@@ -7126,6 +7132,9 @@ body[data-zustand="wach"] .zustandstext{color:var(--akzent)}
     return p + (SCHLUESSEL ? (p.indexOf("?") < 0 ? "?" : "&") +
       "schluessel=" + encodeURIComponent(SCHLUESSEL) : "");
   }
+  // Die Verknüpfungen im Kopf brauchen im Handy-Modus den Schlüssel.
+  Array.prototype.forEach.call(document.querySelectorAll(".ticker a[href^='/']"),
+    function (a) { a.href = url(a.getAttribute("href")); });
   function holen(p, k) {
     var o = { headers: { "Content-Type": "application/json" } };
     if (k !== undefined) { o.method = "POST"; o.body = JSON.stringify(k); }
@@ -8946,6 +8955,278 @@ class Scheduler:
 
 
 # =========================================================================
+# lernpfad  -  Der Lernpfad - sieben Welten, in denen Jarvis Stück für Stück wächst.
+# 
+# Jeder Haken hier wird **aus dem echten Stand** gerechnet: Schlüssel in der
+# Konfiguration, Einträge im Gedächtnis, Zeilen im Gedankenlog. Niemand hakt
+# von Hand etwas ab, das nicht stimmt - steht ein Haken da, ist es wahr.
+# 
+# Eine Welt öffnet sich, sobald in der davor alle **Pflicht-Level** erledigt
+# sind. Freiwillige Level (Telegram, Kalender, Kamera ...) zählen mit, sperren
+# aber nichts: wer sie nicht braucht, soll nicht daran hängen bleiben.
+# =========================================================================
+
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+
+
+
+def _modul_da(name: str) -> bool:
+    try:
+        return importlib.util.find_spec(name) is not None
+    except (ImportError, ValueError):
+        return False
+
+
+# Jedes Level: (kennung, Titel, Beschreibung, Pflicht?, Wie es sich erledigt)
+WELTEN = [
+    {"nummer": 1, "name": "Das Fundament",
+     "text": "Jarvis läuft auf deinem Rechner und kennt dich.",
+     "level": [
+         ("einrichtung", "Die Einrichtung", "Einmal durchlaufen, damit alles angelegt ist.", True,
+          "Hier steht dein Anthropic-Schlüssel und die Einrichtung ist durch."),
+         ("name", "Dein Name", "Damit er dich ansprechen kann.", True,
+          "Dein Name steht in der Konfiguration."),
+     ]},
+    {"nummer": 2, "name": "Der Verstand",
+     "text": "Seine Zugänge: gründliches Denken, schnelles Denken, Stimme, Ohren. "
+             "Alles sind deine eigenen Konten.",
+     "level": [
+         ("claude", "Sein Gehirn", "Claude für die gründliche Arbeit.", True,
+          "Ein Anthropic-Schlüssel ist hinterlegt."),
+         ("gemini", "Sein schnelles Denken", "Gemini für Gespräch und einfache Fragen.", True,
+          "Ein Gemini-Schlüssel ist hinterlegt."),
+         ("stimme", "Seine Stimme", "ElevenLabs, oder unter macOS die eingebaute.", False,
+          "ElevenLabs ist eingerichtet oder du bist auf einem Mac."),
+         ("ohren", "Seine Ohren", "Spracherkennung, lokal oder über OpenAI.", False,
+          "Whisper ist installiert oder ein OpenAI-Schlüssel steht da."),
+     ]},
+    {"nummer": 3, "name": "Das Zuhause",
+     "text": "Wo du ihn siehst und von unterwegs erreichst.",
+     "level": [
+         ("webapp", "Die Web-App", "Du schaust gerade hinein.", True,
+          "Die Seite wird ausgeliefert - also läuft sie."),
+         ("dashboard", "Das Cockpit", "Kennzahlen auf einen Blick.", True,
+          "Das Command Center wurde schon einmal gebaut."),
+         ("telegram", "Telegram", "Jarvis in der Hosentasche.", False,
+          "Bot-Token und deine Chat-Nummer sind eingetragen."),
+     ]},
+    {"nummer": 4, "name": "Das Gedächtnis",
+     "text": "Ohne Gedächtnis ist er ein gewöhnlicher Chatbot.",
+     "level": [
+         ("notiz", "Die erste Notiz", "Sag ihm, er soll sich etwas merken.", True,
+          "Mindestens eine Notiz liegt im Gedächtnis."),
+         ("kontakt", "Der erste Kontakt", "Ein Kunde, den er kennt.", True,
+          "Mindestens ein Kontakt ist angelegt."),
+         ("gespraech", "Zehn Sätze", "Er soll dich im Gespräch kennenlernen.", True,
+          "Zehn Gesprächszeilen sind gespeichert."),
+     ]},
+    {"nummer": 5, "name": "Die Sinne",
+     "text": "Was er von der Welt mitbekommt.",
+     "level": [
+         ("kalender", "Der Kalender", "Termine kennen und anlegen.", False,
+          "Ein Kalender ist verbunden."),
+         ("mail", "Das Postfach", "Mails lesen und Entwürfe schreiben.", False,
+          "Postfach-Zugang ist eingetragen."),
+         ("kamera", "Die Augen", "Sehen, was vor der Kamera liegt.", False,
+          "Eine Kamera ist ansprechbar."),
+     ]},
+    {"nummer": 6, "name": "Der Zuruf",
+     "text": "Du sprichst, er antwortet - ohne Knopf.",
+     "level": [
+         ("erstes_wort", "Das erste Wort", "Du sagst etwas, er antwortet.", True,
+          "Es gibt mindestens eine Antwort von ihm."),
+         ("freigabe", "Die erste Freigabe", "Er tut etwas - und hat vorher gefragt.", True,
+          "Mindestens eine Aktion steht im Protokoll."),
+     ]},
+    {"nummer": 7, "name": "Master",
+     "text": "Er wählt selbst das richtige Gehirn und achtet auf dein Geld.",
+     "level": [
+         ("router", "Beide Gehirne im Einsatz", "Eine Frage ging an Gemini, eine an Claude.", True,
+          "Im Gedankenlog stehen Einträge von beiden."),
+         ("limit", "Das Monatslimit", "Eine Grenze, damit nichts ausufert.", True,
+          "Ein Limit über null ist gesetzt."),
+         ("monitor", "Der Kostenblick", "Du siehst im Cockpit, was das Denken kostet.", False,
+          "Es gibt Einträge im Gedankenlog."),
+     ]},
+]
+
+
+def _erledigt(kennung: str, werkzeuge, dashboard_gebaut: bool, statistik: dict,
+              logzeilen: list) -> bool:
+    if kennung == "einrichtung":
+        return bool(ANTHROPIC_API_KEY and EINRICHTUNG_FERTIG)
+    if kennung == "name":
+        return bool(NUTZER_NAME and NUTZER_NAME != "Chef")
+    if kennung == "claude":
+        return bool(ANTHROPIC_API_KEY)
+    if kennung == "gemini":
+        return bool(GEMINI_API_KEY)
+    if kennung == "stimme":
+        return bool(ELEVENLABS_API_KEY) or sys.platform == "darwin"
+    if kennung == "ohren":
+        return (bool(OPENAI_API_KEY) or _modul_da("faster_whisper")
+                or _modul_da("whisper"))
+    if kennung == "webapp":
+        return True
+    if kennung == "dashboard":
+        return dashboard_gebaut
+    if kennung == "telegram":
+        return bool(TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID)
+    if kennung == "notiz":
+        return statistik.get("notizen", 0) >= 1
+    if kennung == "kontakt":
+        return statistik.get("kontakte", 0) >= 1
+    if kennung == "gespraech":
+        return statistik.get("verlauf", 0) >= 10
+    if kennung == "kalender":
+        return bool(CALDAV_URL and CALDAV_USER)
+    if kennung == "mail":
+        return bool(IMAP_HOST and IMAP_USER)
+    if kennung == "kamera":
+        try:
+            return bool(werkzeuge.kamera.verfuegbar())
+        except Exception:
+            return False
+    if kennung == "erstes_wort":
+        return statistik.get("verlauf", 0) >= 2
+    if kennung == "freigabe":
+        return statistik.get("aktionen", 0) >= 1
+    if kennung == "router":
+        gehirne = {z.get("gehirn") for z in logzeilen}
+        return {"gemini", "claude"} <= gehirne
+    if kennung == "limit":
+        return MONATSLIMIT_EURO > 0
+    if kennung == "monitor":
+        return bool(logzeilen)
+    return False
+
+
+def lernpfad_stand(werkzeuge) -> dict:
+    """Rechnet den Lernpfad aus dem echten Stand von Jarvis."""
+    try:
+        statistik = werkzeuge.memory.statistik()
+    except Exception:
+        statistik = {}
+    try:
+        logzeilen = Gedankenlog().zeilen()
+    except Exception:
+        logzeilen = []
+    dashboard_gebaut = (DASHBOARD_VERZEICHNIS / "dashboard.html").exists()
+
+    welten, vorige_offen = [], False
+    gesamt = erledigt_gesamt = 0
+    for vorlage in WELTEN:
+        level, pflicht_offen = [], 0
+        for nummer, (kennung, titel, text, pflicht, haken) in enumerate(
+                vorlage["level"], start=1):
+            fertig = _erledigt(kennung, werkzeuge, dashboard_gebaut, statistik, logzeilen)
+            level.append({"nummer": nummer, "kennung": kennung, "titel": titel,
+                          "text": text, "pflicht": pflicht, "haken": haken,
+                          "erledigt": fertig})
+            gesamt += 1
+            erledigt_gesamt += 1 if fertig else 0
+            if pflicht and not fertig:
+                pflicht_offen += 1
+        erledigt = sum(1 for l in level if l["erledigt"])
+        welten.append({"nummer": vorlage["nummer"], "name": vorlage["name"],
+                       "text": vorlage["text"], "level": level,
+                       "gesperrt": vorige_offen, "erledigt": erledigt,
+                       "gesamt": len(level),
+                       "abgeschlossen": pflicht_offen == 0 and erledigt > 0
+                                        and not vorige_offen})
+        vorige_offen = vorige_offen or pflicht_offen > 0
+    return {"ok": True, "welten": welten, "erledigt": erledigt_gesamt, "gesamt": gesamt}
+
+
+SEITE_PFAD = r"""<!DOCTYPE html>
+<html lang="de"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<link rel="icon" href="/symbol.svg" type="image/svg+xml">
+<title>Jarvis – Der Pfad</title>
+<style>
+:root{--grund:#F4F1F6;--karte:#fff;--text:#1B1B1F;--leise:#8A8790;--kupfer:#B8694B;
+ --kupfer-hell:#F0DDD3;--gruen:#4E8A3E;--gruen-hell:#E4F2DE;--rand:#ECE8EE;
+ --sans:-apple-system,BlinkMacSystemFont,"Helvetica Neue",Arial,sans-serif}
+@media (prefers-color-scheme:dark){:root{--grund:#14121A;--karte:#1E1B25;--text:#F2EFEA;
+ --leise:#9B97A3;--kupfer:#E19272;--kupfer-hell:#3A2A24;--gruen:#7CC36B;
+ --gruen-hell:#223220;--rand:#2B2733}}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--grund);color:var(--text);font-family:var(--sans);
+ -webkit-font-smoothing:antialiased;padding:0 16px 40px;max-width:560px;margin:0 auto}
+a{color:var(--kupfer);text-decoration:none;font-weight:600}
+.kopf{padding:22px 0 8px}.kopf h1{font-size:26px;margin-top:10px}
+.kopf p{color:var(--leise);margin-top:6px;font-size:15px;line-height:1.5}
+.balken{height:8px;border-radius:8px;background:var(--rand);margin:16px 0 4px;overflow:hidden}
+.balken i{display:block;height:100%;background:var(--kupfer);border-radius:8px}
+.stand{color:var(--leise);font-size:13px}
+.welt{display:flex;flex-direction:column;align-items:center;margin:34px 0 0}
+.planet{width:112px;height:112px;border-radius:50%;position:relative;
+ background:radial-gradient(circle at 34% 30%,#fff 0,#D9D4D2 38%,#A8A29F 100%);
+ box-shadow:0 0 0 12px rgba(184,105,75,.10),0 12px 26px rgba(0,0,0,.14)}
+.planet.offen{background:radial-gradient(circle at 34% 30%,#FFE9DC 0,#DCA487 45%,#B8694B 100%)}
+.planet.fertig{background:radial-gradient(circle at 34% 30%,#fff 0,#B7DDA8 45%,#4E8A3E 100%)}
+.planet.zu{filter:grayscale(.6);opacity:.75}
+.planet b{position:absolute;right:-4px;bottom:18px;width:34px;height:34px;border-radius:50%;
+ background:#6B6A72;color:#fff;display:grid;place-items:center;font-size:15px;
+ border:3px solid var(--grund)}
+.planet.fertig b{background:var(--gruen)}
+.schild{background:var(--karte);border-radius:20px;padding:14px 22px;margin-top:-14px;
+ text-align:center;box-shadow:0 6px 20px rgba(0,0,0,.07);min-width:220px;position:relative}
+.schild small{letter-spacing:.16em;font-size:11px;color:var(--leise);font-weight:700}
+.schild h2{font-size:19px;margin:3px 0}
+.schild span{font-size:13px;color:var(--leise)}
+.schild.zu h2{color:var(--leise)}
+.level{background:var(--karte);border-radius:18px;padding:14px 16px;margin-top:10px;
+ width:100%;display:flex;gap:12px;align-items:flex-start;border:1px solid var(--rand)}
+.level .zahl{flex:none;width:30px;height:30px;border-radius:50%;background:var(--kupfer-hell);
+ color:var(--kupfer);font-weight:700;display:grid;place-items:center}
+.level.fertig .zahl{background:var(--gruen-hell);color:var(--gruen)}
+.level>div:nth-child(2){min-width:0;flex:1}.level h3{font-size:16px}.level p{font-size:13px;color:var(--leise);margin-top:3px;line-height:1.45}
+.level em{font-style:normal;font-size:11px;color:var(--leise);border:1px solid var(--rand);
+ border-radius:9px;padding:1px 7px;margin-left:6px;vertical-align:middle}
+.level .mark{margin-left:auto;white-space:nowrap;flex:none;font-size:13px;font-weight:700;color:var(--leise)}
+.level.fertig .mark{color:var(--gruen)}
+.liste{width:100%;margin-top:6px}
+.fuss{margin-top:44px;color:var(--leise);font-size:12px;text-align:center;line-height:1.6}
+</style></head><body>
+<div class="kopf"><a href="/" id="zurueck">‹ Zurück zu Jarvis</a>
+<h1>Der Pfad</h1>
+<p>Sieben Welten, in denen dein Jarvis wächst. Jeder Haken ist echt: er steht
+nur da, wenn es wirklich eingerichtet ist.</p>
+<div class="balken"><i id="gesamt" style="width:0"></i></div>
+<div class="stand" id="stand">Stand wird geholt …</div></div>
+<div id="welten"></div>
+<div class="fuss">Alles läuft lokal auf diesem Rechner.<br>
+Schlüssel trägst du nur im Terminal ein (<b>jarvis.py zugang</b>), nie in einem Chat.</div>
+<script>
+const SCHLUESSEL="{{SCHLUESSEL}}";
+function esc(t){return String(t).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
+const ANHANG=SCHLUESSEL?"?schluessel="+encodeURIComponent(SCHLUESSEL):"";
+document.getElementById("zurueck").href="/"+ANHANG;
+fetch("/api/pfad"+ANHANG)
+ .then(r=>r.json()).then(d=>{
+  document.getElementById("gesamt").style.width=(100*d.erledigt/Math.max(d.gesamt,1))+"%";
+  document.getElementById("stand").textContent=d.erledigt+" von "+d.gesamt+" Haken";
+  document.getElementById("welten").innerHTML=d.welten.map(w=>{
+   const klasse=w.gesperrt?"zu":(w.abgeschlossen?"fertig":"offen");
+   const zeichen=w.gesperrt?"🔒":(w.abgeschlossen?"✓":w.erledigt+"/"+w.gesamt);
+   const status=w.gesperrt?"Gesperrt":(w.abgeschlossen?"Abgeschlossen":w.erledigt+" von "+w.gesamt+" Haken");
+   const level=w.gesperrt?"":'<div class="liste">'+w.level.map(l=>
+    '<div class="level '+(l.erledigt?"fertig":"")+'"><div class="zahl">'+l.nummer+'</div><div>'+
+    '<h3>'+esc(l.titel)+(l.pflicht?"":"<em>freiwillig</em>")+'</h3><p>'+esc(l.erledigt?l.haken:l.text)+
+    '</p></div><div class="mark">'+(l.erledigt?"✓ Erledigt":"Offen")+'</div></div>').join("")+"</div>";
+   return '<div class="welt"><div class="planet '+klasse+'"><b>'+zeichen+'</b></div>'+
+    '<div class="schild '+(w.gesperrt?"zu":"")+'"><small>WELT '+w.nummer+'</small><h2>'+esc(w.name)+
+    '</h2><span>'+(w.gesperrt?"🔒 ":"")+status+'</span></div>'+
+    (w.gesperrt?"":'<p class="stand" style="margin-top:10px;text-align:center">'+esc(w.text)+'</p>')+level+'</div>'}).join("");
+ }).catch(()=>{document.getElementById("stand").textContent="Der Stand ist nicht erreichbar."});
+</script></body></html>
+"""
+
+
+# =========================================================================
 # webapp  -  Web-App - Jarvis im Browser statt im Terminal.
 # 
 # Ein kleiner Server aus der Python-Standardbibliothek, kein Fremdpaket. Er
@@ -9194,6 +9475,11 @@ class JarvisWeb:
         if pfad == "/":
             return self._html(behandler, SEITE_HTML.replace(
                 "{{SCHLUESSEL}}", self.token))
+        if pfad == "/pfad":
+            return self._html(behandler, SEITE_PFAD.replace(
+                "{{SCHLUESSEL}}", self.token))
+        if pfad == "/api/pfad":
+            return self._antworten(behandler, 200, lernpfad_stand(werkzeuge))
         if pfad == "/api/lage":
             return self._antworten(behandler, 200,
                                    werkzeuge.team.lagebericht(werkzeuge))
@@ -9445,6 +9731,20 @@ class Einrichtung:
             return ""
 
     @staticmethod
+    def fragen_geheim(frage: str) -> str:
+        """Liest einen Schlüssel - unsichtbar, wenn ein echtes Terminal da ist.
+
+        Was man nicht sieht, kann man nicht versehentlich fotografieren oder
+        in einen Chat kopieren. Eingefügt wird trotzdem ganz normal.
+        """
+        try:
+            if sys.stdin.isatty():
+                return getpass.getpass("%s (die Eingabe bleibt unsichtbar) " % frage).strip()
+            return input("%s " % frage).strip()
+        except (EOFError, KeyboardInterrupt):
+            return ""
+
+    @staticmethod
     def oeffnen(ziel: str) -> bool:
         """Öffnet eine Seite oder eine Systemeinstellung."""
         if not shutil.which("open"):
@@ -9556,7 +9856,7 @@ class Einrichtung:
         self.oeffnen(ANTHROPIC_SEITE)
 
         for versuch in range(1, 5):
-            schluessel = self.fragen("Schlüssel hier einfügen und Enter drücken:")
+            schluessel = self.fragen_geheim("Schlüssel hier einfügen und Enter drücken:")
             if not schluessel:
                 self.sagen("Ich habe nichts bekommen. Versuch %d von 4." % versuch)
                 continue
@@ -9743,7 +10043,102 @@ class Einrichtung:
                 env_setzen("STANDARD_MWST", float(mwst.replace(",", ".")))
             except ValueError:
                 print("Das war keine Zahl - ich bleibe bei %g." % STANDARD_MWST)
+        profil = self.fragen("Was soll Jarvis über dich und deinen Alltag wissen? "
+                             "Ein, zwei Sätze (Enter zum Überspringen):")
+        if profil:
+            env_setzen("JARVIS_PROFIL", " ".join(profil.split()))
+        stil = self.fragen("Wie soll er mit dir reden? Zum Beispiel: knapp und direkt, "
+                           "mit etwas Humor (Enter für den Standard):")
+        if stil:
+            env_setzen("JARVIS_STIL", " ".join(stil.split()))
         self.ergebnisse["person"] = NUTZER_NAME
+
+    # -- Gemini (freiwillig) -------------------------------------------------
+
+    def schritt_gemini(self) -> bool:
+        """Gemini ist das schnelle, gratis Gehirn. Ohne bleibt Claude allein."""
+        if GEMINI_API_KEY:
+            probe = gemini_testen(GEMINI_API_KEY)
+            if probe.get("ok"):
+                self.ergebnisse["gemini"] = "vorhanden und geprüft"
+                return True
+            self.sagen(probe["text"])
+        antwort = self.fragen("Möchtest du Gemini dazunehmen? Das ist das schnelle, "
+                              "kostenlose Gehirn für einfache Fragen. (j/N)").lower()
+        if antwort not in ("j", "ja", "y", "yes"):
+            self.ergebnisse["gemini"] = "übersprungen"
+            return False
+        self.sagen("Ich öffne Google AI Studio. Melde dich an, wähle Create API Key, "
+                   "kopiere den Schlüssel und füge ihn hier ein.")
+        self.oeffnen("https://aistudio.google.com/apikey")
+        for versuch in range(1, 4):
+            schluessel = self.fragen_geheim("Gemini-Schlüssel einfügen und Enter drücken:")
+            if not schluessel:
+                self.sagen("Ich habe nichts bekommen. Versuch %d von 3." % versuch)
+                continue
+            probe = gemini_testen(schluessel)
+            self.sagen(probe["text"])
+            if probe.get("ok") or probe.get("limit"):
+                env_setzen("GEMINI_API_KEY", schluessel)
+                self.ergebnisse["gemini"] = "geprüft" if probe.get("ok") else "gespeichert"
+                return True
+        self.ergebnisse["gemini"] = "fehlgeschlagen"
+        self.sagen("Gemini lasse ich weg. Später: python3 jarvis.py zugang")
+        return False
+
+    # -- Einzelner Zugang nachtragen ---------------------------------------
+
+    ZUGAENGE = (
+        ("claude", "Claude (Anthropic)", "ANTHROPIC_API_KEY", "https://console.anthropic.com/settings/keys"),
+        ("gemini", "Gemini (Google)", "GEMINI_API_KEY", "https://aistudio.google.com/apikey"),
+        ("stimme", "ElevenLabs (Stimme)", "ELEVENLABS_API_KEY", "https://elevenlabs.io/app/settings/api-keys"),
+        ("ohren", "OpenAI (Spracherkennung)", "OPENAI_API_KEY", "https://platform.openai.com/api-keys"),
+    )
+
+    def zugang_nachtragen(self, welcher: str = "") -> bool:
+        """Trägt genau einen Zugang ein oder ersetzt ihn - ohne die ganze Einrichtung."""
+        welcher = (welcher or "").strip().lower()
+        wahl = [z for z in self.ZUGAENGE if welcher in (z[0], z[2].lower())]
+        if not wahl:
+            print("Welchen Zugang möchtest du eintragen?")
+            vorhanden = {"ANTHROPIC_API_KEY": ANTHROPIC_API_KEY,
+                         "GEMINI_API_KEY": GEMINI_API_KEY,
+                         "ELEVENLABS_API_KEY": ELEVENLABS_API_KEY,
+                         "OPENAI_API_KEY": OPENAI_API_KEY}
+            for nummer, z in enumerate(self.ZUGAENGE, start=1):
+                print("  %d  %s%s" % (nummer, z[1],
+                                       "   (schon eingetragen)" if vorhanden.get(z[2]) else ""))
+            eingabe = self.fragen("Nummer:")
+            if not eingabe.isdigit() or not 1 <= int(eingabe) <= len(self.ZUGAENGE):
+                print("Das war keine gültige Nummer.")
+                return False
+            wahl = [self.ZUGAENGE[int(eingabe) - 1]]
+        kennung, titel, variable, seite = wahl[0]
+        print("Ich öffne die Seite für %s. Dort erzeugst du den Schlüssel." % titel)
+        self.oeffnen(seite)
+        schluessel = self.fragen_geheim("Schlüssel für %s einfügen und Enter drücken:" % titel)
+        if not schluessel:
+            print("Ich habe nichts bekommen. Es wurde nichts geändert.")
+            return False
+        if kennung == "claude":
+            if not schluessel.startswith("sk-"):
+                print("Das sieht nicht nach einem Anthropic-Schlüssel aus (sie beginnen "
+                      "mit sk-). Es wurde nichts geändert.")
+                return False
+            probe = self.schluessel_testen(schluessel)
+            if not probe.get("ok") and probe.get("grund") != "guthaben":
+                print(probe["text"] + " Es wurde nichts geändert.")
+                return False
+            print(probe["text"] if not probe.get("ok") else "Der Schlüssel funktioniert.")
+        elif kennung == "gemini":
+            probe = gemini_testen(schluessel)
+            print(probe["text"])
+            if not probe.get("ok") and not probe.get("limit"):
+                print("Es wurde nichts geändert.")
+                return False
+        env_setzen(variable, schluessel)
+        print("%s ist eingetragen. Starte Jarvis neu, damit er ihn nutzt." % titel)
+        return True
 
     # -- Schritt 5: Telegram ------------------------------------------------
 
@@ -10001,6 +10396,7 @@ class Einrichtung:
         self.schritt_stimme()
         self.schritt_person()
         self.schritt_schluessel()
+        self.schritt_gemini()
         self.schritt_rechte()
         self.schritt_telegram()
         self.schritt_telefon()
@@ -10022,6 +10418,11 @@ class Einrichtung:
                    "erteilten Rechte nicht. Danach startest du mich einfach wieder über "
                    "JARVIS Punkt command. Dann sag: Hey Jarvis, wie sieht mein Tag aus.")
         return self.ergebnisse
+
+
+def zugang_eintragen(welcher: str = "") -> bool:
+    """Trägt einen einzelnen Zugang ein: ``python3 jarvis.py zugang gemini``."""
+    return Einrichtung().zugang_nachtragen(welcher)
 
 
 def einrichtung_starten(stimme=None) -> dict:
@@ -10952,6 +11353,29 @@ def gemini_fragen(frage: str, systemtext: str, verlauf: list = None,
             "tokens_aus": int(nutzung.get("candidatesTokenCount", 0))}
 
 
+def gemini_testen(schluessel: str) -> dict:
+    """Prüft einen Gemini-Schlüssel mit einem echten Mini-Aufruf."""
+    alt = GEMINI_API_KEY
+    GEMINI_API_KEY = schluessel
+    try:
+        antwort = gemini_fragen("Sag nur: ok", "Antworte mit einem Wort.", timeout=30)
+    finally:
+        GEMINI_API_KEY = alt
+    if antwort.get("ok"):
+        return {"ok": True, "text": "Der Gemini-Schlüssel funktioniert."}
+    fehler = antwort.get("fehler", "")
+    if "400" in fehler or "403" in fehler:
+        text = "Der Schlüssel wird abgelehnt. Bitte noch einmal vollständig kopieren."
+    elif "404" in fehler:
+        text = ("Das Modell %s kennt Google nicht (mehr). Trag in der Konfiguration "
+                "ein anderes ein: GEMINI_MODELL." % GEMINI_MODELL)
+    elif antwort.get("limit"):
+        text = "Der Schlüssel stimmt, Google meldet aber gerade das Limit."
+    else:
+        text = fehler or "Die Prüfung ist fehlgeschlagen."
+    return {"ok": False, "limit": bool(antwort.get("limit")), "text": text}
+
+
 # -- Gedankenlog ------------------------------------------------------------
 
 def claude_kosten(tokens_ein: int, tokens_aus: int) -> float:
@@ -11150,8 +11574,16 @@ class JarvisAgent:
         except Exception as fehler:
             gedaechtnis = ""
             print("[agent] Gedächtnis nicht lesbar: %s" % fehler)
-        return SYSTEMPROMPT.format(name=NUTZER_NAME, wochentag=wochentag,
-                                   datum=datum, gedaechtnis=gedaechtnis)
+        persoenlich = ""
+        if JARVIS_PROFIL:
+            persoenlich += "Das solltest du über %s wissen: %s\n" % (
+                NUTZER_NAME, JARVIS_PROFIL)
+        if JARVIS_STIL:
+            persoenlich += "So möchte %s, dass du klingst: %s\n" % (
+                NUTZER_NAME, JARVIS_STIL)
+        return SYSTEMPROMPT.format(
+            name=NUTZER_NAME, wochentag=wochentag, datum=datum,
+            gedaechtnis=(persoenlich + "\n" if persoenlich else "") + gedaechtnis)
 
     # -- Schnittstelle ------------------------------------------------------
 
@@ -11551,6 +11983,7 @@ class JarvisAgent:
 #     python3 jarvis.py stimmen     ElevenLabs-Stimme aussuchen
 #     python3 jarvis.py test        Selbsttest
 #     python3 jarvis.py einrichten  geführte Ersteinrichtung
+#     python3 jarvis.py zugang      einen Schlüssel eintragen oder ersetzen
 # =========================================================================
 
 #!/usr/bin/env python3
@@ -12212,6 +12645,8 @@ def hauptprogramm(argumente=None) -> int:
         return selbsttest()
     elif modus in ("einrichten", "setup"):
         einrichtung_starten()
+    elif modus in ("zugang", "schluessel", "schlüssel"):
+        return 0 if zugang_eintragen(argumente[1] if len(argumente) > 1 else "") else 1
     elif modus in ("hilfe", "--help", "-h", "help"):
         print(__doc__)
     else:

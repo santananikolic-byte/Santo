@@ -245,7 +245,7 @@ nur da, wenn es wirklich eingerichtet ist.</p>
 <div class="stand" id="stand">Stand wird geholt …</div></div>
 <div id="welten"></div>
 <div class="fuss">Alles läuft lokal auf diesem Rechner.<br>
-Schlüssel trägst du nur in <b>config/.env</b> ein, nie in einem Chat.</div>
+Schlüssel trägst du nur im Terminal ein (<b>jarvis.py zugang</b>), nie in einem Chat.</div>
 <script>
 const SCHLUESSEL="{{SCHLUESSEL}}";
 function esc(t){return String(t).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}

@@ -488,9 +488,13 @@ class Einrichtung:
         wahl = [z for z in self.ZUGAENGE if welcher in (z[0], z[2].lower())]
         if not wahl:
             print("Welchen Zugang möchtest du eintragen?")
+            vorhanden = {"ANTHROPIC_API_KEY": config.ANTHROPIC_API_KEY,
+                         "GEMINI_API_KEY": config.GEMINI_API_KEY,
+                         "ELEVENLABS_API_KEY": config.ELEVENLABS_API_KEY,
+                         "OPENAI_API_KEY": config.OPENAI_API_KEY}
             for nummer, z in enumerate(self.ZUGAENGE, start=1):
                 print("  %d  %s%s" % (nummer, z[1],
-                                       "   (schon eingetragen)" if getattr(config, z[2]) else ""))
+                                       "   (schon eingetragen)" if vorhanden.get(z[2]) else ""))
             eingabe = self.fragen("Nummer:")
             if not eingabe.isdigit() or not 1 <= int(eingabe) <= len(self.ZUGAENGE):
                 print("Das war keine gültige Nummer.")
