@@ -20,6 +20,7 @@ Terminal spricht, nimmt ``hoeren``.
     python3 jarvis.py stimmen     ElevenLabs-Stimme aussuchen
     python3 jarvis.py test        Selbsttest
     python3 jarvis.py einrichten  geführte Ersteinrichtung
+    python3 jarvis.py zugang      einen Schlüssel eintragen oder ersetzen
 """
 
 import json
@@ -35,7 +36,7 @@ from modules.bookkeeping import mwst_aus_brutto
 from modules.memory import Memory
 from modules.mcp_client import MCPClient, MCPServer, vorlage_schreiben
 from modules.scheduler import Scheduler, ist_faellig
-from modules.setup_wizard import einrichtung_starten
+from modules.setup_wizard import einrichtung_starten, zugang_eintragen
 from modules.speaker import Sprecherprofil
 from modules.voice import Stimme, weckwort_pruefen
 from modules.webapp import JarvisWeb, STANDARD_PORT
@@ -694,6 +695,8 @@ def hauptprogramm(argumente=None) -> int:
         return selbsttest()
     elif modus in ("einrichten", "setup"):
         einrichtung_starten()
+    elif modus in ("zugang", "schluessel", "schlüssel"):
+        return 0 if zugang_eintragen(argumente[1] if len(argumente) > 1 else "") else 1
     elif modus in ("hilfe", "--help", "-h", "help"):
         print(__doc__)
     else:

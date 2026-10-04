@@ -137,8 +137,16 @@ class JarvisAgent:
         except Exception as fehler:
             gedaechtnis = ""
             print("[agent] Gedächtnis nicht lesbar: %s" % fehler)
-        return SYSTEMPROMPT.format(name=config.NUTZER_NAME, wochentag=wochentag,
-                                   datum=datum, gedaechtnis=gedaechtnis)
+        persoenlich = ""
+        if config.JARVIS_PROFIL:
+            persoenlich += "Das solltest du über %s wissen: %s\n" % (
+                config.NUTZER_NAME, config.JARVIS_PROFIL)
+        if config.JARVIS_STIL:
+            persoenlich += "So möchte %s, dass du klingst: %s\n" % (
+                config.NUTZER_NAME, config.JARVIS_STIL)
+        return SYSTEMPROMPT.format(
+            name=config.NUTZER_NAME, wochentag=wochentag, datum=datum,
+            gedaechtnis=(persoenlich + "\n" if persoenlich else "") + gedaechtnis)
 
     # -- Schnittstelle ------------------------------------------------------
 

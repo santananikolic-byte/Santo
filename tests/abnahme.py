@@ -48,6 +48,7 @@ from modules.privat import Privat, monatsanteil  # noqa: E402
 from modules.team import ROLLEN, Team  # noqa: E402
 from modules.webapp import JarvisWeb, WebFreigabe  # noqa: E402
 from modules.webseite import SEITE_HTML  # noqa: E402
+import modules.setup_wizard as wizard_modul  # noqa: E402
 from modules.lernpfad import SEITE_PFAD, lernpfad_stand  # noqa: E402
 from modules.werkstatt import Werkstatt, name_saeubern  # noqa: E402
 from modules.voice import weckwort_pruefen  # noqa: E402
@@ -1073,6 +1074,59 @@ def pruefung_ansichten(agent):
                     "Ordner, Auftrag, Start")
 
 
+def pruefung_zugang(agent):
+    abschnitt("Zugänge und Persönliches")
+    Einr = wizard_modul.Einrichtung
+    echt = (config.ENV_DATEI, dict(config._ROHWERTE), config.GEMINI_API_KEY,
+            config.ANTHROPIC_API_KEY, config.JARVIS_PROFIL, config.JARVIS_STIL,
+            Einr.fragen_geheim, Einr.oeffnen, Einr.schluessel_testen,
+            wizard_modul.gemini_testen)
+    config.ENV_DATEI = pathlib.Path(ARBEITSVERZEICHNIS) / "zugang.env"
+    config._ROHWERTE.clear()
+    config.GEMINI_API_KEY = config.ANTHROPIC_API_KEY = ""
+    eingabe = {"wert": ""}
+    Einr.fragen_geheim = staticmethod(lambda frage: eingabe["wert"])
+    Einr.oeffnen = staticmethod(lambda ziel: True)
+    try:
+        wizard_modul.gemini_testen = lambda k: {"ok": k == "gut", "limit": False,
+                                                "text": "geprüft"}
+        eingabe["wert"] = "falsch"
+        geklappt = Einr().zugang_nachtragen("gemini")
+        pruefen("Abgelehnter Gemini-Schlüssel ändert nichts",
+                geklappt is False and config.GEMINI_API_KEY == ""
+                and not config.ENV_DATEI.exists(), "")
+        eingabe["wert"] = "gut"
+        geklappt = Einr().zugang_nachtragen("gemini")
+        gespeichert = config.ENV_DATEI.read_text(encoding="utf-8") if config.ENV_DATEI.exists() else ""
+        pruefen("Geprüfter Gemini-Schlüssel wird eingetragen und sofort aktiv",
+                geklappt and config.GEMINI_API_KEY == "gut"
+                and "GEMINI_API_KEY=gut" in gespeichert, "")
+        pruefen("Die Schlüsseldatei ist nur für den Nutzer lesbar",
+                (config.ENV_DATEI.stat().st_mode & 0o077) == 0, "Rechte 600")
+
+        eingabe["wert"] = "kein-anthropic-schluessel"
+        geklappt = Einr().zugang_nachtragen("claude")
+        pruefen("Ein Schlüssel ohne sk- wird für Claude nicht angenommen",
+                geklappt is False and config.ANTHROPIC_API_KEY == "", "")
+
+        Einr.schluessel_testen = lambda self, k: {"ok": True, "text": "ok"}
+        eingabe["wert"] = "sk-test"
+        pruefen("Claude-Schlüssel nachtragen funktioniert",
+                Einr().zugang_nachtragen("claude") and config.ANTHROPIC_API_KEY == "sk-test", "")
+
+        config.env_setzen("JARVIS_PROFIL", "Ich leite eine Reinigungsfirma mit drei Leuten")
+        config.env_setzen("JARVIS_STIL", "knapp, direkt, etwas trocken")
+        prompt = agent.systemprompt("Hallo")
+        pruefen("Persönliches steht im Systemprompt (für Claude und Gemini)",
+                "drei Leuten" in prompt and "etwas trocken" in prompt, "Profil und Stil")
+    finally:
+        (config.ENV_DATEI, roh, config.GEMINI_API_KEY, config.ANTHROPIC_API_KEY,
+         config.JARVIS_PROFIL, config.JARVIS_STIL, Einr.fragen_geheim, Einr.oeffnen,
+         Einr.schluessel_testen, wizard_modul.gemini_testen) = echt
+        config._ROHWERTE.clear()
+        config._ROHWERTE.update(roh)
+
+
 def pruefung_lernpfad(agent):
     abschnitt("Lernpfad")
     echt = (config.ANTHROPIC_API_KEY, config.GEMINI_API_KEY, config.EINRICHTUNG_FERTIG,
@@ -1417,6 +1471,7 @@ def main() -> int:
     pruefung_werkzeugvertrag(agent)
     pruefung_telefon(agent)
     pruefung_browser(agent)
+    pruefung_zugang(agent)
     pruefung_lernpfad(agent)
     pruefung_webapp(agent)
     pruefung_routinen(agent)

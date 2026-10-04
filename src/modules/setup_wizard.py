@@ -12,6 +12,7 @@ Der Nutzer ist kein Entwickler. Er soll nichts nachschlagen müssen. Deshalb:
   geöffnet. Wer schon alles erlaubt hat, soll nicht drei Fenster wegklicken.
 """
 
+import getpass
 import imaplib
 import json
 import os
@@ -28,6 +29,7 @@ import config
 from modules.camera import Kamera
 from modules.mcp_client import vorlage_schreiben
 from modules.memory import Memory
+from modules.router import gemini_testen
 from modules.routines import Routines
 from modules.speaker import Sprecherprofil
 from modules.telefon import nummer_pruefen
@@ -111,6 +113,20 @@ class Einrichtung:
     def fragen(frage: str) -> str:
         """Liest eine Eingabe vom Terminal."""
         try:
+            return input("%s " % frage).strip()
+        except (EOFError, KeyboardInterrupt):
+            return ""
+
+    @staticmethod
+    def fragen_geheim(frage: str) -> str:
+        """Liest einen Schlüssel - unsichtbar, wenn ein echtes Terminal da ist.
+
+        Was man nicht sieht, kann man nicht versehentlich fotografieren oder
+        in einen Chat kopieren. Eingefügt wird trotzdem ganz normal.
+        """
+        try:
+            if sys.stdin.isatty():
+                return getpass.getpass("%s (die Eingabe bleibt unsichtbar) " % frage).strip()
             return input("%s " % frage).strip()
         except (EOFError, KeyboardInterrupt):
             return ""
@@ -227,7 +243,7 @@ class Einrichtung:
         self.oeffnen(ANTHROPIC_SEITE)
 
         for versuch in range(1, 5):
-            schluessel = self.fragen("Schlüssel hier einfügen und Enter drücken:")
+            schluessel = self.fragen_geheim("Schlüssel hier einfügen und Enter drücken:")
             if not schluessel:
                 self.sagen("Ich habe nichts bekommen. Versuch %d von 4." % versuch)
                 continue
@@ -414,7 +430,98 @@ class Einrichtung:
                 config.env_setzen("STANDARD_MWST", float(mwst.replace(",", ".")))
             except ValueError:
                 print("Das war keine Zahl - ich bleibe bei %g." % config.STANDARD_MWST)
+        profil = self.fragen("Was soll Jarvis über dich und deinen Alltag wissen? "
+                             "Ein, zwei Sätze (Enter zum Überspringen):")
+        if profil:
+            config.env_setzen("JARVIS_PROFIL", " ".join(profil.split()))
+        stil = self.fragen("Wie soll er mit dir reden? Zum Beispiel: knapp und direkt, "
+                           "mit etwas Humor (Enter für den Standard):")
+        if stil:
+            config.env_setzen("JARVIS_STIL", " ".join(stil.split()))
         self.ergebnisse["person"] = config.NUTZER_NAME
+
+    # -- Gemini (freiwillig) -------------------------------------------------
+
+    def schritt_gemini(self) -> bool:
+        """Gemini ist das schnelle, gratis Gehirn. Ohne bleibt Claude allein."""
+        if config.GEMINI_API_KEY:
+            probe = gemini_testen(config.GEMINI_API_KEY)
+            if probe.get("ok"):
+                self.ergebnisse["gemini"] = "vorhanden und geprüft"
+                return True
+            self.sagen(probe["text"])
+        antwort = self.fragen("Möchtest du Gemini dazunehmen? Das ist das schnelle, "
+                              "kostenlose Gehirn für einfache Fragen. (j/N)").lower()
+        if antwort not in ("j", "ja", "y", "yes"):
+            self.ergebnisse["gemini"] = "übersprungen"
+            return False
+        self.sagen("Ich öffne Google AI Studio. Melde dich an, wähle Create API Key, "
+                   "kopiere den Schlüssel und füge ihn hier ein.")
+        self.oeffnen("https://aistudio.google.com/apikey")
+        for versuch in range(1, 4):
+            schluessel = self.fragen_geheim("Gemini-Schlüssel einfügen und Enter drücken:")
+            if not schluessel:
+                self.sagen("Ich habe nichts bekommen. Versuch %d von 3." % versuch)
+                continue
+            probe = gemini_testen(schluessel)
+            self.sagen(probe["text"])
+            if probe.get("ok") or probe.get("limit"):
+                config.env_setzen("GEMINI_API_KEY", schluessel)
+                self.ergebnisse["gemini"] = "geprüft" if probe.get("ok") else "gespeichert"
+                return True
+        self.ergebnisse["gemini"] = "fehlgeschlagen"
+        self.sagen("Gemini lasse ich weg. Später: python3 jarvis.py zugang")
+        return False
+
+    # -- Einzelner Zugang nachtragen ---------------------------------------
+
+    ZUGAENGE = (
+        ("claude", "Claude (Anthropic)", "ANTHROPIC_API_KEY", "https://console.anthropic.com/settings/keys"),
+        ("gemini", "Gemini (Google)", "GEMINI_API_KEY", "https://aistudio.google.com/apikey"),
+        ("stimme", "ElevenLabs (Stimme)", "ELEVENLABS_API_KEY", "https://elevenlabs.io/app/settings/api-keys"),
+        ("ohren", "OpenAI (Spracherkennung)", "OPENAI_API_KEY", "https://platform.openai.com/api-keys"),
+    )
+
+    def zugang_nachtragen(self, welcher: str = "") -> bool:
+        """Trägt genau einen Zugang ein oder ersetzt ihn - ohne die ganze Einrichtung."""
+        welcher = (welcher or "").strip().lower()
+        wahl = [z for z in self.ZUGAENGE if welcher in (z[0], z[2].lower())]
+        if not wahl:
+            print("Welchen Zugang möchtest du eintragen?")
+            for nummer, z in enumerate(self.ZUGAENGE, start=1):
+                print("  %d  %s%s" % (nummer, z[1],
+                                       "   (schon eingetragen)" if getattr(config, z[2]) else ""))
+            eingabe = self.fragen("Nummer:")
+            if not eingabe.isdigit() or not 1 <= int(eingabe) <= len(self.ZUGAENGE):
+                print("Das war keine gültige Nummer.")
+                return False
+            wahl = [self.ZUGAENGE[int(eingabe) - 1]]
+        kennung, titel, variable, seite = wahl[0]
+        print("Ich öffne die Seite für %s. Dort erzeugst du den Schlüssel." % titel)
+        self.oeffnen(seite)
+        schluessel = self.fragen_geheim("Schlüssel für %s einfügen und Enter drücken:" % titel)
+        if not schluessel:
+            print("Ich habe nichts bekommen. Es wurde nichts geändert.")
+            return False
+        if kennung == "claude":
+            if not schluessel.startswith("sk-"):
+                print("Das sieht nicht nach einem Anthropic-Schlüssel aus (sie beginnen "
+                      "mit sk-). Es wurde nichts geändert.")
+                return False
+            probe = self.schluessel_testen(schluessel)
+            if not probe.get("ok") and probe.get("grund") != "guthaben":
+                print(probe["text"] + " Es wurde nichts geändert.")
+                return False
+            print(probe["text"] if not probe.get("ok") else "Der Schlüssel funktioniert.")
+        elif kennung == "gemini":
+            probe = gemini_testen(schluessel)
+            print(probe["text"])
+            if not probe.get("ok") and not probe.get("limit"):
+                print("Es wurde nichts geändert.")
+                return False
+        config.env_setzen(variable, schluessel)
+        print("%s ist eingetragen. Starte Jarvis neu, damit er ihn nutzt." % titel)
+        return True
 
     # -- Schritt 5: Telegram ------------------------------------------------
 
@@ -672,6 +779,7 @@ class Einrichtung:
         self.schritt_stimme()
         self.schritt_person()
         self.schritt_schluessel()
+        self.schritt_gemini()
         self.schritt_rechte()
         self.schritt_telegram()
         self.schritt_telefon()
@@ -693,6 +801,11 @@ class Einrichtung:
                    "erteilten Rechte nicht. Danach startest du mich einfach wieder über "
                    "JARVIS Punkt command. Dann sag: Hey Jarvis, wie sieht mein Tag aus.")
         return self.ergebnisse
+
+
+def zugang_eintragen(welcher: str = "") -> bool:
+    """Trägt einen einzelnen Zugang ein: ``python3 jarvis.py zugang gemini``."""
+    return Einrichtung().zugang_nachtragen(welcher)
 
 
 def einrichtung_starten(stimme=None) -> dict:

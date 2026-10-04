@@ -119,6 +119,29 @@ def gemini_fragen(frage: str, systemtext: str, verlauf: list = None,
             "tokens_aus": int(nutzung.get("candidatesTokenCount", 0))}
 
 
+def gemini_testen(schluessel: str) -> dict:
+    """Prüft einen Gemini-Schlüssel mit einem echten Mini-Aufruf."""
+    alt = config.GEMINI_API_KEY
+    config.GEMINI_API_KEY = schluessel
+    try:
+        antwort = gemini_fragen("Sag nur: ok", "Antworte mit einem Wort.", timeout=30)
+    finally:
+        config.GEMINI_API_KEY = alt
+    if antwort.get("ok"):
+        return {"ok": True, "text": "Der Gemini-Schlüssel funktioniert."}
+    fehler = antwort.get("fehler", "")
+    if "400" in fehler or "403" in fehler:
+        text = "Der Schlüssel wird abgelehnt. Bitte noch einmal vollständig kopieren."
+    elif "404" in fehler:
+        text = ("Das Modell %s kennt Google nicht (mehr). Trag in der Konfiguration "
+                "ein anderes ein: GEMINI_MODELL." % config.GEMINI_MODELL)
+    elif antwort.get("limit"):
+        text = "Der Schlüssel stimmt, Google meldet aber gerade das Limit."
+    else:
+        text = fehler or "Die Prüfung ist fehlgeschlagen."
+    return {"ok": False, "limit": bool(antwort.get("limit")), "text": text}
+
+
 # -- Gedankenlog ------------------------------------------------------------
 
 def claude_kosten(tokens_ein: int, tokens_aus: int) -> float:

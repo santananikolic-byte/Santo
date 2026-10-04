@@ -123,6 +123,10 @@ MONATSLIMIT_EURO = _zahl("MONATSLIMIT_EURO", 15.0)
 
 # Nutzer
 NUTZER_NAME = _text("NUTZER_NAME", "Chef")
+# Persönliches: was Jarvis über dich wissen soll und wie er klingen soll.
+# Beides landet in jedem Gespräch im Systemprompt - bei Claude und bei Gemini.
+JARVIS_PROFIL = _text("JARVIS_PROFIL")
+JARVIS_STIL = _text("JARVIS_STIL")
 FIRMA = _text("FIRMA", "Gebäudereinigung")
 
 # Sprachausgabe
