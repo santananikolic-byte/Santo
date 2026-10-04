@@ -31,6 +31,7 @@ DASHBOARD_VERZEICHNIS = BASIS / "dashboard"
 BELEGE_VERZEICHNIS = BASIS / "belege"
 PROFIL_VERZEICHNIS = BASIS / "profil"
 EXPORT_VERZEICHNIS = BASIS / "export"
+LOG_VERZEICHNIS = BASIS / "logs"
 DB_PFAD = str(BASIS / "jarvis_memory.db")
 
 # ---------------------------------------------------------------------------
@@ -101,6 +102,24 @@ env_neu_laden()
 ANTHROPIC_API_KEY = _text("ANTHROPIC_API_KEY")
 CLAUDE_MODEL = _text("CLAUDE_MODEL", "claude-sonnet-4-6")
 CLAUDE_MAX_TOKENS = _ganzzahl("CLAUDE_MAX_TOKENS", 2000)
+
+# Gemini: das schnelle, billige Gehirn für Smalltalk und einfache Fragen.
+# Ohne Schlüssel antwortet immer Claude. Das Modell steht hier, damit es sich
+# ohne Codeänderung auf ein neueres umstellen lässt.
+GEMINI_API_KEY = _text("GEMINI_API_KEY")
+GEMINI_MODELL = _text("GEMINI_MODELL", "gemini-2.5-flash")
+GEMINI_MAX_TOKENS = _ganzzahl("GEMINI_MAX_TOKENS", 600)
+# Wie lang eine Frage höchstens sein darf, um noch an Gemini zu gehen.
+ROUTER_MAX_WOERTER = _ganzzahl("ROUTER_MAX_WOERTER", 25)
+
+# Kosten: Preise je eine Million Tokens in US-Dollar. Das sind Schätzwerte
+# für das Gedankenlog - maßgeblich ist immer die Rechnung der Anbieter.
+CLAUDE_PREIS_EIN = _zahl("CLAUDE_PREIS_EIN", 3.0)
+CLAUDE_PREIS_AUS = _zahl("CLAUDE_PREIS_AUS", 15.0)
+DOLLAR_IN_EURO = _zahl("DOLLAR_IN_EURO", 0.92)
+# Ist das Monatslimit für Claude erreicht, antwortet Claude nicht mehr, bis
+# der Monat wechselt oder das Limit angehoben wird. 0 schaltet es ab.
+MONATSLIMIT_EURO = _zahl("MONATSLIMIT_EURO", 15.0)
 
 # Nutzer
 NUTZER_NAME = _text("NUTZER_NAME", "Chef")
@@ -228,7 +247,7 @@ def env_schreiben() -> bool:
 def verzeichnisse_anlegen():
     """Legt alle Arbeitsverzeichnisse an, falls sie fehlen."""
     for pfad in (CONFIG_VERZEICHNIS, DASHBOARD_VERZEICHNIS, BELEGE_VERZEICHNIS,
-                 PROFIL_VERZEICHNIS, EXPORT_VERZEICHNIS):
+                 PROFIL_VERZEICHNIS, EXPORT_VERZEICHNIS, LOG_VERZEICHNIS):
         try:
             pfad.mkdir(parents=True, exist_ok=True)
         except OSError as fehler:
@@ -239,6 +258,7 @@ def konfig_uebersicht() -> dict:
     """Zeigt an, welche Dienste eingerichtet sind - ohne Geheimnisse preiszugeben."""
     return {
         "Claude": bool(ANTHROPIC_API_KEY),
+        "Gemini": bool(GEMINI_API_KEY),
         "ElevenLabs": bool(ELEVENLABS_API_KEY),
         "Whisper-API": bool(OPENAI_API_KEY),
         "Telegram": bool(TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID),

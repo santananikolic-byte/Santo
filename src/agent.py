@@ -20,6 +20,8 @@ from datetime import datetime
 import config
 from modules.memory import heute_datum
 from modules.recall import Recall
+from modules.router import (Gedankenlog, claude_kosten, gehirn_waehlen,
+                            gemini_fragen)
 from modules.tools import Werkzeuge
 
 API_URL = "https://api.anthropic.com/v1/messages"
@@ -109,6 +111,8 @@ class JarvisAgent:
             self.tools.stimme_setzen(stimme)
         self.verlauf = []
         self.letzter_fehler = ""
+        self.gedankenlog = Gedankenlog()
+        self.letztes_gehirn = ""
 
     # -- Grundlagen ---------------------------------------------------------
 
@@ -284,6 +288,42 @@ class JarvisAgent:
         systemtext = self.systemprompt(eingabe)
         katalog = self.tools.katalog()
 
+        gehirn, grund = gehirn_waehlen(eingabe)
+        ausgewichen = False
+        if gehirn == "gemini":
+            beginn = time.time()
+            gemini = gemini_fragen(eingabe, systemtext, self.verlauf)
+            if gemini.get("ok"):
+                text = gemini["text"]
+                self.verlauf.append({"role": "assistant", "content": text})
+                if protokollieren:
+                    self.memory.verlauf_anhaengen("assistant", text)
+                self.gedankenlog.eintragen(
+                    eingabe, "gemini", grund, time.time() - beginn,
+                    gemini["tokens_ein"], gemini["tokens_aus"])
+                self.letztes_gehirn = "gemini"
+                return text
+            # Limit oder Ausfall: Claude übernimmt, der Nutzer merkt nichts.
+            ausgewichen = True
+            grund = "Gemini ausgefallen: %s" % gemini.get("fehler", "")
+
+        if self.gedankenlog.limit_erreicht():
+            self.verlauf.pop()  # die unbeantwortete Frage nicht im Verlauf lassen
+            self.letzter_fehler = (
+                "Das Monatslimit von %.2f Euro für Claude ist erreicht. Einfache "
+                "Fragen beantwortet noch Gemini. Das Limit hebst du mit "
+                "MONATSLIMIT_EURO in der Konfiguration an." % config.MONATSLIMIT_EURO)
+            return self.letzter_fehler
+
+        beginn = time.time()
+        tokens_ein = tokens_aus = 0
+
+        def _protokoll():
+            self.letztes_gehirn = "claude"
+            self.gedankenlog.eintragen(
+                eingabe, "claude", grund, time.time() - beginn, tokens_ein,
+                tokens_aus, claude_kosten(tokens_ein, tokens_aus), ausgewichen)
+
         for runde in range(MAX_RUNDEN):
             antwort = self._anfrage({
                 "model": config.CLAUDE_MODEL,
@@ -294,14 +334,19 @@ class JarvisAgent:
             })
             if not antwort.get("ok"):
                 self.letzter_fehler = antwort.get("fehler", "")
+                _protokoll()
                 return self.letzter_fehler
 
             nachricht = antwort["daten"]
+            nutzung = nachricht.get("usage") or {}
+            tokens_ein += int(nutzung.get("input_tokens", 0) or 0)
+            tokens_aus += int(nutzung.get("output_tokens", 0) or 0)
             inhalt = nachricht.get("content", [])
             self.verlauf.append({"role": "assistant", "content": inhalt})
 
             werkzeugaufrufe = [b for b in inhalt if b.get("type") == "tool_use"]
             if not werkzeugaufrufe:
+                _protokoll()
                 text = "\n".join(b.get("text", "") for b in inhalt
                                  if b.get("type") == "text").strip()
                 if protokollieren and text:
@@ -325,6 +370,7 @@ class JarvisAgent:
             self.verlauf.append({"role": "user", "content": ergebnisse})
             self._verlauf_kuerzen()
 
+        _protokoll()
         return ("Ich habe es %d Mal versucht und komme nicht weiter. Sag mir bitte "
                 "genauer, was du brauchst." % MAX_RUNDEN)
 

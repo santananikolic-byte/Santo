@@ -69,6 +69,7 @@ BAULISTE = [
     "modules/webapp",
     "modules/setup_wizard",
     "modules/tools",
+    "modules/router",
     "agent",
     "run",
 ]

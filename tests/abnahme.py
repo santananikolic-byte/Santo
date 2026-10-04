@@ -34,9 +34,12 @@ import config  # noqa: E402
 ARBEITSVERZEICHNIS = tempfile.mkdtemp(prefix="jarvis_abnahme_")
 config.DB_PFAD = os.path.join(ARBEITSVERZEICHNIS, "test.db")
 config.EXPORT_VERZEICHNIS = __import__("pathlib").Path(ARBEITSVERZEICHNIS)
+config.LOG_VERZEICHNIS = __import__("pathlib").Path(ARBEITSVERZEICHNIS)
 
 from agent import JarvisAgent  # noqa: E402
 from modules.bookkeeping import mwst_aus_brutto  # noqa: E402
+import agent as agent_modul  # noqa: E402
+from modules.router import Gedankenlog, claude_kosten, gehirn_waehlen  # noqa: E402
 from modules.calendar_mod import ics_termine_lesen, konflikte_finden  # noqa: E402
 from modules.mcp_client import MCPClient, MCPServer  # noqa: E402
 from modules.akquise import Akquise  # noqa: E402
@@ -840,6 +843,78 @@ def pruefung_kalender():
             konflikte[0]["text"] if konflikte else "keiner")
 
 
+def pruefung_router(agent):
+    abschnitt("Router und Gedankenlog")
+    gewaehlt = lambda frage: gehirn_waehlen(frage, True)[0]  # noqa: E731
+    pruefen("Smalltalk und einfache Frage gehen an Gemini",
+            gewaehlt("Wie geht es dir?") == "gemini"
+            and gewaehlt("Was ist die Hauptstadt von Österreich?") == "gemini",
+            "zwei Fragen")
+    pruefen("Handlung oder Daten gehen an Claude",
+            all(gewaehlt(f) == "claude" for f in (
+                "Leg einen Termin für Freitag an", "Wie viel Umsatz hatte ich?",
+                "Was steht heute an?", "Schick Berger eine Mail")),
+            "vier Fragen")
+    pruefen("Denkarbeit und lange Fragen gehen an Claude",
+            gewaehlt("Vergleiche die beiden Wege") == "claude"
+            and gewaehlt("denk gründlich nach") == "claude"
+            and gewaehlt(" ".join(["wort"] * 30)) == "claude", "drei Fragen")
+    pruefen("Ohne Gemini-Schlüssel antwortet immer Claude",
+            gehirn_waehlen("Wie geht es dir?", False)[0] == "claude", "")
+
+    pruefen("Kostenschätzung rechnet aus den Tokens",
+            abs(claude_kosten(1_000_000, 0) - 3.0 * config.DOLLAR_IN_EURO) < 1e-6
+            and claude_kosten(0, 0) == 0, "1 Mio Tokens rein")
+
+    # Ein ganzer Durchlauf mit vorgetäuschten Gehirnen: kein Netz, kein Geld.
+    echt = (agent_modul.gemini_fragen, agent._anfrage, config.GEMINI_API_KEY,
+            config.MONATSLIMIT_EURO, config.ANTHROPIC_API_KEY)
+    agent.gedankenlog = Gedankenlog(pathlib.Path(ARBEITSVERZEICHNIS) / "router_test.jsonl")
+    config.GEMINI_API_KEY = config.ANTHROPIC_API_KEY = "test"
+    claude_antwort = {"ok": True, "daten": {
+        "content": [{"type": "text", "text": "Antwort von Claude."}],
+        "usage": {"input_tokens": 1000, "output_tokens": 200}}}
+    try:
+        agent_modul.gemini_fragen = lambda *a, **k: {
+            "ok": True, "text": "Antwort von Gemini.", "tokens_ein": 50,
+            "tokens_aus": 10}
+        agent._anfrage = lambda koerper, timeout=120: claude_antwort
+        agent.verlauf_leeren()
+        text = agent.denken("Wie geht es dir?")
+        pruefen("Einfache Frage wird von Gemini beantwortet",
+                text == "Antwort von Gemini." and agent.letztes_gehirn == "gemini", text)
+
+        text = agent.denken("Was steht heute an?")
+        pruefen("Frage mit Handlung wird von Claude beantwortet",
+                text == "Antwort von Claude." and agent.letztes_gehirn == "claude", text)
+
+        agent_modul.gemini_fragen = lambda *a, **k: {
+            "ok": False, "limit": True, "fehler": "Gemini meldet Fehler 429."}
+        text = agent.denken("Und wie spät ist es?")
+        pruefen("Gemini-Limit: Claude springt ein",
+                text == "Antwort von Claude."
+                and agent.gedankenlog.zeilen()[-1]["ausgewichen"] is True, text)
+
+        bilanz = agent.gedankenlog.monatsbilanz()
+        pruefen("Gedankenlog zählt Anfragen und Kosten je Gehirn",
+                bilanz["anfragen"] == 3 and bilanz["gemini"] == 1
+                and bilanz["claude"] == 2 and bilanz["ausgewichen"] == 1
+                and abs(bilanz["kosten"] - 2 * claude_kosten(1000, 200)) < 1e-4,
+                "%s Euro" % bilanz["kosten"])
+
+        config.MONATSLIMIT_EURO = bilanz["kosten"] / 2
+        agent_modul.gemini_fragen = echt[0]
+        text = agent.denken("Schreib mir ein Angebot")
+        pruefen("Monatslimit erreicht: Claude wird nicht mehr gefragt",
+                "Monatslimit" in text and agent.gedankenlog.monatsbilanz()["anfragen"] == 3,
+                text[:60])
+    finally:
+        (agent_modul.gemini_fragen, agent._anfrage, config.GEMINI_API_KEY,
+         config.MONATSLIMIT_EURO, config.ANTHROPIC_API_KEY) = echt
+        del agent._anfrage
+        agent.verlauf_leeren()
+
+
 def pruefung_dashboard(agent):
     abschnitt("Dashboard")
     ergebnis = agent.tools.dashboard.bauen()
@@ -1297,6 +1372,7 @@ def main() -> int:
     pruefung_routinen(agent)
     pruefung_zeitplan()
     pruefung_kalender()
+    pruefung_router(agent)
     pruefung_dashboard(agent)
     pruefung_ansichten(agent)
     pruefung_sicherheit(agent)
