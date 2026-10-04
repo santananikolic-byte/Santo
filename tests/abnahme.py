@@ -926,6 +926,18 @@ def pruefung_dashboard(agent):
             ergebnis.get("ok") and "1.069,60" in inhalt and "178,27" in inhalt
             and "refresh" in inhalt, "%d Zeichen" % len(inhalt))
 
+    pruefen("Ohne Denkprotokoll zeigt das Dashboard kein Gehirn-Panel",
+            "Denken diesen Monat" not in inhalt, "kein erfundener Bereich")
+    log = Gedankenlog()
+    log.eintragen("Hallo", "gemini", "kurz", 1.0)
+    log.eintragen("Termin", "claude", "Werkzeug", 2.0, 1000, 200, 0.5)
+    ergebnis = agent.tools.dashboard.bauen()
+    with open(ergebnis["datei"], encoding="utf-8") as datei:
+        inhalt = datei.read()
+    pruefen("Dashboard zeigt Anfragen je Gehirn und die Kosten",
+            "Denken diesen Monat" in inhalt and "1 Anfragen" in inhalt
+            and "0,50" in inhalt, "Gemini 1, Claude 1, 0,50 Euro")
+
 
 def pruefung_ansichten(agent):
     """Command Center, Sales-Analyse und Landingpage - wirklich erzeugen und ansehen."""
