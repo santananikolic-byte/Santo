@@ -107,7 +107,7 @@ CLAUDE_MAX_TOKENS = _ganzzahl("CLAUDE_MAX_TOKENS", 2000)
 # Ohne Schlüssel antwortet immer Claude. Das Modell steht hier, damit es sich
 # ohne Codeänderung auf ein neueres umstellen lässt.
 GEMINI_API_KEY = _text("GEMINI_API_KEY")
-GEMINI_MODELL = _text("GEMINI_MODELL", "gemini-2.5-flash")
+GEMINI_MODELL = _text("GEMINI_MODELL", "gemini-flash-latest")
 GEMINI_MAX_TOKENS = _ganzzahl("GEMINI_MAX_TOKENS", 600)
 # Wie lang eine Frage höchstens sein darf, um noch an Gemini zu gehen.
 ROUTER_MAX_WOERTER = _ganzzahl("ROUTER_MAX_WOERTER", 25)
