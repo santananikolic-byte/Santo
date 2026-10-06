@@ -37,6 +37,7 @@ from modules.privat import BEREICHE, Privat, WIEDERHOLUNGEN, RHYTHMEN
 from modules.messenger import Messenger
 from modules.recall import Recall
 from modules.routines import Routines
+from modules.autopilot import Autopilot
 from modules.team import ROLLEN, Team
 from modules.telefon import Telefon
 from modules.telegram_mod import Telegram
@@ -74,7 +75,7 @@ PARAMETER_AKTIONEN = {
 # Alles hier drin fragt vor der Ausführung nach einer Freigabe.
 FREIGABE_PFLICHTIG = {"mail_senden", "termin_anlegen", "bildschirm_bedienen",
                       "nachricht_senden", "skript_ausfuehren", "anrufen",
-                      "sms_senden", "browser_auftrag"}
+                      "sms_senden", "browser_auftrag", "autopilot_schalten"}
 
 
 def parameter_pruefen(wert: str):
@@ -122,6 +123,7 @@ class Werkzeuge:
                                    routines=self.routines, mcp=self.mcp,
                                    akquise=self.akquise, team=self.team,
                                    privat=self.privat)
+        self.autopilot = Autopilot(self)
         self.stimme = None
         # Ein anderer Weg, Freigaben einzuholen - die Web-App setzt sich hier ein.
         self.freigabe_kanal = None
@@ -325,6 +327,24 @@ class Werkzeuge:
                      {"rolle": {"type": "string", "enum": sorted(ROLLEN)},
                       "auftrag": text}, ["rolle", "auftrag"]),
             werkzeug("team_liste", "Zeigt, welche Fachkräfte es gibt.", {}),
+            werkzeug("autopilot_auftrag",
+                     "Stellt Arbeit in die Hintergrund-Warteschlange: eine Fachkraft "
+                     "bereitet sie vor (Angebot, Nachfasstext, Antwortentwurf, "
+                     "Skript) und legt das Ergebnis ins Postfach. Verschickt wird "
+                     "nichts. Für alles, was nicht sofort fertig sein muss.",
+                     {"titel": text, "auftrag": text,
+                      "rolle": {"type": "string", "enum": sorted(ROLLEN)},
+                      "prioritaet": {"type": "integer", "description": "1 dringend bis 3"}},
+                     ["titel"]),
+            werkzeug("autopilot_postfach",
+                     "Was der Autopilot im Hintergrund fertiggestellt hat und noch "
+                     "nicht abgehakt ist.", {}),
+            werkzeug("autopilot_gesehen",
+                     "Hakt ein Ergebnis im Postfach ab (mit id) oder alle (ohne id).",
+                     {"id": ganz}),
+            werkzeug("autopilot_schalten",
+                     "Schaltet den Autopiloten ein oder aus. Er arbeitet im "
+                     "Hintergrund und schickt nichts ab.", {"an": wahr}, ["an"]),
             werkzeug("lagebericht",
                      "Der vollständige aktuelle Stand des Betriebs: Kasse, "
                      "Aufträge, Cashflow, Termine, Post, Offenes.", {}),
@@ -679,6 +699,17 @@ class Werkzeuge:
                                         for e in liste)}
         if name == "lagebericht":
             return self.team.lagebericht(self)
+        if name == "autopilot_auftrag":
+            return self.autopilot.auftrag_anlegen(
+                a.get("titel"), a.get("auftrag", ""), a.get("rolle", ""),
+                a.get("prioritaet") or 2)
+        if name == "autopilot_postfach":
+            return {"ok": True, "text": self.autopilot.postfach_text(),
+                    "anzahl": len(self.autopilot.postfach(30))}
+        if name == "autopilot_gesehen":
+            return self.autopilot.gesehen_setzen(a.get("id"))
+        if name == "autopilot_schalten":
+            return self.autopilot.schalten(bool(a.get("an")))
 
         # -- Werkstatt --
         if name == "skript_schreiben":

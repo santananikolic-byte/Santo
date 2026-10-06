@@ -383,7 +383,7 @@ class JarvisAgent:
                 "genauer, was du brauchst." % MAX_RUNDEN)
 
     def arbeiten(self, systemtext: str, auftrag: str, werkzeugnamen: list = None,
-                 max_runden: int = 6) -> str:
+                 max_runden: int = 6, grund: str = "Team") -> str:
         """Eine abgeschlossene Arbeitsschleife ohne eigenen Gesprächsverlauf.
 
         Damit arbeitet eine Fachkraft ihren Auftrag ab: eigener Systemprompt,
@@ -393,6 +393,10 @@ class JarvisAgent:
         """
         if not self.einsatzbereit():
             return ("Es ist kein Anthropic-Schlüssel hinterlegt.")
+        if self.gedankenlog.limit_erreicht():
+            return ("Das Monatslimit von %.2f Euro für Claude ist erreicht. Das Limit "
+                    "hebst du mit MONATSLIMIT_EURO in der Konfiguration an."
+                    % config.MONATSLIMIT_EURO)
 
         katalog = self.tools.katalog()
         if werkzeugnamen:
@@ -402,6 +406,14 @@ class JarvisAgent:
                 return "Für diesen Auftrag stehen keine Werkzeuge bereit."
 
         nachrichten = [{"role": "user", "content": auftrag}]
+        beginn = time.time()
+        tokens_ein = tokens_aus = 0
+
+        def protokoll():
+            self.gedankenlog.eintragen(
+                auftrag, "claude", grund, time.time() - beginn, tokens_ein, tokens_aus,
+                claude_kosten(tokens_ein, tokens_aus))
+
         for _ in range(max(1, int(max_runden))):
             antwort = self._anfrage({
                 "model": config.CLAUDE_MODEL,
@@ -411,12 +423,17 @@ class JarvisAgent:
                 "messages": nachrichten,
             })
             if not antwort.get("ok"):
+                protokoll()
                 return antwort.get("fehler", "Der Auftrag ist fehlgeschlagen.")
 
+            nutzung = antwort["daten"].get("usage") or {}
+            tokens_ein += int(nutzung.get("input_tokens", 0) or 0)
+            tokens_aus += int(nutzung.get("output_tokens", 0) or 0)
             inhalt = antwort["daten"].get("content", [])
             nachrichten.append({"role": "assistant", "content": inhalt})
             aufrufe = [b for b in inhalt if b.get("type") == "tool_use"]
             if not aufrufe:
+                protokoll()
                 return "\n".join(b.get("text", "") for b in inhalt
                                   if b.get("type") == "text").strip()
 
@@ -436,6 +453,7 @@ class JarvisAgent:
                                    "is_error": not bool(ergebnis.get("ok"))})
             nachrichten.append({"role": "user", "content": ergebnisse})
 
+        protokoll()
         return ("Ich bin nach %d Schritten nicht fertig geworden und höre auf."
                 % max_runden)
 
@@ -489,6 +507,15 @@ class JarvisAgent:
         if morgens and config.WETTER_ORT:
             wetter = self.tools.welt.wetter(config.WETTER_ORT)
             teile.append("Wetter: %s" % (wetter.get("text") or wetter.get("fehler")))
+
+        if morgens:
+            try:
+                postfach = self.tools.autopilot.postfach(10)
+                if postfach:
+                    teile.append("Im Postfach des Autopiloten: %s"
+                                 % self.tools.autopilot.postfach_text())
+            except Exception:
+                pass
 
         punkte = self.memory.punkte_offen()
         teile.append("Offene Punkte: %s"

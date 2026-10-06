@@ -199,6 +199,15 @@ WETTER_ORT = _text("WETTER_ORT", "Wien")
 SUPABASE_URL = _text("SUPABASE_URL")
 SUPABASE_KEY = _text("SUPABASE_KEY")
 
+# Autopilot: Jarvis arbeitet im Hintergrund weiter. Standardmäßig aus.
+# Er bereitet nur vor (Entwürfe im Postfach) und schickt nie etwas ab.
+AUTOPILOT_AN = _wahrheit("AUTOPILOT_AN", False)
+AUTOPILOT_ABSTAND_MIN = _ganzzahl("AUTOPILOT_ABSTAND_MIN", 15)
+AUTOPILOT_VON = _text("AUTOPILOT_VON", "07:00")
+AUTOPILOT_BIS = _text("AUTOPILOT_BIS", "21:00")
+AUTOPILOT_MAX_PRO_STUNDE = _ganzzahl("AUTOPILOT_MAX_PRO_STUNDE", 6)
+AUTOPILOT_MAX_PRO_RUNDE = _ganzzahl("AUTOPILOT_MAX_PRO_RUNDE", 2)
+
 # Ersteinrichtung abgeschlossen?
 EINRICHTUNG_FERTIG = _wahrheit("EINRICHTUNG_FERTIG", False)
 

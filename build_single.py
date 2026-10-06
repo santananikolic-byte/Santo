@@ -41,6 +41,7 @@ ZIEL = WURZEL / "jarvis.py"
 BAULISTE = [
     "config",
     "modules/memory",
+    "modules/router",
     "modules/recall",
     "modules/voice",
     "modules/speaker",
@@ -61,6 +62,7 @@ BAULISTE = [
     "modules/computer_use",
     "modules/werkstatt",
     "modules/team",
+    "modules/autopilot",
     "modules/webseite",
     "modules/dashboard_teile",
     "modules/dashboard",
@@ -70,7 +72,6 @@ BAULISTE = [
     "modules/webapp",
     "modules/setup_wizard",
     "modules/tools",
-    "modules/router",
     "agent",
     "run",
 ]

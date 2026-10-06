@@ -21,6 +21,7 @@ Terminal spricht, nimmt ``hoeren``.
     python3 jarvis.py test        Selbsttest
     python3 jarvis.py einrichten  geführte Ersteinrichtung
     python3 jarvis.py zugang      einen Schlüssel eintragen oder ersetzen
+    python3 jarvis.py autopilot   Postfach des Autopiloten (an / aus zum Schalten)
 """
 
 import json
@@ -269,6 +270,11 @@ def webbetrieb(argumente=None):
     zeitplan.start()
     print("  Briefings: morgens %s, abends %s"
           % (config.BRIEFING_MORGENS, config.BRIEFING_ABENDS))
+    autopilot = agent.tools.autopilot
+    autopilot.ausgabe = web.melden
+    autopilot.start()
+    print("  Autopilot: %s" % ("an, arbeitet im Hintergrund" if config.AUTOPILOT_AN
+                               else "aus (einschalten auf der Seite Autopilot)"))
 
     adresse = web.adresse()
     print("  Jarvis läuft jetzt im Browser:")
@@ -296,9 +302,29 @@ def webbetrieb(argumente=None):
         pass
     finally:
         zeitplan.stop()
+        autopilot.stop()
         web.stoppen()
         agent.tools.mcp.stoppen()
     print("\nBeendet.")
+    return 0
+
+
+def autopilot_zeigen(argumente=None):
+    """Zeigt das Postfach des Autopiloten - oder schaltet ihn ein und aus."""
+    argumente = argumente or []
+    agent, stimme = agent_aufbauen(mit_stimme=False)
+    del stimme
+    ap = agent.tools.autopilot
+    if argumente and argumente[0].lower() in ("an", "ein", "aus"):
+        print(ap.schalten(argumente[0].lower() != "aus")["text"])
+        return 0
+    zustand = ap.zustand()
+    print("Autopilot: %s%s" % ("an" if zustand["an"] else "aus",
+                               " (pausiert: %s)" % zustand["gesperrt"]
+                               if zustand["an"] and zustand["gesperrt"] else ""))
+    print("Wartet: %d, Postfach: %d" % (len(zustand["warteschlange"]), len(zustand["postfach"])))
+    for eintrag in zustand["postfach"]:
+        print("\n[%d] %s\n%s" % (eintrag["id"], eintrag["titel"], eintrag["ergebnis"]))
     return 0
 
 
@@ -695,6 +721,8 @@ def hauptprogramm(argumente=None) -> int:
         return selbsttest()
     elif modus in ("einrichten", "setup"):
         einrichtung_starten()
+    elif modus == "autopilot":
+        return autopilot_zeigen(argumente[1:])
     elif modus in ("zugang", "schluessel", "schlüssel"):
         return 0 if zugang_eintragen(argumente[1] if len(argumente) > 1 else "") else 1
     elif modus in ("hilfe", "--help", "-h", "help"):

@@ -49,6 +49,9 @@ from modules.team import ROLLEN, Team  # noqa: E402
 from modules.webapp import JarvisWeb, WebFreigabe  # noqa: E402
 from modules.webseite import SEITE_HTML  # noqa: E402
 import modules.setup_wizard as wizard_modul  # noqa: E402
+from modules import autopilot as autopilot_modul  # noqa: E402
+from modules.autopilot import in_ruhezeit, rolle_raten  # noqa: E402
+from modules.tools import FREIGABE_PFLICHTIG  # noqa: E402
 from modules.lernpfad import SEITE_PFAD, lernpfad_stand  # noqa: E402
 from modules.werkstatt import Werkstatt, name_saeubern  # noqa: E402
 from modules.voice import weckwort_pruefen  # noqa: E402
@@ -1074,6 +1077,144 @@ def pruefung_ansichten(agent):
                     "Ordner, Auftrag, Start")
 
 
+def pruefung_autopilot(agent):
+    abschnitt("Autopilot")
+    ap = agent.tools.autopilot
+    aus = datetime(2026, 1, 1, 22, 30)
+    mittag = datetime(2026, 1, 1, 12, 0)
+    alt = (config.AUTOPILOT_VON, config.AUTOPILOT_BIS)
+    config.AUTOPILOT_VON, config.AUTOPILOT_BIS = "07:00", "21:00"
+    pruefen("Ruhezeit: nachts ja, mittags nein",
+            in_ruhezeit(aus) is True and in_ruhezeit(mittag) is False
+            and in_ruhezeit(datetime(2026, 1, 1, 6, 59)) is True, "07:00 bis 21:00")
+    config.AUTOPILOT_VON, config.AUTOPILOT_BIS = alt
+    pruefen("Fachkraft wird aus dem Auftrag erraten",
+            rolle_raten("Schreib ein Angebot für Müller") == "akquisiteur"
+            and rolle_raten("Schreibe ein Skript für die Rechnungen") == "programmierer"
+            and rolle_raten("Mails durchsehen") == "postmeister", "drei Aufträge")
+
+    erster = ap.auftrag_anlegen("Angebot Müller schreiben", "Fläche 300 qm", "", 2, "nutzer", "t1")
+    doppelt = ap.auftrag_anlegen("Angebot Müller schreiben", "", "", 2, "nutzer", "t1")
+    falsch = ap.auftrag_anlegen("x", "y", "zauberer")
+    pruefen("Auftrag anlegen: Doppelte werden erkannt, falsche Rolle abgelehnt",
+            erster["ok"] and doppelt.get("doppelt") and falsch["ok"] is False
+            and len(ap.warteschlange()) == 1, erster.get("text", "")[:50])
+
+    # Die eine Regel: im Hintergrund nie ein Werkzeug, das eine Freigabe braucht.
+    gesehen = {}
+    echt_arbeiten, echt_key = agent.arbeiten, config.ANTHROPIC_API_KEY
+    config.ANTHROPIC_API_KEY = "test"
+    agent.arbeiten = lambda systemtext, auftrag, werkzeugnamen=None, max_runden=6, grund="": (
+        gesehen.update({"namen": list(werkzeugnamen or []), "system": systemtext, "grund": grund})
+        or "Entwurf: Sehr geehrter Herr Müller, anbei unser Angebot.")
+    try:
+        verboten = []
+        for rolle in sorted(autopilot_modul.ROLLEN):
+            agent.tools.team.beauftragen(rolle, "Test", hintergrund=True)
+            verboten += [n for n in gesehen["namen"] if n in FREIGABE_PFLICHTIG or agent.tools.braucht_freigabe(n)]
+        pruefen("Im Hintergrund hat keine Fachkraft ein Werkzeug mit Freigabe",
+                not verboten and gesehen["grund"] == "Autopilot", "alle %d Rollen geprüft" % len(autopilot_modul.ROLLEN))
+        pruefen("Der Hintergrundauftrag sagt der Fachkraft, dass sie nur Entwürfe schreibt",
+                "HINTERGRUNDARBEIT" in gesehen["system"] and "verschickst nichts" in gesehen["system"], "")
+        agent.tools.team.beauftragen("postmeister", "Test")
+        pruefen("Im Vordergrund behält der Postbearbeiter sein Mailwerkzeug",
+                "mail_senden" in gesehen["namen"], "mail_senden vorhanden")
+
+        # Ein ganzer Lauf: Auftrag -> Fachkraft -> Postfach.
+        config.AUTOPILOT_AN = True
+        ergebnis = ap.naechsten_abarbeiten()
+        postfach = ap.postfach()
+        pruefen("Abgearbeiteter Auftrag landet im Postfach",
+                ergebnis["status"] == "fertig" and len(postfach) == 1
+                and "Sehr geehrter Herr Müller" in postfach[0]["ergebnis"]
+                and not ap.warteschlange(), postfach[0]["titel"] if postfach else "leer")
+        ap.gesehen_setzen(postfach[0]["id"])
+        pruefen("Abgehakt verschwindet es aus dem Postfach",
+                not ap.postfach() and len(ap.verlauf()) == 1, "")
+
+        # Die Nerven: fälliges Nachfassen wird von selbst zu Arbeit.
+        agent.tools.akquise.lead_anlegen("Autopilot Test GmbH", ansprechpartner="Frau Bauer",
+                                         objekt_qm=200, bodenbelag="Linoleum",
+                                         intervall_pro_woche=2)
+        agent.memory._schreiben("UPDATE leads SET naechster_kontakt=? WHERE firma=?",
+                                (datetime.now().strftime("%Y-%m-%d"), "Autopilot Test GmbH"))
+        neu = ap.nerven_pruefen()
+        nochmal = ap.nerven_pruefen()
+        offen = [e for e in ap.warteschlange() if "Autopilot Test GmbH" in e["titel"]]
+        pruefen("Fälliges Nachfassen wird von selbst zum Auftrag, aber nur einmal",
+                len(offen) == 1 and offen[0]["rolle"] == "akquisiteur"
+                and offen[0]["quelle"] == "nerv" and not any("Autopilot Test" in t for t in nochmal),
+                "%d neu, zweiter Durchlauf %d" % (len(neu), len(nochmal)))
+        belege = [e for e in ap.postfach() if e["titel"] == "Belege fehlen"]
+        pruefen("Fehlende Belege meldet der Autopilot ohne Claude",
+                len(belege) == 1 and belege[0]["quelle"] == "nerv" and belege[0]["dauer"] == 0,
+                belege[0]["ergebnis"][:50] if belege else "keine Meldung")
+
+        # Bremsen
+        config.AUTOPILOT_AN = False
+        aus_grund = ap.gesperrt()
+        config.AUTOPILOT_AN = True
+        limit_alt = config.MONATSLIMIT_EURO
+        ap.gedankenlog = Gedankenlog(pathlib.Path(ARBEITSVERZEICHNIS) / "ap_limit.jsonl")
+        ap.gedankenlog.eintragen("x", "claude", "t", 1, 1, 1, 99.0)
+        config.MONATSLIMIT_EURO = 15.0
+        limit_grund = ap.gesperrt(mittag)
+        config.MONATSLIMIT_EURO = limit_alt
+        ap.gedankenlog = Gedankenlog(pathlib.Path(ARBEITSVERZEICHNIS) / "ap_leer.jsonl")
+        config.AUTOPILOT_VON, config.AUTOPILOT_BIS = "07:00", "21:00"
+        nacht_grund = ap.gesperrt(aus)
+        config.AUTOPILOT_VON, config.AUTOPILOT_BIS = alt
+        pruefen("Bremsen: aus, Monatslimit und Ruhezeit halten ihn an",
+                aus_grund == "aus" and "Monatslimit" in limit_grund and "Ruhezeit" in nacht_grund,
+                "%s / %s / %s" % (aus_grund, limit_grund, nacht_grund[:20]))
+
+        # Kosten: auch Teamarbeit steht im Gedankenlog und zählt zum Limit.
+        agent.arbeiten = echt_arbeiten
+        agent._anfrage = lambda koerper, timeout=120: {"ok": True, "daten": {
+            "content": [{"type": "text", "text": "Fertig."}],
+            "usage": {"input_tokens": 2000, "output_tokens": 500}}}
+        agent.gedankenlog = Gedankenlog(pathlib.Path(ARBEITSVERZEICHNIS) / "ap_kosten.jsonl")
+        text = agent.arbeiten("system", "auftrag", ["notiz_speichern"], 2, grund="Autopilot")
+        zeilen = agent.gedankenlog.zeilen()
+        pruefen("Hintergrundarbeit steht im Gedankenlog mit Kosten",
+                text == "Fertig." and len(zeilen) == 1 and zeilen[0]["grund"] == "Autopilot"
+                and zeilen[0]["kosten"] > 0, "%s Euro" % (zeilen[0]["kosten"] if zeilen else "-"))
+        config.MONATSLIMIT_EURO = 0.0001
+        gesperrt_text = agent.arbeiten("system", "auftrag", ["notiz_speichern"], 2)
+        config.MONATSLIMIT_EURO = limit_alt
+        pruefen("Ist das Monatslimit erreicht, arbeitet auch das Team nicht mehr",
+                "Monatslimit" in gesperrt_text, gesperrt_text[:50])
+    finally:
+        agent.arbeiten = echt_arbeiten
+        if "_anfrage" in agent.__dict__:
+            del agent._anfrage
+        config.ANTHROPIC_API_KEY = echt_key
+        config.AUTOPILOT_AN = False
+        config.AUTOPILOT_VON, config.AUTOPILOT_BIS = alt
+        config.MONATSLIMIT_EURO = 15.0
+        ap.gedankenlog = Gedankenlog(pathlib.Path(ARBEITSVERZEICHNIS) / "gedankenlog.jsonl")
+
+    pruefen("Autopilot ein- und ausschalten verlangt eine Freigabe",
+            agent.tools.braucht_freigabe("autopilot_schalten") is True
+            and agent.tools.braucht_freigabe("autopilot_auftrag") is False, "")
+    pruefen("Die Autopilot-Werkzeuge stehen im Katalog",
+            {"autopilot_auftrag", "autopilot_postfach", "autopilot_gesehen",
+             "autopilot_schalten"} <= set(agent.tools.namen()), "vier Werkzeuge")
+    pruefen("Der Autopilot-Zustand hat alles, was die Seite braucht",
+            {"an", "gesperrt", "postfach", "warteschlange", "verlauf", "von", "bis"}
+            <= set(ap.zustand()), "")
+    pruefen("Die Autopilot-Seite lädt nichts aus dem Netz nach",
+            "https://" not in autopilot_modul.SEITE_AUTOPILOT
+            and "http://" not in autopilot_modul.SEITE_AUTOPILOT, "alles in der Seite")
+
+    class Kopf:
+        def __init__(self, **k): self.headers = k
+    pruefen("Schreibende Anfragen von fremden Seiten werden abgelehnt",
+            JarvisWeb._herkunft_ok(Kopf(Host="localhost:8765", Origin="http://boese.example")) is False
+            and JarvisWeb._herkunft_ok(Kopf(Host="localhost:8765", Origin="http://localhost:8765")) is True
+            and JarvisWeb._herkunft_ok(Kopf(Host="localhost:8765")) is True, "Origin gegen Host")
+
+
 def pruefung_zugang(agent):
     abschnitt("Zugänge und Persönliches")
     Einr = wizard_modul.Einrichtung
@@ -1483,6 +1624,7 @@ def main() -> int:
     pruefung_werkzeugvertrag(agent)
     pruefung_telefon(agent)
     pruefung_browser(agent)
+    pruefung_autopilot(agent)
     pruefung_zugang(agent)
     pruefung_lernpfad(agent)
     pruefung_webapp(agent)

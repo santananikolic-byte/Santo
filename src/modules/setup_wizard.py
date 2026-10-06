@@ -473,6 +473,20 @@ class Einrichtung:
         self.sagen("Gemini lasse ich weg. Später: python3 jarvis.py zugang")
         return False
 
+    # -- Autopilot (freiwillig) ---------------------------------------------
+
+    def schritt_autopilot(self):
+        """Fragt, ob Jarvis im Hintergrund selbst arbeiten soll."""
+        self.sagen("Soll ich im Hintergrund von selbst arbeiten? Ich bereite dann "
+                   "Nachfassnachrichten, Antwortentwürfe und Angebote vor und lege "
+                   "sie in ein Postfach. Ich schicke nie etwas ab, ohne dass du Ja sagst.")
+        antwort = self.fragen("Autopilot einschalten? (j/N)").lower()
+        if antwort in ("j", "ja", "y", "yes"):
+            config.env_setzen("AUTOPILOT_AN", "ja")
+            self.ergebnisse["autopilot"] = "an"
+        else:
+            self.ergebnisse["autopilot"] = "aus (später auf der Seite Autopilot)"
+
     # -- Einzelner Zugang nachtragen ---------------------------------------
 
     ZUGAENGE = (
@@ -784,6 +798,7 @@ class Einrichtung:
         self.schritt_person()
         self.schritt_schluessel()
         self.schritt_gemini()
+        self.schritt_autopilot()
         self.schritt_rechte()
         self.schritt_telegram()
         self.schritt_telefon()

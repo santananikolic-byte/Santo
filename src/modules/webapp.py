@@ -32,6 +32,7 @@ from urllib.parse import parse_qs, urlparse
 
 import config
 from modules.memory import zeitstempel
+from modules.autopilot import SEITE_AUTOPILOT
 from modules.lernpfad import SEITE_PFAD, lernpfad_stand
 from modules.webseite import SEITE_HTML
 
@@ -238,6 +239,24 @@ class JarvisWeb:
         kopfschluessel = behandler.headers.get("X-Jarvis-Schluessel", "")
         return secrets.compare_digest(gefragt or kopfschluessel, self.token)
 
+    @staticmethod
+    def _herkunft_ok(behandler) -> bool:
+        """Schreibende Anfragen müssen von dieser Seite selbst kommen.
+
+        Der Browser setzt bei jeder seitenübergreifenden POST-Anfrage den
+        Herkunftskopf. Passt er nicht zum Host, hat eine fremde Webseite den
+        Browser dazu gebracht, hier etwas auszulösen - ohne Schlüssel würde
+        das sonst durchgehen.
+        """
+        herkunft = behandler.headers.get("Origin")
+        if not herkunft:
+            return True
+        host = (behandler.headers.get("Host") or "").lower()
+        try:
+            return urlparse(herkunft).netloc.lower() == host
+        except ValueError:
+            return False
+
     def _behandeln(self, behandler, methode: str):
         """Verteilt eine Anfrage auf die passende Antwort."""
         pfad = urlparse(behandler.path).path.rstrip("/") or "/"
@@ -245,6 +264,9 @@ class JarvisWeb:
             return self._antworten(behandler, 403,
                                    {"fehler": "Kein Zugang. Der Schlüssel fehlt "
                                               "oder stimmt nicht."})
+        if methode == "POST" and not self._herkunft_ok(behandler):
+            return self._antworten(behandler, 403,
+                                   {"fehler": "Anfrage von einer fremden Seite abgelehnt."})
         try:
             if methode == "GET":
                 return self._get(behandler, pfad)
@@ -264,6 +286,11 @@ class JarvisWeb:
                 "{{SCHLUESSEL}}", self.token))
         if pfad == "/api/pfad":
             return self._antworten(behandler, 200, lernpfad_stand(werkzeuge))
+        if pfad == "/autopilot":
+            return self._html(behandler, SEITE_AUTOPILOT.replace(
+                "{{SCHLUESSEL}}", self.token))
+        if pfad == "/api/autopilot":
+            return self._antworten(behandler, 200, werkzeuge.autopilot.zustand())
         if pfad == "/api/lage":
             return self._antworten(behandler, 200,
                                    werkzeuge.team.lagebericht(werkzeuge))
@@ -332,6 +359,25 @@ class JarvisWeb:
             return self._antworten(behandler, 200,
                                    {"ok": True, "antwort": antwort,
                                     "zeit": zeitstempel()})
+
+        if pfad == "/api/autopilot":
+            ap = werkzeuge.autopilot
+            aktion = str(daten.get("aktion") or "")
+            if aktion == "schalten":
+                return self._antworten(behandler, 200, ap.schalten(bool(daten.get("an"))))
+            if aktion == "auftrag":
+                return self._antworten(behandler, 200, ap.auftrag_anlegen(
+                    str(daten.get("titel") or ""), str(daten.get("auftrag") or ""),
+                    str(daten.get("rolle") or ""), daten.get("prioritaet") or 2))
+            if aktion == "gesehen":
+                return self._antworten(behandler, 200, ap.gesehen_setzen(daten.get("id")))
+            if aktion == "jetzt":
+                if ap.gesperrt():
+                    return self._antworten(behandler, 200, {
+                        "ok": False, "fehler": "Gerade nicht möglich: %s." % ap.gesperrt()})
+                threading.Thread(target=ap.tick, daemon=True, name="autopilot-jetzt").start()
+                return self._antworten(behandler, 200, {"ok": True, "text": "Läuft."})
+            return self._antworten(behandler, 400, {"fehler": "Diese Aktion kenne ich nicht."})
 
         if pfad == "/api/freigabe":
             kennung = str(daten.get("id") or "")

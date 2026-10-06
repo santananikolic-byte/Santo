@@ -71,6 +71,28 @@ nur auf diesen Rechner.
 Braucht Safari oder Chrome; Firefox kann keine deutsche Spracherkennung und
 bekommt deshalb keinen Mikrofonknopf, sondern einen Hinweis.
 
+## Autopilot
+
+Jarvis kann auch arbeiten, wenn niemand fragt. Der Autopilot nimmt Aufträge
+aus der Warteschlange ("Schreib im Hintergrund das Angebot für Müller") und
+sucht von selbst nach Arbeit: fälliges Nachfassen, ungelesene Post, fehlende
+Belege, anstehende Termine. Die Fachkräfte aus dem Team bereiten vor und legen
+das Ergebnis ins **Postfach**.
+
+**Er schickt nie etwas ab.** Im Hintergrund hat keine Fachkraft ein Werkzeug,
+das eine Freigabe braucht: keine Mail, kein Anruf, kein Termin, kein Skript.
+Was herauskommt, sind Entwürfe. Ob etwas rausgeht, entscheidest du mit der
+normalen Freigabe.
+
+Er ist **standardmäßig aus** und hat Bremsen: Ruhezeit (`AUTOPILOT_VON`,
+`AUTOPILOT_BIS`), höchstens `AUTOPILOT_MAX_PRO_STUNDE` Aufträge pro Stunde und
+das Monatslimit für Claude (`MONATSLIMIT_EURO`). Jeder Lauf steht im
+Gedankenlog.
+
+- Einschalten und Postfach lesen: Seite **Autopilot** in der Web-App, oder
+  `python3 jarvis.py autopilot an` und `python3 jarvis.py autopilot`.
+- Per Sprache: "Jarvis, erledige im Hintergrund …" und "Was liegt im Postfach?"
+
 ## So redet man mit ihm
 
 > „Hey Jarvis, wie sieht mein Tag aus?“

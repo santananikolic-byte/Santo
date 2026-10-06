@@ -95,6 +95,8 @@ WELTEN = [
           "Ein Limit über null ist gesetzt."),
          ("monitor", "Der Kostenblick", "Du siehst im Cockpit, was das Denken kostet.", False,
           "Es gibt Einträge im Gedankenlog."),
+         ("autopilot", "Der Autopilot", "Er arbeitet im Hintergrund und legt Entwürfe ins Postfach.", False,
+          "Der Autopilot ist eingeschaltet."),
      ]},
 ]
 
@@ -144,6 +146,8 @@ def _erledigt(kennung: str, werkzeuge, dashboard_gebaut: bool, statistik: dict,
         return {"gemini", "claude"} <= gehirne
     if kennung == "limit":
         return config.MONATSLIMIT_EURO > 0
+    if kennung == "autopilot":
+        return bool(config.AUTOPILOT_AN)
     if kennung == "monitor":
         return bool(logzeilen)
     return False
