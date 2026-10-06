@@ -105,12 +105,21 @@ class WebFreigabe:
         return True
 
 
+# Was die Anzeige im Dienst braucht - nur ansehen, nichts auslösen.
+ANZEIGE_PFADE = {"/gehirn", "/zentrale", "/api/gehirn", "/api/zentrale", "/api/status",
+                 "/api/lichter", "/favicon.ico", "/symbol.svg"}
+
+
 class JarvisWeb:
     """Der Webserver. Startet den Agenten im Browser."""
 
     def __init__(self, agent, host: str = "127.0.0.1", port: int = STANDARD_PORT,
-                 offen: bool = False, token: str = ""):
+                 offen: bool = False, token: str = "", nur_anzeige: bool = False):
         self.agent = agent
+        # Im Dienst läuft nur die Anzeige mit. Reden, Werkzeuge, Freigaben und der
+        # Autopilot gehen dort ausschließlich über die Stimme - mit Weckwort und
+        # Stimmprüfung -, nicht über einen offenen Port auf dem Rechner.
+        self.nur_anzeige = bool(nur_anzeige)
         self.offen = bool(offen)
         self.host = "0.0.0.0" if self.offen else (host or "127.0.0.1")
         self.port = int(port or STANDARD_PORT)
@@ -123,7 +132,8 @@ class JarvisWeb:
         self._meldesperre = threading.Lock()
         self.server = None
         self._denkt = threading.Lock()
-        agent.tools.freigabe_kanal_setzen(self.freigabe)
+        if not self.nur_anzeige:
+            agent.tools.freigabe_kanal_setzen(self.freigabe)
 
     def melden(self, text: str):
         """Nimmt eine Meldung des Zeitplans auf.
@@ -268,6 +278,9 @@ class JarvisWeb:
             return self._antworten(behandler, 403,
                                    {"fehler": "Kein Zugang. Der Schlüssel fehlt "
                                               "oder stimmt nicht."})
+        if self.nur_anzeige and (methode != "GET" or pfad not in ANZEIGE_PFADE):
+            return self._antworten(behandler, 404,
+                                   {"fehler": "Hier läuft nur die Anzeige. Sprich mit Jarvis."})
         if methode == "POST" and not self._herkunft_ok(behandler):
             return self._antworten(behandler, 403,
                                    {"fehler": "Anfrage von einer fremden Seite abgelehnt."})

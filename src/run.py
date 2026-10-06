@@ -109,7 +109,7 @@ def dauerbetrieb(dienst: bool = False):
     if dienst and config.DIENST_ANZEIGE:
         # Die Anzeige für die Bildschirme: nur zum Ansehen, nur auf diesem Rechner.
         try:
-            web = JarvisWeb(agent, port=STANDARD_PORT)
+            web = JarvisWeb(agent, port=STANDARD_PORT, nur_anzeige=True)
             web.starten(blockierend=False)
             print("[anzeige] Zentrale:  %s/zentrale\n[anzeige] Gehirn:    %s/gehirn"
                   % (web.adresse().split("?")[0].rstrip("/"), web.adresse().split("?")[0].rstrip("/")))

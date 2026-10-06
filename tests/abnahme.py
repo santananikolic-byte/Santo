@@ -1179,6 +1179,27 @@ def pruefung_anzeige(agent):
     quelle_run = open(os.path.join(WURZEL, "src/run.py"), encoding="utf-8").read()
     anzeige_teil = quelle_run[quelle_run.index("if dienst and config.DIENST_ANZEIGE:"):]
     anzeige_teil = anzeige_teil[:anzeige_teil.index("if dienst:\n")]
+    # Im Dienst läuft nur die Anzeige: ansehen ja, reden, Werkzeuge, Autopilot nein.
+    class Anfrage:
+        def __init__(self, pfad, methode="GET"):
+            self.path, self.headers, self.methode = pfad, {"Host": "127.0.0.1:8765"}, methode
+    gesehen = []
+    echt_kanal = agent.tools.freigabe_kanal
+    nur = JarvisWeb(agent, port=0, nur_anzeige=True)
+    kanal_unveraendert = agent.tools.freigabe_kanal is echt_kanal
+    nur._antworten = lambda b, code, daten: gesehen.append((b.path, code))
+    nur._html = lambda b, html: gesehen.append((b.path, 200))
+    nur._koerper = lambda b: {"text": "schalte den Autopiloten ein", "aktion": "schalten", "an": True}
+    autopilot_vorher = config.AUTOPILOT_AN
+    for pfad, methode in (("/gehirn", "GET"), ("/api/status", "GET"), ("/", "GET"),
+                          ("/api/reden", "POST"), ("/api/werkzeug", "POST"), ("/api/autopilot", "POST"),
+                          ("/api/verlauf", "GET")):
+        nur._behandeln(Anfrage(pfad), methode)
+    codes = dict(gesehen)
+    pruefen("Im Dienst nimmt der Anzeige-Server keine Befehle an",
+            codes.get("/gehirn") == 200 and codes.get("/api/status") == 200
+            and all(codes.get(p) == 404 for p in ("/", "/api/reden", "/api/werkzeug", "/api/autopilot", "/api/verlauf"))
+            and config.AUTOPILOT_AN == autopilot_vorher and kanal_unveraendert, str(codes)[:55])
     pruefen("Startet die Anzeige nicht, bleibt die Freigabe bei der Stimme",
             "finally:" in anzeige_teil and "SprachFreigabe(stimme, profil)" in anzeige_teil.split("finally:")[1], "")
 
