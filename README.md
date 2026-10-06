@@ -275,7 +275,7 @@ MCP-Werkzeug fragen vorher nach — per Telegram, sonst im Terminal.
 **Timeout, Netzwerkfehler oder ausbleibende Antwort gelten als Ablehnung.**
 Nie als Zustimmung. Wer sich nicht meldet, hat nicht zugestimmt.
 
-**Fremder Text ist keine Anweisung.** Mails, SMS, Dateien und Webseiten
+**Fremder Text ist keine Anweisung.** Mails, Dateien und Webseiten
 können Sätze enthalten, die sich an Jarvis richten. Hat er in einem Gespräch
 so etwas gelesen, fragt er danach auch vor jeder Suche im Netz und jeder
 geöffneten Webseite nach — damit nichts unbemerkt hinausgetragen wird. Im
