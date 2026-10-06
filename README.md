@@ -118,6 +118,24 @@ Browser wird Abschnitt für Abschnitt gesprochen, mit der besten deutschen
 Stimme, die der Browser hat. Am natürlichsten klingt ElevenLabs
 (`python3 jarvis.py zugang stimme`).
 
+## Dauerbetrieb auf dem iMac
+
+Jarvis kann als Dienst dauerhaft auf einem iMac laufen: ohne Fenster, nur mit
+Stimme. Er startet bei der Anmeldung, hält den Mac wach, hört zu, antwortet laut,
+arbeitet im Hintergrund weiter und startet nach einem Absturz oder Stillstand neu.
+Freigaben holt er per Stimme ("Soll ich?"). Nur ein klares Ja gilt.
+
+```
+python3 jarvis.py daemon                 # im Vordergrund testen
+python3 jarvis.py dienst installieren    # dauerhaft einrichten
+python3 jarvis.py dienst status
+```
+
+Auf dem Mac kann er Dateien suchen und lesen (Schlüssel, Anmeldungen und `.env`
+sind gesperrt) und mit Freigabe neue Textdateien anlegen. Alles Weitere, auch
+zum Thema eigener Benutzer oder virtuelle Maschine statt eines eigenen
+Betriebssystems, steht in `docs/IMAC.md`.
+
 ## Autopilot
 
 Jarvis kann auch arbeiten, wenn niemand fragt. Der Autopilot nimmt Aufträge

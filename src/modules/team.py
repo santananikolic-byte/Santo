@@ -83,7 +83,7 @@ weil er später niemandem auffällt.
 Du trennst Vorsteuer und Umsatzsteuer sauber. Du weist auf fehlende Belege hin,
 denn genau die fehlen am Jahresende beim Steuerberater. Du führst die
 Buchhaltung vor - die fachliche Prüfung macht der Steuerberater.""",
-        "werkzeuge": ["buchung_eintragen", "beleg_erfassen", "auswertung",
+        "werkzeuge": ["dateien_suchen", "datei_lesen", "buchung_eintragen", "beleg_erfassen", "auswertung",
                       "fehlende_belege", "csv_export", "kennzahl_setzen",
                       "notiz_speichern", "gedaechtnis_durchsuchen"],
     },
@@ -102,7 +102,7 @@ mal Stundensatz ergibt den Preis. Fehlen dir Fläche, Bodenbelag oder Intervall,
 fragst du danach, statt zu kalkulieren.
 
 Du bist ehrlich über Chancen. Ein Angebot ist kein Auftrag.""",
-        "werkzeuge": ["lead_anlegen", "lead_weiterstufen", "angebot_kalkulieren",
+        "werkzeuge": ["dateien_suchen", "datei_lesen", "lead_anlegen", "lead_weiterstufen", "angebot_kalkulieren",
                       "angebot_ablegen", "nachfassliste", "pipeline",
                       "kontakt_anlegen", "kontakt_suchen", "notiz_speichern",
                       "punkt_anlegen", "gedaechtnis_durchsuchen",
@@ -173,7 +173,7 @@ wird die Pipeline gewichtet und nicht voll angesetzt.
 
 Wenn die Zahlen schlecht aussehen, sagst du das zuerst und nennst den größten
 Hebel.""",
-        "werkzeuge": ["auswertung", "cashflow_prognose", "pipeline",
+        "werkzeuge": ["dateien_suchen", "datei_lesen", "auswertung", "cashflow_prognose", "pipeline",
                       "fehlende_belege", "kennzahl_setzen", "dashboard_bauen",
                       "verkaufsmuster", "gedaechtnis_durchsuchen"],
     },
@@ -214,7 +214,7 @@ Auftrag an den Autopiloten, statt es zu beschreiben.
 
 Du kennst die Branche des Betriebs und redest in ihrer Sprache. Fehlen dir
 Zahlen, sagst du welche, statt zu schätzen.""",
-        "werkzeuge": ["lagebericht", "pipeline", "cashflow_prognose", "nachfassliste",
+        "werkzeuge": ["dateien_suchen", "datei_lesen", "lagebericht", "pipeline", "cashflow_prognose", "nachfassliste",
                       "auswertung", "bedarfsrechnung", "punkte_offen", "punkt_anlegen",
                       "autopilot_auftrag", "autopilot_postfach", "notiz_speichern",
                       "gedaechtnis_durchsuchen"],
@@ -233,7 +233,7 @@ Du legst alles im Projektordner ab (projekt_datei_schreiben) und beschreibst in
 zwei Sätzen, was drin ist und wie man es öffnet. Du erfindest keine Referenzen,
 Preise oder Kundenstimmen: Was dir fehlt, schreibst du als offene Frage in den
 Bericht. Du setzt nie Schlüssel oder Passwörter in eine Seite.""",
-        "werkzeuge": ["projekt_datei_schreiben", "projekt_zeigen", "recherche",
+        "werkzeuge": ["dateien_suchen", "datei_lesen", "projekt_datei_schreiben", "projekt_zeigen", "recherche",
                       "notiz_speichern", "gedaechtnis_durchsuchen"],
     },
     "chatbotbauer": {
@@ -269,7 +269,7 @@ Du erfindest keine Zahlen, Auszeichnungen oder Kundenzitate. Lieber ein Platz
 zum Einsetzen, markiert als offen. Alles legst du im Projektordner ab
 (projekt_datei_schreiben), jede Kampagne mit einer Zeile, woran man sieht, ob
 sie funktioniert hat.""",
-        "werkzeuge": ["projekt_datei_schreiben", "projekt_zeigen", "recherche",
+        "werkzeuge": ["dateien_suchen", "datei_lesen", "projekt_datei_schreiben", "projekt_zeigen", "recherche",
                       "pipeline", "notiz_speichern", "gedaechtnis_durchsuchen"],
     },
     "programmierer": {
@@ -283,7 +283,7 @@ ausgeführt wird nur mit ausdrücklicher Freigabe.
 Du schreibst nichts, was Dateien außerhalb der Werkstatt verändert, etwas
 verschickt oder aus dem Netz nachlädt. Brauchst du so etwas, sagst du es,
 statt es zu umgehen.""",
-        "werkzeuge": ["skript_schreiben", "skript_ausfuehren", "skript_zeigen",
+        "werkzeuge": ["dateien_suchen", "datei_lesen", "skript_schreiben", "skript_ausfuehren", "skript_zeigen",
                       "werkstatt_liste", "notiz_speichern"],
     },
 }

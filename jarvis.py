@@ -42,6 +42,7 @@ import json
 import math
 import mimetypes
 import os
+import plistlib
 import queue
 import re
 import secrets
@@ -2774,9 +2775,9 @@ class Kalender:
 
 TELEGRAM_BASIS = "https://api.telegram.org"
 
-JA_WOERTER = {"ja", "j", "ok", "okay", "yes", "y", "passt", "mach", "machen",
+JA_WOERTER_telegram_mod = {"ja", "j", "ok", "okay", "yes", "y", "passt", "mach", "machen",
               "los", "freigabe", "erlaubt", "einverstanden", "jo", "jup", "sicher"}
-NEIN_WOERTER = {"nein", "n", "no", "stop", "stopp", "abbrechen", "abbruch",
+NEIN_WOERTER_telegram_mod = {"nein", "n", "no", "stop", "stopp", "abbrechen", "abbruch",
                 "nicht", "lass", "niemals", "nope"}
 
 
@@ -2966,10 +2967,10 @@ class Telegram:
                 if self.chat_id and chat != str(self.chat_id):
                     continue
                 wort = (nachricht.get("text") or "").strip().lower().strip(".!? ")
-                if wort in JA_WOERTER:
+                if wort in JA_WOERTER_telegram_mod:
                     self.senden("Verstanden, ich mache es.")
                     return {"erlaubt": True, "kanal": "telegram", "grund": "Freigabe erteilt"}
-                if wort in NEIN_WOERTER:
+                if wort in NEIN_WOERTER_telegram_mod:
                     self.senden("Alles klar, ich lasse es.")
                     return {"erlaubt": False, "kanal": "telegram", "grund": "abgelehnt"}
                 if wort:
@@ -2999,7 +3000,7 @@ class Telegram:
             return {"erlaubt": False, "kanal": "terminal",
                     "grund": "keine Antwort innerhalb von %d Sekunden" % timeout}
         eingabe = sys.stdin.readline().strip().lower().strip(".!? ")
-        if eingabe in JA_WOERTER:
+        if eingabe in JA_WOERTER_telegram_mod:
             return {"erlaubt": True, "kanal": "terminal", "grund": "Freigabe erteilt"}
         return {"erlaubt": False, "kanal": "terminal", "grund": "abgelehnt"}
 
@@ -7247,7 +7248,7 @@ weil er später niemandem auffällt.
 Du trennst Vorsteuer und Umsatzsteuer sauber. Du weist auf fehlende Belege hin,
 denn genau die fehlen am Jahresende beim Steuerberater. Du führst die
 Buchhaltung vor - die fachliche Prüfung macht der Steuerberater.""",
-        "werkzeuge": ["buchung_eintragen", "beleg_erfassen", "auswertung",
+        "werkzeuge": ["dateien_suchen", "datei_lesen", "buchung_eintragen", "beleg_erfassen", "auswertung",
                       "fehlende_belege", "csv_export", "kennzahl_setzen",
                       "notiz_speichern", "gedaechtnis_durchsuchen"],
     },
@@ -7266,7 +7267,7 @@ mal Stundensatz ergibt den Preis. Fehlen dir Fläche, Bodenbelag oder Intervall,
 fragst du danach, statt zu kalkulieren.
 
 Du bist ehrlich über Chancen. Ein Angebot ist kein Auftrag.""",
-        "werkzeuge": ["lead_anlegen", "lead_weiterstufen", "angebot_kalkulieren",
+        "werkzeuge": ["dateien_suchen", "datei_lesen", "lead_anlegen", "lead_weiterstufen", "angebot_kalkulieren",
                       "angebot_ablegen", "nachfassliste", "pipeline",
                       "kontakt_anlegen", "kontakt_suchen", "notiz_speichern",
                       "punkt_anlegen", "gedaechtnis_durchsuchen",
@@ -7337,7 +7338,7 @@ wird die Pipeline gewichtet und nicht voll angesetzt.
 
 Wenn die Zahlen schlecht aussehen, sagst du das zuerst und nennst den größten
 Hebel.""",
-        "werkzeuge": ["auswertung", "cashflow_prognose", "pipeline",
+        "werkzeuge": ["dateien_suchen", "datei_lesen", "auswertung", "cashflow_prognose", "pipeline",
                       "fehlende_belege", "kennzahl_setzen", "dashboard_bauen",
                       "verkaufsmuster", "gedaechtnis_durchsuchen"],
     },
@@ -7378,7 +7379,7 @@ Auftrag an den Autopiloten, statt es zu beschreiben.
 
 Du kennst die Branche des Betriebs und redest in ihrer Sprache. Fehlen dir
 Zahlen, sagst du welche, statt zu schätzen.""",
-        "werkzeuge": ["lagebericht", "pipeline", "cashflow_prognose", "nachfassliste",
+        "werkzeuge": ["dateien_suchen", "datei_lesen", "lagebericht", "pipeline", "cashflow_prognose", "nachfassliste",
                       "auswertung", "bedarfsrechnung", "punkte_offen", "punkt_anlegen",
                       "autopilot_auftrag", "autopilot_postfach", "notiz_speichern",
                       "gedaechtnis_durchsuchen"],
@@ -7397,7 +7398,7 @@ Du legst alles im Projektordner ab (projekt_datei_schreiben) und beschreibst in
 zwei Sätzen, was drin ist und wie man es öffnet. Du erfindest keine Referenzen,
 Preise oder Kundenstimmen: Was dir fehlt, schreibst du als offene Frage in den
 Bericht. Du setzt nie Schlüssel oder Passwörter in eine Seite.""",
-        "werkzeuge": ["projekt_datei_schreiben", "projekt_zeigen", "recherche",
+        "werkzeuge": ["dateien_suchen", "datei_lesen", "projekt_datei_schreiben", "projekt_zeigen", "recherche",
                       "notiz_speichern", "gedaechtnis_durchsuchen"],
     },
     "chatbotbauer": {
@@ -7433,7 +7434,7 @@ Du erfindest keine Zahlen, Auszeichnungen oder Kundenzitate. Lieber ein Platz
 zum Einsetzen, markiert als offen. Alles legst du im Projektordner ab
 (projekt_datei_schreiben), jede Kampagne mit einer Zeile, woran man sieht, ob
 sie funktioniert hat.""",
-        "werkzeuge": ["projekt_datei_schreiben", "projekt_zeigen", "recherche",
+        "werkzeuge": ["dateien_suchen", "datei_lesen", "projekt_datei_schreiben", "projekt_zeigen", "recherche",
                       "pipeline", "notiz_speichern", "gedaechtnis_durchsuchen"],
     },
     "programmierer": {
@@ -7447,7 +7448,7 @@ ausgeführt wird nur mit ausdrücklicher Freigabe.
 Du schreibst nichts, was Dateien außerhalb der Werkstatt verändert, etwas
 verschickt oder aus dem Netz nachlädt. Brauchst du so etwas, sagst du es,
 statt es zu umgehen.""",
-        "werkzeuge": ["skript_schreiben", "skript_ausfuehren", "skript_zeigen",
+        "werkzeuge": ["dateien_suchen", "datei_lesen", "skript_schreiben", "skript_ausfuehren", "skript_zeigen",
                       "werkstatt_liste", "notiz_speichern"],
     },
 }
@@ -7682,6 +7683,240 @@ def _euro(betrag) -> str:
         betrag = 0.0
     return ("{:,.2f}".format(betrag).replace(",", "#").replace(".", ",")
             .replace("#", ".")) + " €"
+
+
+# =========================================================================
+# mac  -  Der Mac als Kopf - suchen, lesen und ablegen auf dem ganzen Rechner.
+# 
+# Jarvis soll an alles herankommen, womit der Betrieb arbeitet: Angebote in
+# Ordnern, Tabellen, Verträge, Notizen. Dafür drei Werkzeuge:
+# 
+# * **suchen** (Spotlight) - lesend, ohne Freigabe
+# * **lesen** - lesend, ohne Freigabe, nur Textdateien
+# * **schreiben** - mit Freigabe, nur im eigenen Benutzerordner, nie über
+#   vorhandenes, nie in Startobjekte oder in Jarvis' eigenen Programmordner
+# 
+# Gesperrt bleibt, was Zugang zu anderen Dingen gibt: Schlüsselbund, SSH- und
+# Cloud-Schlüssel, Browser-Profile (Anmeldungen), Passwortdateien, ``.env``.
+# Das ist keine Misstrauenserklärung an den Nutzer, sondern an den Text, der in
+# einer Datei oder Mail stehen kann: Wer Jarvis über eine Datei etwas
+# einflüstern will, soll keine Schlüssel abgreifen können. Die Sperrliste
+# wirkt auch über Verknüpfungen hinweg, weil der echte Pfad geprüft wird.
+# =========================================================================
+
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+
+
+MAX_LESEN = 20000
+MAX_DATEIGROESSE = 8 * 1024 * 1024
+MAX_SCHREIBEN = 200000
+MAX_TREFFER = 25
+
+# Teile des (kleingeschriebenen) echten Pfades, die nie gelesen werden.
+GESPERRT_TEILE = (
+    "/.ssh/", "/.gnupg/", "/.aws/", "/.kube/", "/.docker/", "/.config/gh/",
+    "/.netrc", "/.npmrc", "/.pypirc", "/.git-credentials", "/.gitconfig-credentials",
+    "/library/keychains", "/library/cookies", "/library/safari",
+    "/library/application support/google/chrome",
+    "/library/application support/firefox",
+    "/library/application support/microsoft edge",
+    "/library/application support/com.apple.sharedfilelist",
+    "/library/containers/com.apple.safari",
+    "/library/group containers/group.com.apple.notes",  # Notizen laufen über eigene Wege
+    "/id_rsa", "/id_ed25519", "/id_ecdsa", "/id_dsa",
+)
+GESPERRT_ENDUNGEN = (".pem", ".key", ".p12", ".pfx", ".keychain", ".keychain-db",
+                     ".kdbx", ".ovpn", ".env")
+GESPERRT_NAMEN = (".env", "mcp_servers.json")
+
+# Hier wird nie geschrieben (relativ zum Benutzerordner, kleingeschrieben).
+SCHREIBEN_GESPERRT = (
+    "library/launchagents", "library/launchdaemons", "library/preferences",
+    ".zshrc", ".zprofile", ".zshenv", ".bashrc", ".bash_profile", ".profile",
+    ".ssh", ".gnupg", ".aws", ".config", "library/keychains", "library/application support",
+)
+
+
+class MacZugriff:
+    """Lesender und schreibender Zugriff mit Sperrliste."""
+
+    def __init__(self, benutzerordner=None, programmordner=None):
+        self.home = Path(benutzerordner or Path.home()).resolve()
+        self.programm = Path(programmordner or BASIS).resolve()
+
+    # -- Prüfung ------------------------------------------------------------
+
+    def _aufloesen(self, pfad: str):
+        roh = os.path.expanduser(str(pfad or "").strip())
+        if not roh:
+            return None
+        if not os.path.isabs(roh):
+            roh = str(self.home / roh)
+        try:
+            return Path(roh).resolve()
+        except (OSError, RuntimeError):
+            return None
+
+    def gesperrt(self, ziel: Path) -> str:
+        """Warum ein Pfad nicht gelesen wird - leer, wenn er erlaubt ist."""
+        text = str(ziel).lower() + ("/" if ziel.is_dir() else "")
+        if "/" + ziel.name.lower() in text and ziel.name.lower() in GESPERRT_NAMEN:
+            return "Diese Datei enthält Zugangsdaten."
+        for teil in GESPERRT_TEILE:
+            if teil in text or text.endswith(teil):
+                return "Dieser Bereich enthält Schlüssel oder Anmeldungen und bleibt gesperrt."
+        if ziel.suffix.lower() in GESPERRT_ENDUNGEN:
+            return "Dateien dieser Art enthalten Schlüssel oder Passwörter und bleiben gesperrt."
+        try:
+            ziel.relative_to(self.programm / "config")
+            return "Die Konfiguration von Jarvis enthält Schlüssel und bleibt gesperrt."
+        except ValueError:
+            pass
+        return ""
+
+    # -- Lesen --------------------------------------------------------------
+
+    def lesen(self, pfad: str) -> dict:
+        ziel = self._aufloesen(pfad)
+        if ziel is None:
+            return {"ok": False, "fehler": "Sag mir, welche Datei."}
+        grund = self.gesperrt(ziel)
+        if grund:
+            return {"ok": False, "fehler": grund}
+        if not ziel.is_file():
+            return {"ok": False, "fehler": "Die Datei '%s' gibt es nicht." % pfad}
+        try:
+            groesse = ziel.stat().st_size
+            if groesse > MAX_DATEIGROESSE:
+                return {"ok": False, "fehler": "Die Datei ist mit %d Megabyte zu groß zum Lesen."
+                                               % (groesse // (1024 * 1024))}
+            with open(ziel, "rb") as datei:
+                roh = datei.read(MAX_LESEN * 4)
+        except OSError as fehler:
+            return {"ok": False, "fehler": "Nicht lesbar: %s" % fehler}
+        if b"\x00" in roh[:4000]:
+            return {"ok": False, "fehler": "Das ist keine Textdatei (%s). Ich lese nur Text."
+                                           % (ziel.suffix or "ohne Endung")}
+        text = roh.decode("utf-8", errors="replace")
+        return {"ok": True, "pfad": str(ziel), "inhalt": text[:MAX_LESEN],
+                "gekuerzt": len(text) > MAX_LESEN or groesse > len(roh), "groesse": groesse}
+
+    # -- Suchen -------------------------------------------------------------
+
+    def suchen(self, begriff: str, ordner: str = "", im_inhalt: bool = False) -> dict:
+        begriff = (begriff or "").strip()
+        if len(begriff) < 2:
+            return {"ok": False, "fehler": "Nach was soll ich suchen?"}
+        wurzel = self._aufloesen(ordner) if ordner else self.home
+        if wurzel is None or not wurzel.is_dir():
+            return {"ok": False, "fehler": "Den Ordner '%s' gibt es nicht." % ordner}
+        pfade = []
+        if shutil.which("mdfind"):
+            befehl = ["mdfind", "-onlyin", str(wurzel)]
+            befehl += [begriff] if im_inhalt else ["-name", begriff]
+            try:
+                ausgabe = subprocess.run(befehl, capture_output=True, text=True, timeout=25,
+                                         shell=False).stdout
+                pfade = [z for z in ausgabe.splitlines() if z.strip()]
+            except (OSError, subprocess.SubprocessError):
+                pfade = []
+        else:
+            pfade = self._durchsuchen(wurzel, begriff.lower(), im_inhalt)
+        treffer = []
+        for roh in pfade:
+            ziel = self._aufloesen(roh)
+            if ziel is None or self.gesperrt(ziel):
+                continue
+            if wurzel in ziel.parents and any(
+                    t.startswith(".") for t in ziel.relative_to(wurzel).parts):
+                continue
+            try:
+                info = ziel.stat()
+            except OSError:
+                continue
+            treffer.append({"pfad": str(ziel), "ordner": ziel.is_dir(),
+                            "groesse": info.st_size, "geaendert": int(info.st_mtime)})
+            if len(treffer) >= MAX_TREFFER:
+                break
+        text = ("%d Treffer, zum Beispiel %s." % (len(treffer), treffer[0]["pfad"])
+                if treffer else "Dazu habe ich nichts gefunden.")
+        return {"ok": True, "treffer": treffer, "text": text}
+
+    def _durchsuchen(self, wurzel: Path, begriff: str, im_inhalt: bool) -> list:
+        """Notlösung ohne Spotlight: begrenzt und ohne versteckte Ordner."""
+        gefunden, besucht = [], 0
+        for ordner, unterordner, dateien in os.walk(wurzel):
+            unterordner[:] = [u for u in unterordner if not u.startswith(".")]
+            for name in dateien + unterordner:
+                besucht += 1
+                if besucht > 20000:
+                    return gefunden
+                voll = os.path.join(ordner, name)
+                if begriff in name.lower():
+                    gefunden.append(voll)
+                elif im_inhalt and name in dateien:
+                    try:
+                        if os.path.getsize(voll) < 200000 and begriff in open(
+                                voll, "rb").read().decode("utf-8", "ignore").lower():
+                            gefunden.append(voll)
+                    except OSError:
+                        pass
+                if len(gefunden) >= MAX_TREFFER * 3:
+                    return gefunden
+        return gefunden
+
+    # -- Schreiben ----------------------------------------------------------
+
+    def schreiben_pruefen(self, pfad: str, ueberschreiben: bool = False) -> dict:
+        """Prüft, ob dort geschrieben werden dürfte - ohne etwas zu tun."""
+        ziel = self._aufloesen(pfad)
+        if ziel is None:
+            return {"ok": False, "fehler": "Sag mir, wohin."}
+        if self.home not in ziel.parents:
+            return {"ok": False, "fehler": "Geschrieben wird nur im Benutzerordner."}
+        relativ = str(ziel.relative_to(self.home)).lower()
+        for teil in SCHREIBEN_GESPERRT:
+            if relativ == teil or relativ.startswith(teil + "/"):
+                return {"ok": False, "fehler": "In diesen Bereich schreibe ich nicht: "
+                                               "Dort liegen Startobjekte, Schlüssel oder Einstellungen."}
+        if self.gesperrt(ziel):
+            return {"ok": False, "fehler": self.gesperrt(ziel)}
+        for geschuetzt in ("src", "config", "tests"):
+            try:
+                ziel.relative_to(self.programm / geschuetzt)
+                return {"ok": False, "fehler": "Jarvis ändert sein eigenes Programm nicht."}
+            except ValueError:
+                pass
+        if ziel == self.programm / "jarvis.py":
+            return {"ok": False, "fehler": "Jarvis ändert sein eigenes Programm nicht."}
+        if ziel.exists() and not ueberschreiben:
+            return {"ok": False, "fehler": "Die Datei gibt es schon. Soll sie ersetzt werden, "
+                                           "sag das ausdrücklich."}
+        if ziel.is_dir():
+            return {"ok": False, "fehler": "Das ist ein Ordner."}
+        if not ziel.parent.is_dir():
+            return {"ok": False, "fehler": "Der Ordner %s gibt es nicht. Ich lege keine neuen an."
+                                           % ziel.parent}
+        return {"ok": True, "ziel": ziel}
+
+    def schreiben(self, pfad: str, inhalt: str, ueberschreiben: bool = False) -> dict:
+        inhalt = inhalt if inhalt is not None else ""
+        if not str(inhalt).strip():
+            return {"ok": False, "fehler": "Der Inhalt ist leer."}
+        if len(inhalt) > MAX_SCHREIBEN:
+            return {"ok": False, "fehler": "Der Text ist zu lang."}
+        pruefung = self.schreiben_pruefen(pfad, ueberschreiben)
+        if not pruefung["ok"]:
+            return pruefung
+        ziel = pruefung["ziel"]
+        try:
+            ziel.write_text(inhalt, encoding="utf-8")
+        except OSError as fehler:
+            return {"ok": False, "fehler": "Nicht schreibbar: %s" % fehler}
+        return {"ok": True, "pfad": str(ziel), "zeichen": len(inhalt),
+                "text": "Gespeichert: %s." % ziel}
 
 
 # =========================================================================
@@ -8205,6 +8440,402 @@ $("#anlegen").addEventListener("click",async()=>{const titel=$("#titel").value.t
  if(r.ok){$("#titel").value="";$("#auftrag").value=""}lade()});
 lade();setInterval(()=>{if(!document.hidden)lade()},20000);
 </script></body></html>
+"""
+
+
+# =========================================================================
+# dienst  -  Der Dienst - Jarvis läuft dauerhaft auf dem iMac, nur mit Stimme.
+# 
+# Das ist der Gegenentwurf zur Oberfläche: kein Fenster, kein Textfeld. Der
+# iMac ist der Kopf. Er startet beim Anmelden von selbst, bleibt wach, hört
+# zu, antwortet laut, arbeitet im Hintergrund weiter (Zeitplan, Autopilot) und
+# startet sich selbst neu, wenn er abstürzt oder hängt.
+# 
+# Drei Dinge machen das aus:
+# 
+# * **Der Dienst bei macOS** (``launchd``): ein Anmeldeobjekt, das Jarvis
+#   startet, wach hält (``caffeinate``) und nach einem Absturz neu startet. Nach
+#   einem gewollten Beenden ("Jarvis, schalte dich ab") bleibt er aus.
+# * **Freigaben per Stimme**: Ohne Fenster kann niemand auf "Ja" klicken. Jarvis
+#   sagt, was er tun will, und hört auf Ja oder Nein. Keine klare Antwort ist ein
+#   Nein, genau wie überall.
+# * **Der Ansager**: Meldungen von Zeitplan und Autopilot werden gesagt, wenn
+#   gerade nicht gesprochen wird - und die des Autopiloten nicht nachts.
+# 
+# Ein eigenes Betriebssystem schreibt Jarvis nicht, und das wäre auch das
+# falsche Mittel. Wer die Trennung will, legt am iMac einen eigenen Benutzer für
+# Jarvis an: eigener Ordner, eigener Schlüsselbund, eigene Rechte. Siehe
+# ``docs/IMAC.md``.
+# =========================================================================
+
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+
+
+LABEL = "at.jarvis.imac"
+HERZSCHLAG_GRENZE = 1800  # Sekunden ohne Lebenszeichen, dann Neustart
+
+# Bewusst knapp: Wörter wie "bitte" (kann "Wie bitte?" heißen) oder "genau" zählen nicht als Ja.
+JA_WOERTER_dienst = {"ja", "jo", "jawohl", "jep", "klar", "okay", "ok", "gerne", "gern",
+              "einverstanden", "freigegeben", "genehmigt", "mach", "machs"}
+NEIN_WOERTER_dienst = {"nein", "nee", "nö", "noe", "nicht", "stopp", "stop", "abbrechen",
+                "lass", "lassen", "kein", "keine", "niemals", "nie", "halt", "warte",
+                "falsch", "doch-nicht", "bloß", "bloss", "moment"}
+
+
+def ja_nein(text: str):
+    """``True`` für ein klares Ja, ``False`` für Nein oder Zweifel, ``None`` für nichts Verwertbares.
+
+    Sicherheit vor Bequemlichkeit: Steht in der Antwort irgendein Nein-Wort,
+    ist es ein Nein, auch wenn "ja" davor steht ("ja, aber nicht jetzt").
+    """
+    woerter = re.findall(r"[a-zäöüß]+", (text or "").lower())
+    if not woerter:
+        return None
+    if any(w in NEIN_WOERTER_dienst for w in woerter):
+        return False
+    if any(w in JA_WOERTER_dienst for w in woerter):
+        return True
+    return None
+
+
+def freigabe_ansage(aktion: str, details: str = "") -> str:
+    """Was Jarvis vor einer Freigabe laut sagt. Nie der ganze Code, immer der Kern."""
+    daten = None
+    try:
+        daten = json.loads(details) if details and details.lstrip().startswith("{") else None
+    except ValueError:
+        daten = None
+    d = daten if isinstance(daten, dict) else {}
+
+    if aktion == "mail_senden":
+        return "Ich soll eine Mail an %s schicken, Betreff: %s." % (
+            d.get("an", "jemanden"), d.get("betreff", "ohne Betreff"))
+    if aktion == "termin_anlegen":
+        return "Ich soll einen Termin anlegen: %s." % (d.get("titel") or d.get("betreff") or "ohne Titel")
+    if aktion in ("anrufen", "sms_senden"):
+        wer = d.get("name") or d.get("nummer") or "jemanden"
+        if aktion == "anrufen":
+            return "Ich soll %s anrufen." % wer
+        return "Ich soll %s eine SMS schicken." % wer
+    if aktion == "nachricht_senden":
+        return "Ich soll eine Nachricht schicken."
+    if aktion == "datei_schreiben":
+        return "Ich soll die Datei %s anlegen." % (d.get("pfad", "an einem Ort"))
+    if aktion == "skript_ausfuehren":
+        # Der Kopf der Freigabefrage: "Skript x ausführen. Es will ins Netz." - der Code bleibt weg.
+        kopf = (details or "").split("\n\n")[0].strip()
+        return "%s Den Code kann ich dir nicht vorlesen, schau ihn dir in der Werkstatt an." % kopf
+    if aktion == "bildschirm_bedienen":
+        return "Ich soll den Bildschirm bedienen."
+    if aktion in ("browser_auftrag", "browser_schritt"):
+        return "Im Browser: %s" % (details or "ich soll etwas ausführen.")[:200]
+    if aktion == "autopilot_schalten":
+        return "Ich soll den Autopiloten %s." % ("einschalten" if d.get("an") else "ausschalten")
+    return "Ich soll %s ausführen." % aktion.replace("_", " ")
+
+
+class SprachFreigabe:
+    """Freigaben ohne Fenster: Jarvis fragt laut, der Nutzer antwortet laut."""
+
+    def __init__(self, stimme, profil=None, versuche: int = 2):
+        self.stimme = stimme
+        self.profil = profil
+        self.versuche = versuche
+        self.protokoll = []
+
+    def _antwort_hoeren(self) -> str:
+        pfad = self.stimme.aufnehmen_bis_pause(still_signal=False)
+        if not pfad:
+            return ""
+        try:
+            if self.profil is not None:
+                pruefung = self.profil.ist_der_nutzer(pfad)
+                if not pruefung.get("erkannt"):
+                    return ""  # Eine fremde Stimme gibt nichts frei.
+            return self.stimme.transkribieren(pfad)
+        finally:
+            try:
+                os.remove(pfad)
+            except OSError:
+                pass
+
+    def anfordern(self, aktion: str, details: str = "") -> dict:
+        """Gleiche Schnittstelle wie Telegram und Browser: ``{"erlaubt": bool, "grund": str}``."""
+        frage = freigabe_ansage(aktion, details) + " Soll ich? Sag ja oder nein."
+        for versuch in range(max(1, self.versuche)):
+            self.stimme.sprich(frage if versuch == 0 else "Das war nicht klar. Ja oder nein?")
+            antwort = self._antwort_hoeren()
+            urteil = ja_nein(antwort)
+            if urteil is True:
+                self.protokoll.append((aktion, True))
+                return {"erlaubt": True, "grund": "Per Sprache freigegeben."}
+            if urteil is False:
+                self.protokoll.append((aktion, False))
+                self.stimme.sprich("Gut, ich lasse es.")
+                return {"erlaubt": False, "grund": "Per Sprache abgelehnt."}
+        self.protokoll.append((aktion, False))
+        self.stimme.sprich("Ich habe keine klare Antwort. Ich lasse es.")
+        return {"erlaubt": False, "grund": "Keine klare Antwort - nichts ausgeführt."}
+
+
+class Ansager:
+    """Sammelt Meldungen und sagt sie, wenn gerade nicht gesprochen wird.
+
+    Meldungen vom Autopiloten sind ``leise``: Nachts und außerhalb der
+    Arbeitszeit bleiben sie liegen und kommen am nächsten Morgen. Ein
+    Briefing um 6:45 dagegen wurde ausdrücklich bestellt und kommt sofort.
+    """
+
+    def __init__(self, stimme):
+        self.stimme = stimme
+        self._offen = []
+        self._sperre = threading.Lock()
+
+    def sagen(self, text: str):
+        """Meldung, die sofort dran ist (beim nächsten ruhigen Moment)."""
+        if text and str(text).strip():
+            with self._sperre:
+                self._offen.append((str(text).strip(), False))
+
+    def leise(self, text: str):
+        """Meldung, die nur zur Arbeitszeit gesagt wird."""
+        if text and str(text).strip():
+            with self._sperre:
+                self._offen.append((str(text).strip(), True))
+
+    def ausliefern(self, jetzt: datetime = None) -> int:
+        """Sagt, was dran ist. Gibt die Zahl gesprochener Meldungen zurück."""
+        jetzt = jetzt or datetime.now()
+        with self._sperre:
+            bereit = [m for m in self._offen if not (m[1] and in_ruhezeit(jetzt))]
+            self._offen = [m for m in self._offen if m not in bereit]
+        for text, _ in bereit:
+            self.stimme.sprich(text)
+        return len(bereit)
+
+    def wartend(self) -> int:
+        with self._sperre:
+            return len(self._offen)
+
+
+# -- Herzschlag --------------------------------------------------------------------
+
+def herzschlag_abgelaufen(letzter: float, jetzt: float, grenze: int = HERZSCHLAG_GRENZE) -> bool:
+    """Hat sich die Hauptschleife zu lange nicht gemeldet?"""
+    return (jetzt - letzter) > grenze
+
+
+class Herzschlag:
+    """Schreibt Lebenszeichen und beendet den Prozess, wenn er hängt.
+
+    ``launchd`` startet einen beendeten Prozess neu. Ein hängender (zum
+    Beispiel in der Tonbibliothek) wäre dagegen für immer still.
+    """
+
+    def __init__(self, datei=None, grenze: int = HERZSCHLAG_GRENZE, beenden=None):
+        self.datei = Path(datei or (LOG_VERZEICHNIS / "herzschlag"))
+        self.grenze = grenze
+        self.letzter = time.time()
+        self._beenden = beenden or (lambda: os._exit(3))
+        self._laeuft = False
+
+    def schlagen(self):
+        self.letzter = time.time()
+        try:
+            self.datei.parent.mkdir(parents=True, exist_ok=True)
+            self.datei.write_text(str(int(self.letzter)), encoding="utf-8")
+        except OSError:
+            pass
+
+    def pruefen(self, jetzt: float = None) -> bool:
+        """Beendet bei Stillstand. Gibt ``True`` zurück, wenn es beendet hat."""
+        if herzschlag_abgelaufen(self.letzter, jetzt if jetzt is not None else time.time(), self.grenze):
+            print("[dienst] Kein Lebenszeichen seit %d Sekunden - ich starte neu." % self.grenze)
+            self._beenden()
+            return True
+        return False
+
+    def _wache(self):
+        while self._laeuft:
+            time.sleep(30)
+            if self._laeuft and self.pruefen():
+                return
+
+    def start(self):
+        self._laeuft = True
+        self.schlagen()
+        threading.Thread(target=self._wache, daemon=True, name="jarvis-herzschlag").start()
+
+    def stop(self):
+        self._laeuft = False
+
+
+def logdatei_drehen(pfad, grenze: int = 5 * 1024 * 1024) -> bool:
+    """Eine zu große Logdatei beiseitelegen, damit der Rechner nicht vollläuft."""
+    pfad = Path(pfad)
+    try:
+        if pfad.exists() and pfad.stat().st_size > grenze:
+            ziel = pfad.with_suffix(pfad.suffix + ".1")
+            if ziel.exists():
+                ziel.unlink()
+            pfad.rename(ziel)
+            return True
+    except OSError:
+        pass
+    return False
+
+
+# -- Anmeldeobjekt (macOS) --------------------------------------------------------------
+
+def plist_pfad() -> Path:
+    return Path.home() / "Library" / "LaunchAgents" / (LABEL + ".plist")
+
+
+def programm_skript() -> Path:
+    """Die Datei, die den Dienst startet: die Einzeldatei, sonst ``src/run.py``."""
+    einzel = BASIS / "jarvis.py"
+    return einzel if einzel.exists() else BASIS / "src" / "run.py"
+
+
+def plist_bauen(python: str = "", skript=None, arbeitsordner=None, logordner=None) -> dict:
+    """Der Inhalt des Anmeldeobjekts als Wörterbuch."""
+    python = python or sys.executable
+    skript = Path(skript or programm_skript())
+    arbeitsordner = Path(arbeitsordner or BASIS)
+    logordner = Path(logordner or LOG_VERZEICHNIS)
+    if skript.name == "run.py":
+        # Ohne Einzeldatei (Entwicklung): das Programm aus src/ direkt aufrufen.
+        start = [python, "-c", "import sys; sys.path.insert(0, %r); import run; "
+                 "sys.exit(run.hauptprogramm(['daemon']))" % str(skript.parent)]
+    else:
+        start = [python, str(skript), "daemon"]
+    # Wach bleiben, solange Jarvis läuft (der Bildschirm darf trotzdem ausgehen).
+    if Path("/usr/bin/caffeinate").exists():
+        start = ["/usr/bin/caffeinate", "-i"] + start
+    return {
+        "Label": LABEL,
+        "ProgramArguments": start,
+        "WorkingDirectory": str(arbeitsordner),
+        "RunAtLoad": True,
+        # Neustart nach Absturz, nicht nach gewolltem Beenden (Exit-Code 0).
+        "KeepAlive": {"SuccessfulExit": False},
+        "ThrottleInterval": 10,
+        "ProcessType": "Interactive",
+        "LimitLoadToSessionType": "Aqua",
+        "StandardOutPath": str(logordner / "dienst.log"),
+        "StandardErrorPath": str(logordner / "dienst.log"),
+        "EnvironmentVariables": {
+            "PATH": "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin",
+            "PYTHONUNBUFFERED": "1",
+        },
+    }
+
+
+def _launchctl(*argumente) -> subprocess.CompletedProcess:
+    return subprocess.run(["launchctl"] + list(argumente), capture_output=True, text=True,
+                          timeout=30, shell=False)
+
+
+def _ist_mac() -> bool:
+    return sys.platform == "darwin" and shutil.which("launchctl") is not None
+
+
+def installieren(trocken: bool = False) -> dict:
+    """Legt das Anmeldeobjekt an und startet es. ``trocken`` zeigt nur, was passieren würde."""
+    inhalt = plist_bauen()
+    ziel = plist_pfad()
+    befehle = [["launchctl", "bootout", "gui/%d/%s" % (os.getuid(), LABEL)],
+               ["launchctl", "bootstrap", "gui/%d" % os.getuid(), str(ziel)]]
+    if trocken:
+        return {"ok": True, "trocken": True, "plist": inhalt, "ziel": str(ziel), "befehle": befehle,
+                "text": "Trockenlauf: %s würde angelegt und gestartet." % ziel}
+    if not _ist_mac():
+        return {"ok": False, "fehler": "Den Dienst gibt es nur auf dem Mac. Hier läuft er nicht."}
+    try:
+        Path(inhalt["StandardOutPath"]).parent.mkdir(parents=True, exist_ok=True)
+        ziel.parent.mkdir(parents=True, exist_ok=True)
+        with open(ziel, "wb") as datei:
+            plistlib.dump(inhalt, datei)
+        os.chmod(str(ziel), 0o644)
+        _launchctl("bootout", "gui/%d/%s" % (os.getuid(), LABEL))  # war vielleicht schon geladen
+        ergebnis = _launchctl("bootstrap", "gui/%d" % os.getuid(), str(ziel))
+    except (OSError, subprocess.SubprocessError) as fehler:
+        return {"ok": False, "fehler": "Der Dienst ließ sich nicht einrichten: %s" % fehler}
+    if ergebnis.returncode != 0:
+        return {"ok": False, "fehler": "launchctl meldet: %s" % (ergebnis.stderr or ergebnis.stdout).strip()[:300]}
+    return {"ok": True, "ziel": str(ziel),
+            "text": "Der Dienst ist eingerichtet. Jarvis startet jetzt bei jeder Anmeldung von selbst "
+                    "und startet sich nach einem Absturz neu."}
+
+
+def entfernen(trocken: bool = False) -> dict:
+    ziel = plist_pfad()
+    if trocken:
+        return {"ok": True, "trocken": True, "ziel": str(ziel),
+                "text": "Trockenlauf: %s würde entfernt." % ziel}
+    if not _ist_mac():
+        return {"ok": False, "fehler": "Den Dienst gibt es nur auf dem Mac."}
+    try:
+        _launchctl("bootout", "gui/%d/%s" % (os.getuid(), LABEL))
+        if ziel.exists():
+            ziel.unlink()
+    except (OSError, subprocess.SubprocessError) as fehler:
+        return {"ok": False, "fehler": "Entfernen fehlgeschlagen: %s" % fehler}
+    return {"ok": True, "text": "Der Dienst ist entfernt. Jarvis startet nicht mehr von selbst."}
+
+
+def neustarten() -> dict:
+    if not _ist_mac():
+        return {"ok": False, "fehler": "Den Dienst gibt es nur auf dem Mac."}
+    try:
+        ergebnis = _launchctl("kickstart", "-k", "gui/%d/%s" % (os.getuid(), LABEL))
+    except (OSError, subprocess.SubprocessError) as fehler:
+        return {"ok": False, "fehler": str(fehler)}
+    return {"ok": ergebnis.returncode == 0,
+            "text": "Neu gestartet." if ergebnis.returncode == 0
+            else "Neustart fehlgeschlagen: %s" % ergebnis.stderr.strip()[:200]}
+
+
+def dienst_status() -> dict:
+    """Ist der Dienst eingerichtet, läuft er, und wann hat er sich zuletzt gemeldet?"""
+    angelegt = plist_pfad().exists()
+    laeuft = False
+    if _ist_mac() and angelegt:
+        try:
+            laeuft = _launchctl("print", "gui/%d/%s" % (os.getuid(), LABEL)).returncode == 0
+        except (OSError, subprocess.SubprocessError):
+            laeuft = False
+    alter = None
+    try:
+        alter = int(time.time() - int((LOG_VERZEICHNIS / "herzschlag").read_text().strip()))
+    except (OSError, ValueError):
+        pass
+    if not angelegt:
+        text = "Der Dienst ist nicht eingerichtet. Einrichten mit: python3 jarvis.py dienst installieren"
+    elif not laeuft:
+        text = "Der Dienst ist eingerichtet, läuft aber gerade nicht."
+    elif alter is not None:
+        text = "Der Dienst läuft. Letztes Lebenszeichen vor %d Sekunden." % alter
+    else:
+        text = "Der Dienst läuft."
+    return {"ok": True, "eingerichtet": angelegt, "laeuft": laeuft, "herzschlag_alter": alter, "text": text}
+
+
+HINWEISE = """So bleibt der iMac wach und Jarvis sein Kopf:
+
+1. Systemeinstellungen, Energie: "Ruhezustand bei ausgeschaltetem Display verhindern" einschalten und
+   "Nach einem Stromausfall automatisch starten".
+2. Systemeinstellungen, Benutzer: automatische Anmeldung für den Benutzer, unter dem Jarvis läuft.
+   (Bei eingeschalteter FileVault-Verschlüsselung geht das nicht. Dann muss nach einem Neustart
+   einmal jemand das Passwort eingeben.)
+3. Einmal im Terminal "python3 jarvis.py daemon" starten und die Fragen von macOS bestätigen:
+   Mikrofon, Bedienungshilfen, Bildschirmaufnahme und, wenn Jarvis überall lesen soll,
+   Festplattenvollzugriff. Das kann kein Programm für dich tun, das muss ein Mensch bestätigen.
+4. Danach "python3 jarvis.py dienst installieren". Ab jetzt läuft er von selbst.
+
+Für die Trennung vom privaten Mac: einen eigenen Benutzer für Jarvis anlegen (siehe docs/IMAC.md).
 """
 
 
@@ -11920,7 +12551,8 @@ PARAMETER_AKTIONEN = {
 # Alles hier drin fragt vor der Ausführung nach einer Freigabe.
 FREIGABE_PFLICHTIG = {"mail_senden", "termin_anlegen", "bildschirm_bedienen",
                       "nachricht_senden", "skript_ausfuehren", "anrufen",
-                      "sms_senden", "browser_auftrag", "autopilot_schalten"}
+                      "sms_senden", "browser_auftrag", "autopilot_schalten",
+                      "datei_schreiben"}
 
 
 def parameter_pruefen(wert: str):
@@ -11968,6 +12600,7 @@ class Werkzeuge:
                                    routines=self.routines, mcp=self.mcp,
                                    akquise=self.akquise, team=self.team,
                                    privat=self.privat)
+        self.mac = MacZugriff()
         self.autopilot = Autopilot(self)
         self.stimme = None
         # Ein anderer Weg, Freigaben einzuholen - die Web-App setzt sich hier ein.
@@ -12211,6 +12844,19 @@ class Werkzeuge:
                      "Ohne Angaben: alle Projekte. Mit projekt: dessen Dateien. "
                      "Zusätzlich mit datei: der Inhalt.",
                      {"projekt": text, "datei": text}),
+            werkzeug("dateien_suchen",
+                     "Sucht auf dem ganzen Mac nach Dateien (Spotlight), nach Namen "
+                     "oder mit im_inhalt auch im Text. Nur lesend.",
+                     {"begriff": text, "ordner": text, "im_inhalt": wahr}, ["begriff"]),
+            werkzeug("datei_lesen",
+                     "Liest eine Textdatei irgendwo auf dem Mac. Schlüssel, "
+                     "Anmeldungen und Passwörter sind gesperrt.",
+                     {"pfad": text}, ["pfad"]),
+            werkzeug("datei_schreiben",
+                     "Legt eine neue Textdatei im Benutzerordner an. Fragt vorher "
+                     "um Freigabe. Ersetzt nichts, außer ueberschreiben ist gesetzt.",
+                     {"pfad": text, "inhalt": text, "ueberschreiben": wahr},
+                     ["pfad", "inhalt"]),
             werkzeug("skript_zeigen", "Zeigt den Code eines abgelegten Skripts.",
                      {"name": text}, ["name"]),
             werkzeug("skript_ausfuehren",
@@ -12356,6 +13002,14 @@ class Werkzeuge:
             self.memory.aktion_protokollieren(name, argumente, ergebnis["fehler"],
                                               "unbekannt")
             return ergebnis
+
+        # Was ohnehin nicht geht, wird gar nicht erst zur Freigabe vorgelegt.
+        if name == "datei_schreiben":
+            vorab = self.mac.schreiben_pruefen(argumente.get("pfad"),
+                                               bool(argumente.get("ueberschreiben")))
+            if not vorab["ok"]:
+                self.memory.aktion_protokollieren(name, argumente, vorab["fehler"], "abgelehnt")
+                return vorab
 
         if self.braucht_freigabe(name):
             entscheidung = self._freigabe(name, argumente)
@@ -12576,6 +13230,17 @@ class Werkzeuge:
                 a.get("projekt"), a.get("datei"), a.get("inhalt"), a.get("zweck", ""))
         if name == "projekt_zeigen":
             return self.werkstatt.projekt_zeigen(a.get("projekt", ""), a.get("datei", ""))
+        if name == "dateien_suchen":
+            return self.mac.suchen(a.get("begriff"), a.get("ordner", ""),
+                                   bool(a.get("im_inhalt")))
+        if name == "datei_lesen":
+            return self.mac.lesen(a.get("pfad"))
+        if name == "datei_schreiben":
+            vorab = self.mac.schreiben_pruefen(a.get("pfad"), bool(a.get("ueberschreiben")))
+            if not vorab["ok"]:
+                return vorab
+            return self.mac.schreiben(a.get("pfad"), a.get("inhalt"),
+                                      bool(a.get("ueberschreiben")))
         if name == "skript_zeigen":
             return self.werkstatt.skript_zeigen(a.get("name"))
         if name == "skript_ausfuehren":
@@ -13287,6 +13952,8 @@ class JarvisAgent:
 #     python3 jarvis.py einrichten  geführte Ersteinrichtung
 #     python3 jarvis.py zugang      einen Schlüssel eintragen oder ersetzen
 #     python3 jarvis.py autopilot   Postfach des Autopiloten (an / aus zum Schalten)
+#     python3 jarvis.py daemon      dauerhaft, nur Stimme, ohne Fenster (der iMac als Kopf)
+#     python3 jarvis.py dienst      installieren | entfernen | status | neustart | hinweise
 # =========================================================================
 
 #!/usr/bin/env python3
@@ -13320,21 +13987,43 @@ def agent_aufbauen(mit_stimme: bool = True):
 # Dauerbetrieb
 # ---------------------------------------------------------------------------
 
-def dauerbetrieb():
-    """Hört auf das Weckwort und meldet sich zu den eingestellten Zeiten."""
+BEENDEN_SAETZE = ("schalte dich ab", "schalt dich ab", "beende dich", "feierabend jarvis",
+                  "mach dich aus", "fahr dich runter")
+
+
+def dauerbetrieb(dienst: bool = False):
+    """Hört auf das Weckwort und meldet sich zu den eingestellten Zeiten.
+
+    Als ``dienst`` läuft das ohne Fenster und ohne Tippen: Freigaben per Stimme,
+    Meldungen über den Ansager, Lebenszeichen für den Neustart bei Stillstand,
+    und fehlt das Mikrofon, wird weiter versucht statt zu tippen.
+    """
     print(BANNER)
+    herz = None
+    if dienst:
+        logdatei_drehen(LOG_VERZEICHNIS / "dienst.log")
+        herz = Herzschlag()
+        herz.start()
     agent, stimme = agent_aufbauen()
     profil = Sprecherprofil()
+    ansager = Ansager(stimme) if dienst else None
+    if dienst:
+        agent.tools.freigabe_kanal_setzen(SprachFreigabe(stimme, profil))
 
     zeitplan = Scheduler(agent=agent, routines=agent.tools.routines,
-                         ausgabe=stimme.sprich)
+                         ausgabe=ansager.sagen if dienst else stimme.sprich)
     zeitplan.start()
     print("[zeitplan] Morgens %s, abends %s." % (BRIEFING_MORGENS,
                                                  BRIEFING_ABENDS))
     for eintrag in zeitplan.uebersicht():
         print("           %s  %s" % (eintrag["uhrzeit"], eintrag["beschreibung"]))
 
-    if not stimme.mikrofon_bereit():
+    if dienst:
+        agent.tools.autopilot.ausgabe = ansager.leise
+        agent.tools.autopilot.start()
+        print("[autopilot] %s" % ("an" if AUTOPILOT_AN else "aus (python3 jarvis.py autopilot an)"))
+
+    if not stimme.mikrofon_bereit() and not dienst:
         print("\n[!] Kein Mikrofonzugriff. Ich wechsle in den Tippbetrieb.")
         stimme.sprich("Ich komme nicht an das Mikrofon. Wir tippen erst einmal.")
         zeitplan.stop()
@@ -13347,9 +14036,23 @@ def dauerbetrieb():
 
     stimme.sprich("Ich bin da. Sag Hey Jarvis, wenn du etwas brauchst.")
     print("\nIch höre zu. Abbrechen mit Strg und C.\n")
+    mikro_gemeldet = 0.0
 
     try:
         while True:
+            if herz is not None:
+                herz.schlagen()
+            if ansager is not None:
+                ansager.ausliefern()
+            if dienst and not stimme.mikrofon_bereit():
+                # Kein Tippen im Dienst: es wird weiter versucht, und einmal pro Stunde gesagt.
+                if time.time() - mikro_gemeldet > 3600:
+                    mikro_gemeldet = time.time()
+                    print("[dienst] Kein Mikrofon. %s" % stimme.letzter_fehler)
+                    stimme.sprich("Ich komme gerade nicht an das Mikrofon. "
+                                  "Bitte gib es in den Systemeinstellungen frei.")
+                time.sleep(30)
+                continue
             pfad = stimme.aufnehmen_bis_pause(still_signal=True)
             if not pfad:
                 continue
@@ -13380,18 +14083,46 @@ def dauerbetrieb():
                 befehl = nachtrag
 
             print("Du: %s" % befehl)
+            if dienst and any(satz in befehl.lower() for satz in BEENDEN_SAETZE):
+                stimme.sprich("Alles klar, ich schalte mich ab. Bis später.")
+                return 0  # Exit 0: der Dienst startet erst bei der nächsten Anmeldung neu.
             try:
                 agent.antworten(befehl)
             except Exception as fehler:
                 stimme.signal("fehler")
                 print("[fehler] %s" % fehler)
                 stimme.sprich("Da ist etwas schiefgegangen: %s" % fehler)
+            if herz is not None:
+                herz.schlagen()
     except KeyboardInterrupt:
         print("\nBis später.")
         stimme.sprich("Bis später.")
     finally:
         zeitplan.stop()
+        if dienst:
+            agent.tools.autopilot.stop()
+            herz.stop()
         agent.tools.mcp.stoppen()
+
+
+def dienst_verwalten(argumente=None) -> int:
+    """``python3 jarvis.py dienst installieren | entfernen | status | neustart | hinweise``."""
+    argumente = [a.lower() for a in (argumente or [])]
+    aktion = argumente[0] if argumente else "status"
+    trocken = "--trocken" in argumente
+    if aktion in ("installieren", "einrichten", "an"):
+        ergebnis = installieren(trocken)
+    elif aktion in ("entfernen", "aus"):
+        ergebnis = entfernen(trocken)
+    elif aktion in ("neustart", "neu"):
+        ergebnis = neustarten()
+    elif aktion in ("hinweise", "hilfe"):
+        print(HINWEISE)
+        return 0
+    else:
+        ergebnis = dienst_status()
+    print(ergebnis.get("text") or ergebnis.get("fehler", ""))
+    return 0 if ergebnis.get("ok") else 1
 
 
 # ---------------------------------------------------------------------------
@@ -13973,6 +14704,13 @@ def hauptprogramm(argumente=None) -> int:
         return selbsttest()
     elif modus in ("einrichten", "setup"):
         einrichtung_starten()
+    elif modus in ("daemon", "dienstbetrieb"):
+        if not EINRICHTUNG_FERTIG and not ANTHROPIC_API_KEY:
+            print("Jarvis ist noch nicht eingerichtet. Starte: python3 jarvis.py einrichten")
+            return 1
+        return dauerbetrieb(dienst=True) or 0
+    elif modus == "dienst":
+        return dienst_verwalten(argumente[1:])
     elif modus == "autopilot":
         return autopilot_zeigen(argumente[1:])
     elif modus in ("zugang", "schluessel", "schlüssel"):

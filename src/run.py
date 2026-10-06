@@ -22,6 +22,8 @@ Terminal spricht, nimmt ``hoeren``.
     python3 jarvis.py einrichten  geführte Ersteinrichtung
     python3 jarvis.py zugang      einen Schlüssel eintragen oder ersetzen
     python3 jarvis.py autopilot   Postfach des Autopiloten (an / aus zum Schalten)
+    python3 jarvis.py daemon      dauerhaft, nur Stimme, ohne Fenster (der iMac als Kopf)
+    python3 jarvis.py dienst      installieren | entfernen | status | neustart | hinweise
 """
 
 import json
@@ -37,6 +39,8 @@ from modules.bookkeeping import mwst_aus_brutto
 from modules.memory import Memory
 from modules.mcp_client import MCPClient, MCPServer, vorlage_schreiben
 from modules.scheduler import Scheduler, ist_faellig
+from modules.dienst import (Ansager, HINWEISE, Herzschlag, SprachFreigabe, dienst_status,
+                            entfernen, installieren, logdatei_drehen, neustarten)
 from modules.setup_wizard import einrichtung_starten, zugang_eintragen
 from modules.speaker import Sprecherprofil
 from modules.voice import Stimme, weckwort_pruefen
@@ -68,21 +72,43 @@ def agent_aufbauen(mit_stimme: bool = True):
 # Dauerbetrieb
 # ---------------------------------------------------------------------------
 
-def dauerbetrieb():
-    """Hört auf das Weckwort und meldet sich zu den eingestellten Zeiten."""
+BEENDEN_SAETZE = ("schalte dich ab", "schalt dich ab", "beende dich", "feierabend jarvis",
+                  "mach dich aus", "fahr dich runter")
+
+
+def dauerbetrieb(dienst: bool = False):
+    """Hört auf das Weckwort und meldet sich zu den eingestellten Zeiten.
+
+    Als ``dienst`` läuft das ohne Fenster und ohne Tippen: Freigaben per Stimme,
+    Meldungen über den Ansager, Lebenszeichen für den Neustart bei Stillstand,
+    und fehlt das Mikrofon, wird weiter versucht statt zu tippen.
+    """
     print(BANNER)
+    herz = None
+    if dienst:
+        logdatei_drehen(config.LOG_VERZEICHNIS / "dienst.log")
+        herz = Herzschlag()
+        herz.start()
     agent, stimme = agent_aufbauen()
     profil = Sprecherprofil()
+    ansager = Ansager(stimme) if dienst else None
+    if dienst:
+        agent.tools.freigabe_kanal_setzen(SprachFreigabe(stimme, profil))
 
     zeitplan = Scheduler(agent=agent, routines=agent.tools.routines,
-                         ausgabe=stimme.sprich)
+                         ausgabe=ansager.sagen if dienst else stimme.sprich)
     zeitplan.start()
     print("[zeitplan] Morgens %s, abends %s." % (config.BRIEFING_MORGENS,
                                                  config.BRIEFING_ABENDS))
     for eintrag in zeitplan.uebersicht():
         print("           %s  %s" % (eintrag["uhrzeit"], eintrag["beschreibung"]))
 
-    if not stimme.mikrofon_bereit():
+    if dienst:
+        agent.tools.autopilot.ausgabe = ansager.leise
+        agent.tools.autopilot.start()
+        print("[autopilot] %s" % ("an" if config.AUTOPILOT_AN else "aus (python3 jarvis.py autopilot an)"))
+
+    if not stimme.mikrofon_bereit() and not dienst:
         print("\n[!] Kein Mikrofonzugriff. Ich wechsle in den Tippbetrieb.")
         stimme.sprich("Ich komme nicht an das Mikrofon. Wir tippen erst einmal.")
         zeitplan.stop()
@@ -95,9 +121,23 @@ def dauerbetrieb():
 
     stimme.sprich("Ich bin da. Sag Hey Jarvis, wenn du etwas brauchst.")
     print("\nIch höre zu. Abbrechen mit Strg und C.\n")
+    mikro_gemeldet = 0.0
 
     try:
         while True:
+            if herz is not None:
+                herz.schlagen()
+            if ansager is not None:
+                ansager.ausliefern()
+            if dienst and not stimme.mikrofon_bereit():
+                # Kein Tippen im Dienst: es wird weiter versucht, und einmal pro Stunde gesagt.
+                if time.time() - mikro_gemeldet > 3600:
+                    mikro_gemeldet = time.time()
+                    print("[dienst] Kein Mikrofon. %s" % stimme.letzter_fehler)
+                    stimme.sprich("Ich komme gerade nicht an das Mikrofon. "
+                                  "Bitte gib es in den Systemeinstellungen frei.")
+                time.sleep(30)
+                continue
             pfad = stimme.aufnehmen_bis_pause(still_signal=True)
             if not pfad:
                 continue
@@ -128,18 +168,46 @@ def dauerbetrieb():
                 befehl = nachtrag
 
             print("Du: %s" % befehl)
+            if dienst and any(satz in befehl.lower() for satz in BEENDEN_SAETZE):
+                stimme.sprich("Alles klar, ich schalte mich ab. Bis später.")
+                return 0  # Exit 0: der Dienst startet erst bei der nächsten Anmeldung neu.
             try:
                 agent.antworten(befehl)
             except Exception as fehler:
                 stimme.signal("fehler")
                 print("[fehler] %s" % fehler)
                 stimme.sprich("Da ist etwas schiefgegangen: %s" % fehler)
+            if herz is not None:
+                herz.schlagen()
     except KeyboardInterrupt:
         print("\nBis später.")
         stimme.sprich("Bis später.")
     finally:
         zeitplan.stop()
+        if dienst:
+            agent.tools.autopilot.stop()
+            herz.stop()
         agent.tools.mcp.stoppen()
+
+
+def dienst_verwalten(argumente=None) -> int:
+    """``python3 jarvis.py dienst installieren | entfernen | status | neustart | hinweise``."""
+    argumente = [a.lower() for a in (argumente or [])]
+    aktion = argumente[0] if argumente else "status"
+    trocken = "--trocken" in argumente
+    if aktion in ("installieren", "einrichten", "an"):
+        ergebnis = installieren(trocken)
+    elif aktion in ("entfernen", "aus"):
+        ergebnis = entfernen(trocken)
+    elif aktion in ("neustart", "neu"):
+        ergebnis = neustarten()
+    elif aktion in ("hinweise", "hilfe"):
+        print(HINWEISE)
+        return 0
+    else:
+        ergebnis = dienst_status()
+    print(ergebnis.get("text") or ergebnis.get("fehler", ""))
+    return 0 if ergebnis.get("ok") else 1
 
 
 # ---------------------------------------------------------------------------
@@ -721,6 +789,13 @@ def hauptprogramm(argumente=None) -> int:
         return selbsttest()
     elif modus in ("einrichten", "setup"):
         einrichtung_starten()
+    elif modus in ("daemon", "dienstbetrieb"):
+        if not config.EINRICHTUNG_FERTIG and not config.ANTHROPIC_API_KEY:
+            print("Jarvis ist noch nicht eingerichtet. Starte: python3 jarvis.py einrichten")
+            return 1
+        return dauerbetrieb(dienst=True) or 0
+    elif modus == "dienst":
+        return dienst_verwalten(argumente[1:])
     elif modus == "autopilot":
         return autopilot_zeigen(argumente[1:])
     elif modus in ("zugang", "schluessel", "schlüssel"):

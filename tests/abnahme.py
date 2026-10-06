@@ -56,6 +56,8 @@ import modules.voice as voice_modul  # noqa: E402
 from modules.sprechtext import (abschnitte, jahr_wort, schleifen_entfernen,  # noqa: E402
                                 sprechstuecke, sprechtext, zahl_wort)
 from modules.werkstatt import projektdatei_saeubern  # noqa: E402
+import modules.dienst as dienst_modul  # noqa: E402
+from modules.mac import MacZugriff  # noqa: E402
 from modules.lernpfad import SEITE_PFAD, lernpfad_stand  # noqa: E402
 from modules.werkstatt import Werkstatt, name_saeubern  # noqa: E402
 from modules.voice import weckwort_pruefen  # noqa: E402
@@ -1081,6 +1083,128 @@ def pruefung_ansichten(agent):
                     "Ordner, Auftrag, Start")
 
 
+def pruefung_dienst(agent):
+    abschnitt("Dienst: iMac als Kopf, nur Stimme")
+    ja_nein = dienst_modul.ja_nein
+    pruefen("Ja und Nein werden vorsichtig verstanden",
+            ja_nein("Ja, mach das") is True and ja_nein("klar") is True
+            and ja_nein("nein danke") is False and ja_nein("ja aber nicht jetzt") is False
+            and ja_nein("wie bitte") is None and ja_nein("") is None and ja_nein("vielleicht") is None,
+            "sieben Antworten")
+    ansage = dienst_modul.freigabe_ansage(
+        "skript_ausfuehren", "Skript rechnung.py ausführen. Es will ins Netz.\n\nimport urllib\nprint(secret)")
+    pruefen("Vor einer Freigabe wird der Kern gesagt, nie der Code",
+            "will ins Netz" in ansage and "import urllib" not in ansage and "print" not in ansage
+            and "Mail an a@b.at" in dienst_modul.freigabe_ansage("mail_senden", '{"an":"a@b.at","betreff":"x"}'),
+            ansage[:60])
+
+    class FalscheStimme:
+        def __init__(self, antworten):
+            self.antworten, self.gesagt = list(antworten), []
+        def sprich(self, text): self.gesagt.append(text); return True
+        def aufnehmen_bis_pause(self, still_signal=False): return "/tmp/x.wav" if self.antworten else ""
+        def transkribieren(self, pfad): return self.antworten.pop(0)
+
+    for antworten, erwartet, name in ((["ja klar"], True, "Ja"), (["nein"], False, "Nein"),
+                                       (["hm", "äh"], False, "zweimal unklar"), ([], False, "keine Antwort")):
+        st = FalscheStimme(antworten)
+        erg = dienst_modul.SprachFreigabe(st).anfordern("mail_senden", '{"an":"a@b.at","betreff":"Angebot"}')
+        pruefen("Sprachfreigabe: %s ergibt %s" % (name, "erlaubt" if erwartet else "nicht erlaubt"),
+                erg["erlaubt"] is erwartet and "Mail an a@b.at" in st.gesagt[0], "")
+
+    class FremdesProfil:
+        def ist_der_nutzer(self, pfad): return {"erkannt": False, "grund": "fremde Stimme"}
+    st = FalscheStimme(["ja"])
+    pruefen("Eine fremde Stimme gibt nichts frei",
+            dienst_modul.SprachFreigabe(st, FremdesProfil(), versuche=1).anfordern("anrufen", "{}")["erlaubt"] is False, "")
+
+    # Ein ganzer Weg: Datei schreiben, per Stimme freigegeben, im eigenen Benutzerordner.
+    heim = pathlib.Path(tempfile.mkdtemp(prefix="jarvis_home_"))
+    (heim / "Angebote").mkdir()
+    (heim / ".ssh").mkdir(); (heim / ".ssh" / "id_rsa").write_text("GEHEIM")
+    (heim / "Notiz.txt").write_text("Kunde Weber will 300 qm, dreimal pro Woche.")
+    echt_mac, echt_kanal = agent.tools.mac, agent.tools.freigabe_kanal
+    agent.tools.mac = MacZugriff(heim, config.BASIS)
+    try:
+        st = FalscheStimme(["ja bitte mach das"])
+        agent.tools.freigabe_kanal_setzen(dienst_modul.SprachFreigabe(st))
+        ergebnis = agent.tools.run("datei_schreiben", {"pfad": "Angebote/weber.txt", "inhalt": "Angebot Weber"})
+        pruefen("Datei schreiben: Jarvis fragt laut, bei Ja wird sie angelegt",
+                ergebnis.get("ok") and (heim / "Angebote" / "weber.txt").read_text() == "Angebot Weber"
+                and "Datei" in st.gesagt[0], st.gesagt[0][:50])
+        st = FalscheStimme(["nein"])
+        agent.tools.freigabe_kanal_setzen(dienst_modul.SprachFreigabe(st))
+        agent.tools.run("datei_schreiben", {"pfad": "Angebote/zwei.txt", "inhalt": "x"})
+        pruefen("Bei Nein wird nichts geschrieben", not (heim / "Angebote" / "zwei.txt").exists(), "")
+        st = FalscheStimme(["ja"])
+        agent.tools.freigabe_kanal_setzen(dienst_modul.SprachFreigabe(st))
+        abgelehnt = [agent.tools.run("datei_schreiben", {"pfad": "Library/LaunchAgents/boese.plist", "inhalt": "x"}),
+                     agent.tools.run("datei_schreiben", {"pfad": ".zshrc", "inhalt": "x"}),
+                     agent.tools.run("datei_schreiben", {"pfad": "/etc/hosts", "inhalt": "x"}),
+                     agent.tools.run("datei_schreiben", {"pfad": "Angebote/weber.txt", "inhalt": "neu"})]
+        pruefen("Startobjekte, Shell-Profile, Systempfade und Vorhandenes: abgelehnt, ohne zu fragen",
+                all(a["ok"] is False for a in abgelehnt) and not st.gesagt, "vier Versuche")
+        gelesen = agent.tools.run("datei_lesen", {"pfad": "Notiz.txt"})
+        gesperrt = [agent.tools.run("datei_lesen", {"pfad": ".ssh/id_rsa"})["ok"],
+                    agent.tools.run("datei_lesen", {"pfad": "~/.ssh/id_rsa"})["ok"]]
+        suche = agent.tools.run("dateien_suchen", {"begriff": "notiz"})
+        pruefen("Lesen und Suchen gehen ohne Freigabe, Schlüssel bleiben gesperrt",
+                gelesen["ok"] and "Weber" in gelesen["inhalt"] and gesperrt == [False, False]
+                and suche["ok"] and any("Notiz.txt" in t["pfad"] for t in suche["treffer"]),
+                "%d Treffer" % len(suche.get("treffer", [])))
+    finally:
+        agent.tools.mac = echt_mac
+        agent.tools.freigabe_kanal = echt_kanal
+        shutil.rmtree(heim, ignore_errors=True)
+    pruefen("Datei-Werkzeuge: Schreiben fragt, Lesen und Suchen nicht",
+            agent.tools.braucht_freigabe("datei_schreiben") and not agent.tools.braucht_freigabe("datei_lesen")
+            and not agent.tools.braucht_freigabe("dateien_suchen")
+            and "datei_lesen" in autopilot_modul.ROLLEN["geschaeftsfuehrer"]["werkzeuge"], "")
+
+    # Der Ansager
+    st = FalscheStimme([])
+    a = dienst_modul.Ansager(st)
+    a.sagen("Briefing um sieben.")
+    a.leise("Autopilot: Angebot fertig.")
+    nachts, tags = datetime(2026, 1, 1, 23, 30), datetime(2026, 1, 2, 9, 0)
+    n1 = a.ausliefern(nachts)
+    n2 = a.ausliefern(tags)
+    pruefen("Der Ansager: Briefing sofort, Autopilot nachts nicht, am Morgen schon",
+            n1 == 1 and st.gesagt[0].startswith("Briefing") and n2 == 1
+            and st.gesagt[1].startswith("Autopilot") and a.wartend() == 0, "zwei Meldungen")
+
+    # Herzschlag und Logdatei
+    beendet = []
+    herz = dienst_modul.Herzschlag(pathlib.Path(ARBEITSVERZEICHNIS) / "herz", grenze=100, beenden=lambda: beendet.append(1))
+    herz.schlagen()
+    frisch = herz.pruefen(herz.letzter + 50)
+    stillstand = herz.pruefen(herz.letzter + 500)
+    pruefen("Bei Stillstand beendet sich der Dienst, damit er neu startet",
+            frisch is False and stillstand is True and beendet == [1]
+            and (pathlib.Path(ARBEITSVERZEICHNIS) / "herz").exists(), "Grenze 100 Sekunden")
+    gross = pathlib.Path(ARBEITSVERZEICHNIS) / "gross.log"
+    gross.write_bytes(b"x" * 2000)
+    pruefen("Eine zu große Logdatei wird beiseitegelegt",
+            dienst_modul.logdatei_drehen(gross, 1000) and (pathlib.Path(ARBEITSVERZEICHNIS) / "gross.log.1").exists()
+            and not gross.exists(), "")
+
+    # Anmeldeobjekt
+    p = dienst_modul.plist_bauen(python="/usr/bin/python3", skript="/Users/x/Jarvis/jarvis.py",
+                                 arbeitsordner="/Users/x/Jarvis", logordner="/Users/x/Jarvis/logs")
+    trocken = dienst_modul.installieren(trocken=True)
+    pruefen("Das Anmeldeobjekt startet den Dienst bei Anmeldung und nach Absturz",
+            p["Label"] == "at.jarvis.imac" and p["RunAtLoad"] is True
+            and p["KeepAlive"] == {"SuccessfulExit": False} and "daemon" in p["ProgramArguments"]
+            and p["LimitLoadToSessionType"] == "Aqua" and p["StandardOutPath"].endswith("dienst.log")
+            and trocken["ok"] and trocken["trocken"] and trocken["befehle"], "RunAtLoad, KeepAlive, Aqua")
+    pruefen("Auf einem anderen System als dem Mac sagt der Dienst das ehrlich",
+            sys.platform == "darwin" or dienst_modul.installieren()["ok"] is False, "")
+    quelle = open(os.path.join(WURZEL, "jarvis.py"), encoding="utf-8").read()
+    pruefen("Der Dienstbetrieb ist in der Einzeldatei: Sprachfreigabe, Ansager, Beenden per Stimme",
+            "def dauerbetrieb(dienst: bool = False)" in quelle and "SprachFreigabe(stimme, profil)" in quelle
+            and "schalte dich ab" in quelle and "def dienst_verwalten" in quelle, "")
+
+
 def pruefung_sprechen(agent):
     abschnitt("Sprechen wie ein Mensch")
     faelle = [
@@ -1758,6 +1882,7 @@ def main() -> int:
     pruefung_telefon(agent)
     pruefung_browser(agent)
     pruefung_sprechen(agent)
+    pruefung_dienst(agent)
     pruefung_autopilot(agent)
     pruefung_neue_fachkraefte(agent)
     pruefung_zugang(agent)

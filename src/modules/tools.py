@@ -38,6 +38,7 @@ from modules.messenger import Messenger
 from modules.recall import Recall
 from modules.routines import Routines
 from modules.autopilot import Autopilot
+from modules.mac import MacZugriff
 from modules.team import ROLLEN, Team
 from modules.telefon import Telefon
 from modules.telegram_mod import Telegram
@@ -75,7 +76,8 @@ PARAMETER_AKTIONEN = {
 # Alles hier drin fragt vor der Ausführung nach einer Freigabe.
 FREIGABE_PFLICHTIG = {"mail_senden", "termin_anlegen", "bildschirm_bedienen",
                       "nachricht_senden", "skript_ausfuehren", "anrufen",
-                      "sms_senden", "browser_auftrag", "autopilot_schalten"}
+                      "sms_senden", "browser_auftrag", "autopilot_schalten",
+                      "datei_schreiben"}
 
 
 def parameter_pruefen(wert: str):
@@ -123,6 +125,7 @@ class Werkzeuge:
                                    routines=self.routines, mcp=self.mcp,
                                    akquise=self.akquise, team=self.team,
                                    privat=self.privat)
+        self.mac = MacZugriff()
         self.autopilot = Autopilot(self)
         self.stimme = None
         # Ein anderer Weg, Freigaben einzuholen - die Web-App setzt sich hier ein.
@@ -366,6 +369,19 @@ class Werkzeuge:
                      "Ohne Angaben: alle Projekte. Mit projekt: dessen Dateien. "
                      "Zusätzlich mit datei: der Inhalt.",
                      {"projekt": text, "datei": text}),
+            werkzeug("dateien_suchen",
+                     "Sucht auf dem ganzen Mac nach Dateien (Spotlight), nach Namen "
+                     "oder mit im_inhalt auch im Text. Nur lesend.",
+                     {"begriff": text, "ordner": text, "im_inhalt": wahr}, ["begriff"]),
+            werkzeug("datei_lesen",
+                     "Liest eine Textdatei irgendwo auf dem Mac. Schlüssel, "
+                     "Anmeldungen und Passwörter sind gesperrt.",
+                     {"pfad": text}, ["pfad"]),
+            werkzeug("datei_schreiben",
+                     "Legt eine neue Textdatei im Benutzerordner an. Fragt vorher "
+                     "um Freigabe. Ersetzt nichts, außer ueberschreiben ist gesetzt.",
+                     {"pfad": text, "inhalt": text, "ueberschreiben": wahr},
+                     ["pfad", "inhalt"]),
             werkzeug("skript_zeigen", "Zeigt den Code eines abgelegten Skripts.",
                      {"name": text}, ["name"]),
             werkzeug("skript_ausfuehren",
@@ -511,6 +527,14 @@ class Werkzeuge:
             self.memory.aktion_protokollieren(name, argumente, ergebnis["fehler"],
                                               "unbekannt")
             return ergebnis
+
+        # Was ohnehin nicht geht, wird gar nicht erst zur Freigabe vorgelegt.
+        if name == "datei_schreiben":
+            vorab = self.mac.schreiben_pruefen(argumente.get("pfad"),
+                                               bool(argumente.get("ueberschreiben")))
+            if not vorab["ok"]:
+                self.memory.aktion_protokollieren(name, argumente, vorab["fehler"], "abgelehnt")
+                return vorab
 
         if self.braucht_freigabe(name):
             entscheidung = self._freigabe(name, argumente)
@@ -731,6 +755,17 @@ class Werkzeuge:
                 a.get("projekt"), a.get("datei"), a.get("inhalt"), a.get("zweck", ""))
         if name == "projekt_zeigen":
             return self.werkstatt.projekt_zeigen(a.get("projekt", ""), a.get("datei", ""))
+        if name == "dateien_suchen":
+            return self.mac.suchen(a.get("begriff"), a.get("ordner", ""),
+                                   bool(a.get("im_inhalt")))
+        if name == "datei_lesen":
+            return self.mac.lesen(a.get("pfad"))
+        if name == "datei_schreiben":
+            vorab = self.mac.schreiben_pruefen(a.get("pfad"), bool(a.get("ueberschreiben")))
+            if not vorab["ok"]:
+                return vorab
+            return self.mac.schreiben(a.get("pfad"), a.get("inhalt"),
+                                      bool(a.get("ueberschreiben")))
         if name == "skript_zeigen":
             return self.werkstatt.skript_zeigen(a.get("name"))
         if name == "skript_ausfuehren":
