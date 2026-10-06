@@ -51,6 +51,10 @@ from modules.telegram_mod import TelegramFreigabe
 from modules.voice import Stimme, weckwort_pruefen
 from modules.webapp import JarvisWeb, STANDARD_PORT
 
+# Die Anzeige des Dienstes hat ihren eigenen Anschluss - so kann die Web-App per
+# Doppelklick trotzdem starten, während der Dienst läuft.
+ANZEIGE_PORT = STANDARD_PORT + 1
+
 BANNER = r"""
    _   _   ___  _   _ ___ ___
   | | /_\ | _ \| | | |_ _/ __|   Persönlicher Assistent
@@ -164,7 +168,7 @@ def dauerbetrieb(dienst: bool = False):
     if dienst and config.DIENST_ANZEIGE:
         # Die Anzeige für die Bildschirme: nur zum Ansehen, nur auf diesem Rechner.
         try:
-            web = JarvisWeb(agent, port=STANDARD_PORT, nur_anzeige=True)
+            web = JarvisWeb(agent, port=ANZEIGE_PORT, nur_anzeige=True)
             web.starten(blockierend=False)
             print("[anzeige] Zentrale:  %s/zentrale\n[anzeige] Gehirn:    %s/gehirn"
                   % (web.adresse().split("?")[0].rstrip("/"), web.adresse().split("?")[0].rstrip("/")))
@@ -286,11 +290,22 @@ def dauerbetrieb(dienst: bool = False):
         agent.tools.mcp.stoppen()
 
 
+def _port_belegt(port: int) -> bool:
+    import socket
+    try:
+        with socket.create_connection(("127.0.0.1", int(port)), timeout=0.5):
+            return True
+    except OSError:
+        return False
+
+
 def anzeige_oeffnen(argumente=None) -> int:
     """Öffnet Gehirn und Zentrale im Browser - je ein Fenster, zum Verschieben auf die Bildschirme."""
     import shutil as _shutil
     import subprocess as _subprocess
-    adressen = ["http://127.0.0.1:%d/zentrale" % STANDARD_PORT, "http://127.0.0.1:%d/gehirn" % STANDARD_PORT]
+    # Läuft der Dienst, zeigt seine Anzeige; sonst die Web-App per Doppelklick.
+    port = ANZEIGE_PORT if _port_belegt(ANZEIGE_PORT) else STANDARD_PORT
+    adressen = ["http://127.0.0.1:%d/zentrale" % port, "http://127.0.0.1:%d/gehirn" % port]
     if not _shutil.which("open"):
         print("Öffne diese Adressen im Browser:\n  " + "\n  ".join(adressen))
         return 0
@@ -442,6 +457,15 @@ def webbetrieb(argumente=None):
     agent, stimme = agent_aufbauen(mit_stimme=False)
     del stimme
     web = JarvisWeb(agent, port=port, offen=offen)
+    # Erst den Anschluss belegen, dann den Browser öffnen - sonst landet er bei einem
+    # anderen Programm auf demselben Anschluss, und hier folgt ein Absturz.
+    try:
+        web.starten(blockierend=False)
+    except OSError as fehler:
+        print("  Der Anschluss %d ist belegt (%s). Läuft Jarvis schon in einem anderen "
+              "Fenster? Dann dort weiterreden - oder dieses schließen und neu starten." % (port, fehler))
+        agent.tools.mcp.stoppen()
+        return 1
 
     # Der Zeitplan meldet in die Web-App, nicht ins Terminal - dort schaut
     # um 6:45 niemand hin.
@@ -469,21 +493,17 @@ def webbetrieb(argumente=None):
 
     import shutil as _shutil
     import subprocess as _subprocess
-    seiten = [adresse]
-    if config.ANZEIGE_BEIM_START:
-        # Das Gehirn gleich daneben: es zeigt, ob Jarvis zuhört, denkt oder spricht.
-        basis, _, abfrage = adresse.partition("?")
-        seiten.append(basis.rstrip("/") + "/gehirn" + ("?" + abfrage if abfrage else ""))
+    # Eine Seite für alles: das Gehirn sitzt mitten in der Gesprächsseite.
     if _shutil.which("open"):
-        for seite in seiten:
-            try:
-                _subprocess.run(["open", seite], shell=False, timeout=15,
-                                stdout=_subprocess.DEVNULL, stderr=_subprocess.DEVNULL)
-            except (OSError, _subprocess.SubprocessError):
-                pass
+        try:
+            _subprocess.run(["open", adresse], shell=False, timeout=15,
+                            stdout=_subprocess.DEVNULL, stderr=_subprocess.DEVNULL)
+        except (OSError, _subprocess.SubprocessError):
+            pass
 
     try:
-        web.starten(blockierend=True)
+        while True:
+            time.sleep(1)
     except KeyboardInterrupt:
         pass
     finally:

@@ -130,10 +130,11 @@ Zwei Seiten für zwei Bildschirme, nur zum Ansehen, ohne Eingabefeld:
   Pipeline, Denken (Gemini gegen Claude, Kosten gegen Limit), Nachfassen, was Jarvis zuletzt
   getan hat, ein Globus mit dem Betrieb und den Orten der Kunden, und das Briefing.
 
-Beim Doppelklick auf **JARVIS** öffnet sich das Gehirn neben dem Gespräch von selbst
-(abschalten mit `ANZEIGE_BEIM_START=nein`). Beide Seiten: `python3 jarvis.py anzeige`
-(je ein Fenster, auf die Bildschirme ziehen, dann Vollbild). Im Dienst läuft die Anzeige
-von selbst mit (`DIENST_ANZEIGE`).
+Beim Doppelklick auf **JARVIS** ist alles auf einer Seite: das Gehirn leuchtet mitten
+im Gespräch und zeigt, ob Jarvis zuhört, denkt oder spricht. Für zwei Bildschirme:
+`python3 jarvis.py anzeige` (Zentrale und Gehirn je ein Fenster, dann Vollbild). Im
+Dienst läuft die Anzeige von selbst mit (`DIENST_ANZEIGE`), nur zum Ansehen - bedient
+wird dort mit der Stimme oder per Telegram.
 
 Es wird nur gezeigt, was wirklich in der Datenbank steht. Mit `ANZEIGE_DISKRET=ja` fallen
 alle Texte und Namen weg, damit im Raum niemand mitliest. Die Weltkarte ist **gezeichnet,

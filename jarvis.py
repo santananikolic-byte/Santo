@@ -333,9 +333,6 @@ DIENST_ANZEIGE = _wahrheit("DIENST_ANZEIGE", True)
 # Anzeige: ohne Namen und Texte, damit im Raum niemand mitliest.
 ANZEIGE_DISKRET = _wahrheit("ANZEIGE_DISKRET", False)
 
-# Beim Start per Doppelklick öffnet sich neben dem Gespräch auch das Gehirn.
-ANZEIGE_BEIM_START = _wahrheit("ANZEIGE_BEIM_START", True)
-
 # Im Dienst hört Jarvis auch auf Telegram (Text und Sprachnachrichten vom Handy).
 DIENST_TELEGRAM = _wahrheit("DIENST_TELEGRAM", True)
 
@@ -9203,15 +9200,27 @@ def ort_schluessel(name: str) -> str:
     return re.sub(r"\s+", " ", roh)
 
 
+_LAENDER = {"oesterreich", "austria", "deutschland", "germany", "schweiz", "switzerland",
+            "italien", "italia", "liechtenstein", "at", "de", "ch"}
+_STRASSE = re.compile(r"(strasse|gasse|weg|platz|allee|ring|gürtel|guertel|kai)\b|str\.|\d")
+
+
 def ort_aus_adresse(adresse: str) -> str:
-    """Der Ortsname aus einer Anschrift: "Hauptstr. 5, 1010 Wien" -> "Wien"."""
-    teile = [t.strip() for t in str(adresse or "").split(",") if t.strip()]
-    if not teile:
-        return ""
-    ort = re.sub(r"\d+", "", teile[-1]).strip(" -/")
-    if len(teile) == 1 and re.search(r"\d", teile[0]) and not re.search(r"\b\d{4,5}\b", teile[0]):
-        return ""  # nur Straße und Hausnummer
-    return ort[:60]
+    """Der Ortsname aus einer Anschrift: "Hauptstr. 5, 1010 Wien" -> "Wien".
+
+    Der Ort steht neben der Postleitzahl - egal ob vorn, hinten, mit "A-" davor
+    oder mit dem Land dahinter. Ohne Postleitzahl zählt der letzte Teil, der
+    weder Land noch Straße ist.
+    """
+    text = str(adresse or "")
+    plz = re.search(r"(?:\b[A-Z]{1,2}-)?\b\d{4,5}\s+([^\d,]+)", text)
+    if plz:
+        return plz.group(1).strip(" -/")[:60]
+    for teil in reversed([t.strip() for t in text.split(",") if t.strip()]):
+        schluessel = ort_schluessel(teil)
+        if schluessel and schluessel not in _LAENDER and not _STRASSE.search(schluessel):
+            return teil[:60]
+    return ""
 
 
 # Mehrere Abrufe der Zentrale gleichzeitig dürfen den Zwischenspeicher nicht zerschießen.
@@ -9467,7 +9476,8 @@ def zentrale_daten(tools, agent=None) -> dict:
                      "gesichert": pipeline.get("laufender_umsatz_monat", 0),
                      "stufen": pipeline.get("stufen", {})},
         "bedarf": {"berechenbar": bool(bedarf.get("berechenbar")),
-                   "noetig": bedarf.get("noetiger_umsatz"), "text": bedarf.get("text", "")},
+                   "noetig": bedarf.get("noetiger_umsatz"), "gewinn": bedarf.get("gewinn"),
+                   "text": bedarf.get("text", "")},
         "gehirne": d.get("gehirne") or {},
         "limit": MONATSLIMIT_EURO,
         "nachfassen": [{"firma": "Kunde" if diskret else e["firma"], "tage": e.get("seit_tagen", 0),
@@ -9860,9 +9870,10 @@ function anzeigen(d){
  const ap=d.autopilot||{};$("#apchip").className="chip"+(ap.an?"":" aus");
  $("#aptext").textContent=ap.an?(ap.arbeitet_an?"Autopilot: "+ap.arbeitet_an.slice(0,40):"Autopilot an · "+ap.postfach+" im Postfach"):"Autopilot aus";
  const m=d.monat||{},mm=(m.von||"").slice(0,7);$("#monatname").textContent=mm;
- const bedarf=d.bedarf&&d.bedarf.berechenbar&&d.bedarf.noetig?d.bedarf.noetig:0;
+ // Gewinn gegen den nötigen Gewinn - nicht gegen den nötigen Umsatz, sonst zählen die Firmenkosten doppelt.
+ const bedarf=d.bedarf&&d.bedarf.berechenbar&&d.bedarf.gewinn>0?d.bedarf.gewinn:0;
  $("#ringe").replaceChildren(
-  ring(bedarf?(m.ergebnis||0)/bedarf:(m.einnahmen?Math.max(0,(m.ergebnis||0)/m.einnahmen):0),bedarf?"vom Bedarf":"Marge",euro(m.ergebnis||0)),
+  ring(bedarf?((m.ergebnis||0)-(m.zahllast||0))/bedarf:(m.einnahmen?Math.max(0,(m.ergebnis||0)/m.einnahmen):0),bedarf?"vom Bedarf":"Marge",euro(m.ergebnis||0)),
   ring((d.belegquote||0)/100,"Belege",d.belegquote==null?"–":Math.round(d.belegquote)+" %","#7fd6a0"),
   ring((d.pipeline&&d.pipeline.offen_wert)?(d.pipeline.gewichtet/d.pipeline.offen_wert):0,"Chance",euro(d.pipeline?d.pipeline.gewichtet:0)),
   ring(Math.min(1,(ap.postfach||0)/10),"Postfach",String(ap.postfach||0),"#ffd9b8"));
@@ -15258,6 +15269,10 @@ class JarvisAgent:
 
 
 
+# Die Anzeige des Dienstes hat ihren eigenen Anschluss - so kann die Web-App per
+# Doppelklick trotzdem starten, während der Dienst läuft.
+ANZEIGE_PORT = STANDARD_PORT + 1
+
 BANNER = r"""
    _   _   ___  _   _ ___ ___
   | | /_\ | _ \| | | |_ _/ __|   Persönlicher Assistent
@@ -15371,7 +15386,7 @@ def dauerbetrieb(dienst: bool = False):
     if dienst and DIENST_ANZEIGE:
         # Die Anzeige für die Bildschirme: nur zum Ansehen, nur auf diesem Rechner.
         try:
-            web = JarvisWeb(agent, port=STANDARD_PORT, nur_anzeige=True)
+            web = JarvisWeb(agent, port=ANZEIGE_PORT, nur_anzeige=True)
             web.starten(blockierend=False)
             print("[anzeige] Zentrale:  %s/zentrale\n[anzeige] Gehirn:    %s/gehirn"
                   % (web.adresse().split("?")[0].rstrip("/"), web.adresse().split("?")[0].rstrip("/")))
@@ -15493,11 +15508,22 @@ def dauerbetrieb(dienst: bool = False):
         agent.tools.mcp.stoppen()
 
 
+def _port_belegt(port: int) -> bool:
+    import socket
+    try:
+        with socket.create_connection(("127.0.0.1", int(port)), timeout=0.5):
+            return True
+    except OSError:
+        return False
+
+
 def anzeige_oeffnen(argumente=None) -> int:
     """Öffnet Gehirn und Zentrale im Browser - je ein Fenster, zum Verschieben auf die Bildschirme."""
     import shutil as _shutil
     import subprocess as _subprocess
-    adressen = ["http://127.0.0.1:%d/zentrale" % STANDARD_PORT, "http://127.0.0.1:%d/gehirn" % STANDARD_PORT]
+    # Läuft der Dienst, zeigt seine Anzeige; sonst die Web-App per Doppelklick.
+    port = ANZEIGE_PORT if _port_belegt(ANZEIGE_PORT) else STANDARD_PORT
+    adressen = ["http://127.0.0.1:%d/zentrale" % port, "http://127.0.0.1:%d/gehirn" % port]
     if not _shutil.which("open"):
         print("Öffne diese Adressen im Browser:\n  " + "\n  ".join(adressen))
         return 0
@@ -15649,6 +15675,15 @@ def webbetrieb(argumente=None):
     agent, stimme = agent_aufbauen(mit_stimme=False)
     del stimme
     web = JarvisWeb(agent, port=port, offen=offen)
+    # Erst den Anschluss belegen, dann den Browser öffnen - sonst landet er bei einem
+    # anderen Programm auf demselben Anschluss, und hier folgt ein Absturz.
+    try:
+        web.starten(blockierend=False)
+    except OSError as fehler:
+        print("  Der Anschluss %d ist belegt (%s). Läuft Jarvis schon in einem anderen "
+              "Fenster? Dann dort weiterreden - oder dieses schließen und neu starten." % (port, fehler))
+        agent.tools.mcp.stoppen()
+        return 1
 
     # Der Zeitplan meldet in die Web-App, nicht ins Terminal - dort schaut
     # um 6:45 niemand hin.
@@ -15676,21 +15711,17 @@ def webbetrieb(argumente=None):
 
     import shutil as _shutil
     import subprocess as _subprocess
-    seiten = [adresse]
-    if ANZEIGE_BEIM_START:
-        # Das Gehirn gleich daneben: es zeigt, ob Jarvis zuhört, denkt oder spricht.
-        basis, _, abfrage = adresse.partition("?")
-        seiten.append(basis.rstrip("/") + "/gehirn" + ("?" + abfrage if abfrage else ""))
+    # Eine Seite für alles: das Gehirn sitzt mitten in der Gesprächsseite.
     if _shutil.which("open"):
-        for seite in seiten:
-            try:
-                _subprocess.run(["open", seite], shell=False, timeout=15,
-                                stdout=_subprocess.DEVNULL, stderr=_subprocess.DEVNULL)
-            except (OSError, _subprocess.SubprocessError):
-                pass
+        try:
+            _subprocess.run(["open", adresse], shell=False, timeout=15,
+                            stdout=_subprocess.DEVNULL, stderr=_subprocess.DEVNULL)
+        except (OSError, _subprocess.SubprocessError):
+            pass
 
     try:
-        web.starten(blockierend=True)
+        while True:
+            time.sleep(1)
     except KeyboardInterrupt:
         pass
     finally:

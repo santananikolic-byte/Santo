@@ -1139,6 +1139,12 @@ def pruefung_anzeige(agent):
             a.ort_aus_adresse("Hauptstr. 5, 1010 Wien") == "Wien"
             and a.ort_aus_adresse("Werkstr. 7, 6020 Innsbruck") == "Innsbruck"
             and a.ort_aus_adresse("Hauptstraße 5") == "" and a.ort_aus_adresse("") == "", "vier Anschriften")
+    formen = {"Hauptstr. 5, 1010 Wien, Österreich": "Wien", "5020 Salzburg, Hauptstraße 5": "Salzburg",
+              "Gewerbepark 3, A-4020 Linz": "Linz", "Hauptstraße 5 1010 Wien": "Wien",
+              "Herrengasse 3, 8010 Graz, Austria": "Graz", "Mödling": "Mödling"}
+    falsch = {k: a.ort_aus_adresse(k) for k, v in formen.items() if a.ort_aus_adresse(k) != v}
+    pruefen("Der Ort wird auch mit Land, PLZ vorn oder A- davor richtig erkannt",
+            not falsch, str(falsch)[:55] if falsch else "%d Schreibweisen" % len(formen))
     pruefen("Bekannte Orte brauchen kein Netz, Umlaute egal",
             a.ort_finden("München", online_erlaubt=False) == a.ORTE["muenchen"]
             and a.ort_finden("Zürich", online_erlaubt=False) is not None
@@ -1174,6 +1180,10 @@ def pruefung_anzeige(agent):
         config.WETTER_ORT = echt_ort
     pruefen("Die Zentrale wartet nicht auf die Ortssuche im Netz",
             time.time() - beginn < 1.0, "%.2f Sekunden" % (time.time() - beginn))
+    zd = a.zentrale_daten(agent.tools, agent)
+    pruefen("Der Bedarfsring vergleicht Gewinn mit nötigem Gewinn, nicht mit Umsatz",
+            "gewinn" in zd["bedarf"] and "d.bedarf.gewinn>0?d.bedarf.gewinn" in a.SEITE_ZENTRALE
+            and "d.bedarf.noetig?d.bedarf.noetig" not in a.SEITE_ZENTRALE, "gedeckt = voller Ring")
     pruefen("Die Belegquote kommt in Prozent und wird als Anteil gezeichnet",
             "ring((d.belegquote||0)/100" in a.SEITE_ZENTRALE
             and "(d.belegquote||0)*100" not in a.SEITE_ZENTRALE, "50 Prozent = halber Ring")
@@ -1201,6 +1211,20 @@ def pruefung_anzeige(agent):
             codes.get("/gehirn") == 200 and codes.get("/api/status") == 200
             and all(codes.get(p) == 404 for p in ("/", "/api/reden", "/api/werkzeug", "/api/autopilot", "/api/verlauf"))
             and config.AUTOPILOT_AN == autopilot_vorher and kanal_unveraendert, str(codes)[:55])
+    import run as run_modul
+    import socket as _socket
+    belegt = _socket.socket()
+    belegt.bind(("127.0.0.1", 0)); belegt.listen(1)
+    besetzt = belegt.getsockname()[1]
+    try:
+        beginn = time.time()
+        rueckgabe = run_modul.webbetrieb([str(besetzt)])
+    finally:
+        belegt.close()
+    pruefen("Ist der Anschluss belegt, sagt der Doppelklick das, statt abzustürzen",
+            rueckgabe == 1 and time.time() - beginn < 30 and run_modul.ANZEIGE_PORT != run_modul.STANDARD_PORT
+            and "JarvisWeb(agent, port=ANZEIGE_PORT, nur_anzeige=True)" in quelle_run,
+            "Dienst-Anzeige auf %d" % run_modul.ANZEIGE_PORT)
     pruefen("Startet die Anzeige nicht, bleibt die Freigabe bei der Stimme",
             "finally:" in anzeige_teil and "SprachFreigabe(stimme, profil)" in anzeige_teil.split("finally:")[1], "")
 

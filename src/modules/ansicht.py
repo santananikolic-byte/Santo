@@ -82,15 +82,27 @@ def ort_schluessel(name: str) -> str:
     return re.sub(r"\s+", " ", roh)
 
 
+_LAENDER = {"oesterreich", "austria", "deutschland", "germany", "schweiz", "switzerland",
+            "italien", "italia", "liechtenstein", "at", "de", "ch"}
+_STRASSE = re.compile(r"(strasse|gasse|weg|platz|allee|ring|gürtel|guertel|kai)\b|str\.|\d")
+
+
 def ort_aus_adresse(adresse: str) -> str:
-    """Der Ortsname aus einer Anschrift: "Hauptstr. 5, 1010 Wien" -> "Wien"."""
-    teile = [t.strip() for t in str(adresse or "").split(",") if t.strip()]
-    if not teile:
-        return ""
-    ort = re.sub(r"\d+", "", teile[-1]).strip(" -/")
-    if len(teile) == 1 and re.search(r"\d", teile[0]) and not re.search(r"\b\d{4,5}\b", teile[0]):
-        return ""  # nur Straße und Hausnummer
-    return ort[:60]
+    """Der Ortsname aus einer Anschrift: "Hauptstr. 5, 1010 Wien" -> "Wien".
+
+    Der Ort steht neben der Postleitzahl - egal ob vorn, hinten, mit "A-" davor
+    oder mit dem Land dahinter. Ohne Postleitzahl zählt der letzte Teil, der
+    weder Land noch Straße ist.
+    """
+    text = str(adresse or "")
+    plz = re.search(r"(?:\b[A-Z]{1,2}-)?\b\d{4,5}\s+([^\d,]+)", text)
+    if plz:
+        return plz.group(1).strip(" -/")[:60]
+    for teil in reversed([t.strip() for t in text.split(",") if t.strip()]):
+        schluessel = ort_schluessel(teil)
+        if schluessel and schluessel not in _LAENDER and not _STRASSE.search(schluessel):
+            return teil[:60]
+    return ""
 
 
 # Mehrere Abrufe der Zentrale gleichzeitig dürfen den Zwischenspeicher nicht zerschießen.
@@ -346,7 +358,8 @@ def zentrale_daten(tools, agent=None) -> dict:
                      "gesichert": pipeline.get("laufender_umsatz_monat", 0),
                      "stufen": pipeline.get("stufen", {})},
         "bedarf": {"berechenbar": bool(bedarf.get("berechenbar")),
-                   "noetig": bedarf.get("noetiger_umsatz"), "text": bedarf.get("text", "")},
+                   "noetig": bedarf.get("noetiger_umsatz"), "gewinn": bedarf.get("gewinn"),
+                   "text": bedarf.get("text", "")},
         "gehirne": d.get("gehirne") or {},
         "limit": config.MONATSLIMIT_EURO,
         "nachfassen": [{"firma": "Kunde" if diskret else e["firma"], "tage": e.get("seit_tagen", 0),
@@ -739,9 +752,10 @@ function anzeigen(d){
  const ap=d.autopilot||{};$("#apchip").className="chip"+(ap.an?"":" aus");
  $("#aptext").textContent=ap.an?(ap.arbeitet_an?"Autopilot: "+ap.arbeitet_an.slice(0,40):"Autopilot an · "+ap.postfach+" im Postfach"):"Autopilot aus";
  const m=d.monat||{},mm=(m.von||"").slice(0,7);$("#monatname").textContent=mm;
- const bedarf=d.bedarf&&d.bedarf.berechenbar&&d.bedarf.noetig?d.bedarf.noetig:0;
+ // Gewinn gegen den nötigen Gewinn - nicht gegen den nötigen Umsatz, sonst zählen die Firmenkosten doppelt.
+ const bedarf=d.bedarf&&d.bedarf.berechenbar&&d.bedarf.gewinn>0?d.bedarf.gewinn:0;
  $("#ringe").replaceChildren(
-  ring(bedarf?(m.ergebnis||0)/bedarf:(m.einnahmen?Math.max(0,(m.ergebnis||0)/m.einnahmen):0),bedarf?"vom Bedarf":"Marge",euro(m.ergebnis||0)),
+  ring(bedarf?((m.ergebnis||0)-(m.zahllast||0))/bedarf:(m.einnahmen?Math.max(0,(m.ergebnis||0)/m.einnahmen):0),bedarf?"vom Bedarf":"Marge",euro(m.ergebnis||0)),
   ring((d.belegquote||0)/100,"Belege",d.belegquote==null?"–":Math.round(d.belegquote)+" %","#7fd6a0"),
   ring((d.pipeline&&d.pipeline.offen_wert)?(d.pipeline.gewichtet/d.pipeline.offen_wert):0,"Chance",euro(d.pipeline?d.pipeline.gewichtet:0)),
   ring(Math.min(1,(ap.postfach||0)/10),"Postfach",String(ap.postfach||0),"#ffd9b8"));
