@@ -287,8 +287,14 @@ class JarvisAgent:
 
     # -- Denkschleife -------------------------------------------------------
 
-    def denken(self, eingabe: str, protokollieren: bool = True) -> str:
-        """Die Hauptschleife, mit Zustand für die Anzeige."""
+    def denken(self, eingabe: str, protokollieren: bool = True, anzeigen: bool = True) -> str:
+        """Die Hauptschleife, mit Zustand für die Anzeige.
+
+        Hintergrundarbeit (Briefing, Routinen) läuft mit ``anzeigen=False``: Sie soll
+        der Anzeige nicht mitten im Gespräch "bereit" melden.
+        """
+        if not anzeigen:
+            return self._denken(eingabe, protokollieren)
         self.zustand_setzen("denkt")
         try:
             return self._denken(eingabe, protokollieren)
@@ -517,7 +523,7 @@ class JarvisAgent:
                    "Termine, das Wichtigste aus der Post und was offen ist. Wenn etwas "
                    "davon nicht abrufbar war, sag es kurz und erfinde nichts.\n\n"
                    "Das sind die Daten:\n%s" % bausteine)
-        antwort = self.denken(auftrag, protokollieren=False)
+        antwort = self.denken(auftrag, protokollieren=False, anzeigen=False)
         return antwort
 
     def briefing_abends(self) -> str:
@@ -533,7 +539,7 @@ class JarvisAgent:
                    "ohne Aufzählungen. Wie der Tag lief, was er morgen anpacken sollte, "
                    "und wenn ein Lead liegen bleibt, sag das deutlich.\n\n"
                    "Das sind die Daten:\n%s" % bausteine)
-        return self.denken(auftrag, protokollieren=False)
+        return self.denken(auftrag, protokollieren=False, anzeigen=False)
 
     def _bausteine_sammeln(self, morgens: bool) -> str:
         """Sammelt die Fakten für ein Briefing - jeder Fehler bleibt sichtbar."""

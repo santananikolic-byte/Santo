@@ -210,7 +210,7 @@ class Routines:
         auftrag = ("Führe jetzt die gespeicherte Routine '%s' aus. Das ist die Anweisung:\n\n%s\n\n"
                    "Nutze dafür deine Werkzeuge und melde am Ende kurz, was du getan hast."
                    % (treffer["name"], treffer["anweisung"]))
-        antwort = agent.denken(auftrag, protokollieren=False)
+        antwort = agent.denken(auftrag, protokollieren=False, anzeigen=False)
         return {"ok": True, "name": treffer["name"], "text": antwort}
 
     def statistik(self) -> dict:

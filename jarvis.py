@@ -5294,7 +5294,7 @@ class Routines:
         auftrag = ("Führe jetzt die gespeicherte Routine '%s' aus. Das ist die Anweisung:\n\n%s\n\n"
                    "Nutze dafür deine Werkzeuge und melde am Ende kurz, was du getan hast."
                    % (treffer["name"], treffer["anweisung"]))
-        antwort = agent.denken(auftrag, protokollieren=False)
+        antwort = agent.denken(auftrag, protokollieren=False, anzeigen=False)
         return {"ok": True, "name": treffer["name"], "text": antwort}
 
     def statistik(self) -> dict:
@@ -9407,9 +9407,11 @@ def gehirn_daten(tools, agent=None) -> dict:
         stat = m.statistik()
     except Exception:
         stat = {}
-    zaehler = {"notiz": stat.get("notizen", 0), "kontakt": stat.get("kontakte", 0),
-               "aufgabe": stat.get("offene_punkte", 0), "gespraech": stat.get("verlauf", 0)}
-    for art, sql in (("lead", "SELECT count(*) AS n FROM leads"),
+    # Gezählt wird mit denselben Bedingungen wie die Knoten - sonst passt die Zahl nicht zum Bild.
+    zaehler = {"notiz": stat.get("notizen", 0), "kontakt": stat.get("kontakte", 0)}
+    for art, sql in (("aufgabe", "SELECT count(*) AS n FROM offene_punkte WHERE erledigt=0"),
+                     ("gespraech", "SELECT count(*) AS n FROM verlauf WHERE rolle='user'"),
+                     ("lead", "SELECT count(*) AS n FROM leads"),
                      ("autopilot", "SELECT count(*) AS n FROM autopilot WHERE status IN ('fertig','fehler')")):
         try:
             zaehler[art] = m._lesen(sql)[0]["n"]
@@ -14930,8 +14932,14 @@ class JarvisAgent:
 
     # -- Denkschleife -------------------------------------------------------
 
-    def denken(self, eingabe: str, protokollieren: bool = True) -> str:
-        """Die Hauptschleife, mit Zustand für die Anzeige."""
+    def denken(self, eingabe: str, protokollieren: bool = True, anzeigen: bool = True) -> str:
+        """Die Hauptschleife, mit Zustand für die Anzeige.
+
+        Hintergrundarbeit (Briefing, Routinen) läuft mit ``anzeigen=False``: Sie soll
+        der Anzeige nicht mitten im Gespräch "bereit" melden.
+        """
+        if not anzeigen:
+            return self._denken(eingabe, protokollieren)
         self.zustand_setzen("denkt")
         try:
             return self._denken(eingabe, protokollieren)
@@ -15160,7 +15168,7 @@ class JarvisAgent:
                    "Termine, das Wichtigste aus der Post und was offen ist. Wenn etwas "
                    "davon nicht abrufbar war, sag es kurz und erfinde nichts.\n\n"
                    "Das sind die Daten:\n%s" % bausteine)
-        antwort = self.denken(auftrag, protokollieren=False)
+        antwort = self.denken(auftrag, protokollieren=False, anzeigen=False)
         return antwort
 
     def briefing_abends(self) -> str:
@@ -15176,7 +15184,7 @@ class JarvisAgent:
                    "ohne Aufzählungen. Wie der Tag lief, was er morgen anpacken sollte, "
                    "und wenn ein Lead liegen bleibt, sag das deutlich.\n\n"
                    "Das sind die Daten:\n%s" % bausteine)
-        return self.denken(auftrag, protokollieren=False)
+        return self.denken(auftrag, protokollieren=False, anzeigen=False)
 
     def _bausteine_sammeln(self, morgens: bool) -> str:
         """Sammelt die Fakten für ein Briefing - jeder Fehler bleibt sichtbar."""
@@ -15476,7 +15484,11 @@ def dauerbetrieb(dienst: bool = False):
             stimme.signal("verstanden")
             if not befehl:
                 stimme.sprich("Ja?")
-                nachtrag = stimme.zuhoeren()
+                agent.zustand_setzen("hoert")
+                try:
+                    nachtrag = stimme.zuhoeren()
+                finally:
+                    agent.zustand_setzen("bereit")
                 if not nachtrag:
                     continue
                 befehl = nachtrag

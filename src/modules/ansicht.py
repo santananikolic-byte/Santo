@@ -289,9 +289,11 @@ def gehirn_daten(tools, agent=None) -> dict:
         stat = m.statistik()
     except Exception:
         stat = {}
-    zaehler = {"notiz": stat.get("notizen", 0), "kontakt": stat.get("kontakte", 0),
-               "aufgabe": stat.get("offene_punkte", 0), "gespraech": stat.get("verlauf", 0)}
-    for art, sql in (("lead", "SELECT count(*) AS n FROM leads"),
+    # Gezählt wird mit denselben Bedingungen wie die Knoten - sonst passt die Zahl nicht zum Bild.
+    zaehler = {"notiz": stat.get("notizen", 0), "kontakt": stat.get("kontakte", 0)}
+    for art, sql in (("aufgabe", "SELECT count(*) AS n FROM offene_punkte WHERE erledigt=0"),
+                     ("gespraech", "SELECT count(*) AS n FROM verlauf WHERE rolle='user'"),
+                     ("lead", "SELECT count(*) AS n FROM leads"),
                      ("autopilot", "SELECT count(*) AS n FROM autopilot WHERE status IN ('fertig','fehler')")):
         try:
             zaehler[art] = m._lesen(sql)[0]["n"]

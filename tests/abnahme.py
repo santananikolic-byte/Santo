@@ -1184,6 +1184,23 @@ def pruefung_anzeige(agent):
     pruefen("Der Bedarfsring vergleicht Gewinn mit nötigem Gewinn, nicht mit Umsatz",
             "gewinn" in zd["bedarf"] and "d.bedarf.gewinn>0?d.bedarf.gewinn" in a.SEITE_ZENTRALE
             and "d.bedarf.noetig?d.bedarf.noetig" not in a.SEITE_ZENTRALE, "gedeckt = voller Ring")
+    hd = a.gehirn_daten(agent.tools, agent)
+    offen = agent.memory._lesen("SELECT count(*) AS n FROM offene_punkte WHERE erledigt=0")[0]["n"]
+    gefragt = agent.memory._lesen("SELECT count(*) AS n FROM verlauf WHERE rolle='user'")[0]["n"]
+    pruefen("Die Zähler unter dem Gehirn zählen wie die Knoten",
+            hd["zaehler"]["aufgabe"] == offen and hd["zaehler"]["gespraech"] == gefragt,
+            "%d Aufgaben, %d Fragen" % (offen, gefragt))
+    zustaende = []
+    echt_setzen, echt_innen = agent.zustand_setzen, agent._denken
+    agent.zustand_setzen = lambda z: zustaende.append(z)
+    agent._denken = lambda e, p=True: "ok"
+    try:
+        agent.denken("Briefing", protokollieren=False, anzeigen=False)
+        agent.denken("Frage")
+    finally:
+        agent.zustand_setzen, agent._denken = echt_setzen, echt_innen
+    pruefen("Hintergrundarbeit meldet der Anzeige nicht mitten im Gespräch 'bereit'",
+            zustaende == ["denkt", "bereit"], str(zustaende))
     pruefen("Die Belegquote kommt in Prozent und wird als Anteil gezeichnet",
             "ring((d.belegquote||0)/100" in a.SEITE_ZENTRALE
             and "(d.belegquote||0)*100" not in a.SEITE_ZENTRALE, "50 Prozent = halber Ring")

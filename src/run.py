@@ -258,7 +258,11 @@ def dauerbetrieb(dienst: bool = False):
             stimme.signal("verstanden")
             if not befehl:
                 stimme.sprich("Ja?")
-                nachtrag = stimme.zuhoeren()
+                agent.zustand_setzen("hoert")
+                try:
+                    nachtrag = stimme.zuhoeren()
+                finally:
+                    agent.zustand_setzen("bereit")
                 if not nachtrag:
                     continue
                 befehl = nachtrag
