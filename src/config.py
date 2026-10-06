@@ -205,6 +205,15 @@ SUPABASE_KEY = _text("SUPABASE_KEY")
 # nach Freigabe Dateien schreiben darf. Dokumente, Schreibtisch und Downloads sind immer erlaubt.
 MAC_SCHREIBORDNER = _text("MAC_SCHREIBORDNER", "")
 
+# Im Dienst läuft die Anzeige (Gehirn und Zentrale) nur auf diesem Rechner mit.
+DIENST_ANZEIGE = _wahrheit("DIENST_ANZEIGE", True)
+
+# Anzeige: ohne Namen und Texte, damit im Raum niemand mitliest.
+ANZEIGE_DISKRET = _wahrheit("ANZEIGE_DISKRET", False)
+
+# Beim Start per Doppelklick öffnet sich neben dem Gespräch auch das Gehirn.
+ANZEIGE_BEIM_START = _wahrheit("ANZEIGE_BEIM_START", True)
+
 # Autopilot: Jarvis arbeitet im Hintergrund weiter. Standardmäßig aus.
 # Er bereitet nur vor (Entwürfe im Postfach) und schickt nie etwas ab.
 AUTOPILOT_AN = _wahrheit("AUTOPILOT_AN", False)

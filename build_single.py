@@ -66,6 +66,7 @@ BAULISTE = [
     "modules/mac",
     "modules/autopilot",
     "modules/dienst",
+    "modules/ansicht",
     "modules/webseite",
     "modules/dashboard_teile",
     "modules/dashboard",

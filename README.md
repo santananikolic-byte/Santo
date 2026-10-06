@@ -118,6 +118,28 @@ Browser wird Abschnitt für Abschnitt gesprochen, mit der besten deutschen
 Stimme, die der Browser hat. Am natürlichsten klingt ElevenLabs
 (`python3 jarvis.py zugang stimme`).
 
+## Zweites Gehirn und Zentrale
+
+Zwei Seiten für zwei Bildschirme, nur zum Ansehen, ohne Eingabefeld:
+
+- **`/gehirn`**: Jarvis' Gedächtnis als leuchtendes Gehirn. Jede Notiz, jeder Kontakt,
+  jeder Interessent, jede Aufgabe, jedes Gespräch und jedes Ergebnis des Autopiloten
+  ist ein Knoten, verwandte sind verbunden. Es pulsiert schneller, wenn Jarvis zuhört,
+  denkt oder spricht, und blitzt in der passenden Region auf, wenn er etwas tut.
+- **`/zentrale`**: der Stand des Betriebs auf einen Blick: Kasse, Belege, Chancen, Verlauf,
+  Pipeline, Denken (Gemini gegen Claude, Kosten gegen Limit), Nachfassen, was Jarvis zuletzt
+  getan hat, ein Globus mit dem Betrieb und den Orten der Kunden, und das Briefing.
+
+Beim Doppelklick auf **JARVIS** öffnet sich das Gehirn neben dem Gespräch von selbst
+(abschalten mit `ANZEIGE_BEIM_START=nein`). Beide Seiten: `python3 jarvis.py anzeige`
+(je ein Fenster, auf die Bildschirme ziehen, dann Vollbild). Im Dienst läuft die Anzeige
+von selbst mit (`DIENST_ANZEIGE`).
+
+Es wird nur gezeigt, was wirklich in der Datenbank steht. Mit `ANZEIGE_DISKRET=ja` fallen
+alle Texte und Namen weg, damit im Raum niemand mitliest. Die Weltkarte ist **gezeichnet,
+nicht vermessen**: grobe Umrisse als Punktraster, gut genug zu sehen, wo etwa etwas liegt,
+und nicht zum Navigieren.
+
 ## Dauerbetrieb auf dem iMac
 
 Jarvis kann als Dienst dauerhaft auf einem iMac laufen: ohne Fenster, nur mit

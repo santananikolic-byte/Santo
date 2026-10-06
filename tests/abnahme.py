@@ -61,6 +61,7 @@ import modules.dienst as dienst_modul  # noqa: E402
 from modules.mac import MacZugriff  # noqa: E402
 import modules.mail as mail_modul  # noqa: E402
 import modules.messenger as messenger_modul  # noqa: E402
+import modules.ansicht as ansicht_modul  # noqa: E402
 from modules.lernpfad import SEITE_PFAD, lernpfad_stand  # noqa: E402
 from modules.werkstatt import Werkstatt, name_saeubern  # noqa: E402
 from modules.voice import weckwort_pruefen  # noqa: E402
@@ -1106,6 +1107,134 @@ def pruefung_ansichten(agent):
                     "Ordner, Auftrag, Start")
 
 
+def pruefung_anzeige(agent):
+    abschnitt("Anzeige: zweites Gehirn und Zentrale")
+    a = ansicht_modul
+    pruefen("Der Ort steckt in der Anschrift",
+            a.ort_aus_adresse("Hauptstr. 5, 1010 Wien") == "Wien"
+            and a.ort_aus_adresse("Werkstr. 7, 6020 Innsbruck") == "Innsbruck"
+            and a.ort_aus_adresse("Hauptstraße 5") == "" and a.ort_aus_adresse("") == "", "vier Anschriften")
+    pruefen("Bekannte Orte brauchen kein Netz, Umlaute egal",
+            a.ort_finden("München", online_erlaubt=False) == a.ORTE["muenchen"]
+            and a.ort_finden("Zürich", online_erlaubt=False) is not None
+            and a.ort_finden("Graz-Umgebung", online_erlaubt=False) == a.ORTE["graz"]
+            and a.ort_finden("Nirgendwo", online_erlaubt=False, cache_datei=os.path.join(ARBEITSVERZEICHNIS, "o.json")) is None,
+            "ohne Netz")
+
+    # Netzfehler werden nicht gespeichert, "gibt es nicht" schon - und die Zentrale wartet nie.
+    cache = os.path.join(ARBEITSVERZEICHNIS, "orte_test.json")
+    antworten = {"netz": (None, "Der Wetterdienst ist nicht erreichbar: timeout"),
+                 "fehlt": (None, "Den Ort 'Xyz' finde ich nicht.")}
+    falsche_welt = types.SimpleNamespace(ort_finden=lambda name: antworten[modus["m"]])
+    falsche_tools = types.SimpleNamespace(welt=falsche_welt)
+    modus = {"m": "netz"}
+    a.ort_finden("Hallein", falsche_tools, cache_datei=cache)
+    nach_netzfehler = a.ort_gespeichert("Hallein", cache_datei=cache)[0]
+    modus["m"] = "fehlt"
+    a.ort_finden("Xyz", falsche_tools, cache_datei=cache)
+    pruefen("Ortssuche: Netzfehler werden nicht gespeichert, 'gibt es nicht' schon",
+            nach_netzfehler is False and a.ort_gespeichert("Xyz", cache_datei=cache) == (True, None), "")
+
+    def langsam(name):
+        time.sleep(3)
+        return None, "Den Ort finde ich nicht."
+    langsame_tools = types.SimpleNamespace(welt=types.SimpleNamespace(ort_finden=langsam),
+                                           memory=agent.tools.memory)
+    echt_ort = config.WETTER_ORT
+    config.WETTER_ORT = "Irgendwoanders-%d" % os.getpid()
+    beginn = time.time()
+    try:
+        a.orte_der_kunden(langsame_tools)
+    finally:
+        config.WETTER_ORT = echt_ort
+    pruefen("Die Zentrale wartet nicht auf die Ortssuche im Netz",
+            time.time() - beginn < 1.0, "%.2f Sekunden" % (time.time() - beginn))
+    pruefen("Die Belegquote kommt in Prozent und wird als Anteil gezeichnet",
+            "ring((d.belegquote||0)/100" in a.SEITE_ZENTRALE
+            and "(d.belegquote||0)*100" not in a.SEITE_ZENTRALE, "50 Prozent = halber Ring")
+    quelle_run = open(os.path.join(WURZEL, "src/run.py"), encoding="utf-8").read()
+    anzeige_teil = quelle_run[quelle_run.index("if dienst and config.DIENST_ANZEIGE:"):]
+    anzeige_teil = anzeige_teil[:anzeige_teil.index("if dienst:\n")]
+    pruefen("Startet die Anzeige nicht, bleibt die Freigabe bei der Stimme",
+            "finally:" in anzeige_teil and "SprachFreigabe(stimme, profil)" in anzeige_teil.split("finally:")[1], "")
+
+    agent.memory.verlauf_anhaengen("user", "Wie weit ist das Angebot für Meier mit der Fensterreinigung")
+    daten = a.gehirn_daten(agent.tools, agent)
+    arten = {k["art"] for k in daten["knoten"]}
+    pruefen("Das Gehirn bekommt Knoten aus Notizen, Kontakten, Aufgaben und Gesprächen",
+            daten["ok"] and {"notiz", "kontakt", "gespraech"} <= arten and len(daten["knoten"]) > 5
+            and all(set(k) == {"id", "art", "text", "zeit"} for k in daten["knoten"]),
+            "%d Knoten, %d Verbindungen" % (len(daten["knoten"]), len(daten["kanten"])))
+    pruefen("Verbindungen zeigen auf echte Knoten",
+            all(0 <= x < len(daten["knoten"]) and 0 <= y < len(daten["knoten"]) and x != y
+                for x, y in daten["kanten"]), "%d Verbindungen" % len(daten["kanten"]))
+    pruefen("Die Zähler stammen aus der Datenbank",
+            daten["zaehler"]["notiz"] == agent.memory.statistik()["notizen"]
+            and set(daten["zaehler"]) == {"notiz", "kontakt", "lead", "aufgabe", "gespraech", "autopilot"}, "")
+    config.ANZEIGE_DISKRET = True
+    try:
+        diskret = a.gehirn_daten(agent.tools, agent)
+        zentrale_d = a.zentrale_daten(agent.tools, agent)
+    finally:
+        config.ANZEIGE_DISKRET = False
+    pruefen("Diskret: keine Texte, keine Namen auf dem Bildschirm",
+            all(k["text"] == "" for k in diskret["knoten"]) and zentrale_d["nutzer"] == ""
+            and all(n["firma"] == "Kunde" for n in zentrale_d["nachfassen"]), "")
+
+    zentrale = a.zentrale_daten(agent.tools, agent)
+    pruefen("Die Zentrale hat Kasse, Pipeline, Denken, Autopilot, Orte und Briefing",
+            {"monat", "pipeline", "gehirne", "autopilot", "orte", "briefing", "verlauf", "protokoll", "status"} <= set(zentrale)
+            and zentrale["orte"] and zentrale["orte"][0]["art"] == "zuhause" and zentrale["briefing"], 
+            "%d Orte" % len(zentrale["orte"]))
+    pruefen("Die Zentrale zeigt Zahlen aus den echten Buchungen",
+            abs((zentrale["monat"]["ergebnis"] or 0) - 1069.60) < 0.01, "%s Euro" % zentrale["monat"]["ergebnis"])
+
+    ohne = agent._denken
+    gesehen = []
+    agent._denken = lambda eingabe, protokollieren=True: gesehen.append(agent.status["zustand"]) or "fertig"
+    try:
+        agent.denken("Hallo")
+    finally:
+        agent._denken = ohne
+    pruefen("Der Zustand für die Anzeige: denkt, dann bereit",
+            gesehen == ["denkt"] and agent.status["zustand"] == "bereit"
+            and a.status_daten(agent.tools, agent)["zustand"] == "bereit", "")
+
+    for name, seite in (("Gehirn", a.SEITE_GEHIRN), ("Zentrale", a.SEITE_ZENTRALE)):
+        ohne_ns = seite.replace("http://www.w3.org/2000/svg", "")
+        pruefen("Die Seite %s lädt nichts aus dem Netz nach und nimmt den Schlüssel auf" % name,
+                "http://" not in ohne_ns and "https://" not in ohne_ns and "{{SCHLUESSEL}}" in seite
+                and "requestAnimationFrame" in seite and "prefers-reduced-motion" in seite, "")
+    pruefen("Es gibt keine Eingabefelder: nur Ansicht",
+            "<input" not in a.SEITE_GEHIRN + a.SEITE_ZENTRALE and "<textarea" not in a.SEITE_GEHIRN + a.SEITE_ZENTRALE, "")
+
+    # Über echtes HTTP
+    import socket
+    import urllib.request as _netz
+    sock = socket.socket(); sock.bind(("127.0.0.1", 0)); port = sock.getsockname()[1]; sock.close()
+    echt_kanal = agent.tools.freigabe_kanal
+    web = JarvisWeb(agent, port=port)
+    web.starten(blockierend=False)
+    try:
+        def holen(pfad):
+            with _netz.urlopen("http://127.0.0.1:%d%s" % (port, pfad), timeout=20) as antwort:
+                return antwort.status, antwort.read().decode("utf-8")
+        s1, seite = holen("/zentrale"); s2, hirn = holen("/gehirn")
+        s3, api1 = holen("/api/gehirn"); s4, api2 = holen("/api/zentrale")
+        s5, api3 = holen("/api/status"); s6, api4 = holen("/api/lichter")
+        pruefen("Alle sechs Adressen der Anzeige antworten",
+                (s1, s2, s3, s4, s5, s6) == (200,) * 6 and "Zentrale" in seite and "Gehirn" in hirn
+                and json.loads(api1)["ok"] and json.loads(api2)["ok"] and "zustand" in json.loads(api3)
+                and len(json.loads(api4)["lichter"]) > 30, "Seiten und Daten")
+    finally:
+        web.stoppen()
+        agent.tools.freigabe_kanal = echt_kanal
+    quelle = open(os.path.join(WURZEL, "jarvis.py"), encoding="utf-8").read()
+    pruefen("Der Dienst startet die Anzeige und meldet den Zustand",
+            "DIENST_ANZEIGE" in quelle and 'agent.zustand_setzen("hoert")' in quelle
+            and "def anzeige_oeffnen" in quelle, "")
+
+
 def pruefung_dienst(agent):
     abschnitt("Dienst: iMac als Kopf, nur Stimme")
     ja_nein = dienst_modul.ja_nein
@@ -2141,6 +2270,7 @@ def main() -> int:
     pruefung_sprechen(agent)
     pruefung_dienst(agent)
     pruefung_mac_zugriff(agent)
+    pruefung_anzeige(agent)
     pruefung_autopilot(agent)
     pruefung_neue_fachkraefte(agent)
     pruefung_zugang(agent)
