@@ -22,6 +22,7 @@ Terminal spricht, nimmt ``hoeren``.
     python3 jarvis.py einrichten  geführte Ersteinrichtung
     python3 jarvis.py zugang      einen Schlüssel eintragen oder ersetzen
     python3 jarvis.py zugang mail Gmail oder ein anderes Postfach verbinden
+    python3 jarvis.py zugang telegram  Handy verbinden: schreiben und sprechen von unterwegs
     python3 jarvis.py autopilot   Postfach des Autopiloten (an / aus zum Schalten)
     python3 jarvis.py daemon      dauerhaft, nur Stimme, ohne Fenster (der iMac als Kopf)
     python3 jarvis.py dienst      installieren | entfernen | status | neustart | hinweise
@@ -31,6 +32,7 @@ Terminal spricht, nimmt ``hoeren``.
 import json
 import os
 import sys
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -45,6 +47,7 @@ from modules.dienst import (Ansager, HINWEISE, Herzschlag, SprachFreigabe, diens
                             entfernen, installieren, logdatei_drehen, neustarten)
 from modules.setup_wizard import einrichtung_starten, zugang_eintragen
 from modules.speaker import Sprecherprofil
+from modules.telegram_mod import TelegramFreigabe
 from modules.voice import Stimme, weckwort_pruefen
 from modules.webapp import JarvisWeb, STANDARD_PORT
 
@@ -76,6 +79,58 @@ def agent_aufbauen(mit_stimme: bool = True):
 
 BEENDEN_SAETZE = ("schalte dich ab", "schalt dich ab", "beende dich", "feierabend jarvis",
                   "mach dich aus", "fahr dich runter")
+
+
+def telegram_lauschen(agent, stimme, sperre, halt, warten: float = 10.0):
+    """Nimmt im Dienst Nachrichten vom Handy an - Text oder Sprachnachricht.
+
+    Nur der eingerichtete Chat zählt (das prüft ``nachrichten_holen``). Rückfragen
+    zur Freigabe gehen per Telegram ans Handy, nicht laut in den leeren Raum. Wer
+    per Sprachnachricht fragt, bekommt die Antwort auch als Sprachnachricht.
+    """
+    telegram = agent.tools.telegram
+    kanal = TelegramFreigabe(telegram)
+    while not halt.is_set():
+        try:
+            nachrichten = telegram.nachrichten_holen(timeout=25)
+        except Exception as fehler:
+            print("[telegram] %s" % fehler)
+            halt.wait(warten)
+            continue
+        for nachricht in nachrichten:
+            text = (nachricht.get("text") or "").strip()
+            gesprochen = False
+            if not text and nachricht.get("sprachdatei"):
+                gesprochen = True
+                try:
+                    text = stimme.transkribieren(nachricht["sprachdatei"]) or ""
+                finally:
+                    try:
+                        os.remove(nachricht["sprachdatei"])
+                    except OSError:
+                        pass
+            if not text:
+                continue
+            erkannt, befehl = weckwort_pruefen(text)
+            befehl = befehl if erkannt and befehl else text
+            print("Du (Telegram): %s" % befehl)
+            with sperre:
+                agent.tools.anfrage_kanal_setzen(kanal)
+                try:
+                    antwort = agent.denken(befehl)
+                except Exception as fehler:
+                    antwort = "Da ist etwas schiefgegangen: %s" % fehler
+                finally:
+                    agent.tools.anfrage_kanal_setzen(None)
+            if gesprochen and hasattr(stimme, "sprachdatei_erzeugen"):
+                pfad = stimme.sprachdatei_erzeugen(antwort)
+                if pfad:
+                    telegram.datei_senden(pfad, "sendVoice", "voice", "")
+                    try:
+                        os.remove(pfad)
+                    except OSError:
+                        pass
+            telegram.senden(antwort)
 
 
 def dauerbetrieb(dienst: bool = False):
@@ -136,6 +191,14 @@ def dauerbetrieb(dienst: bool = False):
         stimme.sprich("Es ist kein Anthropic-Schlüssel hinterlegt. Starte bitte einmal "
                       "die Einrichtung.")
         print("Starte die Einrichtung mit: python3 jarvis.py einrichten")
+
+    # Ein Gedanke zur Zeit: Stimme am iMac und Telegram vom Handy teilen sich den Verlauf.
+    denk_sperre = threading.Lock()
+    telegram_halt = threading.Event()
+    if dienst and config.DIENST_TELEGRAM and agent.tools.telegram.verfuegbar():
+        threading.Thread(target=telegram_lauschen, args=(agent, stimme, denk_sperre, telegram_halt),
+                         daemon=True, name="jarvis-telegram").start()
+        print("[telegram] Ich höre auch auf Nachrichten vom Handy.")
 
     stimme.sprich("Ich bin da. Sag Hey Jarvis, wenn du etwas brauchst.")
     print("\nIch höre zu. Abbrechen mit Strg und C.\n")
@@ -201,7 +264,8 @@ def dauerbetrieb(dienst: bool = False):
                 stimme.sprich("Alles klar, ich schalte mich ab. Bis später.")
                 return 0  # Exit 0: der Dienst startet erst bei der nächsten Anmeldung neu.
             try:
-                agent.antworten(befehl)
+                with denk_sperre:
+                    agent.antworten(befehl)
             except Exception as fehler:
                 stimme.signal("fehler")
                 print("[fehler] %s" % fehler)
@@ -212,6 +276,7 @@ def dauerbetrieb(dienst: bool = False):
         print("\nBis später.")
         stimme.sprich("Bis später.")
     finally:
+        telegram_halt.set()
         zeitplan.stop()
         if dienst:
             agent.tools.autopilot.stop()

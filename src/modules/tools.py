@@ -157,6 +157,18 @@ class Werkzeuge:
         """
         self.freigabe_kanal = kanal
 
+    def anfrage_kanal_setzen(self, kanal=None):
+        """Freigabeweg nur für diesen Faden: Wer fragt, bekommt auch die Rückfrage.
+
+        Im Dienst fragt Jarvis sonst laut im Raum nach. Kommt die Bitte per
+        Telegram vom Handy, muss die Freigabe auch dorthin - sonst fragt er einen
+        leeren Raum. ``None`` hebt es wieder auf.
+        """
+        self._lauf.kanal = kanal
+
+    def _kanal(self):
+        return getattr(self._lauf, "kanal", None) or self.freigabe_kanal
+
     def stimme_setzen(self, stimme):
         """Reicht die Sprachausgabe durch - für Sprachnachrichten."""
         self.stimme = stimme
@@ -554,8 +566,9 @@ class Werkzeuge:
             details = self.werkstatt.freigabetext(argumente.get("name", ""))
         else:
             details = self.freigabe_details(argumente)
-        if self.freigabe_kanal is not None:
-            return self.freigabe_kanal.anfordern(name, details)
+        kanal = self._kanal()
+        if kanal is not None:
+            return kanal.anfordern(name, details)
         return self.telegram.freigabe_einholen(name, details)
 
     def _skript_fingerabdruck(self, name: str) -> str:
@@ -571,8 +584,9 @@ class Werkzeuge:
         Frage ist ein Nein.
         """
         try:
-            if self.freigabe_kanal is not None:
-                entscheidung = self.freigabe_kanal.anfordern("browser_schritt", frage)
+            kanal = self._kanal()
+            if kanal is not None:
+                entscheidung = kanal.anfordern("browser_schritt", frage)
             else:
                 entscheidung = self.telegram.freigabe_einholen("browser_schritt", frage)
         except Exception:

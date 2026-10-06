@@ -336,6 +336,9 @@ ANZEIGE_DISKRET = _wahrheit("ANZEIGE_DISKRET", False)
 # Beim Start per Doppelklick öffnet sich neben dem Gespräch auch das Gehirn.
 ANZEIGE_BEIM_START = _wahrheit("ANZEIGE_BEIM_START", True)
 
+# Im Dienst hört Jarvis auch auf Telegram (Text und Sprachnachrichten vom Handy).
+DIENST_TELEGRAM = _wahrheit("DIENST_TELEGRAM", True)
+
 # Autopilot: Jarvis arbeitet im Hintergrund weiter. Standardmäßig aus.
 # Er bereitet nur vor (Entwürfe im Postfach) und schickt nie etwas ab.
 AUTOPILOT_AN = _wahrheit("AUTOPILOT_AN", False)
@@ -1940,8 +1943,41 @@ class Stimme:
         except (OSError, subprocess.SubprocessError):
             pass
 
+    def _elevenlabs_datei(self, text: str) -> str:
+        """Die ganze Antwort mit ElevenLabs als eine MP3-Datei - Abschnitt für Abschnitt,
+        nahtlos verbunden. Leer, wenn es nicht klappt."""
+        stuecke = sprechstuecke(text)
+        teile, kennungen = [], []
+        for nummer, stueck in enumerate(stuecke):
+            zusatz = {"vorige": kennungen[-3:]} if kennungen else {}
+            daten = self._elevenlabs_holen(
+                stueck, stuecke[nummer - 1] if nummer else "",
+                stuecke[nummer + 1] if nummer + 1 < len(stuecke) else "", **zusatz)
+            if not daten:
+                return ""
+            teile.append(daten)
+            if getattr(self, "_anfrage_id", None):
+                kennungen.append(self._anfrage_id)
+        if not teile:
+            return ""
+        ziel = os.path.join(self._temp, "nachricht_%d.mp3" % int(time.time() * 1000))
+        try:
+            with open(ziel, "wb") as datei:
+                datei.write(b"".join(teile))
+        except OSError:
+            return ""
+        return ziel
+
     def sprachdatei_erzeugen(self, text: str, ziel: str = "") -> str:
-        """Erzeugt eine Audiodatei aus Text - für Sprachnachrichten per Telegram."""
+        """Erzeugt eine Audiodatei aus Text - für Sprachnachrichten per Telegram.
+
+        Mit ElevenLabs klingt auch die Sprachnachricht wie ein Mensch (Telegram
+        nimmt MP3 an). Sonst spricht die beste deutsche Mac-Stimme.
+        """
+        if ELEVENLABS_API_KEY and not ziel:
+            datei = self._elevenlabs_datei(text)
+            if datei:
+                return datei
         sauber = text_fuers_sprechen(text)
         if not sauber or not shutil.which("say"):
             return ""
@@ -3137,6 +3173,16 @@ class Telegram:
         if eingabe in JA_WOERTER_telegram_mod:
             return {"erlaubt": True, "kanal": "terminal", "grund": "Freigabe erteilt"}
         return {"erlaubt": False, "kanal": "terminal", "grund": "abgelehnt"}
+
+
+class TelegramFreigabe:
+    """Freigabeweg über Telegram - für Bitten, die vom Handy kommen."""
+
+    def __init__(self, telegram):
+        self.telegram = telegram
+
+    def anfordern(self, aktion: str, details: str = "") -> dict:
+        return self.telegram.freigabe_einholen(aktion, details)
 
 
 # =========================================================================
@@ -13244,6 +13290,7 @@ class Einrichtung:
     )
 
     MAIL_WOERTER = ("mail", "gmail", "email", "e-mail", "post", "postfach")
+    TELEGRAM_WOERTER = ("telegram", "handy", "unterwegs")
     MAIL_TITEL = "E-Mail (Gmail, GMX, Outlook ...) lesen, suchen und senden"
 
     def mail_nachtragen(self) -> bool:
@@ -13256,6 +13303,9 @@ class Einrichtung:
         welcher = (welcher or "").strip().lower()
         if welcher in self.MAIL_WOERTER:
             return self.mail_nachtragen()
+        if welcher in self.TELEGRAM_WOERTER:
+            self.schritt_telegram(nachfragen=False)
+            return self.ergebnisse.get("telegram") == "eingerichtet"
         wahl = [z for z in self.ZUGAENGE if welcher in (z[0], z[2].lower())]
         if not wahl:
             print("Welchen Zugang möchtest du eintragen?")
@@ -13304,18 +13354,19 @@ class Einrichtung:
 
     # -- Schritt 5: Telegram ------------------------------------------------
 
-    def schritt_telegram(self):
-        """Richtet Telegram ein - der Weg für Freigaben unterwegs."""
-        self.sagen("Telegram ist der Weg, über den ich dich um Freigaben bitte, wenn du "
-                   "nicht am Rechner sitzt. Das ist freiwillig. Ohne Telegram frage ich "
-                   "im Terminal.")
-        antwort = self.fragen("Telegram jetzt einrichten? (ja/nein)").lower()
-        if antwort not in ("ja", "j", "yes", "y"):
-            self.ergebnisse["telegram"] = "übersprungen"
-            return
+    def schritt_telegram(self, nachfragen: bool = True):
+        """Richtet Telegram ein - der Weg vom Handy zu Jarvis, auch für Freigaben unterwegs."""
+        if nachfragen:
+            self.sagen("Telegram ist der Weg, über den du mir unterwegs schreibst oder "
+                       "Sprachnachrichten schickst, und über den ich dich um Freigaben bitte. "
+                       "Das ist freiwillig. Ohne Telegram frage ich im Terminal.")
+            antwort = self.fragen("Telegram jetzt einrichten? (ja/nein)").lower()
+            if antwort not in ("ja", "j", "yes", "y"):
+                self.ergebnisse["telegram"] = "übersprungen"
+                return
         self.sagen("Öffne Telegram, suche den BotFather, schicke ihm slash newbot und "
                    "folge den Anweisungen. Am Ende bekommst du einen Token.")
-        token = self.fragen("Bot-Token hier einfügen:")
+        token = self.fragen_geheim("Bot-Token hier einfügen:")
         if not token:
             self.ergebnisse["telegram"] = "kein Token"
             return
@@ -13729,6 +13780,18 @@ class Werkzeuge:
         """
         self.freigabe_kanal = kanal
 
+    def anfrage_kanal_setzen(self, kanal=None):
+        """Freigabeweg nur für diesen Faden: Wer fragt, bekommt auch die Rückfrage.
+
+        Im Dienst fragt Jarvis sonst laut im Raum nach. Kommt die Bitte per
+        Telegram vom Handy, muss die Freigabe auch dorthin - sonst fragt er einen
+        leeren Raum. ``None`` hebt es wieder auf.
+        """
+        self._lauf.kanal = kanal
+
+    def _kanal(self):
+        return getattr(self._lauf, "kanal", None) or self.freigabe_kanal
+
     def stimme_setzen(self, stimme):
         """Reicht die Sprachausgabe durch - für Sprachnachrichten."""
         self.stimme = stimme
@@ -14126,8 +14189,9 @@ class Werkzeuge:
             details = self.werkstatt.freigabetext(argumente.get("name", ""))
         else:
             details = self.freigabe_details(argumente)
-        if self.freigabe_kanal is not None:
-            return self.freigabe_kanal.anfordern(name, details)
+        kanal = self._kanal()
+        if kanal is not None:
+            return kanal.anfordern(name, details)
         return self.telegram.freigabe_einholen(name, details)
 
     def _skript_fingerabdruck(self, name: str) -> str:
@@ -14143,8 +14207,9 @@ class Werkzeuge:
         Frage ist ein Nein.
         """
         try:
-            if self.freigabe_kanal is not None:
-                entscheidung = self.freigabe_kanal.anfordern("browser_schritt", frage)
+            kanal = self._kanal()
+            if kanal is not None:
+                entscheidung = kanal.anfordern("browser_schritt", frage)
             else:
                 entscheidung = self.telegram.freigabe_einholen("browser_schritt", frage)
         except Exception:
@@ -15181,6 +15246,7 @@ class JarvisAgent:
 #     python3 jarvis.py einrichten  geführte Ersteinrichtung
 #     python3 jarvis.py zugang      einen Schlüssel eintragen oder ersetzen
 #     python3 jarvis.py zugang mail Gmail oder ein anderes Postfach verbinden
+#     python3 jarvis.py zugang telegram  Handy verbinden: schreiben und sprechen von unterwegs
 #     python3 jarvis.py autopilot   Postfach des Autopiloten (an / aus zum Schalten)
 #     python3 jarvis.py daemon      dauerhaft, nur Stimme, ohne Fenster (der iMac als Kopf)
 #     python3 jarvis.py dienst      installieren | entfernen | status | neustart | hinweise
@@ -15220,6 +15286,58 @@ def agent_aufbauen(mit_stimme: bool = True):
 
 BEENDEN_SAETZE = ("schalte dich ab", "schalt dich ab", "beende dich", "feierabend jarvis",
                   "mach dich aus", "fahr dich runter")
+
+
+def telegram_lauschen(agent, stimme, sperre, halt, warten: float = 10.0):
+    """Nimmt im Dienst Nachrichten vom Handy an - Text oder Sprachnachricht.
+
+    Nur der eingerichtete Chat zählt (das prüft ``nachrichten_holen``). Rückfragen
+    zur Freigabe gehen per Telegram ans Handy, nicht laut in den leeren Raum. Wer
+    per Sprachnachricht fragt, bekommt die Antwort auch als Sprachnachricht.
+    """
+    telegram = agent.tools.telegram
+    kanal = TelegramFreigabe(telegram)
+    while not halt.is_set():
+        try:
+            nachrichten = telegram.nachrichten_holen(timeout=25)
+        except Exception as fehler:
+            print("[telegram] %s" % fehler)
+            halt.wait(warten)
+            continue
+        for nachricht in nachrichten:
+            text = (nachricht.get("text") or "").strip()
+            gesprochen = False
+            if not text and nachricht.get("sprachdatei"):
+                gesprochen = True
+                try:
+                    text = stimme.transkribieren(nachricht["sprachdatei"]) or ""
+                finally:
+                    try:
+                        os.remove(nachricht["sprachdatei"])
+                    except OSError:
+                        pass
+            if not text:
+                continue
+            erkannt, befehl = weckwort_pruefen(text)
+            befehl = befehl if erkannt and befehl else text
+            print("Du (Telegram): %s" % befehl)
+            with sperre:
+                agent.tools.anfrage_kanal_setzen(kanal)
+                try:
+                    antwort = agent.denken(befehl)
+                except Exception as fehler:
+                    antwort = "Da ist etwas schiefgegangen: %s" % fehler
+                finally:
+                    agent.tools.anfrage_kanal_setzen(None)
+            if gesprochen and hasattr(stimme, "sprachdatei_erzeugen"):
+                pfad = stimme.sprachdatei_erzeugen(antwort)
+                if pfad:
+                    telegram.datei_senden(pfad, "sendVoice", "voice", "")
+                    try:
+                        os.remove(pfad)
+                    except OSError:
+                        pass
+            telegram.senden(antwort)
 
 
 def dauerbetrieb(dienst: bool = False):
@@ -15280,6 +15398,14 @@ def dauerbetrieb(dienst: bool = False):
         stimme.sprich("Es ist kein Anthropic-Schlüssel hinterlegt. Starte bitte einmal "
                       "die Einrichtung.")
         print("Starte die Einrichtung mit: python3 jarvis.py einrichten")
+
+    # Ein Gedanke zur Zeit: Stimme am iMac und Telegram vom Handy teilen sich den Verlauf.
+    denk_sperre = threading.Lock()
+    telegram_halt = threading.Event()
+    if dienst and DIENST_TELEGRAM and agent.tools.telegram.verfuegbar():
+        threading.Thread(target=telegram_lauschen, args=(agent, stimme, denk_sperre, telegram_halt),
+                         daemon=True, name="jarvis-telegram").start()
+        print("[telegram] Ich höre auch auf Nachrichten vom Handy.")
 
     stimme.sprich("Ich bin da. Sag Hey Jarvis, wenn du etwas brauchst.")
     print("\nIch höre zu. Abbrechen mit Strg und C.\n")
@@ -15345,7 +15471,8 @@ def dauerbetrieb(dienst: bool = False):
                 stimme.sprich("Alles klar, ich schalte mich ab. Bis später.")
                 return 0  # Exit 0: der Dienst startet erst bei der nächsten Anmeldung neu.
             try:
-                agent.antworten(befehl)
+                with denk_sperre:
+                    agent.antworten(befehl)
             except Exception as fehler:
                 stimme.signal("fehler")
                 print("[fehler] %s" % fehler)
@@ -15356,6 +15483,7 @@ def dauerbetrieb(dienst: bool = False):
         print("\nBis später.")
         stimme.sprich("Bis später.")
     finally:
+        telegram_halt.set()
         zeitplan.stop()
         if dienst:
             agent.tools.autopilot.stop()

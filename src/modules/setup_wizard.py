@@ -501,6 +501,7 @@ class Einrichtung:
     )
 
     MAIL_WOERTER = ("mail", "gmail", "email", "e-mail", "post", "postfach")
+    TELEGRAM_WOERTER = ("telegram", "handy", "unterwegs")
     MAIL_TITEL = "E-Mail (Gmail, GMX, Outlook ...) lesen, suchen und senden"
 
     def mail_nachtragen(self) -> bool:
@@ -513,6 +514,9 @@ class Einrichtung:
         welcher = (welcher or "").strip().lower()
         if welcher in self.MAIL_WOERTER:
             return self.mail_nachtragen()
+        if welcher in self.TELEGRAM_WOERTER:
+            self.schritt_telegram(nachfragen=False)
+            return self.ergebnisse.get("telegram") == "eingerichtet"
         wahl = [z for z in self.ZUGAENGE if welcher in (z[0], z[2].lower())]
         if not wahl:
             print("Welchen Zugang möchtest du eintragen?")
@@ -561,18 +565,19 @@ class Einrichtung:
 
     # -- Schritt 5: Telegram ------------------------------------------------
 
-    def schritt_telegram(self):
-        """Richtet Telegram ein - der Weg für Freigaben unterwegs."""
-        self.sagen("Telegram ist der Weg, über den ich dich um Freigaben bitte, wenn du "
-                   "nicht am Rechner sitzt. Das ist freiwillig. Ohne Telegram frage ich "
-                   "im Terminal.")
-        antwort = self.fragen("Telegram jetzt einrichten? (ja/nein)").lower()
-        if antwort not in ("ja", "j", "yes", "y"):
-            self.ergebnisse["telegram"] = "übersprungen"
-            return
+    def schritt_telegram(self, nachfragen: bool = True):
+        """Richtet Telegram ein - der Weg vom Handy zu Jarvis, auch für Freigaben unterwegs."""
+        if nachfragen:
+            self.sagen("Telegram ist der Weg, über den du mir unterwegs schreibst oder "
+                       "Sprachnachrichten schickst, und über den ich dich um Freigaben bitte. "
+                       "Das ist freiwillig. Ohne Telegram frage ich im Terminal.")
+            antwort = self.fragen("Telegram jetzt einrichten? (ja/nein)").lower()
+            if antwort not in ("ja", "j", "yes", "y"):
+                self.ergebnisse["telegram"] = "übersprungen"
+                return
         self.sagen("Öffne Telegram, suche den BotFather, schicke ihm slash newbot und "
                    "folge den Anweisungen. Am Ende bekommst du einen Token.")
-        token = self.fragen("Bot-Token hier einfügen:")
+        token = self.fragen_geheim("Bot-Token hier einfügen:")
         if not token:
             self.ergebnisse["telegram"] = "kein Token"
             return

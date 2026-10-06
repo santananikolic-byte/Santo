@@ -214,6 +214,9 @@ ANZEIGE_DISKRET = _wahrheit("ANZEIGE_DISKRET", False)
 # Beim Start per Doppelklick öffnet sich neben dem Gespräch auch das Gehirn.
 ANZEIGE_BEIM_START = _wahrheit("ANZEIGE_BEIM_START", True)
 
+# Im Dienst hört Jarvis auch auf Telegram (Text und Sprachnachrichten vom Handy).
+DIENST_TELEGRAM = _wahrheit("DIENST_TELEGRAM", True)
+
 # Autopilot: Jarvis arbeitet im Hintergrund weiter. Standardmäßig aus.
 # Er bereitet nur vor (Entwürfe im Postfach) und schickt nie etwas ab.
 AUTOPILOT_AN = _wahrheit("AUTOPILOT_AN", False)

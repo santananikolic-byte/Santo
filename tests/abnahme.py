@@ -17,6 +17,7 @@ import json
 import os
 import pathlib
 import pty
+import re
 import select
 import shutil
 import subprocess
@@ -1437,6 +1438,86 @@ def pruefung_dienst(agent):
             and "schalte dich ab" in quelle and "def dienst_verwalten" in quelle, "")
 
 
+def pruefung_telegram_dienst(agent):
+    abschnitt("Telegram im Dauerbetrieb")
+    import run as run_modul
+    from modules.telegram_mod import TelegramFreigabe
+    halt = threading.Event()
+    gesendet, sprachnachrichten, kanaele = [], [], []
+    sprachdatei = os.path.join(ARBEITSVERZEICHNIS, "eingang.ogg")
+    open(sprachdatei, "wb").write(b"ogg")
+    antwortdatei = os.path.join(ARBEITSVERZEICHNIS, "antwort.mp3")
+
+    class FalschesTelegram:
+        runde = 0
+        def nachrichten_holen(self, timeout=25):
+            self.runde += 1
+            if self.runde == 1:
+                return [{"text": "Hey Jarvis, wie viele Leads sind offen?", "sprachdatei": ""},
+                        {"text": "", "sprachdatei": sprachdatei}]
+            halt.set()
+            return []
+        def senden(self, text, an=""): gesendet.append(text); return {"ok": True}
+        def datei_senden(self, pfad, methode="sendVoice", feld="voice", chat_id=""):
+            sprachnachrichten.append((pfad, methode)); return {"ok": True}
+        def freigabe_einholen(self, aktion, details=""): return {"erlaubt": False}
+
+    class FalscheStimme:
+        def transkribieren(self, pfad): return "Schreib das Angebot für Huber"
+        def sprachdatei_erzeugen(self, text):
+            open(antwortdatei, "wb").write(b"mp3"); return antwortdatei
+
+    werkzeuge = agent.tools
+    echt_telegram = werkzeuge.telegram
+    werkzeuge.telegram = FalschesTelegram()
+    def denken(befehl):
+        kanaele.append((befehl, type(werkzeuge._kanal()).__name__))
+        return "Erledigt: %s" % befehl
+    falscher_agent = types.SimpleNamespace(tools=werkzeuge, denken=denken)
+    try:
+        faden = threading.Thread(target=run_modul.telegram_lauschen,
+                                 args=(falscher_agent, FalscheStimme(), threading.Lock(), halt, 0.1), daemon=True)
+        faden.start()
+        faden.join(10)
+        nachher = type(werkzeuge._kanal()).__name__ if werkzeuge._kanal() is not None else "None"
+    finally:
+        werkzeuge.telegram = echt_telegram
+    pruefen("Vom Handy: Text und Sprachnachricht kommen an, ohne Weckwort-Zwang",
+            not faden.is_alive() and [k[0] for k in kanaele] == ["wie viele Leads sind offen?",
+                                                                 "Schreib das Angebot für Huber"], str(kanaele)[:55])
+    pruefen("Rückfragen zur Freigabe gehen dann aufs Handy, nicht in den leeren Raum",
+            all(k[1] == "TelegramFreigabe" for k in kanaele) and nachher != "TelegramFreigabe", nachher)
+    pruefen("Auf eine Sprachnachricht antwortet Jarvis mit Stimme und Text",
+            len(gesendet) == 2 and len(sprachnachrichten) == 1 and sprachnachrichten[0][1] == "sendVoice"
+            and not os.path.exists(sprachdatei) and not os.path.exists(antwortdatei), "")
+    quelle = open(os.path.join(WURZEL, "src/run.py"), encoding="utf-8").read()
+    pruefen("Im Dienst teilen sich Stimme und Telegram einen Gedanken zur Zeit",
+            "with denk_sperre:" in quelle and "telegram_lauschen, args=(agent, stimme, denk_sperre" in quelle, "")
+
+    # Sprachnachrichten mit der menschlichen Stimme (ElevenLabs), nahtlos aus Abschnitten.
+    stimme = voice_modul.Stimme()
+    aufrufe = []
+    def holen(text, vorher="", nachher="", vorige=None):
+        aufrufe.append(vorige)
+        stimme._anfrage_id = "id-%d" % len(aufrufe)
+        return b"teil%d" % len(aufrufe)
+    echt = config.ELEVENLABS_API_KEY
+    config.ELEVENLABS_API_KEY = "test"
+    stimme._elevenlabs_holen = holen
+    try:
+        datei = stimme.sprachdatei_erzeugen(" ".join(
+            "Das ist der Satz Nummer %s, und er hat genug Worte, damit die Antwort geteilt wird." % zahl_wort(i)
+            for i in range(1, 9)))
+    finally:
+        config.ELEVENLABS_API_KEY = echt
+    inhalt = open(datei, "rb").read() if datei else b""
+    pruefen("Sprachnachrichten nach Telegram klingen wie ElevenLabs, nicht wie die Mac-Stimme",
+            datei.endswith(".mp3") and inhalt.startswith(b"teil1") and len(aufrufe) >= 2
+            and aufrufe[0] is None and aufrufe[1] == ["id-1"], "%d Abschnitte" % len(aufrufe))
+    if datei:
+        os.remove(datei)
+
+
 def pruefung_mac_zugriff(agent):
     abschnitt("Mails und SMS")
     try:
@@ -2313,7 +2394,8 @@ def pruefung_einzeldatei():
     pruefen("jarvis.py ist aktuell (alles aus src/ ist darin)", not veraltet,
             "veraltet - neu bauen: %s" % ", ".join(veraltet[:3]) if veraltet
             else "gebaut aus dem jetzigen src/")
-    fehlend = [k for k in klassen if inhalt.count("\nclass %s" % k) != 1]
+    # Wortgrenze: "class Telegram" darf "class TelegramFreigabe" nicht mitzählen.
+    fehlend = [k for k in klassen if len(re.findall(r"\nclass %s\b" % re.escape(k), inhalt)) != 1]
     pruefen("Einzeldatei enthält alle Klassen genau einmal", not fehlend,
             ", ".join(fehlend) or "%d Klassen" % len(klassen))
 
@@ -2350,6 +2432,7 @@ def main() -> int:
     pruefung_sprechen(agent)
     pruefung_dienst(agent)
     pruefung_mac_zugriff(agent)
+    pruefung_telegram_dienst(agent)
     pruefung_anzeige(agent)
     pruefung_autopilot(agent)
     pruefung_neue_fachkraefte(agent)

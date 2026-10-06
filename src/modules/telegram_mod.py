@@ -249,3 +249,13 @@ class Telegram:
         if eingabe in JA_WOERTER:
             return {"erlaubt": True, "kanal": "terminal", "grund": "Freigabe erteilt"}
         return {"erlaubt": False, "kanal": "terminal", "grund": "abgelehnt"}
+
+
+class TelegramFreigabe:
+    """Freigabeweg über Telegram - für Bitten, die vom Handy kommen."""
+
+    def __init__(self, telegram):
+        self.telegram = telegram
+
+    def anfordern(self, aktion: str, details: str = "") -> dict:
+        return self.telegram.freigabe_einholen(aktion, details)

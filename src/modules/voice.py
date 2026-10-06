@@ -398,8 +398,41 @@ class Stimme:
         except (OSError, subprocess.SubprocessError):
             pass
 
+    def _elevenlabs_datei(self, text: str) -> str:
+        """Die ganze Antwort mit ElevenLabs als eine MP3-Datei - Abschnitt für Abschnitt,
+        nahtlos verbunden. Leer, wenn es nicht klappt."""
+        stuecke = sprechstuecke(text)
+        teile, kennungen = [], []
+        for nummer, stueck in enumerate(stuecke):
+            zusatz = {"vorige": kennungen[-3:]} if kennungen else {}
+            daten = self._elevenlabs_holen(
+                stueck, stuecke[nummer - 1] if nummer else "",
+                stuecke[nummer + 1] if nummer + 1 < len(stuecke) else "", **zusatz)
+            if not daten:
+                return ""
+            teile.append(daten)
+            if getattr(self, "_anfrage_id", None):
+                kennungen.append(self._anfrage_id)
+        if not teile:
+            return ""
+        ziel = os.path.join(self._temp, "nachricht_%d.mp3" % int(time.time() * 1000))
+        try:
+            with open(ziel, "wb") as datei:
+                datei.write(b"".join(teile))
+        except OSError:
+            return ""
+        return ziel
+
     def sprachdatei_erzeugen(self, text: str, ziel: str = "") -> str:
-        """Erzeugt eine Audiodatei aus Text - für Sprachnachrichten per Telegram."""
+        """Erzeugt eine Audiodatei aus Text - für Sprachnachrichten per Telegram.
+
+        Mit ElevenLabs klingt auch die Sprachnachricht wie ein Mensch (Telegram
+        nimmt MP3 an). Sonst spricht die beste deutsche Mac-Stimme.
+        """
+        if config.ELEVENLABS_API_KEY and not ziel:
+            datei = self._elevenlabs_datei(text)
+            if datei:
+                return datei
         sauber = text_fuers_sprechen(text)
         if not sauber or not shutil.which("say"):
             return ""

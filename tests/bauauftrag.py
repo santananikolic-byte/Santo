@@ -11,6 +11,7 @@ Es wird wirklich ausgeführt, nicht behauptet. Gearbeitet wird gegen eine
 eigene Testdatenbank, die echte ``jarvis_memory.db`` bleibt unangetastet.
 """
 
+import re
 import json
 import os
 import pty
@@ -353,7 +354,8 @@ def main() -> int:
                "Telegram", "Bookkeeping", "CallAnalysis", "Routines", "Kamera",
                "MCPServer", "MCPClient", "Welt", "Messenger", "Bildschirm",
                "Dashboard", "Scheduler", "Einrichtung", "Werkzeuge", "JarvisAgent"]
-    fehlend = [k for k in klassen if einzeldatei.count("\nclass %s" % k) != 1]
+    # Wortgrenze: "class Telegram" darf "class TelegramFreigabe" nicht mitzählen.
+    fehlend = [k for k in klassen if len(re.findall(r"\nclass %s\b" % re.escape(k), einzeldatei)) != 1]
     haken(29, "Einzeldatei enthält alle Klassen genau einmal", not fehlend,
           ", ".join(fehlend) or "%d Klassen aus dem Bauauftrag" % len(klassen))
 
