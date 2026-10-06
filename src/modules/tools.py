@@ -19,7 +19,9 @@ Timeout oder ausbleibende Antwort gelten als Ablehnung.
 import json
 import os
 import re
+import hashlib
 import subprocess
+import threading
 
 import config
 from modules.akquise import Akquise, SONDERLEISTUNGEN, STUFEN
@@ -38,9 +40,10 @@ from modules.messenger import Messenger
 from modules.recall import Recall
 from modules.routines import Routines
 from modules.autopilot import Autopilot
+from modules.apple import MacApps
 from modules.mac import MacZugriff
 from modules.team import ROLLEN, Team
-from modules.telefon import Telefon
+from modules.telefon import Telefon, nummer_pruefen
 from modules.telegram_mod import Telegram
 from modules.werkstatt import Werkstatt
 from modules.world import Welt
@@ -77,7 +80,18 @@ PARAMETER_AKTIONEN = {
 FREIGABE_PFLICHTIG = {"mail_senden", "termin_anlegen", "bildschirm_bedienen",
                       "nachricht_senden", "skript_ausfuehren", "anrufen",
                       "sms_senden", "browser_auftrag", "autopilot_schalten",
-                      "datei_schreiben"}
+                      "datei_schreiben", "browser_oeffnen", "mac_termin_anlegen"}
+
+# Werkzeuge, die frei formulierten Text ins Netz tragen. Wer vorher etwas Fremdes
+# gelesen hat (eine Datei, eine Mail, eine Nachricht), könnte von diesem Text dazu
+# gebracht worden sein, Inhalte hinauszuschicken. Deshalb fragen sie danach nach,
+# und im Hintergrund gibt es sie gar nicht.
+NETZ_SENDEND = {"recherche", "flug_suchen", "browser_oeffnen", "browser_auftrag",
+                "browser_lesen"}
+# Werkzeuge, deren Ergebnis Text von anderen ist.
+FREMDE_INHALTE = {"datei_lesen", "mails_lesen", "mails_suchen", "handy_nachrichten_lesen",
+                  "browser_lesen", "browser_oeffnen", "recherche", "lagebericht",
+                  "dateien_suchen", "mac_termine", "termine_lesen"}
 
 
 def parameter_pruefen(wert: str):
@@ -97,6 +111,8 @@ def parameter_pruefen(wert: str):
 
 class Werkzeuge:
     """Der Katalog: Beschreibungen für Claude und die Ausführung dahinter."""
+
+    NETZ_SENDEND = NETZ_SENDEND
 
     def __init__(self, agent=None, db_pfad: str = None):
         self.agent = agent
@@ -126,6 +142,9 @@ class Werkzeuge:
                                    akquise=self.akquise, team=self.team,
                                    privat=self.privat)
         self.mac = MacZugriff()
+        self.apple = MacApps()
+        # Je Faden: Läuft das gerade im Hintergrund, und wurde schon Fremdes gelesen?
+        self._lauf = threading.local()
         self.autopilot = Autopilot(self)
         self.stimme = None
         # Ein anderer Weg, Freigaben einzuholen - die Web-App setzt sich hier ein.
@@ -394,16 +413,31 @@ class Werkzeuge:
 
             # -- Kommunikation --
             werkzeug("mails_lesen",
-                     "Holt ungelesene Mails und sortiert sie vor.", {"limit": ganz}),
+                     "Holt ungelesene Mails (Gmail oder anderes Postfach) und sortiert "
+                     "sie vor.", {"limit": ganz}),
+            werkzeug("mails_suchen",
+                     "Sucht im Postfach nach Absender, Betreff oder Text, auch in schon "
+                     "gelesenen Mails - etwa 'die Mail von Müller wegen dem Angebot'.",
+                     {"begriff": text, "tage": ganz, "limit": ganz}, ["begriff"]),
+            werkzeug("handy_nachrichten_lesen",
+                     "Liest SMS und iMessages der letzten Stunden vom Mac (sie kommen "
+                     "vom iPhone). Nur lesend. Optional nur von einer Nummer oder einem "
+                     "Namen, oder nur eingehende.",
+                     {"stunden": ganz, "von": text, "limit": ganz, "nur_eingang": wahr}),
+            werkzeug("adressbuch_suchen",
+                     "Sucht im Adressbuch des Macs (Kontakte-App, auch iPhone und "
+                     "iCloud) nach Name oder Firma und nennt Nummern und Mailadressen.",
+                     {"begriff": text}, ["begriff"]),
             werkzeug("mail_senden",
                      "Verschickt eine E-Mail. Braucht eine Freigabe.",
                      {"an": text, "betreff": text, "text": text},
                      ["an", "betreff", "text"]),
             werkzeug("nachricht_senden",
-                     "Verschickt eine Nachricht über telegram, mail, imessage oder "
-                     "whatsapp. Braucht eine Freigabe.",
+                     "Verschickt eine Nachricht über telegram, mail, imessage, sms oder "
+                     "whatsapp. imessage und sms gehen über die Nachrichten-App des Macs "
+                     "mit der eigenen Handynummer. Braucht eine Freigabe.",
                      {"kanal": {"type": "string",
-                                "enum": ["telegram", "mail", "imessage", "whatsapp"]},
+                                "enum": ["telegram", "mail", "imessage", "sms", "whatsapp"]},
                       "an": text, "text": text, "als_sprache": wahr, "betreff": text},
                      ["kanal", "text"]),
 
@@ -414,6 +448,15 @@ class Werkzeuge:
                      "Trägt einen Termin ein. Braucht eine Freigabe.",
                      {"titel": text, "beginn": text, "dauer_minuten": ganz,
                       "ort": text, "beschreibung": text}, ["titel", "beginn"]),
+            werkzeug("mac_termine",
+                     "Termine aus der Kalender-App des Macs, ab heute - dort stehen auch "
+                     "Google- und iCloud-Kalender, wenn sie am Mac verbunden sind.",
+                     {"tage": ganz}),
+            werkzeug("mac_termin_anlegen",
+                     "Trägt einen Termin in die Kalender-App des Macs ein (damit auch "
+                     "aufs iPhone). Datum JJJJ-MM-TT, Uhrzeit HH:MM. Braucht eine Freigabe.",
+                     {"titel": text, "datum": text, "uhrzeit": text, "dauer_minuten": ganz,
+                      "ort": text, "kalender": text}, ["titel", "datum", "uhrzeit"]),
 
             # -- Welt --
             werkzeug("wetter", "Aktuelles Wetter und Vorhersage für einen Ort.",
@@ -430,7 +473,8 @@ class Werkzeuge:
             # -- Browser --
             werkzeug("browser_oeffnen",
                      "Öffnet eine Webseite im Browser und liest, was darauf steht - "
-                     "samt aller Knöpfe und Felder mit ihren Nummern.",
+                     "samt aller Knöpfe und Felder mit ihren Nummern. Braucht eine "
+                     "Freigabe, weil die Adresse selbst schon etwas mitteilt.",
                      {"adresse": text}, ["adresse"]),
             werkzeug("browser_lesen",
                      "Liest die gerade offene Seite noch einmal.", {}),
@@ -448,7 +492,9 @@ class Werkzeuge:
                      "eine Terminbestätigung oder einen Rückruf. Braucht eine Freigabe.",
                      {"nummer": text, "ansage": text}, ["nummer", "ansage"]),
             werkzeug("sms_senden",
-                     "Schickt eine SMS an eine Nummer. Braucht eine Freigabe.",
+                     "Schickt eine SMS an eine Nummer - über Twilio, wenn eingerichtet, "
+                     "sonst über die Nachrichten-App des Macs mit der eigenen Nummer. "
+                     "Braucht eine Freigabe.",
                      {"nummer": text, "text": text}, ["nummer", "text"]),
             werkzeug("anrufliste",
                      "Zeigt die letzten Anrufe und SMS mit Nummer, Zeitpunkt und Status.",
@@ -480,11 +526,45 @@ class Werkzeuge:
 
     # -- Freigabe -----------------------------------------------------------
 
+    def lauf_beginnen(self, hintergrund: bool = False):
+        """Ein neuer Gedankengang: noch nichts Fremdes gelesen."""
+        self._lauf.fremd = False
+        self._lauf.hintergrund = bool(hintergrund)
+
+    def im_hintergrund(self) -> bool:
+        return bool(getattr(self._lauf, "hintergrund", False))
+
+    def hintergrund_setzen(self, an: bool):
+        self._lauf.hintergrund = bool(an)
+
+    def fremdes_gelesen(self) -> bool:
+        return bool(getattr(self._lauf, "fremd", False))
+
     def braucht_freigabe(self, name: str) -> bool:
         """Muss vor diesem Werkzeug gefragt werden?"""
         if self.mcp.ist_mcp_werkzeug(name):
             return self.mcp.braucht_freigabe(name)
+        if name in NETZ_SENDEND and self.fremdes_gelesen():
+            return True
         return name in FREIGABE_PFLICHTIG
+
+    @staticmethod
+    def freigabe_details(argumente: dict) -> str:
+        """Die Argumente für die Freigabefrage: gültiges JSON, lange Texte gekürzt.
+
+        Gekürzt wird jedes Feld für sich, nicht der ganze Text: so bleiben
+        Empfänger, Pfad und Adresse immer lesbar, auch wenn der Inhalt lang ist.
+        """
+        kurz = {}
+        for schluessel, wert in (argumente or {}).items():
+            if isinstance(wert, str) and len(wert) > 400 and schluessel not in ("adresse", "url", "pfad", "an"):
+                kurz[schluessel] = "%s … (%d Zeichen insgesamt)" % (wert[:400], len(wert))
+            else:
+                kurz[schluessel] = wert
+        try:
+            return json.dumps(kurz, ensure_ascii=False, default=str)
+        except (TypeError, ValueError):
+            return str(kurz)[:2000]
 
     def _freigabe(self, name: str, argumente: dict) -> dict:
         """Holt die Freigabe ein. Ohne klares Ja wird nichts ausgeführt."""
@@ -493,13 +573,16 @@ class Werkzeuge:
             # Über einen blossen Dateinamen kann niemand entscheiden.
             details = self.werkstatt.freigabetext(argumente.get("name", ""))
         else:
-            try:
-                details = json.dumps(argumente or {}, ensure_ascii=False)[:600]
-            except (TypeError, ValueError):
-                details = str(argumente)[:600]
+            details = self.freigabe_details(argumente)
         if self.freigabe_kanal is not None:
             return self.freigabe_kanal.anfordern(name, details)
         return self.telegram.freigabe_einholen(name, details)
+
+    def _skript_fingerabdruck(self, name: str) -> str:
+        angaben = self.werkstatt.skript_zeigen(name)
+        if not angaben.get("ok"):
+            return ""
+        return hashlib.sha256(angaben.get("code", "").encode("utf-8")).hexdigest()
 
     def _zwischenfrage(self, frage: str) -> bool:
         """Fragt mitten in einem laufenden Vorgang nach - etwa vor dem Bezahlen.
@@ -536,7 +619,17 @@ class Werkzeuge:
                 self.memory.aktion_protokollieren(name, argumente, vorab["fehler"], "abgelehnt")
                 return vorab
 
+        skript_vorher = ""
         if self.braucht_freigabe(name):
+            if self.im_hintergrund():
+                # Im Hintergrund ist niemand da, der Ja sagen könnte.
+                ergebnis = {"ok": False, "abgebrochen": True,
+                            "fehler": "Im Hintergrund ist niemand da, der %s freigeben "
+                                      "kann. Schreib es als Entwurf in deinen Bericht." % name}
+                self.memory.aktion_protokollieren(name, argumente, ergebnis["fehler"], "abgelehnt")
+                return ergebnis
+            if name == "skript_ausfuehren":
+                skript_vorher = self._skript_fingerabdruck(argumente.get("name", ""))
             entscheidung = self._freigabe(name, argumente)
             if not entscheidung.get("erlaubt"):
                 ergebnis = {"ok": False, "abgebrochen": True,
@@ -546,6 +639,16 @@ class Werkzeuge:
                     "abgelehnt")
                 return ergebnis
 
+        if name == "skript_ausfuehren" and skript_vorher and \
+                self._skript_fingerabdruck(argumente.get("name", "")) != skript_vorher:
+            ergebnis = {"ok": False, "abgebrochen": True,
+                        "fehler": "Das Skript wurde nach der Freigabe verändert. Ich führe es "
+                                  "nicht aus. Bitte noch einmal freigeben."}
+            self.memory.aktion_protokollieren(name, argumente, ergebnis["fehler"], "abgelehnt")
+            return ergebnis
+
+        if name in FREMDE_INHALTE:
+            self._lauf.fremd = True
         try:
             ergebnis = self._ausfuehren(name, argumente)
         except Exception as fehler:
@@ -737,7 +840,8 @@ class Werkzeuge:
         if name == "autopilot_auftrag":
             return self.autopilot.auftrag_anlegen(
                 a.get("titel"), a.get("auftrag", ""), a.get("rolle", ""),
-                a.get("prioritaet") or 2)
+                a.get("prioritaet") or 2,
+                "hintergrund" if self.im_hintergrund() else "nutzer")
         if name == "autopilot_postfach":
             return {"ok": True, "text": self.autopilot.postfach_text(),
                     "anzahl": len(self.autopilot.postfach(30))}
@@ -777,6 +881,14 @@ class Werkzeuge:
         # -- Kommunikation --
         if name == "mails_lesen":
             return self.mail.ungelesene(int(a.get("limit") or 15))
+        if name == "mails_suchen":
+            return self.mail.suchen(a.get("begriff", ""), int(a.get("tage") or 180),
+                                    int(a.get("limit") or 10))
+        if name == "handy_nachrichten_lesen":
+            return self.apple.nachrichten(int(a.get("stunden") or 24), a.get("von", ""),
+                                          int(a.get("limit") or 30), bool(a.get("nur_eingang")))
+        if name == "adressbuch_suchen":
+            return self.apple.kontakte_suchen(a.get("begriff", ""))
         if name == "mail_senden":
             return self.mail.senden(a.get("an"), a.get("betreff"), a.get("text"))
         if name == "nachricht_senden":
@@ -791,6 +903,12 @@ class Werkzeuge:
             return self.kalender.termin_anlegen(
                 a.get("titel"), a.get("beginn"), int(a.get("dauer_minuten") or 60),
                 a.get("ort", ""), a.get("beschreibung", ""))
+        if name == "mac_termine":
+            return self.apple.termine(int(a.get("tage") or 7))
+        if name == "mac_termin_anlegen":
+            return self.apple.termin_anlegen(
+                a.get("titel"), a.get("datum", ""), a.get("uhrzeit", ""),
+                int(a.get("dauer_minuten") or 60), a.get("ort", ""), a.get("kalender", ""))
 
         # -- Welt --
         if name == "wetter":
@@ -822,7 +940,13 @@ class Werkzeuge:
         if name == "anrufen":
             return self.telefon.anrufen(a.get("nummer"), a.get("ansage"))
         if name == "sms_senden":
-            return self.telefon.sms_senden(a.get("nummer"), a.get("text"))
+            if self.telefon.verfuegbar():
+                return self.telefon.sms_senden(a.get("nummer"), a.get("text"))
+            # Ohne Twilio geht die SMS über das eigene iPhone (Nachrichten-App am Mac).
+            ziel, fehler = nummer_pruefen(a.get("nummer"))
+            if ziel is None:
+                return {"ok": False, "fehler": fehler}
+            return self.messenger.nachricht_senden("sms", ziel, a.get("text"))
         if name == "anrufliste":
             return self.telefon.anrufliste(int(a.get("limit") or 20))
 
@@ -906,4 +1030,5 @@ class Werkzeuge:
             "bildschirm": self.bildschirm.zustand(),
             "browser": self.browser.zustand(),
             "versand": self.messenger.zustand(),
+            "mac_apps": self.apple.zustand(),
         }

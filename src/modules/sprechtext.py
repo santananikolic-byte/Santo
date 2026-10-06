@@ -165,8 +165,14 @@ def _datum(treffer) -> str:
     text = "%s %s" % (tag_wort(tag, davor), MONATE[monat - 1])
     if jahr:
         j = int(jahr)
-        j = j + 2000 if j < 100 else j
+        if j < 100:
+            j += 1900 if j > 40 else 2000
         text += " " + jahr_wort(j)
+        return text
+    # "bis 12.10. Danach": der Punkt nach dem Monat war auch das Satzende.
+    danach = treffer.string[treffer.end():]
+    if not danach.strip() or re.match(r"\s+[A-ZÄÖÜ]", danach):
+        text += "."
     return text
 
 
@@ -174,7 +180,7 @@ def _uhrzeit(treffer) -> str:
     stunde, minute = int(treffer.group(1)), int(treffer.group(2))
     if stunde > 24 or minute > 59:
         return treffer.group(0)
-    text = "%s Uhr" % zahl_wort(stunde)
+    text = "%s Uhr" % ("ein" if stunde == 1 else zahl_wort(stunde))
     return text + (" %s" % zahl_wort(minute) if minute else "")
 
 
@@ -191,7 +197,7 @@ def schreiben_zu_sprechen(text: str) -> str:
     t = re.sub(r"\[([^\]]*)\]\([^)]*\)", r"\1", t)
     t = re.sub(r"^\s{0,3}#{1,6}\s*", "", t, flags=re.M)
     t = re.sub(r"^\s*[-*•·]\s+", "", t, flags=re.M)
-    t = re.sub(r"^\s*\d+[.)]\s+", "", t, flags=re.M)
+    t = re.sub(r"^\s*\d+[.)]\s+(?!(?:%s)\b)" % "|".join(MONATE), "", t, flags=re.M)
     t = re.sub(r"[*_~>]+", " ", t)
     t = re.sub(r"[\U0001F300-\U0001FAFF☀-➿️]", "", t)
     t = t.replace("|", ", ")
@@ -208,7 +214,20 @@ def schreiben_zu_sprechen(text: str) -> str:
 
     # Daten, Uhrzeiten, Beträge, Prozent, Zahlen
     t = re.sub(r"\b(\d{1,2})\.(\d{1,2})\.(\d{4}|\d{2})?(?!\d)", _datum, t)
+    # "3. März": ausgeschriebener Monat mit Ordnungszahl davor.
+    t = re.sub(r"\b(\d{1,2})\.\s?(%s)\b" % "|".join(MONATE),
+               lambda m: "%s %s" % (tag_wort(int(m.group(1)), m.string[max(0, m.start() - 12):m.start()]),
+                                    m.group(2)) if 1 <= int(m.group(1)) <= 31 else m.group(0), t)
     t = re.sub(r"\b(\d{1,2}):(\d{2})(?:\s?Uhr)?\b", _uhrzeit, t)
+    # "45 €/h", "130 km/h": der Schrägstrich ist ein "pro".
+    pro = {"h": "Stunde", "std": "Stunde", "std.": "Stunde", "stunde": "Stunde", "m²": "Quadratmeter",
+           "m2": "Quadratmeter", "qm": "Quadratmeter", "monat": "Monat", "tag": "Tag",
+           "woche": "Woche", "stück": "Stück", "stk": "Stück", "stk.": "Stück"}
+    t = re.sub(r"(\d)\s?km\s?/\s?h(?![\wäöüß])", r"\1 Kilometer pro Stunde", t)
+    t = re.sub(r"(€|EUR|Euro)\s?/\s?(h|Std\.?|Stunde|m²|m2|qm|Monat|Tag|Woche|Stück|Stk\.?)(?![\wäöüß])",
+               lambda m: "%s pro %s" % (m.group(1), pro.get(m.group(2).lower(), m.group(2))), t)
+    # Ein Minus vor einem Betrag oder einer Prozentzahl wird gesprochen.
+    t = re.sub(r"(?<![\w.,])[-−–]\s?(?=\d[\d.,]*\s?(?:€|EUR|Euro|%))", "minus ", t)
     betrag = r"(?P<ganz>\d{1,3}(?:\.\d{3})+|\d+)(?:,(?P<cent>\d{1,2}))?"
     t = re.sub(betrag + r"\s?(?:€|EUR|Euro)(?![\wäöüß])", _betrag, t)
     t = re.sub(r"(?:€|EUR)\s?" + betrag, _betrag, t)

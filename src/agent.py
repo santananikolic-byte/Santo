@@ -287,6 +287,8 @@ class JarvisAgent:
         if not self.einsatzbereit():
             return ("Es ist kein Anthropic-Schlüssel hinterlegt. Starte einmal die "
                     "Einrichtung, dann kann ich dir antworten.")
+        # Ein neuer Gedankengang: Fremdes ist noch nicht gelesen worden.
+        self.tools.lauf_beginnen(hintergrund=False)
 
         if protokollieren:
             self.memory.verlauf_anhaengen("user", eingabe)
@@ -383,7 +385,17 @@ class JarvisAgent:
                 "genauer, was du brauchst." % MAX_RUNDEN)
 
     def arbeiten(self, systemtext: str, auftrag: str, werkzeugnamen: list = None,
-                 max_runden: int = 6, grund: str = "Team") -> str:
+                 max_runden: int = 6, grund: str = "Team", hintergrund: bool = False) -> str:
+        """Wie ``_arbeiten``, mit dem Hintergrund-Merker für den Werkzeugkatalog."""
+        vorher = self.tools.im_hintergrund()
+        self.tools.hintergrund_setzen(vorher or hintergrund)
+        try:
+            return self._arbeiten(systemtext, auftrag, werkzeugnamen, max_runden, grund)
+        finally:
+            self.tools.hintergrund_setzen(vorher)
+
+    def _arbeiten(self, systemtext: str, auftrag: str, werkzeugnamen: list = None,
+                  max_runden: int = 6, grund: str = "Team") -> str:
         """Eine abgeschlossene Arbeitsschleife ohne eigenen Gesprächsverlauf.
 
         Damit arbeitet eine Fachkraft ihren Auftrag ab: eigener Systemprompt,
@@ -399,6 +411,7 @@ class JarvisAgent:
                     % config.MONATSLIMIT_EURO)
 
         katalog = self.tools.katalog()
+        erlaubt = None
         if werkzeugnamen:
             erlaubt = set(werkzeugnamen)
             katalog = [w for w in katalog if w["name"] in erlaubt]
@@ -441,7 +454,13 @@ class JarvisAgent:
             for aufruf in aufrufe:
                 name = aufruf.get("name", "")
                 print("[fachkraft] %s" % name)
-                ergebnis = self.tools.run(name, aufruf.get("input") or {})
+                if erlaubt is not None and name not in erlaubt:
+                    # Die Liste der Rolle ist die Sperre, nicht nur das Angebot.
+                    ergebnis = {"ok": False, "fehler": "Das Werkzeug %s gehört nicht zu dieser Rolle." % name}
+                    self.memory.aktion_protokollieren(name, aufruf.get("input") or {},
+                                                      ergebnis["fehler"], "abgelehnt")
+                else:
+                    ergebnis = self.tools.run(name, aufruf.get("input") or {})
                 try:
                     text = json.dumps(ergebnis, ensure_ascii=False,
                                       default=str)[:6000]

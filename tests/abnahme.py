@@ -19,11 +19,13 @@ import pathlib
 import pty
 import select
 import shutil
+import sqlite3
 import subprocess
 import sys
 import threading
 import tempfile
 import time
+import types
 from datetime import datetime, timedelta
 
 WURZEL = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -51,13 +53,16 @@ from modules.webseite import SEITE_HTML  # noqa: E402
 import modules.setup_wizard as wizard_modul  # noqa: E402
 from modules import autopilot as autopilot_modul  # noqa: E402
 from modules.autopilot import in_ruhezeit, rolle_raten  # noqa: E402
-from modules.tools import FREIGABE_PFLICHTIG  # noqa: E402
+from modules.tools import FREIGABE_PFLICHTIG, NETZ_SENDEND, Werkzeuge  # noqa: E402
 import modules.voice as voice_modul  # noqa: E402
 from modules.sprechtext import (abschnitte, jahr_wort, schleifen_entfernen,  # noqa: E402
                                 sprechstuecke, sprechtext, zahl_wort)
 from modules.werkstatt import projektdatei_saeubern  # noqa: E402
 import modules.dienst as dienst_modul  # noqa: E402
 from modules.mac import MacZugriff  # noqa: E402
+import modules.apple as apple_modul  # noqa: E402
+import modules.mail as mail_modul  # noqa: E402
+import modules.messenger as messenger_modul  # noqa: E402
 from modules.lernpfad import SEITE_PFAD, lernpfad_stand  # noqa: E402
 from modules.werkstatt import Werkstatt, name_saeubern  # noqa: E402
 from modules.voice import weckwort_pruefen  # noqa: E402
@@ -546,6 +551,24 @@ def pruefung_werkstatt(agent):
     pruefen("skript_ausfuehren ist freigabepflichtig",
             agent.tools.braucht_freigabe("skript_ausfuehren") is True)
 
+    werkstatt.skript_schreiben("tauscher", "print('harmlos')")
+    class Tauscher:
+        def anfordern(self, aktion, details):
+            # Während gefragt wird, tauscht jemand den Code aus.
+            werkstatt.skript_schreiben("tauscher", "print('ausgetauscht')")
+            return {"erlaubt": True}
+    echt_kanal = agent.tools.freigabe_kanal
+    agent.tools.freigabe_kanal = Tauscher()
+    try:
+        agent.tools.lauf_beginnen()
+        getauscht = agent.tools.run("skript_ausfuehren", {"name": "tauscher"})
+    finally:
+        agent.tools.freigabe_kanal = echt_kanal
+    pruefen("Ein nach der Freigabe verändertes Skript läuft nicht",
+            getauscht["ok"] is False and "verändert" in getauscht.get("fehler", "")
+            and "ausgetauscht" not in json.dumps(getauscht, ensure_ascii=False),
+            getauscht.get("fehler", "")[:55])
+
 
 def pruefung_werkzeugvertrag(agent):
     """Jedes Werkzeug muss ein ok melden - sonst gilt Erfolg als Fehler."""
@@ -601,9 +624,11 @@ def pruefung_browser(agent):
 
     pruefen("browser_auftrag ist freigabepflichtig",
             agent.tools.braucht_freigabe("browser_auftrag"), "Freigabe nötig")
-    pruefen("Lesen braucht keine Freigabe",
-            not agent.tools.braucht_freigabe("browser_oeffnen")
-            and not agent.tools.braucht_freigabe("browser_lesen"), "nur Lesen")
+    agent.tools.lauf_beginnen()
+    pruefen("Eine Adresse öffnen fragt nach, die offene Seite lesen nicht",
+            agent.tools.braucht_freigabe("browser_oeffnen")
+            and not agent.tools.braucht_freigabe("browser_lesen"),
+            "die Adresse selbst trägt schon etwas hinaus")
 
     # Eine kaputte Freigabe darf nie als Ja durchgehen.
     class KaputterKanal:
@@ -1091,12 +1116,37 @@ def pruefung_dienst(agent):
             and ja_nein("nein danke") is False and ja_nein("ja aber nicht jetzt") is False
             and ja_nein("wie bitte") is None and ja_nein("") is None and ja_nein("vielleicht") is None,
             "sieben Antworten")
+    kein_ja = ["Ich habe ja gar nichts gesagt", "Das ist ja unglaublich", "Okay, vergiss es",
+               "Ja, auf keinen Fall", "Mach mal leiser", "Ja, aber an Müller statt an Meier",
+               "ja ja ja ja ja ja", "Klar, und dann noch die Rechnung an alle Kunden"]
+    durchgerutscht = [t for t in kein_ja if ja_nein(t) is True]
+    pruefen("Ein Ja mitten im Satz ist kein Ja",
+            not durchgerutscht and ja_nein("ja bitte") is True and ja_nein("Okay, mach das") is True,
+            durchgerutscht[0] if durchgerutscht else "%d Gegenbeispiele" % len(kein_ja))
     ansage = dienst_modul.freigabe_ansage(
         "skript_ausfuehren", "Skript rechnung.py ausführen. Es will ins Netz.\n\nimport urllib\nprint(secret)")
     pruefen("Vor einer Freigabe wird der Kern gesagt, nie der Code",
             "will ins Netz" in ansage and "import urllib" not in ansage and "print" not in ansage
             and "Mail an a@b.at" in dienst_modul.freigabe_ansage("mail_senden", '{"an":"a@b.at","betreff":"x"}'),
             ansage[:60])
+
+    details = Werkzeuge.freigabe_details({"an": "kunde@firma.at", "betreff": "Angebot",
+                                          "text": "Sehr geehrte Frau Weber, " + "x" * 2000})
+    geparst = json.loads(details)
+    pruefen("Freigabedetails bleiben gültiges JSON, Empfänger ganz, Text gekürzt",
+            geparst["an"] == "kunde@firma.at" and "Zeichen insgesamt" in geparst["text"]
+            and len(details) < 800, "%d Zeichen" % len(details))
+    ansagen = [dienst_modul.freigabe_ansage("mail_senden", details),
+               dienst_modul.freigabe_ansage("datei_schreiben", json.dumps(
+                   {"pfad": "Documents/a.txt", "inhalt": "Neu", "ueberschreiben": True})),
+               dienst_modul.freigabe_ansage("mcp__kalender__loeschen", '{"id": "alle"}'),
+               dienst_modul.freigabe_ansage("sms_senden", '{"nummer": "+43664", "text": "Komme um neun"}'),
+               dienst_modul.freigabe_ansage("mac_termin_anlegen", json.dumps(
+                   {"titel": "Besichtigung Huber", "datum": "2026-10-09", "uhrzeit": "14:30"}))]
+    pruefen("Vor der Freigabe hört man Empfänger, Inhalt und was ersetzt wird",
+            "Sehr geehrte Frau Weber" in ansagen[0] and "ersetzen" in ansagen[1]
+            and "alle" in ansagen[2] and "Komme um neun" in ansagen[3]
+            and "Besichtigung Huber" in ansagen[4], ansagen[2][:55])
 
     class FalscheStimme:
         def __init__(self, antworten):
@@ -1120,38 +1170,51 @@ def pruefung_dienst(agent):
 
     # Ein ganzer Weg: Datei schreiben, per Stimme freigegeben, im eigenen Benutzerordner.
     heim = pathlib.Path(tempfile.mkdtemp(prefix="jarvis_home_"))
+    (heim / "Documents" / "Angebote").mkdir(parents=True)
     (heim / "Angebote").mkdir()
     (heim / ".ssh").mkdir(); (heim / ".ssh" / "id_rsa").write_text("GEHEIM")
+    (heim / "Documents" / "Passwörter.txt").write_text("GEHEIM")
+    (heim / ".env.local").write_text("GEHEIM")
+    (heim / ".zsh_history").write_text("export TOKEN=GEHEIM")
     (heim / "Notiz.txt").write_text("Kunde Weber will 300 qm, dreimal pro Woche.")
     echt_mac, echt_kanal = agent.tools.mac, agent.tools.freigabe_kanal
     agent.tools.mac = MacZugriff(heim, config.BASIS)
     try:
         st = FalscheStimme(["ja bitte mach das"])
         agent.tools.freigabe_kanal_setzen(dienst_modul.SprachFreigabe(st))
-        ergebnis = agent.tools.run("datei_schreiben", {"pfad": "Angebote/weber.txt", "inhalt": "Angebot Weber"})
+        ergebnis = agent.tools.run("datei_schreiben", {"pfad": "Documents/Angebote/weber.txt",
+                                                       "inhalt": "Angebot Weber"})
         pruefen("Datei schreiben: Jarvis fragt laut, bei Ja wird sie angelegt",
-                ergebnis.get("ok") and (heim / "Angebote" / "weber.txt").read_text() == "Angebot Weber"
-                and "Datei" in st.gesagt[0], st.gesagt[0][:50])
+                ergebnis.get("ok") and (heim / "Documents" / "Angebote" / "weber.txt").read_text() == "Angebot Weber"
+                and st.gesagt and "Datei" in st.gesagt[0] and "Angebot Weber" in st.gesagt[0],
+                st.gesagt[0][:50] if st.gesagt else ergebnis.get("fehler", "")[:50])
         st = FalscheStimme(["nein"])
         agent.tools.freigabe_kanal_setzen(dienst_modul.SprachFreigabe(st))
-        agent.tools.run("datei_schreiben", {"pfad": "Angebote/zwei.txt", "inhalt": "x"})
-        pruefen("Bei Nein wird nichts geschrieben", not (heim / "Angebote" / "zwei.txt").exists(), "")
+        agent.tools.run("datei_schreiben", {"pfad": "Documents/Angebote/zwei.txt", "inhalt": "x"})
+        pruefen("Bei Nein wird nichts geschrieben",
+                not (heim / "Documents" / "Angebote" / "zwei.txt").exists(), "")
         st = FalscheStimme(["ja"])
         agent.tools.freigabe_kanal_setzen(dienst_modul.SprachFreigabe(st))
         abgelehnt = [agent.tools.run("datei_schreiben", {"pfad": "Library/LaunchAgents/boese.plist", "inhalt": "x"}),
                      agent.tools.run("datei_schreiben", {"pfad": ".zshrc", "inhalt": "x"}),
                      agent.tools.run("datei_schreiben", {"pfad": "/etc/hosts", "inhalt": "x"}),
-                     agent.tools.run("datei_schreiben", {"pfad": "Angebote/weber.txt", "inhalt": "neu"})]
-        pruefen("Startobjekte, Shell-Profile, Systempfade und Vorhandenes: abgelehnt, ohne zu fragen",
-                all(a["ok"] is False for a in abgelehnt) and not st.gesagt, "vier Versuche")
+                     agent.tools.run("datei_schreiben", {"pfad": "Documents/Angebote/weber.txt", "inhalt": "neu"}),
+                     agent.tools.run("datei_schreiben", {"pfad": "Angebote/frei.txt", "inhalt": "x"}),
+                     agent.tools.run("datei_schreiben", {"pfad": "Documents/../.zshenv", "inhalt": "x"}),
+                     agent.tools.run("datei_schreiben", {"pfad": str(pathlib.Path(config.BASIS) / "notiz.txt"),
+                                                         "inhalt": "x"})]
+        pruefen("Außerhalb von Dokumente, Schreibtisch, Downloads und über Vorhandenes: abgelehnt, ohne zu fragen",
+                all(a["ok"] is False for a in abgelehnt) and not st.gesagt
+                and not (heim / "Angebote" / "frei.txt").exists(), "%d Versuche" % len(abgelehnt))
         gelesen = agent.tools.run("datei_lesen", {"pfad": "Notiz.txt"})
-        gesperrt = [agent.tools.run("datei_lesen", {"pfad": ".ssh/id_rsa"})["ok"],
-                    agent.tools.run("datei_lesen", {"pfad": "~/.ssh/id_rsa"})["ok"]]
+        gesperrt = [agent.tools.run("datei_lesen", {"pfad": p})["ok"]
+                    for p in (".ssh/id_rsa", "~/.ssh/id_rsa", "Documents/Passwörter.txt",
+                              ".env.local", ".zsh_history")]
         suche = agent.tools.run("dateien_suchen", {"begriff": "notiz"})
-        pruefen("Lesen und Suchen gehen ohne Freigabe, Schlüssel bleiben gesperrt",
-                gelesen["ok"] and "Weber" in gelesen["inhalt"] and gesperrt == [False, False]
+        pruefen("Lesen und Suchen gehen ohne Freigabe, Schlüssel und Verläufe bleiben gesperrt",
+                gelesen["ok"] and "Weber" in gelesen["inhalt"] and gesperrt == [False] * 5
                 and suche["ok"] and any("Notiz.txt" in t["pfad"] for t in suche["treffer"]),
-                "%d Treffer" % len(suche.get("treffer", [])))
+                "%d Treffer, %s" % (len(suche.get("treffer", [])), gesperrt))
     finally:
         agent.tools.mac = echt_mac
         agent.tools.freigabe_kanal = echt_kanal
@@ -1205,6 +1268,217 @@ def pruefung_dienst(agent):
             and "schalte dich ab" in quelle and "def dienst_verwalten" in quelle, "")
 
 
+def _attributed_body(text: str) -> bytes:
+    """Baut einen NSArchiver-Datenstrom nach, wie ihn neuere Macs in chat.db ablegen."""
+    roh = text.encode("utf-8")
+    laenge = bytes([len(roh)]) if len(roh) < 0x80 else b"\x81" + len(roh).to_bytes(2, "little")
+    return (b"\x04\x0bstreamtyped\x81\xe8\x03\x84\x01@\x84\x84\x84\x12NSAttributedString\x00"
+            b"\x84\x84\x08NSObject\x00\x85\x92\x84\x84\x84\x08NSString\x01\x94\x84\x01+"
+            + laenge + roh + b"\x86\x84\x02iI\x01\x05\x92\x84\x84\x84\x0cNSDictionary\x00")
+
+
+def pruefung_mac_zugriff(agent):
+    abschnitt("Mac: Mails, SMS, Kontakte, Kalender")
+    ordner = pathlib.Path(tempfile.mkdtemp(prefix="jarvis_mac_"))
+    jetzt = datetime.now()
+    try:
+        # -- Nachrichten aus einer nachgebauten chat.db --
+        db = ordner / "chat.db"
+        v = sqlite3.connect(db)
+        v.executescript("""
+            CREATE TABLE handle (ROWID INTEGER PRIMARY KEY, id TEXT, service TEXT);
+            CREATE TABLE chat (ROWID INTEGER PRIMARY KEY, chat_identifier TEXT, display_name TEXT);
+            CREATE TABLE message (ROWID INTEGER PRIMARY KEY, text TEXT, attributedBody BLOB,
+                                  handle_id INTEGER, date INTEGER, is_from_me INTEGER, service TEXT);
+            CREATE TABLE chat_message_join (chat_id INTEGER, message_id INTEGER);
+            INSERT INTO handle VALUES (1, '+436641234567', 'SMS'), (2, 'weber@icloud.com', 'iMessage');
+            INSERT INTO chat VALUES (1, '+436641234567', ''), (2, 'weber@icloud.com', 'Weber Büro');
+        """)
+        lang = "Hallo, hier noch die Details zur Grundreinigung: " + "Fenster, Böden, Sanitär. " * 8
+        zeilen = [
+            (1, "Können Sie morgen um 9 kommen?", None, 1, jetzt - timedelta(hours=2), 0, "SMS", 1),
+            (2, None, _attributed_body("Schlüssel liegt beim Portier – Grüße"), 1, jetzt - timedelta(hours=1), 0, "SMS", 1),
+            (3, "Ja, passt.", None, 1, jetzt - timedelta(minutes=30), 1, "SMS", 1),
+            (4, "Alt", None, 1, jetzt - timedelta(days=3), 0, "SMS", 1),
+            (5, None, _attributed_body(lang), 2, jetzt - timedelta(minutes=10), 0, "iMessage", 2),
+            (6, None, None, 2, jetzt - timedelta(minutes=5), 0, "iMessage", 2),
+        ]
+        for nr, text, koerper, handle, zeit, von_mir, dienst, chat in zeilen:
+            v.execute("INSERT INTO message VALUES (?,?,?,?,?,?,?)",
+                      (nr, text, koerper, handle, apple_modul.apple_zahl(zeit), von_mir, dienst))
+            v.execute("INSERT INTO chat_message_join VALUES (?,?)", (chat, nr))
+        v.commit(); v.close()
+
+        aufrufe = []
+        def laeufer(skript, argumente=(), timeout=30):
+            aufrufe.append((skript, list(argumente)))
+            if skript is apple_modul.KONTAKTE_SKRIPT:
+                return {"ok": True, "ausgabe": "Anna Weber\tWeber Immobilien\t+43 664 1234567;01 234 56;"
+                                               "\tanna@weber.at;\nOhne Firma\t\t\t"}
+            if skript is apple_modul.TERMINE_SKRIPT:
+                return {"ok": True, "ausgabe": "Arbeit\tBüro Huber\t2026-10-08 09:00\t2026-10-08 10:00\tWien\tnein\n"
+                                               "Privat\tZahnarzt\t2026-10-07 14:00\t2026-10-07 15:00\t\tnein\nkaputt"}
+            if skript is apple_modul.TERMIN_ANLEGEN_SKRIPT:
+                return {"ok": True, "ausgabe": "Arbeit"}
+            return {"ok": False, "fehler": "execution error: Not authorized to send Apple events. (-1743)"}
+
+        apps = apple_modul.MacApps(chat_db=db, ausfuehren=laeufer)
+        alle = apps.nachrichten(stunden=24)
+        texte = [n["text"] for n in alle.get("nachrichten", [])]
+        pruefen("SMS und iMessages der letzten Stunden, neueste zuerst",
+                alle.get("ok") and len(texte) == 4 and texte[0].startswith("Hallo, hier noch")
+                and texte[-1] == "Können Sie morgen um 9 kommen?" and "Alt" not in texte,
+                "%d Nachrichten" % len(texte))
+        pruefen("Auch der Text aus attributedBody wird gelesen, mit Umlauten und lang",
+                "Schlüssel liegt beim Portier – Grüße" in texte and len(texte[0]) > 200, "")
+        nur_von = apps.nachrichten(stunden=24, von="1234567", nur_eingang=True)
+        pruefen("Filter: nur eine Nummer, nur eingehende",
+                nur_von.get("ok") and len(nur_von["nachrichten"]) == 2
+                and all(n["von"] == "+436641234567" for n in nur_von["nachrichten"]),
+                "%d Nachrichten" % len(nur_von.get("nachrichten", [])))
+        zeit = datetime.strptime(alle["nachrichten"][-1]["zeit"], "%Y-%m-%d %H:%M")
+        pruefen("Apple-Zeit wird richtig in Ortszeit umgerechnet",
+                abs((zeit - (jetzt - timedelta(hours=2))).total_seconds()) < 90
+                and abs((apple_modul.apple_zeit(apple_modul.apple_zahl(jetzt)) - jetzt).total_seconds()) < 1, "")
+        fehlt = apple_modul.MacApps(chat_db=ordner / "gibtsnicht.db", ausfuehren=laeufer).nachrichten()
+        pruefen("Ohne Zugriff auf die Nachrichten sagt Jarvis, was zu tun ist",
+                fehlt["ok"] is False and ("Festplattenvollzugriff" in fehlt["fehler"] or "Mac" in fehlt["fehler"]), "")
+
+        # -- Kontakte und Kalender über AppleScript, Eingaben nur als Argumente --
+        boese = 'Weber" & (do shell script "rm -rf ~") & "'
+        kontakte = apps.kontakte_suchen(boese)
+        pruefen("Kontakte: Suchbegriff geht als Argument, nie in den Skripttext",
+                kontakte.get("ok") and aufrufe[-1][1] == [boese] and aufrufe[-1][0] is apple_modul.KONTAKTE_SKRIPT
+                and "rm -rf" not in apple_modul.KONTAKTE_SKRIPT
+                and kontakte["kontakte"][0]["telefon"] == ["+43 664 1234567", "01 234 56"]
+                and kontakte["kontakte"][0]["mail"] == ["anna@weber.at"], "%d Kontakte" % kontakte.get("anzahl", 0))
+        termine = apps.termine(7)
+        pruefen("Kalender: Termine sortiert, kaputte Zeilen übersprungen",
+                termine.get("ok") and [t["titel"] for t in termine["termine"]] == ["Zahnarzt", "Büro Huber"], "")
+        vorher = len(aufrufe)
+        falsch = apps.termin_anlegen("Besichtigung", "9.10.2026", "14:30")
+        richtig = apps.termin_anlegen("Besichtigung Huber", "2026-10-09", "14:30", 90, "Wien")
+        pruefen("Termin eintragen: Datum geprüft, Teile einzeln übergeben",
+                falsch["ok"] is False and len(aufrufe) == vorher + 1 and richtig.get("ok")
+                and aufrufe[-1][1] == ["Besichtigung Huber", 2026, 10, 9, 14, 30, 90, "Wien", ""], "")
+        rechte = apps.rechte_pruefen()
+        pruefen("Fehlt die Erlaubnis, nennt Jarvis die richtige Einstellung",
+                rechte["Nachrichten"][0] is True and rechte["Kontakte"][0] is False
+                and "Automation" in rechte["Kontakte"][1], rechte["Kontakte"][1][:55])
+
+        # -- Im Werkzeugkatalog: Lesen ohne Freigabe, Eintragen mit, Fremdes macht vorsichtig --
+        echt_apple, echt_kanal = agent.tools.apple, agent.tools.freigabe_kanal
+        echt_senden = agent.tools.messenger.nachricht_senden
+        agent.tools.apple = apps
+        gefragt, gesendet = [], []
+        class JaKanal:
+            def anfordern(self, aktion, details):
+                gefragt.append((aktion, dienst_modul.freigabe_ansage(aktion, details)))
+                return {"erlaubt": True}
+        agent.tools.freigabe_kanal = JaKanal()
+        agent.tools.messenger.nachricht_senden = lambda kanal, an, text, *x, **k: (
+            gesendet.append((kanal, an, text)) or {"ok": True, "text": "raus"})
+        try:
+            agent.tools.lauf_beginnen()
+            frei_vorher = agent.tools.braucht_freigabe("recherche")
+            gelesen = agent.tools.run("handy_nachrichten_lesen", {"stunden": 24})
+            vorsichtig = agent.tools.braucht_freigabe("recherche") and agent.tools.braucht_freigabe("browser_lesen")
+            agent.tools.lauf_beginnen()
+            pruefen("Nach dem Lesen fremder Nachrichten fragt Jarvis vor jedem Netzzugriff",
+                    gelesen.get("ok") and not frei_vorher and vorsichtig
+                    and not agent.tools.braucht_freigabe("recherche") and not gefragt, "")
+            eingetragen = agent.tools.run("mac_termin_anlegen", {"titel": "Besichtigung Huber", "datum": "2026-10-09",
+                                                                  "uhrzeit": "14:30"})
+            sms = agent.tools.run("sms_senden", {"nummer": "0664 1234567", "text": "Komme um neun"})
+            pruefen("Termin und SMS gehen erst nach Freigabe raus, die SMS über das eigene iPhone",
+                    eingetragen.get("ok") and sms.get("ok") and [g[0] for g in gefragt] == ["mac_termin_anlegen", "sms_senden"]
+                    and "Besichtigung Huber" in gefragt[0][1] and gesendet and gesendet[0][0] == "sms"
+                    and gesendet[0][1].startswith("+43") and agent.tools.telefon.verfuegbar() is False,
+                    gesendet[0][1] if gesendet else "nichts gesendet")
+            pruefen("Lesen und Suchen brauchen keine Freigabe",
+                    not any(agent.tools.braucht_freigabe(n) for n in
+                            ("handy_nachrichten_lesen", "adressbuch_suchen", "mac_termine", "mails_suchen"))
+                    and {"handy_nachrichten_lesen", "adressbuch_suchen", "mac_termine", "mac_termin_anlegen",
+                         "mails_suchen"} <= set(agent.tools.namen()), "")
+        finally:
+            agent.tools.apple, agent.tools.freigabe_kanal = echt_apple, echt_kanal
+            agent.tools.messenger.nachricht_senden = echt_senden
+            agent.tools.lauf_beginnen()
+        pruefen("Der Postbearbeiter liest SMS, der Terminplaner den Mac-Kalender",
+                {"handy_nachrichten_lesen", "mails_suchen", "adressbuch_suchen"} <= set(ROLLEN["postmeister"]["werkzeuge"])
+                and {"mac_termine", "mac_termin_anlegen"} <= set(ROLLEN["terminplaner"]["werkzeuge"]), "")
+
+        # -- Nachrichten-App: neues Skript zuerst, altes nur, wenn das neue nicht übersetzbar ist --
+        laeufe = []
+        antworten = []
+        def falsches_run(befehl, input=None, **k):
+            laeufe.append((befehl, input))
+            # Ein unerwarteter weiterer Lauf "gelingt" - dann fällt der doppelte Versand auf.
+            code, aus, fehler = antworten.pop(0) if antworten else (0, "iMessage", "")
+            return subprocess.CompletedProcess(befehl, code, aus, fehler)
+        echt_mod = (messenger_modul.subprocess, messenger_modul.shutil)
+        messenger_modul.subprocess = types.SimpleNamespace(run=falsches_run, SubprocessError=subprocess.SubprocessError)
+        messenger_modul.shutil = types.SimpleNamespace(which=lambda n: "/usr/bin/osascript")
+        try:
+            m = messenger_modul.Messenger()
+            antworten[:] = [(1, "", "syntax error: Expected class name but found identifier. (-2741)"), (0, "SMS\n", "")]
+            erst = m.nachricht_senden("sms", "+436641234567", 'Text mit "Anführungszeichen"')
+            zwei_skripte = [l[1] for l in laeufe] == [messenger_modul.IMESSAGE_SKRIPT, messenger_modul.IMESSAGE_SKRIPT_ALT]
+            argumente_ok = all(l[0] == ["osascript", "-", "+436641234567", 'Text mit "Anführungszeichen"', "SMS"] for l in laeufe)
+            laeufe.clear()
+            antworten[:] = [(1, "", "execution error: Messages got an error: Can't send. (-1708)")]
+            einmal = m.nachricht_senden("imessage", "+436641234567", "Hallo")
+            laeufe_einmal = len(laeufe)
+            antworten[:] = [(1, "", "execution error: Kein Konto in der Nachrichten-App kann an diese Adresse schicken. (-2700)")]
+            ohne_sms = m.nachricht_senden("sms", "+436641234567", "Hallo")
+        finally:
+            messenger_modul.subprocess, messenger_modul.shutil = echt_mod
+        pruefen("Nachrichten-App: altes Skript nur, wenn das neue nicht übersetzbar ist",
+                erst.get("ok") and erst.get("weg") == "SMS" and zwei_skripte and argumente_ok, "")
+        pruefen("Ein Sendefehler wird nicht wiederholt, damit nichts doppelt rausgeht",
+                einmal["ok"] is False and laeufe_einmal == 1
+                and "SMS-Weiterleitung" in ohne_sms.get("fehler", ""), "")
+
+        # -- Postfach durchsuchen (Gmail und andere), nur lesend --
+        mail_roh = ("From: Anna Weber <anna@weber.at>\r\nSubject: Angebot Grundreinigung\r\n"
+                    "Date: Mon, 5 Oct 2026 09:00:00 +0200\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n"
+                    "Bitte um ein Angebot für 300 qm.").encode("utf-8")
+        imap_log = []
+        class FalschesImap:
+            def __init__(self, host, port, ssl_context=None):
+                imap_log.append(("verbinden", host)); self.literal = None
+            def login(self, benutzer, passwort): imap_log.append(("login", benutzer))
+            def select(self, ordner, readonly=False): imap_log.append(("select", readonly)); return "OK", [b"1"]
+            def search(self, zeichensatz, *kriterien):
+                imap_log.append(("search", zeichensatz, kriterien, self.literal)); return "OK", [b"1"]
+            def fetch(self, nummer, teil): return "OK", [(b"1 (BODY[] {%d}" % len(mail_roh), mail_roh)]
+            def close(self): pass
+            def logout(self): pass
+        echt_imap = mail_modul.imaplib
+        echt_werte = (config.IMAP_HOST, config.IMAP_USER, config.IMAP_PASSWORT)
+        mail_modul.imaplib = types.SimpleNamespace(IMAP4_SSL=FalschesImap, IMAP4=echt_imap.IMAP4)
+        config.IMAP_HOST, config.IMAP_USER, config.IMAP_PASSWORT = "imap.gmail.com", "chef@gmail.com", "x"
+        try:
+            post = mail_modul.Mail()
+            gefunden = post.suchen('Weber" OR ALL', tage=30)
+            ascii_suche = [e for e in imap_log if e[0] == "search"][-1]
+            umlaut = post.suchen("Müller")
+            umlaut_suche = [e for e in imap_log if e[0] == "search"][-1]
+        finally:
+            mail_modul.imaplib = echt_imap
+            config.IMAP_HOST, config.IMAP_USER, config.IMAP_PASSWORT = echt_werte
+        monat = ascii_suche[2][1].split("-")[1] if len(ascii_suche[2]) > 1 else ""
+        pruefen("Mails suchen: Treffer mit Absender und Betreff, Postfach nur lesend geöffnet",
+                gefunden.get("ok") and gefunden["mails"][0]["betreff"] == "Angebot Grundreinigung"
+                and "Anna Weber" in gefunden["mails"][0]["absender"] and ("select", True) in imap_log, "")
+        pruefen("Mails suchen: Anführungszeichen brechen die Suche nicht auf, Umlaute gehen",
+                ascii_suche[2][-1] == '"Weber  OR ALL"' and monat in mail_modul.IMAP_MONATE
+                and umlaut.get("ok") and umlaut_suche[1] == "UTF-8" and umlaut_suche[3] == "Müller".encode("utf-8"),
+                str(ascii_suche[2])[:55])
+    finally:
+        shutil.rmtree(ordner, ignore_errors=True)
+
+
 def pruefung_sprechen(agent):
     abschnitt("Sprechen wie ein Mensch")
     faelle = [
@@ -1216,6 +1490,13 @@ def pruefung_sprechen(agent):
         ("1.200 qm, 3,5 km und 1 h.", "eintausendzweihundert Quadratmeter, drei Komma fünf Kilometer und 1 Stunde."),
         ("Rund 19,5 % davon.", "Rund neunzehn Komma fünf Prozent davon."),
         ("Büros usw. Siehe unten.", "Büros und so weiter. Siehe unten."),
+        ("Saldo -300,00 € heute.", "Saldo minus dreihundert Euro heute."),
+        ("45 €/h und 2,80 €/m².", "fünfundvierzig Euro pro Stunde und zwei Euro achtzig pro Quadratmeter."),
+        ("Treffen um 1:00 Uhr.", "Treffen um ein Uhr."),
+        ("Zeit bis 12.10. Danach Urlaub.", "Zeit bis zwölften Oktober. Danach Urlaub."),
+        ("Seit dem 3.4.98 dabei.", "Seit dem dritten April neunzehnhundertachtundneunzig dabei."),
+        ("Ab 3. März geht es los.", "Ab dritten März geht es los."),
+        ("1. Angebot schreiben\n2. Mail an Weber", "Angebot schreiben. Mail an Weber."),
     ]
     falsch = [(a, sprechtext(a)) for a, b in faelle if sprechtext(a) != b]
     pruefen("Beträge, Daten, Uhrzeiten, Einheiten werden ausgeschrieben",
@@ -1272,6 +1553,22 @@ def pruefung_sprechen(agent):
         pruefen("Fällt ElevenLabs aus, spricht die Systemstimme nur den Rest",
                 len(gespielt) == 2 and len(gesagt) == 1 and gesagt[0].startswith(stuecke[2])
                 and stuecke[0] not in gesagt[0], "2 gespielt, Rest per Systemstimme")
+
+        # Eine unerwartete Ausnahme beim Holen darf die Wiedergabe nicht für immer warten lassen.
+        geholt.clear(); gespielt.clear(); gesagt.clear()
+        zaehler["n"] = 0
+        def holen_mit_absturz(text, vorher="", nachher=""):
+            zaehler["n"] += 1
+            if zaehler["n"] == 2:
+                raise RuntimeError("Verbindung mitten in der Antwort abgerissen")
+            return b"mp3"
+        stimme._elevenlabs_holen = holen_mit_absturz
+        faden = threading.Thread(target=stimme.sprich, args=(lang,), daemon=True)
+        faden.start()
+        faden.join(15)
+        pruefen("Bricht das Holen mit einem Fehler ab, hängt die Stimme nicht",
+                not faden.is_alive() and len(gespielt) == 1 and len(gesagt) == 1
+                and gesagt[0].startswith(stuecke[1]), "1 gespielt, Rest per Systemstimme")
     finally:
         stimme._elevenlabs_holen, stimme.abspielen, config.ELEVENLABS_API_KEY = echt
     pruefen("Die Web-App liefert die Abschnitte mit der Antwort",
@@ -1361,16 +1658,19 @@ def pruefung_autopilot(agent):
     gesehen = {}
     echt_arbeiten, echt_key = agent.arbeiten, config.ANTHROPIC_API_KEY
     config.ANTHROPIC_API_KEY = "test"
-    agent.arbeiten = lambda systemtext, auftrag, werkzeugnamen=None, max_runden=6, grund="": (
-        gesehen.update({"namen": list(werkzeugnamen or []), "system": systemtext, "grund": grund})
+    agent.arbeiten = lambda systemtext, auftrag, werkzeugnamen=None, max_runden=6, grund="", hintergrund=False: (
+        gesehen.update({"namen": list(werkzeugnamen or []), "system": systemtext, "grund": grund,
+                        "hintergrund": hintergrund})
         or "Entwurf: Sehr geehrter Herr Müller, anbei unser Angebot.")
     try:
         verboten = []
         for rolle in sorted(autopilot_modul.ROLLEN):
             agent.tools.team.beauftragen(rolle, "Test", hintergrund=True)
-            verboten += [n for n in gesehen["namen"] if n in FREIGABE_PFLICHTIG or agent.tools.braucht_freigabe(n)]
-        pruefen("Im Hintergrund hat keine Fachkraft ein Werkzeug mit Freigabe",
-                not verboten and gesehen["grund"] == "Autopilot", "alle %d Rollen geprüft" % len(autopilot_modul.ROLLEN))
+            verboten += [n for n in gesehen["namen"] if n in FREIGABE_PFLICHTIG or agent.tools.braucht_freigabe(n)
+                         or n in NETZ_SENDEND]
+        pruefen("Im Hintergrund hat keine Fachkraft ein Werkzeug mit Freigabe oder Netz",
+                not verboten and gesehen["grund"] == "Autopilot" and gesehen["hintergrund"] is True,
+                verboten[0] if verboten else "alle %d Rollen geprüft" % len(autopilot_modul.ROLLEN))
         pruefen("Der Hintergrundauftrag sagt der Fachkraft, dass sie nur Entwürfe schreibt",
                 "HINTERGRUNDARBEIT" in gesehen["system"] and "verschickst nichts" in gesehen["system"], "")
         agent.tools.team.beauftragen("postmeister", "Test")
@@ -1425,8 +1725,45 @@ def pruefung_autopilot(agent):
                 aus_grund == "aus" and "Monatslimit" in limit_grund and "Ruhezeit" in nacht_grund,
                 "%s / %s / %s" % (aus_grund, limit_grund, nacht_grund[:20]))
 
-        # Kosten: auch Teamarbeit steht im Gedankenlog und zählt zum Limit.
+        # Die Rollenliste ist die Sperre: ein Werkzeug außerhalb wird nicht ausgeführt,
+        # auch wenn das Modell es trotzdem aufruft.
         agent.arbeiten = echt_arbeiten
+        antworten = [
+            {"ok": True, "daten": {"content": [{"type": "tool_use", "id": "t1", "name": "lead_anlegen",
+                                                "input": {"name": "Eingeschleust GmbH"}}],
+                                   "stop_reason": "tool_use", "usage": {"input_tokens": 10, "output_tokens": 5}}},
+            {"ok": True, "daten": {"content": [{"type": "text", "text": "Fertig."}],
+                                   "usage": {"input_tokens": 10, "output_tokens": 5}}}]
+        verlauf = []
+        agent._anfrage = lambda koerper, timeout=120: (verlauf.append(copy.deepcopy(koerper["messages"]))
+                                                       or antworten.pop(0))
+        agent.gedankenlog = Gedankenlog(pathlib.Path(ARBEITSVERZEICHNIS) / "ap_rolle.jsonl")
+        zaehlen = lambda: agent.memory._lesen("SELECT COUNT(*) AS n FROM leads")[0]["n"]
+        vorher = zaehlen()
+        agent.arbeiten("system", "auftrag", ["notiz_speichern"], 3, grund="Team")
+        rueckmeldung = json.dumps(verlauf[-1][-1]["content"], ensure_ascii=False) if verlauf else ""
+        pruefen("Ein Werkzeug außerhalb der Rolle wird nicht ausgeführt",
+                vorher == zaehlen() and not antworten and "gehört nicht zu dieser Rolle" in rueckmeldung,
+                "lead_anlegen abgelehnt")
+
+        # Im Hintergrund fragt niemand: Freigabewerkzeuge brechen ab, ohne zu fragen.
+        gefragt = []
+        class Fragender:
+            def anfordern(self, aktion, details):
+                gefragt.append(aktion)
+                return {"erlaubt": True}
+        echt_kanal = agent.tools.freigabe_kanal
+        agent.tools.freigabe_kanal = Fragender()
+        try:
+            agent.tools.lauf_beginnen(hintergrund=True)
+            hinten = agent.tools.run("mail_senden", {"an": "a@b.at", "betreff": "x", "text": "y"})
+            agent.tools.lauf_beginnen()
+        finally:
+            agent.tools.freigabe_kanal = echt_kanal
+        pruefen("Im Hintergrund wird nichts freigegeben, auch nicht von einem offenen Kanal",
+                hinten["ok"] is False and "Hintergrund" in hinten.get("fehler", "") and not gefragt, "")
+
+        # Kosten: auch Teamarbeit steht im Gedankenlog und zählt zum Limit.
         agent._anfrage = lambda koerper, timeout=120: {"ok": True, "daten": {
             "content": [{"type": "text", "text": "Fertig."}],
             "usage": {"input_tokens": 2000, "output_tokens": 500}}}
@@ -1511,6 +1848,32 @@ def pruefung_zugang(agent):
         eingabe["wert"] = "sk-test"
         pruefen("Claude-Schlüssel nachtragen funktioniert",
                 Einr().zugang_nachtragen("claude") and config.ANTHROPIC_API_KEY == "sk-test", "")
+
+        mail_alt = {k: getattr(config, k) for k in ("IMAP_HOST", "IMAP_PORT", "IMAP_USER", "IMAP_PASSWORT",
+                                                     "SMTP_HOST", "SMTP_PORT", "SMTP_USER", "SMTP_PASSWORT",
+                                                     "SMTP_ABSENDER")}
+        echt_fragen, echt_testen, echt_sagen = Einr.fragen, Einr.mail_testen, Einr.sagen
+        geprueft = []
+        try:
+            Einr.fragen = staticmethod(lambda frage: "chef@gmail.com")
+            Einr.sagen = lambda self, text: None
+            Einr.mail_testen = lambda self, host, port, benutzer, passwort: (
+                geprueft.append((host, benutzer, passwort)) or {"ok": True, "ungelesen": 3})
+            eingabe["wert"] = "abcd efgh ijkl mnop"
+            verbunden = Einr().zugang_nachtragen("gmail")
+            gespeichert = config.ENV_DATEI.read_text(encoding="utf-8")
+            pruefen("zugang gmail: Postfach mit App-Passwort verbinden, ohne Leerzeichen",
+                    verbunden and geprueft == [("imap.gmail.com", "chef@gmail.com", "abcdefghijklmnop")]
+                    and config.SMTP_HOST == "smtp.gmail.com" and "IMAP_USER=chef@gmail.com" in gespeichert, "")
+            pruefen("Das Mailpasswort wird unsichtbar abgefragt",
+                    "fragen_geheim(\"Passwort" in open(os.path.join(WURZEL, "src/modules/setup_wizard.py"),
+                                                       encoding="utf-8").read(), "")
+            pruefen("zugang mac sagt auf anderen Systemen ehrlich, dass es nur am Mac geht",
+                    sys.platform == "darwin" or Einr().zugang_nachtragen("sms") is False, "")
+        finally:
+            Einr.fragen, Einr.mail_testen, Einr.sagen = echt_fragen, echt_testen, echt_sagen
+            for k, w in mail_alt.items():
+                setattr(config, k, w)
 
         config.env_setzen("JARVIS_PROFIL", "Ich leite eine Reinigungsfirma mit drei Leuten")
         config.env_setzen("JARVIS_STIL", "knapp, direkt, etwas trocken")
@@ -1883,6 +2246,7 @@ def main() -> int:
     pruefung_browser(agent)
     pruefung_sprechen(agent)
     pruefung_dienst(agent)
+    pruefung_mac_zugriff(agent)
     pruefung_autopilot(agent)
     pruefung_neue_fachkraefte(agent)
     pruefung_zugang(agent)

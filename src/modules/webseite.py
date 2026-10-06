@@ -538,13 +538,16 @@ body[data-zustand="wach"] .zustandstext{color:var(--akzent)}
   function meldungenHolen() {
     if (laeuft || sprichtGerade || freigabe) { return; }
     holen("/api/meldungen").then(function (a) {
-      var m = (a.meldungen || [])[0];
-      if (!m) { return; }
+      var liste = a.meldungen || [];
+      if (!liste.length) { return; }
+      // Alle Meldungen zeigen und sprechen, nicht nur die erste.
+      var teile = [];
+      liste.forEach(function (m) { teile = teile.concat(stuecke(m.sprechstuecke || m.text)); });
       el("gesagt").textContent = "";
-      el("antwort").textContent = m.text;
+      el("antwort").textContent = liste.map(function (m) { return m.text; }).join("\n\n");
       el("antwort").className = "antwort";
       el("hinweis").style.display = "none";
-      sprich(m.sprechstuecke || m.text, function () { setzeZustand("schlaeft"); });
+      sprich(teile, function () { setzeZustand("schlaeft"); });
       lageHolen(); zahlenHolen();
     }).catch(function () {});
   }

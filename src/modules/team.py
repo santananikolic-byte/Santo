@@ -104,8 +104,8 @@ fragst du danach, statt zu kalkulieren.
 Du bist ehrlich über Chancen. Ein Angebot ist kein Auftrag.""",
         "werkzeuge": ["dateien_suchen", "datei_lesen", "lead_anlegen", "lead_weiterstufen", "angebot_kalkulieren",
                       "angebot_ablegen", "nachfassliste", "pipeline",
-                      "kontakt_anlegen", "kontakt_suchen", "notiz_speichern",
-                      "punkt_anlegen", "gedaechtnis_durchsuchen",
+                      "kontakt_anlegen", "kontakt_suchen", "adressbuch_suchen", "mails_suchen",
+                      "notiz_speichern", "punkt_anlegen", "gedaechtnis_durchsuchen",
                       "anrufen", "sms_senden", "anrufliste"],
     },
     "terminplaner": {
@@ -116,14 +116,17 @@ Du achtest auf Überschneidungen. Bei einem Einzelunternehmer, der selbst zu den
 Objekten fährt, ist eine Doppelbuchung ein verlorener Tag - du sagst es sofort.
 
 Du denkst an die Fahrzeit zwischen zwei Objekten mit. Liegen zwei Termine
-räumlich weit auseinander und zeitlich eng, weist du darauf hin.""",
-        "werkzeuge": ["termine_lesen", "termin_anlegen", "punkt_anlegen",
-                      "punkte_offen", "punkt_erledigen", "kontakt_suchen",
-                      "gedaechtnis_durchsuchen", "sms_senden", "anrufen"],
+räumlich weit auseinander und zeitlich eng, weist du darauf hin.
+
+Der Kalender des Macs (mac_termine) ist der, den der Chef auch auf dem iPhone
+sieht. Schau dort zuerst nach.""",
+        "werkzeuge": ["termine_lesen", "termin_anlegen", "mac_termine", "mac_termin_anlegen",
+                      "punkt_anlegen", "punkte_offen", "punkt_erledigen", "kontakt_suchen",
+                      "adressbuch_suchen", "gedaechtnis_durchsuchen", "sms_senden", "anrufen"],
     },
     "postmeister": {
         "name": "der Postbearbeiter",
-        "fachliches": """Deine Aufgabe ist der Posteingang.
+        "fachliches": """Deine Aufgabe ist der Posteingang - Mails, SMS und iMessages.
 
 Du sortierst nach Dringlichkeit, nicht nach Eingangszeit. Mahnungen, Fristen
 und Auftragsanfragen kommen zuerst, Newsletter zuletzt. Du löschst niemals
@@ -132,7 +135,8 @@ etwas.
 Antworten formulierst du vor, verschickst sie aber nur nach ausdrücklicher
 Freigabe. Aus einer Anfrage, die nach Auftrag riecht, machst du einen Hinweis
 an den Verkäufer.""",
-        "werkzeuge": ["mails_lesen", "mail_senden", "notiz_speichern",
+        "werkzeuge": ["mails_lesen", "mails_suchen", "mail_senden", "handy_nachrichten_lesen",
+                      "sms_senden", "adressbuch_suchen", "notiz_speichern",
                       "punkt_anlegen", "kontakt_suchen", "kontakt_anlegen",
                       "gedaechtnis_durchsuchen"],
     },
@@ -148,7 +152,7 @@ die ist kein Preis kalkulierbar".
 Kommt derselbe Einwand dreimal, ist das kein Zufall, sondern eine Lücke im
 Angebot. Darauf weist du hin.""",
         "werkzeuge": ["gespraech_festhalten", "offene_leads", "verkaufsmuster",
-                      "anrufliste",
+                      "anrufliste", "adressbuch_suchen", "handy_nachrichten_lesen",
                       "kontakt_suchen", "kontakt_anlegen", "notiz_speichern",
                       "gedaechtnis_durchsuchen"],
     },
@@ -194,6 +198,7 @@ Du erinnerst an das, was einmal im Jahr kommt und trotzdem jedes Jahr
         "werkzeuge": ["fixkosten_anlegen", "fixkosten_liste",
                       "fixkosten_streichen", "bedarfsrechnung",
                       "erinnerung_anlegen", "erinnerungen_faellig",
+                      "mac_termine", "handy_nachrichten_lesen", "adressbuch_suchen",
                       "notiz_speichern", "punkt_anlegen",
                       "gedaechtnis_durchsuchen"],
     },
@@ -216,6 +221,7 @@ Du kennst die Branche des Betriebs und redest in ihrer Sprache. Fehlen dir
 Zahlen, sagst du welche, statt zu schätzen.""",
         "werkzeuge": ["dateien_suchen", "datei_lesen", "lagebericht", "pipeline", "cashflow_prognose", "nachfassliste",
                       "auswertung", "bedarfsrechnung", "punkte_offen", "punkt_anlegen",
+                      "mails_suchen", "mac_termine",
                       "autopilot_auftrag", "autopilot_postfach", "notiz_speichern",
                       "gedaechtnis_durchsuchen"],
     },
@@ -396,15 +402,16 @@ class Team:
         werkzeugnamen = list(ROLLEN[schluessel]["werkzeuge"])
         systemtext = self.systemprompt(schluessel, gedaechtnis)
         if hintergrund:
+            netz = getattr(self.agent.tools, "NETZ_SENDEND", None) or set()
             werkzeugnamen = [n for n in werkzeugnamen
-                             if not self.agent.tools.braucht_freigabe(n)]
+                             if not self.agent.tools.braucht_freigabe(n) and n not in netz]
             systemtext += HINTERGRUND_HINWEIS.format(name=config.NUTZER_NAME)
 
         beginn = datetime.now()
         bericht = self.agent.arbeiten(
             systemtext, auftrag,
             werkzeugnamen=werkzeugnamen, max_runden=max_runden,
-            grund="Autopilot" if hintergrund else "Team")
+            grund="Autopilot" if hintergrund else "Team", hintergrund=hintergrund)
         dauer = (datetime.now() - beginn).total_seconds()
 
         self.memory._schreiben(

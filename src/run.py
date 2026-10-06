@@ -21,6 +21,8 @@ Terminal spricht, nimmt ``hoeren``.
     python3 jarvis.py test        Selbsttest
     python3 jarvis.py einrichten  geführte Ersteinrichtung
     python3 jarvis.py zugang      einen Schlüssel eintragen oder ersetzen
+    python3 jarvis.py zugang mail Gmail oder ein anderes Postfach verbinden
+    python3 jarvis.py zugang mac  SMS, iMessage, Kontakte und Kalender freigeben
     python3 jarvis.py autopilot   Postfach des Autopiloten (an / aus zum Schalten)
     python3 jarvis.py daemon      dauerhaft, nur Stimme, ohne Fenster (der iMac als Kopf)
     python3 jarvis.py dienst      installieren | entfernen | status | neustart | hinweise
@@ -122,6 +124,7 @@ def dauerbetrieb(dienst: bool = False):
     stimme.sprich("Ich bin da. Sag Hey Jarvis, wenn du etwas brauchst.")
     print("\nIch höre zu. Abbrechen mit Strg und C.\n")
     mikro_gemeldet = 0.0
+    mikro_seit = 0.0
 
     try:
         while True:
@@ -129,18 +132,26 @@ def dauerbetrieb(dienst: bool = False):
                 herz.schlagen()
             if ansager is not None:
                 ansager.ausliefern()
-            if dienst and not stimme.mikrofon_bereit():
-                # Kein Tippen im Dienst: es wird weiter versucht, und einmal pro Stunde gesagt.
-                if time.time() - mikro_gemeldet > 3600:
-                    mikro_gemeldet = time.time()
-                    print("[dienst] Kein Mikrofon. %s" % stimme.letzter_fehler)
-                    stimme.sprich("Ich komme gerade nicht an das Mikrofon. "
-                                  "Bitte gib es in den Systemeinstellungen frei.")
-                time.sleep(30)
-                continue
             pfad = stimme.aufnehmen_bis_pause(still_signal=True)
             if not pfad:
+                if dienst and getattr(stimme, "mikro_fehler", ""):
+                    # Kein Tippen im Dienst: weiter versuchen, einmal pro Stunde Bescheid sagen,
+                    # und nach zehn Minuten ohne Mikrofon neu starten (launchd holt ihn zurück).
+                    if not mikro_seit:
+                        mikro_seit = time.time()
+                    if time.time() - mikro_gemeldet > 3600:
+                        mikro_gemeldet = time.time()
+                        print("[dienst] Kein Mikrofon. %s" % stimme.mikro_fehler)
+                        stimme.sprich("Ich komme gerade nicht an das Mikrofon. "
+                                      "Bitte gib es in den Systemeinstellungen frei.")
+                    if time.time() - mikro_seit > 600:
+                        print("[dienst] Seit zehn Minuten kein Mikrofon - Neustart.")
+                        return 4
+                    time.sleep(30)
+                else:
+                    mikro_seit = 0.0
                 continue
+            mikro_seit = 0.0
             try:
                 text = stimme.transkribieren(pfad)
                 if not text:

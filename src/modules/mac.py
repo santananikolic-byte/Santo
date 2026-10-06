@@ -7,8 +7,8 @@ Ordnern, Tabellen, Verträge, Notizen. Dafür drei Werkzeuge:
 
 * **suchen** (Spotlight) - lesend, ohne Freigabe
 * **lesen** - lesend, ohne Freigabe, nur Textdateien
-* **schreiben** - mit Freigabe, nur im eigenen Benutzerordner, nie über
-  vorhandenes, nie in Startobjekte oder in Jarvis' eigenen Programmordner
+* **schreiben** - mit Freigabe, nur in Dokumente, Schreibtisch und Downloads
+  (oder Ordnern, die der Nutzer ausdrücklich nennt), nie über Vorhandenes
 
 Gesperrt bleibt, was Zugang zu anderen Dingen gibt: Schlüsselbund, SSH- und
 Cloud-Schlüssel, Browser-Profile (Anmeldungen), Passwortdateien, ``.env``.
@@ -42,17 +42,38 @@ GESPERRT_TEILE = (
     "/library/containers/com.apple.safari",
     "/library/group containers/group.com.apple.notes",  # Notizen laufen über eigene Wege
     "/id_rsa", "/id_ed25519", "/id_ecdsa", "/id_dsa",
+    "/.config/", "/.local/share/", "/browserprofil/", "/library/messages/",
+    "/library/mail/", "/library/application support/addressbook",
+    "/.zsh_history", "/.bash_history", "/.python_history", "/.node_repl_history",
+    "/.psql_history", "/.mysql_history", "/.lesshst", "/.zsh_sessions/",
 )
 GESPERRT_ENDUNGEN = (".pem", ".key", ".p12", ".pfx", ".keychain", ".keychain-db",
                      ".kdbx", ".ovpn", ".env")
-GESPERRT_NAMEN = (".env", "mcp_servers.json")
+GESPERRT_NAMEN = (".env", "mcp_servers.json", ".zshrc", ".zprofile", ".zshenv", ".zlogin",
+                  ".zlogout", ".bashrc", ".bash_profile", ".bash_login", ".bash_logout",
+                  ".profile")
+# Wörter im Dateinamen, die auf Zugangsdaten deuten.
+GESPERRT_WORTE = ("credential", "secret", "token", "passw", "kennw", "zugangsdaten",
+                  "kennung", "pin-", "tan-liste", "recovery", "wiederherstellung")
 
-# Hier wird nie geschrieben (relativ zum Benutzerordner, kleingeschrieben).
+# Nur hier wird geschrieben (relativ zum Benutzerordner). Weitere Ordner nennt der
+# Nutzer selbst in MAC_SCHREIBORDNER - eine Positivliste ist sicherer als jede Sperrliste.
+SCHREIB_ORDNER = ("documents", "desktop", "downloads")
+
+# Hier wird nie geschrieben, auch nicht über MAC_SCHREIBORDNER (kleingeschrieben).
 SCHREIBEN_GESPERRT = (
     "library/launchagents", "library/launchdaemons", "library/preferences",
     ".zshrc", ".zprofile", ".zshenv", ".bashrc", ".bash_profile", ".profile",
     ".ssh", ".gnupg", ".aws", ".config", "library/keychains", "library/application support",
+    ".zlogin", ".zlogout", ".bash_login", ".bash_logout", "library",
 )
+
+
+def _unter(pfad: Path, basis: Path) -> bool:
+    """Liegt ``pfad`` in ``basis`` (oder ist es)? Ohne Rücksicht auf Groß- und Kleinschreibung,
+    denn das Dateisystem des Macs unterscheidet sie normalerweise nicht."""
+    a, b = str(pfad).lower().rstrip("/"), str(basis).lower().rstrip("/")
+    return a == b or a.startswith(b + "/")
 
 
 class MacZugriff:
@@ -78,18 +99,18 @@ class MacZugriff:
     def gesperrt(self, ziel: Path) -> str:
         """Warum ein Pfad nicht gelesen wird - leer, wenn er erlaubt ist."""
         text = str(ziel).lower() + ("/" if ziel.is_dir() else "")
-        if "/" + ziel.name.lower() in text and ziel.name.lower() in GESPERRT_NAMEN:
+        name = ziel.name.lower()
+        if name in GESPERRT_NAMEN or name.startswith(".env") or ".env." in name:
             return "Diese Datei enthält Zugangsdaten."
+        if any(wort in name for wort in GESPERRT_WORTE):
+            return "Der Name deutet auf Zugangsdaten. Diese Datei bleibt gesperrt."
         for teil in GESPERRT_TEILE:
             if teil in text or text.endswith(teil):
                 return "Dieser Bereich enthält Schlüssel oder Anmeldungen und bleibt gesperrt."
         if ziel.suffix.lower() in GESPERRT_ENDUNGEN:
             return "Dateien dieser Art enthalten Schlüssel oder Passwörter und bleiben gesperrt."
-        try:
-            ziel.relative_to(self.programm / "config")
+        if _unter(ziel, self.programm / "config"):
             return "Die Konfiguration von Jarvis enthält Schlüssel und bleibt gesperrt."
-        except ValueError:
-            pass
         return ""
 
     # -- Lesen --------------------------------------------------------------
@@ -185,35 +206,39 @@ class MacZugriff:
 
     # -- Schreiben ----------------------------------------------------------
 
+    def schreib_ordner(self) -> list:
+        """Die Ordner, in die geschrieben werden darf."""
+        namen = list(SCHREIB_ORDNER)
+        for extra in str(config.MAC_SCHREIBORDNER or "").split(","):
+            extra = extra.strip().strip("/")
+            if extra and ".." not in extra:
+                namen.append(extra.lower())
+        return [self.home / n for n in namen]
+
     def schreiben_pruefen(self, pfad: str, ueberschreiben: bool = False) -> dict:
         """Prüft, ob dort geschrieben werden dürfte - ohne etwas zu tun."""
         ziel = self._aufloesen(pfad)
         if ziel is None:
             return {"ok": False, "fehler": "Sag mir, wohin."}
-        if self.home not in ziel.parents:
-            return {"ok": False, "fehler": "Geschrieben wird nur im Benutzerordner."}
-        relativ = str(ziel.relative_to(self.home)).lower()
+        if _unter(ziel, self.programm):
+            return {"ok": False, "fehler": "Jarvis ändert nichts in seinem eigenen Programmordner."}
+        if not any(_unter(ziel, ordner) and not _unter(ordner, ziel) for ordner in self.schreib_ordner()):
+            return {"ok": False, "fehler": "Ich schreibe nur in Dokumente, Schreibtisch und Downloads. "
+                                           "Weitere Ordner kannst du in MAC_SCHREIBORDNER freigeben."}
+        relativ = str(ziel).lower()[len(str(self.home).lower()):].lstrip("/")
         for teil in SCHREIBEN_GESPERRT:
             if relativ == teil or relativ.startswith(teil + "/"):
                 return {"ok": False, "fehler": "In diesen Bereich schreibe ich nicht: "
                                                "Dort liegen Startobjekte, Schlüssel oder Einstellungen."}
         if self.gesperrt(ziel):
             return {"ok": False, "fehler": self.gesperrt(ziel)}
-        for geschuetzt in ("src", "config", "tests"):
-            try:
-                ziel.relative_to(self.programm / geschuetzt)
-                return {"ok": False, "fehler": "Jarvis ändert sein eigenes Programm nicht."}
-            except ValueError:
-                pass
-        if ziel == self.programm / "jarvis.py":
-            return {"ok": False, "fehler": "Jarvis ändert sein eigenes Programm nicht."}
         if ziel.exists() and not ueberschreiben:
             return {"ok": False, "fehler": "Die Datei gibt es schon. Soll sie ersetzt werden, "
                                            "sag das ausdrücklich."}
         if ziel.is_dir():
             return {"ok": False, "fehler": "Das ist ein Ordner."}
         if not ziel.parent.is_dir():
-            return {"ok": False, "fehler": "Der Ordner %s gibt es nicht. Ich lege keine neuen an."
+            return {"ok": False, "fehler": "Den Ordner %s gibt es nicht. Ich lege keine neuen an."
                                            % ziel.parent}
         return {"ok": True, "ziel": ziel}
 

@@ -123,7 +123,7 @@ Stimme, die der Browser hat. Am natürlichsten klingt ElevenLabs
 Jarvis kann als Dienst dauerhaft auf einem iMac laufen: ohne Fenster, nur mit
 Stimme. Er startet bei der Anmeldung, hält den Mac wach, hört zu, antwortet laut,
 arbeitet im Hintergrund weiter und startet nach einem Absturz oder Stillstand neu.
-Freigaben holt er per Stimme ("Soll ich?"). Nur ein klares Ja gilt.
+Freigaben holt er per Stimme ("Soll ich?"). Nur ein kurzes, klares Ja gilt.
 
 ```
 python3 jarvis.py daemon                 # im Vordergrund testen
@@ -131,10 +131,20 @@ python3 jarvis.py dienst installieren    # dauerhaft einrichten
 python3 jarvis.py dienst status
 ```
 
-Auf dem Mac kann er Dateien suchen und lesen (Schlüssel, Anmeldungen und `.env`
-sind gesperrt) und mit Freigabe neue Textdateien anlegen. Alles Weitere, auch
-zum Thema eigener Benutzer oder virtuelle Maschine statt eines eigenen
-Betriebssystems, steht in `docs/IMAC.md`.
+Auf dem Mac kann er Dateien suchen und lesen (Schlüssel, Anmeldungen, Verläufe und
+`.env` sind gesperrt) und mit Freigabe neue Textdateien in Dokumente, Schreibtisch
+oder Downloads anlegen. Er liest deine **SMS und iMessages**, sucht im
+**Adressbuch**, sieht in den **Kalender** des Macs (auch Google-Kalender) und
+durchsucht dein **Gmail**-Postfach - verschickt und eingetragen wird nur nach
+deinem Ja:
+
+```
+python3 jarvis.py zugang mail     # Gmail mit App-Passwort verbinden
+python3 jarvis.py zugang mac      # SMS, Kontakte, Kalender freigeben
+```
+
+Alles Weitere, auch zum Thema eigener Benutzer oder virtuelle Maschine statt
+eines eigenen Betriebssystems, steht in `docs/IMAC.md`.
 
 ## Autopilot
 
@@ -197,10 +207,11 @@ gutes Gespräch, und das sagt er auch. Über viele Gespräche hinweg erkennt er
 Muster: Kommt derselbe Einwand dreimal, ist das kein Zufall, sondern eine Lücke
 im Angebot.
 
-**Ein Team statt eines Alleskönners.** Neun Fachkräfte mit eigenem Auftrag und
+**Ein Team statt eines Alleskönners.** Dreizehn Fachkräfte mit eigenem Auftrag und
 **eigenem Werkzeugsatz**: Buchhalter, Verkäufer, Terminplaner, Postbearbeiter,
-Kundenberater, Rechercheur, Controller, Programmierer, Privatsekretär. Die
-Trennung ist echt — der Verkäufer sieht 11 von 58 Werkzeugen und kann weder buchen noch mailen, der
+Kundenberater, Rechercheur, Controller, Programmierer, Privatsekretär, der zweite
+Chef, Webdesigner, Chatbot-Bauer und Marketing. Die Trennung ist echt — der
+Verkäufer sieht 18 von 79 Werkzeugen und kann weder buchen noch mailen, der
 Rechercheur kann gar nichts eintragen. Wer alles darf, macht irgendwann alles,
 auch das Falsche.
 
@@ -229,10 +240,12 @@ vollständigen Code samt Hinweis, ob er ins Netz will oder Dateien anfasst.
 per Telegram schicken. Jeden Tag um 18 Uhr.“ Danach genügt „Mach den
 Tagesbericht“. Routinen mit Uhrzeit laufen von selbst.
 
-**E-Mail, Kalender, Wetter, Kamera, Bildschirm.** Post lesen und vorsortieren,
-Termine samt Überschneidungen, echtes Wetter, ein Blick durch die Kamera, und
-auf Wunsch Bedienung des Bildschirms — Schritt für Schritt, jeder einzeln
-bestätigt.
+**E-Mail, SMS, Kontakte, Kalender, Wetter, Kamera, Bildschirm.** Post lesen,
+vorsortieren und durchsuchen (Gmail und andere), SMS und iMessages vom iPhone
+lesen und mit der eigenen Nummer beantworten, Kontakte aus dem Adressbuch,
+Termine aus der Kalender-App samt Überschneidungen, echtes Wetter, ein Blick
+durch die Kamera, und auf Wunsch Bedienung des Bildschirms — Schritt für
+Schritt, jeder einzeln bestätigt.
 
 **Command Center.** `dashboard/dashboard.html` zeigt Monatszahlen mit
 30-Tage-Verlauf, die Belegquote als Ring, Ausgaben je Kategorie, Termine,
@@ -265,6 +278,13 @@ senden, Bildschirm bedienen und jedes nicht ausdrücklich freigegebene
 MCP-Werkzeug fragen vorher nach — per Telegram, sonst im Terminal.
 **Timeout, Netzwerkfehler oder ausbleibende Antwort gelten als Ablehnung.**
 Nie als Zustimmung. Wer sich nicht meldet, hat nicht zugestimmt.
+
+**Fremder Text ist keine Anweisung.** Mails, SMS, Dateien und Webseiten
+können Sätze enthalten, die sich an Jarvis richten. Hat er in einem Gespräch
+so etwas gelesen, fragt er danach auch vor jeder Suche im Netz und jeder
+geöffneten Webseite nach — damit nichts unbemerkt hinausgetragen wird. Im
+Hintergrund gibt es solche Werkzeuge gar nicht, und eine Fachkraft kann nur
+die Werkzeuge ihrer Rolle benutzen, auch wenn sie ein anderes aufruft.
 
 Jede Aktion landet im Protokoll und erscheint im Dashboard.
 
@@ -316,7 +336,9 @@ Der **Selbsttest** geht jeden Baustein durch:
 | Klicks landen daneben | Sollte nicht vorkommen — der Retina-Faktor wird gemessen. Selbsttest zeigt ihn an |
 | Er redet englisch oder klingt falsch | `EXTRAS.command` → 9, deutsche Stimme installieren lassen |
 | Kamera geht nicht | `brew install imagesnap`, dann Kamera-Recht erteilen |
-| Mail geht nicht | Bei Gmail, iCloud und Outlook braucht es ein **App-Passwort**, nicht das normale |
+| Mail geht nicht | Bei Gmail, iCloud und Outlook braucht es ein **App-Passwort**, nicht das normale: `python3 jarvis.py zugang mail` |
+| Er kommt nicht an SMS, Kontakte oder Kalender | `python3 jarvis.py zugang mac` — zeigt, was fehlt, und öffnet die Einstellung |
+| SMS gehen nicht raus | Am iPhone: Einstellungen → Nachrichten → SMS-Weiterleitung → diesen Mac einschalten |
 | Irgendetwas anderes | `EXTRAS.command` → 1 (Selbsttest) |
 
 ---

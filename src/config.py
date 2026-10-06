@@ -201,6 +201,10 @@ WETTER_ORT = _text("WETTER_ORT", "Wien")
 SUPABASE_URL = _text("SUPABASE_URL")
 SUPABASE_KEY = _text("SUPABASE_KEY")
 
+# Weitere Ordner (relativ zum Benutzerordner, mit Komma getrennt), in die Jarvis
+# nach Freigabe Dateien schreiben darf. Dokumente, Schreibtisch und Downloads sind immer erlaubt.
+MAC_SCHREIBORDNER = _text("MAC_SCHREIBORDNER", "")
+
 # Autopilot: Jarvis arbeitet im Hintergrund weiter. Standardmäßig aus.
 # Er bereitet nur vor (Entwürfe im Postfach) und schickt nie etwas ab.
 AUTOPILOT_AN = _wahrheit("AUTOPILOT_AN", False)

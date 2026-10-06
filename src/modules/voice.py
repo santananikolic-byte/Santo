@@ -12,6 +12,7 @@ schneiden entweder mitten im Satz ab oder lassen den Nutzer nach dem letzten
 Wort warten - beides fällt im Alltag sofort unangenehm auf.
 """
 
+import http.client
 import importlib.util
 import json
 import os
@@ -131,6 +132,8 @@ class Stimme:
         self.letzter_fehler = ""
         self._stopp = threading.Event()
         self._abspiel_prozess = None
+        # Nur die Aufnahme setzt das: Mikrofon fehlt oder lässt sich nicht öffnen.
+        self.mikro_fehler = ""
         if self.ist_macos():
             self.macos_stimme = config.MACOS_STIMME or self.deutsche_stimme_suchen()
 
@@ -242,7 +245,7 @@ class Stimme:
         try:
             with urllib.request.urlopen(anfrage, timeout=45) as antwort:
                 return antwort.read()
-        except (urllib.error.URLError, OSError) as fehler:
+        except (urllib.error.URLError, OSError, http.client.HTTPException, ValueError) as fehler:
             self.letzter_fehler = "ElevenLabs nicht erreichbar: %s" % fehler
             print("[stimme] %s - ich nehme die Systemstimme." % self.letzter_fehler)
             return None
@@ -252,34 +255,47 @@ class Stimme:
         fertig = queue.Queue(maxsize=2)
         ende = threading.Event()
 
-        def holer():
-            for nummer, stueck in enumerate(stuecke):
-                if ende.is_set() or self._stopp.is_set():
-                    break
-                daten = self._elevenlabs_holen(
-                    stueck, stuecke[nummer - 1] if nummer else "",
-                    stuecke[nummer + 1] if nummer + 1 < len(stuecke) else "")
-                while not ende.is_set():
-                    try:
-                        fertig.put((nummer, daten), timeout=0.2)
-                        break
-                    except queue.Full:
-                        continue
-                if daten is None:
-                    return
+        def ablegen(eintrag):
             while not ende.is_set():
                 try:
-                    fertig.put(None, timeout=0.2)
+                    fertig.put(eintrag, timeout=0.2)
                     return
                 except queue.Full:
                     continue
+
+        def holer():
+            # Was auch passiert: am Ende liegt immer ein Abschluss in der Warteschlange,
+            # sonst wartet die Wiedergabe für immer.
+            try:
+                for nummer, stueck in enumerate(stuecke):
+                    if ende.is_set() or self._stopp.is_set():
+                        break
+                    daten = self._elevenlabs_holen(
+                        stueck, stuecke[nummer - 1] if nummer else "",
+                        stuecke[nummer + 1] if nummer + 1 < len(stuecke) else "")
+                    ablegen((nummer, daten))
+                    if daten is None:
+                        return
+            except Exception as fehler:
+                self.letzter_fehler = "ElevenLabs: %s" % fehler
+                ablegen((-1, None))
+                return
+            finally:
+                ablegen(None)
 
         faden = threading.Thread(target=holer, daemon=True, name="jarvis-stimme-holen")
         faden.start()
         gesprochen = 0
         try:
             while True:
-                eintrag = fertig.get()
+                try:
+                    eintrag = fertig.get(timeout=1)
+                except queue.Empty:
+                    if not faden.is_alive() and fertig.empty():
+                        break
+                    if self._stopp.is_set():
+                        break
+                    continue
                 if eintrag is None:
                     break
                 nummer, daten = eintrag
@@ -394,8 +410,9 @@ class Stimme:
         Der Raumpegel wird zu Beginn gemessen, damit ein lauter Raum nicht
         dauernd als Sprache gilt und ein leiser nicht überhört wird.
         """
+        self.mikro_fehler = ""
         if not self.mikrofon_bereit():
-            self.letzter_fehler = "Kein Mikrofonzugriff. %s" % mikrofon_fehlermeldung()
+            self.letzter_fehler = self.mikro_fehler = "Kein Mikrofonzugriff. %s" % mikrofon_fehlermeldung()
             return ""
         blockgroesse = int(ABTASTRATE * BLOCK_SEKUNDEN)
         gesammelt = []
@@ -408,9 +425,9 @@ class Stimme:
             strom = sd.InputStream(samplerate=ABTASTRATE, channels=1, dtype="float32",
                                    blocksize=blockgroesse)
         except Exception as fehler:
-            self.letzter_fehler = ("Das Mikrofon lässt sich nicht öffnen: %s. In den "
-                                   "Systemeinstellungen unter Datenschutz das Mikrofon "
-                                   "für das Terminal freigeben." % fehler)
+            self.letzter_fehler = self.mikro_fehler = (
+                "Das Mikrofon lässt sich nicht öffnen: %s. In den Systemeinstellungen unter "
+                "Datenschutz das Mikrofon für das Terminal freigeben." % fehler)
             return ""
 
         try:
@@ -444,7 +461,7 @@ class Stimme:
                     if spricht and (time.time() - beginn) > MAX_AUFNAHME:
                         break
         except Exception as fehler:
-            self.letzter_fehler = "Die Aufnahme ist abgebrochen: %s" % fehler
+            self.letzter_fehler = self.mikro_fehler = "Die Aufnahme ist abgebrochen: %s" % fehler
             return ""
 
         if not gesammelt:

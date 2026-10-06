@@ -335,6 +335,7 @@ class Autopilot:
         self.arbeitet_an = eintrag["titel"]
         beginn = time.time()
         try:
+            self.tools.lauf_beginnen(hintergrund=True)
             ergebnis = self.tools.team.beauftragen(
                 eintrag["rolle"], eintrag["auftrag"], max_runden=6, hintergrund=True)
         except Exception as fehler:
@@ -502,7 +503,7 @@ function eintrag(e,mitKnopf){
   kn.push(h("button",{type:"button",text:"Ganz zeigen",onclick:ev=>{text.classList.toggle("offen");ev.target.textContent=text.classList.contains("offen")?"Einklappen":"Ganz zeigen"}}))}
  if(mitKnopf)kn.push(h("button",{class:"haupt",type:"button",text:"Gesehen",onclick:async()=>{await api("POST",{aktion:"gesehen",id:e.id});lade()}}));
  return h("div",{class:"eintrag"},h("h3",{text:e.titel}),
-  h("div",{class:"leise"},h("span",{class:"etikett",text:ROLLEN[e.rolle]||e.rolle}),h("span",{class:"etikett"+(fehler?" fehler":""),text:fehler?"nicht geklappt":(e.quelle==="nerv"?"selbst gefunden":"dein Auftrag")}),zeit(e.beendet||e.angelegt)),
+  h("div",{class:"leise"},h("span",{class:"etikett",text:ROLLEN[e.rolle]||e.rolle}),h("span",{class:"etikett"+(fehler?" fehler":""),text:fehler?"nicht geklappt":(e.quelle==="nerv"?"selbst gefunden":e.quelle==="hintergrund"?"von einer Fachkraft":"dein Auftrag")}),zeit(e.beendet||e.angelegt)),
   e.ergebnis?text:null,h("div",{class:"aktionen"},kn))}
 function liste(box,daten,leer,mitKnopf,wartend){
  box.replaceChildren(...(daten.length?daten.map(e=>wartend?h("div",{class:"eintrag"},h("h3",{text:e.titel}),h("div",{class:"leise"},h("span",{class:"etikett",text:ROLLEN[e.rolle]||e.rolle}),e.status==="laeuft"?"arbeitet gerade daran":"wartet")):eintrag(e,mitKnopf)):[h("p",{class:"leise",text:leer})]))}

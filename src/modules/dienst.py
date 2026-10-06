@@ -42,32 +42,48 @@ from modules.autopilot import in_ruhezeit
 LABEL = "at.jarvis.imac"
 HERZSCHLAG_GRENZE = 1800  # Sekunden ohne Lebenszeichen, dann Neustart
 
-# Bewusst knapp: Wörter wie "bitte" (kann "Wie bitte?" heißen) oder "genau" zählen nicht als Ja.
-JA_WOERTER = {"ja", "jo", "jawohl", "jep", "klar", "okay", "ok", "gerne", "gern",
-              "einverstanden", "freigegeben", "genehmigt", "mach", "machs"}
-NEIN_WOERTER = {"nein", "nee", "nö", "noe", "nicht", "stopp", "stop", "abbrechen",
-                "lass", "lassen", "kein", "keine", "niemals", "nie", "halt", "warte",
-                "falsch", "doch-nicht", "bloß", "bloss", "moment"}
+# Bewusst knapp. Ein Ja zählt nur als kurze, eindeutige Antwort, die mit einem dieser
+# Wörter beginnt - nicht, wenn "ja" irgendwo in einem Satz steht ("Das ist ja unglaublich").
+JA_WOERTER = {"ja", "jo", "jawohl", "jep", "klar", "okay", "ok", "einverstanden",
+              "freigegeben", "genehmigt", "mach", "machs"}
+# Was nach dem Ja noch stehen darf, ohne dass es zweifelhaft wird.
+FUELLWOERTER = {"ja", "bitte", "gerne", "gern", "mach", "machs", "das", "es", "so", "los",
+                "danke", "genau", "klar", "okay", "ok", "jarvis"}
+NEIN_WOERTER = {"nein", "nee", "ne", "nö", "noe", "nicht", "nichts", "nix", "stopp", "stop",
+                "abbrechen", "lass", "lassen", "kein", "keine", "keinen", "keinem", "keiner",
+                "keinesfalls", "niemals", "nie", "halt", "warte", "falsch", "bloß", "bloss",
+                "moment", "ohne", "vergiss", "aber", "sondern", "statt", "anders", "später",
+                "spaeter", "gar", "nochmal", "warum", "wieso"}
+MAX_ANTWORT_WOERTER = 4
 
 
 def ja_nein(text: str):
-    """``True`` für ein klares Ja, ``False`` für Nein oder Zweifel, ``None`` für nichts Verwertbares.
+    """``True`` nur für ein kurzes, eindeutiges Ja. ``False`` für Nein oder Zweifel,
+    ``None`` für nichts Verwertbares.
 
-    Sicherheit vor Bequemlichkeit: Steht in der Antwort irgendein Nein-Wort,
-    ist es ein Nein, auch wenn "ja" davor steht ("ja, aber nicht jetzt").
+    Sicherheit vor Bequemlichkeit: Ein Ja muss am Anfang stehen, die Antwort darf
+    höchstens vier Wörter lang sein, und danach dürfen nur Füllwörter folgen
+    ("ja bitte", "mach das"). Steht irgendwo ein Nein-Wort, ist es ein Nein.
     """
     woerter = re.findall(r"[a-zäöüß]+", (text or "").lower())
     if not woerter:
         return None
     if any(w in NEIN_WOERTER for w in woerter):
         return False
-    if any(w in JA_WOERTER for w in woerter):
+    if len(woerter) > MAX_ANTWORT_WOERTER:
+        return None
+    if woerter[0] in JA_WOERTER and all(w in FUELLWOERTER or w in JA_WOERTER for w in woerter[1:]):
         return True
     return None
 
 
+def _anfang(text, n: int = 90) -> str:
+    text = " ".join(str(text or "").split())
+    return text if len(text) <= n else text[:n].rsplit(" ", 1)[0] + " und so weiter"
+
+
 def freigabe_ansage(aktion: str, details: str = "") -> str:
-    """Was Jarvis vor einer Freigabe laut sagt. Nie der ganze Code, immer der Kern."""
+    """Was Jarvis vor einer Freigabe laut sagt: wer, was, wohin. Nie der ganze Code."""
     daten = None
     try:
         daten = json.loads(details) if details and details.lstrip().startswith("{") else None
@@ -76,30 +92,39 @@ def freigabe_ansage(aktion: str, details: str = "") -> str:
     d = daten if isinstance(daten, dict) else {}
 
     if aktion == "mail_senden":
-        return "Ich soll eine Mail an %s schicken, Betreff: %s." % (
-            d.get("an", "jemanden"), d.get("betreff", "ohne Betreff"))
+        return "Ich soll eine Mail an %s schicken, Betreff: %s. Sie beginnt mit: %s" % (
+            d.get("an", "jemanden"), d.get("betreff", "ohne Betreff"), _anfang(d.get("text"), 70))
     if aktion == "termin_anlegen":
-        return "Ich soll einen Termin anlegen: %s." % (d.get("titel") or d.get("betreff") or "ohne Titel")
-    if aktion in ("anrufen", "sms_senden"):
-        wer = d.get("name") or d.get("nummer") or "jemanden"
-        if aktion == "anrufen":
-            return "Ich soll %s anrufen." % wer
-        return "Ich soll %s eine SMS schicken." % wer
+        return "Ich soll einen Termin anlegen: %s, Beginn %s." % (
+            d.get("titel") or "ohne Titel", d.get("beginn") or "ohne Zeit")
+    if aktion == "mac_termin_anlegen":
+        return "Ich soll in deinen Kalender eintragen: %s, am %s um %s." % (
+            d.get("titel") or "ohne Titel", d.get("datum") or "?", d.get("uhrzeit") or "?")
+    if aktion == "anrufen":
+        return "Ich soll %s anrufen. Ansage: %s" % (d.get("name") or d.get("nummer") or "jemanden",
+                                                     _anfang(d.get("ansage") or d.get("text"), 70))
+    if aktion == "sms_senden":
+        return "Ich soll %s eine SMS schicken: %s" % (d.get("name") or d.get("nummer") or "jemandem",
+                                                       _anfang(d.get("text"), 90))
     if aktion == "nachricht_senden":
-        return "Ich soll eine Nachricht schicken."
+        return "Ich soll per %s an %s schreiben: %s" % (
+            d.get("kanal", "Nachricht"), d.get("an") or "den Empfänger", _anfang(d.get("text"), 90))
     if aktion == "datei_schreiben":
-        return "Ich soll die Datei %s anlegen." % (d.get("pfad", "an einem Ort"))
+        wie = "die vorhandene Datei %s ersetzen" if d.get("ueberschreiben") else "die neue Datei %s anlegen"
+        return ("Ich soll " + wie + ". Sie beginnt mit: %s") % (d.get("pfad", "?"), _anfang(d.get("inhalt"), 60))
     if aktion == "skript_ausfuehren":
-        # Der Kopf der Freigabefrage: "Skript x ausführen. Es will ins Netz." - der Code bleibt weg.
         kopf = (details or "").split("\n\n")[0].strip()
         return "%s Den Code kann ich dir nicht vorlesen, schau ihn dir in der Werkstatt an." % kopf
+    if aktion == "browser_oeffnen":
+        return "Ich soll diese Adresse öffnen: %s" % _anfang(d.get("adresse"), 120)
     if aktion == "bildschirm_bedienen":
-        return "Ich soll den Bildschirm bedienen."
+        return "Ich soll den Bildschirm bedienen: %s" % _anfang(d.get("auftrag") or details, 90)
     if aktion in ("browser_auftrag", "browser_schritt"):
-        return "Im Browser: %s" % (details or "ich soll etwas ausführen.")[:200]
+        return "Im Browser: %s" % _anfang(d.get("auftrag") or details or "ich soll etwas ausführen.", 160)
     if aktion == "autopilot_schalten":
         return "Ich soll den Autopiloten %s." % ("einschalten" if d.get("an") else "ausschalten")
-    return "Ich soll %s ausführen." % aktion.replace("_", " ")
+    lesbar = aktion.replace("mcp__", "").replace("__", ", ").replace("_", " ")
+    return "Ich soll %s ausführen, mit: %s" % (lesbar, _anfang(details, 160) or "ohne Angaben")
 
 
 class SprachFreigabe:

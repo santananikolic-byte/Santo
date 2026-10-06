@@ -13,9 +13,12 @@ import email.utils
 import imaplib
 import smtplib
 import ssl
+from datetime import datetime, timedelta
 from email.message import EmailMessage
 
 import config
+
+IMAP_MONATE = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
 
 # Grobe Wortlisten für die Vorsortierung.
 WICHTIG_WOERTER = ["dringend", "frist", "mahnung", "rechnung", "angebot", "auftrag",
@@ -112,41 +115,63 @@ class Mail:
 
     # -- Lesen --------------------------------------------------------------
 
+    def _verbinden(self):
+        verbindung = imaplib.IMAP4_SSL(config.IMAP_HOST, config.IMAP_PORT,
+                                       ssl_context=ssl.create_default_context())
+        verbindung.login(config.IMAP_USER, config.IMAP_PASSWORT)
+        verbindung.select("INBOX", readonly=True)
+        return verbindung
+
+    @staticmethod
+    def _trennen(verbindung):
+        if verbindung is None:
+            return
+        try:
+            verbindung.close()
+        except (imaplib.IMAP4.error, OSError):
+            pass
+        try:
+            verbindung.logout()
+        except (imaplib.IMAP4.error, OSError):
+            pass
+
+    @staticmethod
+    def _holen(verbindung, nummern) -> list:
+        """Holt Mails, neueste zuerst - ohne sie als gelesen zu markieren."""
+        mails = []
+        for nummer in reversed(nummern):
+            # BODY.PEEK lässt die Mail ungelesen - er soll sie selbst noch sehen.
+            status, teil = verbindung.fetch(nummer, "(BODY.PEEK[])")
+            if status != "OK" or not teil or not teil[0]:
+                continue
+            nachricht = email.message_from_bytes(teil[0][1])
+            betreff = kopf_dekodieren(nachricht.get("Subject"))
+            absender = kopf_dekodieren(nachricht.get("From"))
+            text = klartext_aus_mail(nachricht)
+            mails.append({
+                "id": nummer.decode("ascii", errors="replace"),
+                "betreff": betreff or "(ohne Betreff)",
+                "absender": absender,
+                "datum": kopf_dekodieren(nachricht.get("Date")),
+                "auszug": " ".join((text or "").split())[:400],
+                "einstufung": triage(betreff, absender, text),
+            })
+        return mails
+
     def ungelesene(self, limit: int = 15) -> dict:
         """Holt ungelesene Mails und sortiert sie vor - ohne sie als gelesen zu markieren."""
         if not self.lesen_moeglich():
             return {"ok": False,
-                    "fehler": "Der Posteingang ist nicht eingerichtet. In der Einrichtung "
-                              "IMAP-Server, Benutzer und Passwort hinterlegen."}
+                    "fehler": "Der Posteingang ist nicht eingerichtet. Richte ihn ein mit: "
+                              "python3 jarvis.py zugang mail"}
         verbindung = None
         try:
-            kontext = ssl.create_default_context()
-            verbindung = imaplib.IMAP4_SSL(config.IMAP_HOST, config.IMAP_PORT,
-                                           ssl_context=kontext)
-            verbindung.login(config.IMAP_USER, config.IMAP_PASSWORT)
-            verbindung.select("INBOX")
+            verbindung = self._verbinden()
             status, daten = verbindung.search(None, "UNSEEN")
             if status != "OK":
                 return {"ok": False, "fehler": "Der Posteingang antwortet nicht wie erwartet."}
             nummern = daten[0].split()[-limit:] if daten and daten[0] else []
-            mails = []
-            for nummer in reversed(nummern):
-                # BODY.PEEK lässt die Mail ungelesen - er soll sie selbst noch sehen.
-                status, teil = verbindung.fetch(nummer, "(BODY.PEEK[])")
-                if status != "OK" or not teil or not teil[0]:
-                    continue
-                nachricht = email.message_from_bytes(teil[0][1])
-                betreff = kopf_dekodieren(nachricht.get("Subject"))
-                absender = kopf_dekodieren(nachricht.get("From"))
-                text = klartext_aus_mail(nachricht)
-                mails.append({
-                    "id": nummer.decode("ascii", errors="replace"),
-                    "betreff": betreff or "(ohne Betreff)",
-                    "absender": absender,
-                    "datum": kopf_dekodieren(nachricht.get("Date")),
-                    "auszug": " ".join((text or "").split())[:400],
-                    "einstufung": triage(betreff, absender, text),
-                })
+            mails = self._holen(verbindung, nummern)
             return {"ok": True, "anzahl": len(mails), "mails": mails,
                     "wichtig": [m for m in mails if m["einstufung"] == "wichtig"],
                     "spaeter": [m for m in mails if m["einstufung"] == "spaeter"],
@@ -156,15 +181,45 @@ class Mail:
             return {"ok": False,
                     "fehler": "Der Posteingang ist nicht erreichbar: %s" % fehler}
         finally:
-            if verbindung is not None:
-                try:
-                    verbindung.close()
-                except (imaplib.IMAP4.error, OSError):
-                    pass
-                try:
-                    verbindung.logout()
-                except (imaplib.IMAP4.error, OSError):
-                    pass
+            self._trennen(verbindung)
+
+    def suchen(self, begriff: str, tage: int = 180, limit: int = 10) -> dict:
+        """Sucht im Posteingang nach Absender, Betreff oder Text - auch in gelesenen Mails."""
+        if not self.lesen_moeglich():
+            return {"ok": False,
+                    "fehler": "Der Posteingang ist nicht eingerichtet. Richte ihn ein mit: "
+                              "python3 jarvis.py zugang mail"}
+        begriff = " ".join(str(begriff or "").split())[:100]
+        if len(begriff) < 2:
+            return {"ok": False, "fehler": "Wonach soll ich suchen?"}
+        tage = max(1, min(int(tage or 180), 3650))
+        limit = max(1, min(int(limit or 10), 25))
+        # IMAP will englische Monatsnamen, unabhängig von der Spracheinstellung des Macs.
+        tag = datetime.now() - timedelta(days=tage)
+        seit = "%d-%s-%d" % (tag.day, IMAP_MONATE[tag.month - 1], tag.year)
+        verbindung = None
+        try:
+            verbindung = self._verbinden()
+            if begriff.isascii():
+                # Anführungszeichen und Rückstriche würden die Suchanfrage aufbrechen.
+                sauber = begriff.replace("\\", " ").replace('"', " ")
+                status, daten = verbindung.search(None, "SINCE", seit, "TEXT", '"%s"' % sauber)
+            else:
+                # Umlaute gehen nur als Literal mit Zeichensatz.
+                verbindung.literal = begriff.encode("utf-8")
+                status, daten = verbindung.search("UTF-8", "SINCE", seit, "TEXT")
+            if status != "OK":
+                return {"ok": False, "fehler": "Die Suche im Posteingang hat nicht geklappt."}
+            nummern = daten[0].split()[-limit:] if daten and daten[0] else []
+            mails = self._holen(verbindung, nummern)
+            return {"ok": True, "anzahl": len(mails), "begriff": begriff, "tage": tage,
+                    "mails": mails}
+        except (imaplib.IMAP4.error, ssl.SSLError, OSError) as fehler:
+            self.letzter_fehler = str(fehler)
+            return {"ok": False,
+                    "fehler": "Der Posteingang ist nicht erreichbar: %s" % fehler}
+        finally:
+            self._trennen(verbindung)
 
     def zusammenfassung(self, limit: int = 15) -> str:
         """Ein gesprochener Satz über den Posteingang."""
