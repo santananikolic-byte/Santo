@@ -128,6 +128,8 @@ NUTZER_NAME = _text("NUTZER_NAME", "Chef")
 JARVIS_PROFIL = _text("JARVIS_PROFIL")
 JARVIS_STIL = _text("JARVIS_STIL")
 FIRMA = _text("FIRMA", "Gebäudereinigung")
+# Die Branche, in der Jarvis mitarbeitet. Sie steht in jedem Auftrag an die Fachkräfte.
+BRANCHE = _text("BRANCHE", "Gebäudereinigung")
 
 # Sprachausgabe
 ELEVENLABS_API_KEY = _text("ELEVENLABS_API_KEY")

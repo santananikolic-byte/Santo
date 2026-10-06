@@ -279,29 +279,60 @@ body[data-zustand="wach"] .zustandstext{color:var(--akzent)}
     stimmenLaden();
     window.speechSynthesis.onvoiceschanged = stimmenLaden;
   }
+  // Die natürlichste deutsche Stimme, die der Browser hat: erst die
+  // hochwertigen (Premium, Enhanced, Natural, Neural), dann Google, dann die
+  // übrigen bekannten, zuletzt irgendeine deutsche.
+  function besteStimme() {
+    var de = stimmen.filter(function (s) { return /^de/i.test(s.lang); });
+    var stufen = [/premium|enhanced|natural|neural|online/i, /google/i,
+                  /markus|yannick|petra|anna|viktor|hedda|katja|conrad/i];
+    for (var i = 0; i < stufen.length; i++) {
+      var treffer = de.filter(function (s) { return stufen[i].test(s.name); });
+      if (treffer.length) { return treffer[0]; }
+    }
+    return de.length ? de[0] : null;
+  }
+  // Lange Texte in einem Stück bleiben in vielen Browsern nach etwa fünfzehn
+  // Sekunden stehen oder fangen von vorn an. Deshalb in kurzen Stücken.
+  function stuecke(text) {
+    if (Array.isArray(text)) { return text.filter(Boolean); }
+    var teile = String(text || "").replace(/\s+/g, " ").match(/[^.!?]+[.!?]*/g) || [];
+    return teile.map(function (t) { return t.trim(); }).filter(Boolean);
+  }
   function sprich(text, danach) {
-    if (!window.speechSynthesis || !text) { if (danach) { danach(); } return; }
+    var liste = stuecke(text);
+    if (!window.speechSynthesis || !liste.length) { if (danach) { danach(); } return; }
     // Erkennung anhalten, sonst hört Jarvis sich selbst zu.
     hoerenPause();
     sprichtGerade = true;
     setzeZustand("spricht");
     window.speechSynthesis.cancel();
-    var satz = new SpeechSynthesisUtterance(text);
-    satz.lang = "de-DE"; satz.rate = 1.06;
-    var de = stimmen.filter(function (s) { return /^de/i.test(s.lang); });
-    var gut = de.filter(function (s) {
-      return /markus|yannick|petra|anna|viktor|google/i.test(s.name); });
-    if (gut.length) { satz.voice = gut[0]; } else if (de.length) { satz.voice = de[0]; }
-    satz.onend = satz.onerror = function () {
+    var stimme = besteStimme(), nummer = 0, fertig = false;
+    function ende() {
+      if (fertig) { return; }
+      fertig = true;
       sprichtGerade = false;
       hoerenWeiter();
       if (danach) { danach(); }
-    };
-    window.speechSynthesis.speak(satz);
+    }
+    function weiter() {
+      if (fertig) { return; }
+      if (nummer >= liste.length) { ende(); return; }
+      var satz = new SpeechSynthesisUtterance(liste[nummer++]);
+      satz.lang = "de-DE"; satz.rate = 1.0; satz.pitch = 1.0;
+      if (stimme) { satz.voice = stimme; }
+      satz.onend = weiter;
+      satz.onerror = function (e) {
+        // Wurde absichtlich abgebrochen, nicht weitermachen.
+        if (e && (e.error === "canceled" || e.error === "interrupted")) { ende(); } else { weiter(); }
+      };
+      window.speechSynthesis.speak(satz);
+    }
+    weiter();
     // Sicherheitsnetz: manche Browser feuern onend nicht.
-    setTimeout(function () {
-      if (sprichtGerade) { sprichtGerade = false; hoerenWeiter(); }
-    }, Math.min(45000, 2500 + text.length * 90));
+    var gesamt = liste.join(" ").length;
+    setTimeout(function () { if (!fertig) { window.speechSynthesis.cancel(); ende(); } },
+               Math.min(120000, 4000 + gesamt * 90));
   }
 
   /* ---------- Reden ---------- */
@@ -319,7 +350,7 @@ body[data-zustand="wach"] .zustandstext{color:var(--akzent)}
       el("antwort").textContent = antwort;
       el("antwort").className = "antwort" + (a.ok ? "" : " fehler");
       laeuft = false;
-      sprich(antwort, function () { setzeZustand("schlaeft"); });
+      sprich(a.sprechstuecke || antwort, function () { setzeZustand("schlaeft"); });
       lageHolen(); zahlenHolen();
     }).catch(function (f) {
       el("antwort").textContent = "Ich erreiche den Server nicht: " + f.message;
@@ -513,7 +544,7 @@ body[data-zustand="wach"] .zustandstext{color:var(--akzent)}
       el("antwort").textContent = m.text;
       el("antwort").className = "antwort";
       el("hinweis").style.display = "none";
-      sprich(m.text, function () { setzeZustand("schlaeft"); });
+      sprich(m.sprechstuecke || m.text, function () { setzeZustand("schlaeft"); });
       lageHolen(); zahlenHolen();
     }).catch(function () {});
   }

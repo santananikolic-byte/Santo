@@ -35,7 +35,7 @@ MONATE_DE = ["Januar", "Februar", "März", "April", "Mai", "Juni", "Juli",
              "August", "September", "Oktober", "November", "Dezember"]
 
 SYSTEMPROMPT = """Du bist Jarvis, der persönliche Assistent von {name}.
-{name} führt eine Gebäudereinigungsfirma als Einzelunternehmer.
+{name} führt einen Betrieb als Einzelunternehmer. Branche: {branche}.
 
 So sprichst du:
 - Kurz und gesprochen. Deine Antworten werden vorgelesen — keine
@@ -145,8 +145,8 @@ class JarvisAgent:
             persoenlich += "So möchte %s, dass du klingst: %s\n" % (
                 config.NUTZER_NAME, config.JARVIS_STIL)
         return SYSTEMPROMPT.format(
-            name=config.NUTZER_NAME, wochentag=wochentag, datum=datum,
-            gedaechtnis=(persoenlich + "\n" if persoenlich else "") + gedaechtnis)
+            name=config.NUTZER_NAME, branche=config.BRANCHE, wochentag=wochentag,
+            datum=datum, gedaechtnis=(persoenlich + "\n" if persoenlich else "") + gedaechtnis)
 
     # -- Schnittstelle ------------------------------------------------------
 

@@ -71,6 +71,53 @@ nur auf diesen Rechner.
 Braucht Safari oder Chrome; Firefox kann keine deutsche Spracherkennung und
 bekommt deshalb keinen Mikrofonknopf, sondern einen Hinweis.
 
+## Aufbau: Erinnern und Umsetzen
+
+Jarvis hat zwei Bereiche, so wie ein Mensch im Betrieb.
+
+**Erinnern.** Das Gedächtnis liegt lokal in einer Datenbank: Notizen, Kunden,
+Gespräche, Zahlen, Tagesberichte, offene Punkte. Vor jeder Antwort holt er sich
+heraus, was zur Frage passt, und nutzt es beiläufig. Er merkt sich von selbst,
+was wichtig klingt, und vergisst nichts, was du ihm sagst.
+
+**Umsetzen.** Hier arbeiten die Fachkräfte, im Gespräch oder im Hintergrund
+über den Autopiloten:
+
+| Fachkraft | Macht |
+|---|---|
+| der zweite Chef | Lage des Betriebs, Prioritäten, Entscheidungen vorbereiten, Aufträge verteilen |
+| der Verkäufer | Pipeline, Nachfassen, Angebote kalkulieren und schreiben |
+| der Buchhalter, Controller | Buchungen, Belege, Kasse, Cashflow |
+| der Postbearbeiter, Terminplaner | Posteingang, Antwortentwürfe, Kalender |
+| der Webdesigner | fertige Webseiten und Landingpages als HTML-Datei |
+| der Chatbot-Bauer | Bot-Anweisung, häufige Fragen, Gesprächsablauf, Einbindung |
+| der Marketingmann | Beiträge, Anschreiben, Kampagnen mit Erfolgskennzahl |
+| der Programmierer | kleine Programme und Auswertungen |
+| der Rechercheur, Kundenberater, Privatsekretär | Recherche, Gesprächsbewertung, private Fixkosten |
+
+Was die Webdesigner-, Chatbot- und Marketing-Fachkräfte bauen, liegt unter
+`werkstatt/projekte/<Projekt>/`. Es wird **nur geschrieben, nie ausgeführt**,
+und Dateien mit Schlüsseln oder Tokens werden abgelehnt.
+
+Die Branche stellst du in der Einrichtung ein (`BRANCHE`). Sie steht in jedem
+Auftrag. Die Kalkulation über Leistungswerte ist auf Reinigung zugeschnitten,
+der Rest arbeitet in jeder Branche.
+
+## Sprechen wie ein Mensch
+
+Was Jarvis sagt, wird erst ins Gesprochene übersetzt: Beträge, Daten, Uhrzeiten
+und Einheiten werden ausgeschrieben ("eintausendneunundsechzig Euro sechzig",
+"am sechsten Oktober um vierzehn Uhr dreißig"), Markdown, Links und Code fallen
+weg, Telefonnummern bleiben Ziffern. Danach wird der Text in kurze Atemabschnitte
+geteilt, und doppelte Sätze oder Wortschleifen werden einmal gesprochen.
+
+Mit ElevenLabs wird der nächste Abschnitt schon geholt, während der vorige läuft,
+und jeder Abschnitt kennt den Satz davor und danach, damit die Betonung
+durchläuft. Fällt ElevenLabs aus, spricht die Systemstimme nur den Rest. Im
+Browser wird Abschnitt für Abschnitt gesprochen, mit der besten deutschen
+Stimme, die der Browser hat. Am natürlichsten klingt ElevenLabs
+(`python3 jarvis.py zugang stimme`).
+
 ## Autopilot
 
 Jarvis kann auch arbeiten, wenn niemand fragt. Der Autopilot nimmt Aufträge

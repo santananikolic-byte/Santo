@@ -43,6 +43,7 @@ BAULISTE = [
     "modules/memory",
     "modules/router",
     "modules/recall",
+    "modules/sprechtext",
     "modules/voice",
     "modules/speaker",
     "modules/mail",

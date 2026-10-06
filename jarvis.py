@@ -247,6 +247,8 @@ NUTZER_NAME = _text("NUTZER_NAME", "Chef")
 JARVIS_PROFIL = _text("JARVIS_PROFIL")
 JARVIS_STIL = _text("JARVIS_STIL")
 FIRMA = _text("FIRMA", "Gebäudereinigung")
+# Die Branche, in der Jarvis mitarbeitet. Sie steht in jedem Auftrag an die Fachkräfte.
+BRANCHE = _text("BRANCHE", "Gebäudereinigung")
 
 # Sprachausgabe
 ELEVENLABS_API_KEY = _text("ELEVENLABS_API_KEY")
@@ -1218,6 +1220,318 @@ class Recall:
 
 
 # =========================================================================
+# sprechtext  -  Sprechtext - aus geschriebenem Text wird Text, den ein Mensch so sagen würde.
+# 
+# Eine Stimme klingt nicht nur wegen des Klangs künstlich, sondern wegen dem,
+# was sie vorliest. Wer "1.069,60 €" liest, sagt nicht "eins Punkt null sechs
+# neun Komma sechzig Euro-Zeichen". Wer "z. B." liest, hält nicht an einem Punkt
+# an. Und ein Text, der in einem Stück an die Sprachausgabe geht, stockt oder
+# wiederholt sich gern mitten im Satz: lange Texte sind die häufigste Ursache
+# für Aussetzer und Schleifen.
+# 
+# Deshalb drei Schritte, alle ohne Netz und ohne Abhängigkeiten:
+# 
+# 1. **Schreiben in Sprechen übersetzen**: Zahlen, Beträge, Daten, Uhrzeiten,
+#    Einheiten und Abkürzungen werden ausgeschrieben, Markdown, Links und Code
+#    fallen weg.
+# 2. **In Atemabschnitte teilen**: kurze, in sich geschlossene Stücke, die an
+#    Satzenden und Kommas trennen, nie mitten in einer Zahl.
+# 3. **Schleifen abfangen**: ein Satz, der zweimal hintereinander kommt, oder
+#    ein Wort, das dreimal hintereinander steht, wird einmal gesprochen.
+# =========================================================================
+
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+
+EINER = ["null", "ein", "zwei", "drei", "vier", "fünf", "sechs", "sieben", "acht",
+         "neun", "zehn", "elf", "zwölf", "dreizehn", "vierzehn", "fünfzehn",
+         "sechzehn", "siebzehn", "achtzehn", "neunzehn"]
+ZEHNER = ["", "", "zwanzig", "dreißig", "vierzig", "fünfzig", "sechzig",
+          "siebzig", "achtzig", "neunzig"]
+MONATE = ["Januar", "Februar", "März", "April", "Mai", "Juni", "Juli", "August",
+          "September", "Oktober", "November", "Dezember"]
+
+ABKUERZUNGEN = [
+    (r"\bz\.\s?B\.", "zum Beispiel"), (r"\bd\.\s?h\.", "das heißt"),
+    (r"\bu\.\s?a\.", "unter anderem"), (r"\bu\.\s?U\.", "unter Umständen"),
+    (r"\bv\.\s?a\.", "vor allem"), (r"\bs\.\s?o\.", "siehe oben"),
+    (r"\busw\.", "und so weiter"), (r"\betc\.", "und so weiter"),
+    (r"\bca\.", "circa"), (r"\bbzw\.", "beziehungsweise"),
+    (r"\bevtl\.", "eventuell"), (r"\bggf\.", "gegebenenfalls"),
+    (r"\binkl\.", "inklusive"), (r"\bexkl\.", "exklusive"),
+    (r"\bmax\.", "maximal"), (r"\bNr\.", "Nummer"), (r"\bTel\.", "Telefon"),
+    (r"\bStr\.", "Straße"), (r"\bMio\.", "Millionen"), (r"\bMrd\.", "Milliarden"),
+    (r"\bvgl\.", "vergleiche"), (r"\bggü\.", "gegenüber"),
+    (r"\bDr\.", "Doktor"), (r"\bProf\.", "Professor"), (r"\bHr\.", "Herr"),
+    (r"\bFr\.", "Frau"),
+]
+
+# Einheit nach einer Zahl -> gesprochene Form. Nur direkt hinter Ziffern.
+EINHEITEN = [
+    (r"m²|m2|qm", "Quadratmeter", "Quadratmeter"), (r"km", "Kilometer", "Kilometer"),
+    (r"kg", "Kilogramm", "Kilogramm"), (r"min", "Minuten", "Minute"),
+    (r"Std\.?|h", "Stunden", "Stunde"), (r"cm", "Zentimeter", "Zentimeter"),
+    (r"mm", "Millimeter", "Millimeter"), (r"l", "Liter", "Liter"),
+]
+
+
+# -- Zahlen -------------------------------------------------------------------
+
+def _unter_hundert(n: int, eins_voll: bool) -> str:
+    if n < 20:
+        return "eins" if (n == 1 and eins_voll) else EINER[n]
+    einer, zehner = n % 10, n // 10
+    if einer == 0:
+        return ZEHNER[zehner]
+    return ("ein" if einer == 1 else EINER[einer]) + "und" + ZEHNER[zehner]
+
+
+def _unter_tausend(n: int, eins_voll: bool) -> str:
+    hunderter, rest = n // 100, n % 100
+    teile = ""
+    if hunderter:
+        teile = ("ein" if hunderter == 1 else EINER[hunderter]) + "hundert"
+    if rest:
+        teile += _unter_hundert(rest, eins_voll)
+    return teile
+
+
+def zahl_wort(n: int) -> str:
+    """Eine ganze Zahl als deutsches Zahlwort. ``1069`` -> ``eintausendneunundsechzig``."""
+    n = int(n)
+    if n < 0:
+        return "minus " + zahl_wort(-n)
+    if n == 0:
+        return "null"
+    teile = []
+    for grenze, einzahl, mehrzahl in ((10**12, "eine Billion", "Billionen"),
+                                      (10**9, "eine Milliarde", "Milliarden"),
+                                      (10**6, "eine Million", "Millionen")):
+        if n >= grenze:
+            menge, n = divmod(n, grenze)
+            teile.append(einzahl if menge == 1
+                         else "%s %s" % (zahl_wort(menge), mehrzahl))
+    text = " ".join(teile)
+    tausend, rest = divmod(n, 1000)
+    unten = ""
+    if tausend:
+        unten = ("ein" if tausend == 1 else _unter_tausend(tausend, False)) + "tausend"
+    if rest:
+        unten += _unter_tausend(rest, True)
+    return (text + " " + unten).strip() if unten else text
+
+
+def jahr_wort(jahr: int) -> str:
+    """Jahreszahlen: 1985 -> neunzehnhundertfünfundachtzig, 2026 -> zweitausendsechsundzwanzig."""
+    if 1100 <= jahr <= 1999:
+        hundert, rest = divmod(jahr, 100)
+        text = _unter_hundert(hundert, False) + "hundert"
+        return text + (_unter_hundert(rest, True) if rest else "")
+    return zahl_wort(jahr)
+
+
+def tag_stamm(tag: int) -> str:
+    """Stamm der Ordnungszahl: 1 -> erst, 3 -> dritt, 7 -> siebt, 20 -> zwanzigst."""
+    sonder = {1: "erst", 3: "dritt", 7: "siebt", 8: "acht"}
+    if tag in sonder:
+        return sonder[tag]
+    if tag < 20:
+        return EINER[tag] + "t"
+    return zahl_wort(tag) + "st"
+
+
+def tag_wort(tag: int, davor: str = "") -> str:
+    """Ein Datumstag gesprochen. Die Endung hängt vom Wort davor ab:
+    "am sechsten", "der sechste", sonst "sechster"."""
+    davor = (davor or "").lower().rstrip()
+    if re.search(r"\b(am|vom|zum|dem|den|beim|ab|bis|zum|im)$", davor):
+        endung = "en"
+    elif re.search(r"\bder$", davor):
+        endung = "e"
+    else:
+        endung = "er"
+    return tag_stamm(tag) + endung
+
+
+def _dezimal_wort(ganz: str, nachkomma: str) -> str:
+    stellen = " ".join(EINER[int(z)] if z != "1" else "eins" for z in nachkomma)
+    return "%s Komma %s" % (zahl_wort(int(ganz)), stellen)
+
+
+def _zahl_aus(text: str) -> int:
+    return int(text.replace(".", ""))
+
+
+# -- Schreiben -> Sprechen --------------------------------------------------------
+
+def _betrag(treffer) -> str:
+    ganz = treffer.group("ganz")
+    cent = treffer.group("cent")
+    euro = _zahl_aus(ganz)
+    wort = "%s Euro" % ("ein" if euro == 1 else zahl_wort(euro))
+    if cent and int(cent):
+        c = int(cent.ljust(2, "0")[:2])
+        if euro == 0:
+            return "%s Cent" % ("ein" if c == 1 else zahl_wort(c))
+        return "%s %s" % (wort, zahl_wort(c))
+    return wort
+
+
+def _datum(treffer) -> str:
+    tag, monat = int(treffer.group(1)), int(treffer.group(2))
+    jahr = treffer.group(3)
+    if not (1 <= tag <= 31 and 1 <= monat <= 12):
+        return treffer.group(0)
+    davor = treffer.string[max(0, treffer.start() - 12):treffer.start()]
+    text = "%s %s" % (tag_wort(tag, davor), MONATE[monat - 1])
+    if jahr:
+        j = int(jahr)
+        j = j + 2000 if j < 100 else j
+        text += " " + jahr_wort(j)
+    return text
+
+
+def _uhrzeit(treffer) -> str:
+    stunde, minute = int(treffer.group(1)), int(treffer.group(2))
+    if stunde > 24 or minute > 59:
+        return treffer.group(0)
+    text = "%s Uhr" % zahl_wort(stunde)
+    return text + (" %s" % zahl_wort(minute) if minute else "")
+
+
+def schreiben_zu_sprechen(text: str) -> str:
+    """Wandelt Geschriebenes in Gesprochenes um. Siehe Modulkopf."""
+    if not text:
+        return ""
+    t = str(text)
+
+    # Code und Gliederung fallen weg
+    t = re.sub(r"```.*?(```|$)", " Den Code zeige ich dir auf dem Bildschirm. ", t, flags=re.S)
+    t = re.sub(r"`([^`]*)`", r"\1", t)
+    t = re.sub(r"!\[[^\]]*\]\([^)]*\)", " ", t)
+    t = re.sub(r"\[([^\]]*)\]\([^)]*\)", r"\1", t)
+    t = re.sub(r"^\s{0,3}#{1,6}\s*", "", t, flags=re.M)
+    t = re.sub(r"^\s*[-*•·]\s+", "", t, flags=re.M)
+    t = re.sub(r"^\s*\d+[.)]\s+", "", t, flags=re.M)
+    t = re.sub(r"[*_~>]+", " ", t)
+    t = re.sub(r"[\U0001F300-\U0001FAFF☀-➿️]", "", t)
+    t = t.replace("|", ", ")
+    # Jede Zeile ist ein eigener Gedanke: ohne Satzzeichen würde sie an die nächste kleben.
+    zeilen = [z.strip() for z in t.splitlines() if z.strip()]
+    t = " ".join(z if re.search(r"[.!?:;,]$", z) else z + "." for z in zeilen)
+
+    # Links und Adressen
+    t = re.sub(r"https?://(?:www\.)?([^\s/]+)\S*",
+               lambda m: "ein Link zu " + m.group(1).replace(".", " Punkt "), t)
+    t = re.sub(r"([\w.+-]+)@([\w-]+(?:\.[\w-]+)+)",
+               lambda m: "%s ät %s" % (m.group(1).replace(".", " Punkt "),
+                                      m.group(2).replace(".", " Punkt ")), t)
+
+    # Daten, Uhrzeiten, Beträge, Prozent, Zahlen
+    t = re.sub(r"\b(\d{1,2})\.(\d{1,2})\.(\d{4}|\d{2})?(?!\d)", _datum, t)
+    t = re.sub(r"\b(\d{1,2}):(\d{2})(?:\s?Uhr)?\b", _uhrzeit, t)
+    betrag = r"(?P<ganz>\d{1,3}(?:\.\d{3})+|\d+)(?:,(?P<cent>\d{1,2}))?"
+    t = re.sub(betrag + r"\s?(?:€|EUR|Euro)(?![\wäöüß])", _betrag, t)
+    t = re.sub(r"(?:€|EUR)\s?" + betrag, _betrag, t)
+    t = re.sub(r"(\d+(?:,\d+)?)\s?%",
+               lambda m: re.sub(r"(\d+),(\d+)", lambda d: _dezimal_wort(d.group(1), d.group(2)),
+                                m.group(1)) + " Prozent", t)
+    for muster, mehrzahl, einzahl in EINHEITEN:
+        t = re.sub(r"(?P<zahl>\d+(?:[.,]\d+)*)\s?(?:%s)(?![\wäöüß])" % muster,
+                   lambda m, mz=mehrzahl, ez=einzahl: "%s %s" % (
+                       m.group("zahl"), ez if m.group("zahl") == "1" else mz), t)
+    t = re.sub(r"\b\d{1,3}(?:\.\d{3})+\b", lambda m: zahl_wort(_zahl_aus(m.group(0))), t)
+    t = re.sub(r"\b(\d+),(\d+)\b", lambda m: _dezimal_wort(m.group(1), m.group(2)), t)
+
+    # Abkürzungen und Zeichen
+    for muster, wort in ABKUERZUNGEN:
+        t = re.sub(muster, wort, t)
+    # "usw." stand am Satzende: der Punkt gehört dann wieder dahin.
+    t = re.sub(r"\bund so weiter(?=\s+[A-ZÄÖÜ])", "und so weiter.", t)
+    t = t.replace("&", " und ").replace("€", " Euro ").replace("→", ", ").replace("->", ", ")
+    t = re.sub(r"\s[–—-]\s", ", ", t)
+    t = t.replace("…", ".").replace("...", ".")
+    t = re.sub(r"[„“”\"»«]", "", t)
+    t = re.sub(r"\s*[()\[\]]\s*", ", ", t)
+    t = re.sub(r"\s*/\s*", " ", t)
+
+    # Aufräumen: doppelte Zeichen, Leerzeichen vor Satzzeichen
+    t = re.sub(r"\s+", " ", t)
+    t = re.sub(r"\s+([,.;:!?])", r"\1", t)
+    t = re.sub(r"([,;:])\s*([,;:.!?])", r"\2", t)
+    t = re.sub(r"([.!?])\s*,", r"\1", t)
+    t = re.sub(r"^[,;:\s]+", "", t)
+    return t.strip()
+
+
+# -- Schleifen ----------------------------------------------------------------------
+
+def schleifen_entfernen(text: str) -> str:
+    """Spricht Wiederholungen einmal: drei gleiche Wörter und doppelte Sätze."""
+    t = re.sub(r"\b([\wäöüÄÖÜß]+)(?:[\s,]+\1\b){2,}", r"\1", text, flags=re.I)
+    saetze = re.findall(r"[^.!?]+[.!?]*\s*", t)
+    gesehen, behalten = set(), []
+    for satz in saetze:
+        schluessel = re.sub(r"\W+", " ", satz).strip().lower()
+        if len(schluessel) > 15 and schluessel in gesehen:
+            continue
+        gesehen.add(schluessel)
+        behalten.append(satz)
+    return "".join(behalten).strip() if behalten else t.strip()
+
+
+# -- Atemabschnitte ---------------------------------------------------------------------
+
+def abschnitte(text: str, ziel: int = 170, maximum: int = 260) -> list:
+    """Teilt gesprochenen Text in Stücke, die man in einem Atemzug sagt.
+
+    Getrennt wird an Satzenden, zu lange Sätze an Kommas und Bindewörtern. Nie
+    mitten in einem Wort. Sehr kurze Stücke werden mit dem nächsten verbunden,
+    denn ein Stück mit zwei Wörtern klingt abgehackt.
+    """
+    text = (text or "").strip()
+    if not text:
+        return []
+    saetze = [s.strip() for s in re.findall(r"[^.!?]+[.!?]*", text) if s.strip()]
+    stuecke = []
+    for satz in saetze:
+        while len(satz) > maximum:
+            fenster = satz[:maximum]
+            schnitt = max(fenster.rfind(", "), fenster.rfind("; "), fenster.rfind(": "))
+            if schnitt < ziel // 3:
+                schnitt = max(fenster.rfind(" und "), fenster.rfind(" aber "),
+                              fenster.rfind(" oder "), fenster.rfind(" weil "))
+            if schnitt < ziel // 3:
+                schnitt = fenster.rfind(" ")
+            if schnitt <= 0:
+                schnitt = maximum
+            stuecke.append(satz[:schnitt + 1].strip())
+            satz = satz[schnitt + 1:].strip()
+        if satz:
+            stuecke.append(satz)
+
+    verbunden = []
+    for stueck in stuecke:
+        if verbunden and (len(verbunden[-1]) < 45 or len(stueck) < 25) \
+                and len(verbunden[-1]) + 1 + len(stueck) <= ziel:
+            verbunden[-1] += " " + stueck
+        else:
+            verbunden.append(stueck)
+    return verbunden
+
+
+def sprechtext(text: str) -> str:
+    """Der ganze Text, zum Sprechen vorbereitet - in einem Stück."""
+    return schleifen_entfernen(schreiben_zu_sprechen(text))
+
+
+def sprechstuecke(text: str, ziel: int = 170) -> list:
+    """Der Text, zum Sprechen vorbereitet und in Atemabschnitte geteilt."""
+    return abschnitte(sprechtext(text), ziel)
+
+
+# =========================================================================
 # voice  -  Sprache - Mikrofon rein, Stimme raus.
 # 
 # Beides ist mehrstufig aufgebaut, damit **ein einziger Schlüssel** genügt:
@@ -1290,16 +1604,8 @@ def mikrofon_fehlermeldung() -> str:
 
 
 def text_fuers_sprechen(text: str) -> str:
-    """Entfernt alles, was vorgelesen albern klingt: Sternchen, Striche, Überschriften."""
-    if not text:
-        return ""
-    sauber = str(text)
-    sauber = re.sub(r"```.*?```", " ", sauber, flags=re.S)
-    sauber = re.sub(r"[*_`#>]+", " ", sauber)
-    sauber = re.sub(r"^\s*[-•·]\s*", "", sauber, flags=re.M)
-    sauber = re.sub(r"\[([^\]]*)\]\([^)]*\)", r"\1", sauber)
-    sauber = re.sub(r"\s+", " ", sauber)
-    return sauber.strip()
+    """Der Text, so wie ein Mensch ihn sagen würde (siehe ``sprechtext``)."""
+    return sprechtext(text)
 
 
 def weckwort_pruefen(text: str):
@@ -1331,6 +1637,8 @@ class Stimme:
         self._whisper_modell = None
         self._temp = tempfile.mkdtemp(prefix="jarvis_audio_")
         self.letzter_fehler = ""
+        self._stopp = threading.Event()
+        self._abspiel_prozess = None
         if self.ist_macos():
             self.macos_stimme = MACOS_STIMME or self.deutsche_stimme_suchen()
 
@@ -1379,25 +1687,46 @@ class Stimme:
     # -- Ausgabe ------------------------------------------------------------
 
     def sprich(self, text: str) -> bool:
-        """Spricht einen Text. ElevenLabs zuerst, sonst die Systemstimme."""
-        sauber = text_fuers_sprechen(text)
-        if not sauber:
-            return False
-        print("Jarvis: %s" % sauber)
-        if ELEVENLABS_API_KEY:
-            if self._elevenlabs_sprechen(sauber):
-                return True
-        return self._systemstimme_sprechen(sauber)
+        """Spricht einen Text so, wie ein Mensch ihn sagen würde.
 
-    def _elevenlabs_sprechen(self, text: str) -> bool:
-        """Sprachausgabe über ElevenLabs. Scheitert sie, übernimmt ``say``."""
+        Der Text wird zuerst ins Gesprochene übersetzt (Zahlen, Beträge, Daten
+        ausgeschrieben, kein Markdown) und in Atemabschnitte geteilt. Mit
+        ElevenLabs wird der nächste Abschnitt schon geholt, während der
+        vorige läuft: kein Warten dazwischen, und jeder Abschnitt kennt den
+        Satz davor und danach, damit die Betonung durchläuft. Ohne ElevenLabs
+        spricht die Systemstimme.
+        """
+        stuecke = sprechstuecke(text)
+        if not stuecke:
+            return False
+        print("Jarvis: %s" % " ".join(stuecke))
+        self._stopp.clear()
+        gesprochen = 0
+        if ELEVENLABS_API_KEY:
+            gesprochen = self._elevenlabs_sprechen(stuecke)
+            if gesprochen >= len(stuecke):
+                return True
+            if self._stopp.is_set():
+                return True
+        # Was ElevenLabs nicht geschafft hat, übernimmt die Systemstimme: der
+        # Satz, bei dem es abbrach, wird nicht noch einmal von vorn gesprochen.
+        return self._systemstimme_sprechen(" ".join(stuecke[gesprochen:]))
+
+    def stoppen(self):
+        """Hält die Sprachausgabe sofort an - etwa wenn der Nutzer dazwischenredet."""
+        self._stopp.set()
+        prozess = self._abspiel_prozess
+        if prozess is not None and prozess.poll() is None:
+            try:
+                prozess.terminate()
+            except OSError:
+                pass
+
+    def _elevenlabs_holen(self, text: str, vorher: str = "", nachher: str = ""):
+        """Holt die Sprachdatei für einen Abschnitt. ``None`` bei Fehler."""
         ziel = "%s/text-to-speech/%s" % (ELEVENLABS_URL, ELEVENLABS_VOICE_ID)
-        # Die Klangwerte standen bisher fest im Code und waren die
-        # Voreinstellung von ElevenLabs - damit klingt jede Stimme gleich
-        # brav. Jetzt kommen sie aus der Konfiguration: ruhig, nah am
-        # Original, ohne Theatralik.
-        koerper = json.dumps({
-            "text": text[:4000],
+        inhalt = {
+            "text": text[:2500],
             "model_id": ELEVENLABS_MODEL,
             "voice_settings": {
                 "stability": ELEVENLABS_STABILITY,
@@ -1405,31 +1734,83 @@ class Stimme:
                 "style": ELEVENLABS_STYLE,
                 "use_speaker_boost": True,
             },
-        }).encode("utf-8")
-        anfrage = urllib.request.Request(ziel, data=koerper, method="POST", headers={
-            "xi-api-key": ELEVENLABS_API_KEY,
-            "Content-Type": "application/json",
-            "Accept": "audio/mpeg",
-        })
+        }
+        # Der Satz davor und danach: so wird eine Stimme, die in Stücken
+        # spricht, nicht zu lauter einzelnen Ansagen.
+        if vorher:
+            inhalt["previous_text"] = vorher[-300:]
+        if nachher:
+            inhalt["next_text"] = nachher[:300]
+        anfrage = urllib.request.Request(
+            ziel, data=json.dumps(inhalt).encode("utf-8"), method="POST", headers={
+                "xi-api-key": ELEVENLABS_API_KEY,
+                "Content-Type": "application/json",
+                "Accept": "audio/mpeg",
+            })
         try:
             with urllib.request.urlopen(anfrage, timeout=45) as antwort:
-                daten = antwort.read()
+                return antwort.read()
         except (urllib.error.URLError, OSError) as fehler:
             self.letzter_fehler = "ElevenLabs nicht erreichbar: %s" % fehler
             print("[stimme] %s - ich nehme die Systemstimme." % self.letzter_fehler)
-            return False
-        pfad = os.path.join(self._temp, "antwort_%d.mp3" % int(time.time() * 1000))
+            return None
+
+    def _elevenlabs_sprechen(self, stuecke: list) -> int:
+        """Spricht Abschnitt für Abschnitt. Gibt zurück, wie viele gesprochen wurden."""
+        fertig = queue.Queue(maxsize=2)
+        ende = threading.Event()
+
+        def holer():
+            for nummer, stueck in enumerate(stuecke):
+                if ende.is_set() or self._stopp.is_set():
+                    break
+                daten = self._elevenlabs_holen(
+                    stueck, stuecke[nummer - 1] if nummer else "",
+                    stuecke[nummer + 1] if nummer + 1 < len(stuecke) else "")
+                while not ende.is_set():
+                    try:
+                        fertig.put((nummer, daten), timeout=0.2)
+                        break
+                    except queue.Full:
+                        continue
+                if daten is None:
+                    return
+            while not ende.is_set():
+                try:
+                    fertig.put(None, timeout=0.2)
+                    return
+                except queue.Full:
+                    continue
+
+        faden = threading.Thread(target=holer, daemon=True, name="jarvis-stimme-holen")
+        faden.start()
+        gesprochen = 0
         try:
-            with open(pfad, "wb") as datei:
-                datei.write(daten)
-        except OSError:
-            return False
-        erfolg = self.abspielen(pfad)
-        try:
-            os.remove(pfad)
-        except OSError:
-            pass
-        return erfolg
+            while True:
+                eintrag = fertig.get()
+                if eintrag is None:
+                    break
+                nummer, daten = eintrag
+                if daten is None or self._stopp.is_set():
+                    break
+                pfad = os.path.join(self._temp, "antwort_%d_%d.mp3"
+                                    % (int(time.time() * 1000), nummer))
+                try:
+                    with open(pfad, "wb") as datei:
+                        datei.write(daten)
+                except OSError:
+                    break
+                erfolg = self.abspielen(pfad)
+                try:
+                    os.remove(pfad)
+                except OSError:
+                    pass
+                if not erfolg:
+                    break
+                gesprochen += 1
+        finally:
+            ende.set()
+        return gesprochen
 
     def _systemstimme_sprechen(self, text: str) -> bool:
         """Sprachausgabe über das eingebaute ``say`` von macOS."""
@@ -1457,13 +1838,15 @@ class Stimme:
             if not shutil.which(befehl[0]):
                 continue
             try:
-                ergebnis = subprocess.run(befehl, timeout=300, shell=False,
-                                          stdout=subprocess.DEVNULL,
-                                          stderr=subprocess.DEVNULL)
-                if ergebnis.returncode == 0:
+                self._abspiel_prozess = subprocess.Popen(
+                    befehl, shell=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                rueckgabe = self._abspiel_prozess.wait(timeout=300)
+                if rueckgabe == 0 or self._stopp.is_set():
                     return True
             except (OSError, subprocess.SubprocessError):
                 continue
+            finally:
+                self._abspiel_prozess = None
         return False
 
     def signal(self, name: str):
@@ -6437,6 +6820,12 @@ CREATE TABLE IF NOT EXISTS skripte (
 """
 
 MAX_ZEICHEN = 20000
+MAX_PROJEKTDATEI = 60000
+PROJEKT_ENDUNGEN = ("html", "css", "js", "json", "md", "txt", "svg")
+# Schlüssel gehören nie in eine Seite oder ein Skript, das jemand außerhalb sieht.
+GEHEIMNIS_MUSTER = re.compile(
+    r"sk-[A-Za-z0-9_-]{20,}|AIza[0-9A-Za-z_-]{30,}|AQ\.[A-Za-z0-9_-]{30,}"
+    r"|xox[bap]-[A-Za-z0-9-]{10,}|ghp_[A-Za-z0-9]{30,}|\b\d{8,10}:[A-Za-z0-9_-]{30,}\b")
 LAUFZEIT_GRENZE = 60
 
 # Module, deren Verwendung in der Freigabefrage genannt wird. Das ist eine
@@ -6472,6 +6861,28 @@ def name_saeubern(name: str) -> str:
     return (roh or "skript")[:60] + ".py"
 
 
+def projekt_saeubern(name: str) -> str:
+    """Ordnername eines Projekts: nur Buchstaben, Ziffern, Strich und Unterstrich."""
+    roh = (name or "").strip().lower()
+    for alt, neu in (("ä", "ae"), ("ö", "oe"), ("ü", "ue"), ("ß", "ss")):
+        roh = roh.replace(alt, neu)
+    return (re.sub(r"[^a-z0-9_-]+", "_", roh).strip("_-") or "projekt")[:50]
+
+
+def projektdatei_saeubern(name: str) -> str:
+    """Dateiname im Projekt - nur ein Name, nie ein Pfad. Leer, wenn nicht erlaubt."""
+    roh = (name or "").strip().lower()
+    for alt, neu in (("ä", "ae"), ("ö", "oe"), ("ü", "ue"), ("ß", "ss")):
+        roh = roh.replace(alt, neu)
+    if "/" in roh or "\\" in roh or roh.startswith("."):
+        return ""
+    stamm, punkt, endung = roh.rpartition(".")
+    if not punkt or endung not in PROJEKT_ENDUNGEN:
+        return ""
+    stamm = re.sub(r"[^a-z0-9_-]+", "_", stamm).strip("_-")[:50]
+    return "%s.%s" % (stamm, endung) if stamm else ""
+
+
 class Werkstatt:
     """Legt Skripte ab, zeigt sie und führt sie nach Freigabe aus."""
 
@@ -6497,6 +6908,80 @@ class Werkstatt:
         if wurzel not in datei.parents and datei != wurzel:
             return None
         return datei
+
+    # -- Projekte (Webseiten, Chatbots, Texte) ---------------------------------
+
+    def _projektpfad(self, projekt: str, datei: str = ""):
+        """Pfad innerhalb von ``werkstatt/projekte`` - garantiert nicht daraus heraus."""
+        wurzel = (self.verzeichnis / "projekte").resolve()
+        ziel = wurzel / projekt_saeubern(projekt)
+        if datei:
+            ziel = ziel / datei
+        ziel = ziel.resolve()
+        if wurzel not in ziel.parents and ziel != wurzel:
+            return None
+        return ziel
+
+    def projekt_datei_schreiben(self, projekt: str, datei: str, inhalt: str,
+                                zweck: str = "") -> dict:
+        """Legt eine Datei in einem Projekt ab (Seite, Bot-Anweisung, Kampagnentext).
+
+        Es wird nur geschrieben. Ausgeführt wird nie etwas: HTML öffnet der
+        Nutzer selbst im Browser. Erlaubt sind nur Text- und Webdateien, und
+        nichts, was nach einem Schlüssel aussieht.
+        """
+        name = projektdatei_saeubern(datei)
+        if not name:
+            return {"ok": False,
+                    "fehler": "Der Dateiname '%s' ist nicht zulässig. Erlaubt sind Namen "
+                              "ohne Ordner mit der Endung %s." % (datei, ", ".join(PROJEKT_ENDUNGEN))}
+        inhalt = inhalt or ""
+        if not inhalt.strip():
+            return {"ok": False, "fehler": "Die Datei ist leer."}
+        if len(inhalt) > MAX_PROJEKTDATEI:
+            return {"ok": False, "fehler": "Die Datei ist zu lang (%d Zeichen, erlaubt sind %d)."
+                                           % (len(inhalt), MAX_PROJEKTDATEI)}
+        if GEHEIMNIS_MUSTER.search(inhalt):
+            return {"ok": False,
+                    "fehler": "In der Datei steht etwas, das wie ein Schlüssel oder Token "
+                              "aussieht. Das gehört nie in eine Seite oder ein Skript, das "
+                              "andere sehen. Für so etwas braucht es einen Server dazwischen."}
+        ziel = self._projektpfad(projekt, name)
+        if ziel is None:
+            return {"ok": False, "fehler": "Das Projekt '%s' ist nicht zulässig." % projekt}
+        try:
+            ziel.parent.mkdir(parents=True, exist_ok=True)
+            ziel.write_text(inhalt, encoding="utf-8")
+        except OSError as fehler:
+            return {"ok": False, "fehler": "Nicht schreibbar: %s" % fehler}
+        ordner = projekt_saeubern(projekt)
+        return {"ok": True, "projekt": ordner, "datei": name, "zeichen": len(inhalt),
+                "pfad": str(ziel),
+                "text": "%s ist im Projekt %s abgelegt. Öffnen: Datei in %s doppelklicken. "
+                        "Ausgeführt wurde nichts." % (name, ordner, ordner)}
+
+    def projekt_zeigen(self, projekt: str = "", datei: str = "") -> dict:
+        """Ohne Namen: alle Projekte. Mit Projekt: seine Dateien. Mit Datei: der Inhalt."""
+        wurzel = self._projektpfad("")
+        basis = (self.verzeichnis / "projekte")
+        if not projekt:
+            namen = sorted(p.name for p in basis.glob("*") if p.is_dir()) if basis.exists() else []
+            return {"ok": True, "projekte": namen,
+                    "text": ("Projekte: %s." % ", ".join(namen)) if namen else "Es gibt noch kein Projekt."}
+        ordner = self._projektpfad(projekt)
+        if ordner is None or not ordner.is_dir():
+            return {"ok": False, "fehler": "Das Projekt '%s' gibt es nicht." % projekt}
+        if not datei:
+            dateien = sorted(p.name for p in ordner.iterdir() if p.is_file())
+            return {"ok": True, "projekt": ordner.name, "dateien": dateien,
+                    "text": "%s enthält: %s." % (ordner.name, ", ".join(dateien) or "nichts")}
+        name = projektdatei_saeubern(datei)
+        pfad = self._projektpfad(projekt, name) if name else None
+        if pfad is None or not pfad.is_file():
+            return {"ok": False, "fehler": "Die Datei '%s' gibt es nicht." % datei}
+        text = pfad.read_text(encoding="utf-8", errors="replace")
+        return {"ok": True, "projekt": ordner.name, "datei": name, "inhalt": text[:8000],
+                "gekuerzt": len(text) > 8000}
 
     # -- Schreiben ----------------------------------------------------------
 
@@ -6715,8 +7200,8 @@ CREATE INDEX IF NOT EXISTS idx_auftraege_rolle ON auftraege(rolle);
 """
 
 # Gemeinsame Haltung aller Rollen. Steht vor jedem Rollenprompt.
-GRUNDHALTUNG = """Du bist {rolle} im Betrieb von {name}, einer Gebäudereinigung
-mit einem Inhaber. Du arbeitest diesen einen Auftrag ab und meldest zurück.
+GRUNDHALTUNG = """Du bist {rolle} im Betrieb von {name} (Branche: {branche}), geführt
+von einem Inhaber. Du arbeitest diesen einen Auftrag ab und meldest zurück.
 
 So arbeitest du:
 - Du nutzt deine Werkzeuge selbstständig. Du fragst nicht um Erlaubnis für das,
@@ -6876,6 +7361,81 @@ Du erinnerst an das, was einmal im Jahr kommt und trotzdem jedes Jahr
                       "notiz_speichern", "punkt_anlegen",
                       "gedaechtnis_durchsuchen"],
     },
+    "geschaeftsfuehrer": {
+        "name": "der zweite Chef",
+        "fachliches": """Deine Aufgabe ist es, den Betrieb mitzuführen wie ein zweiter Inhaber.
+
+Du denkst in Prioritäten, nicht in Listen. Aus dem Stand des Betriebs (Kasse,
+Pipeline, offene Punkte, Nachfassliste, Cashflow) holst du heraus: Was ist
+diese Woche das Eine, das am meisten bringt? Was brennt? Was wird liegen
+gelassen, obwohl es Geld kostet? Du sagst das zuerst und ohne Umschweife.
+
+Du entscheidest nichts, was Geld, Kunden oder Mitarbeiter betrifft - du
+bereitest die Entscheidung vor: die Lage in zwei Sätzen, zwei bis drei
+Möglichkeiten, deine Empfehlung und warum. Was sich als Hintergrundarbeit
+erledigen lässt (ein Angebot, ein Nachfasstext, eine Auswertung), gibst du als
+Auftrag an den Autopiloten, statt es zu beschreiben.
+
+Du kennst die Branche des Betriebs und redest in ihrer Sprache. Fehlen dir
+Zahlen, sagst du welche, statt zu schätzen.""",
+        "werkzeuge": ["lagebericht", "pipeline", "cashflow_prognose", "nachfassliste",
+                      "auswertung", "bedarfsrechnung", "punkte_offen", "punkt_anlegen",
+                      "autopilot_auftrag", "autopilot_postfach", "notiz_speichern",
+                      "gedaechtnis_durchsuchen"],
+    },
+    "webdesigner": {
+        "name": "der Webdesigner",
+        "fachliches": """Deine Aufgabe sind Webseiten und Landingpages für den Betrieb und seine Kunden.
+
+Du schreibst fertige, einzelne HTML-Dateien mit eingebettetem CSS, die man per
+Doppelklick öffnen kann: sauber gegliedert, mit echtem Inhalt statt Platzhaltern,
+auf dem Handy genauso gut wie am Rechner, mit hellem und dunklem Erscheinungsbild.
+Ein Angebot wird zur Seite, die jemanden zum Anrufen bringt: ein klarer Satz oben,
+was der Betrieb tut und für wen, ein Knopf, Belege, Kontakt.
+
+Du legst alles im Projektordner ab (projekt_datei_schreiben) und beschreibst in
+zwei Sätzen, was drin ist und wie man es öffnet. Du erfindest keine Referenzen,
+Preise oder Kundenstimmen: Was dir fehlt, schreibst du als offene Frage in den
+Bericht. Du setzt nie Schlüssel oder Passwörter in eine Seite.""",
+        "werkzeuge": ["projekt_datei_schreiben", "projekt_zeigen", "recherche",
+                      "notiz_speichern", "gedaechtnis_durchsuchen"],
+    },
+    "chatbotbauer": {
+        "name": "der Chatbot-Bauer",
+        "fachliches": """Deine Aufgabe sind Chatbots für den Betrieb und für Kunden.
+
+Du baust sie als Paket im Projektordner: eine klare Anweisung für den Bot
+(Rolle, Ton, was er beantwortet, was er an einen Menschen übergibt, was er nie
+tut), die häufigen Fragen mit Antworten aus dem, was du über den Betrieb
+weißt, ein Gesprächsablauf für die wichtigsten Fälle (Anfrage aufnehmen,
+Termin vereinbaren, Preis nennen) und, wenn gewünscht, die Webseiten-Einbindung
+als HTML-Datei.
+
+Ein Bot, der etwas erfindet, ist schlimmer als keiner: Er beantwortet nur, was
+im Wissen steht, und übergibt sonst mit Name und Telefonnummer. Schlüssel
+gehören nie in Seiten oder Skripte, die ein Besucher sieht - dafür braucht es
+einen Server dazwischen, und das sagst du dazu.""",
+        "werkzeuge": ["projekt_datei_schreiben", "projekt_zeigen", "skript_schreiben",
+                      "skript_zeigen", "notiz_speichern", "gedaechtnis_durchsuchen"],
+    },
+    "marketing": {
+        "name": "der Marketingmann",
+        "fachliches": """Deine Aufgabe ist Marketing, das Aufträge bringt - nicht Reichweite um ihrer selbst willen.
+
+Du fängst bei der Frage an, wer der ideale Kunde ist und was ihn zum
+Handeln bringt, und baust daraus kleine, ausführbare Pakete: ein Beitrag für
+die Woche, ein Anschreiben für Neukunden, ein Text für Google und Social Media,
+eine kurze Kampagne mit Ziel, Zielgruppe, Botschaft, Weg und Zahl, an der man
+den Erfolg misst. Du schreibst, wie der Betrieb spricht: konkret, ohne
+Floskeln, ohne Superlative.
+
+Du erfindest keine Zahlen, Auszeichnungen oder Kundenzitate. Lieber ein Platz
+zum Einsetzen, markiert als offen. Alles legst du im Projektordner ab
+(projekt_datei_schreiben), jede Kampagne mit einer Zeile, woran man sieht, ob
+sie funktioniert hat.""",
+        "werkzeuge": ["projekt_datei_schreiben", "projekt_zeigen", "recherche",
+                      "pipeline", "notiz_speichern", "gedaechtnis_durchsuchen"],
+    },
     "programmierer": {
         "name": "der Programmierer",
         "fachliches": """Deine Aufgabe sind kleine Programme und Auswertungen.
@@ -6936,6 +7496,13 @@ class Team:
             "suche": "rechercheur", "recherche": "rechercheur",
             "programm": "programmierer", "skript": "programmierer",
             "code": "programmierer", "entwickler": "programmierer",
+            "chef": "geschaeftsfuehrer", "geschäftsführ": "geschaeftsfuehrer",
+            "geschaeftsfuehr": "geschaeftsfuehrer", "betrieb führen": "geschaeftsfuehrer",
+            "webseite": "webdesigner", "website": "webdesigner", "homepage": "webdesigner",
+            "landingpage": "webdesigner", "webdesign": "webdesigner",
+            "chatbot": "chatbotbauer",
+            "marketing": "marketing", "werbung": "marketing", "kampagne": "marketing",
+            "social": "marketing", "newsletter": "marketing",
         }
         for stichwort, rolle in abbildung.items():
             if stichwort in gesucht:
@@ -6950,7 +7517,7 @@ class Team:
         angaben = ROLLEN[rolle]
         jetzt = datetime.now()
         text = GRUNDHALTUNG.format(
-            rolle=angaben["name"], name=NUTZER_NAME,
+            rolle=angaben["name"], name=NUTZER_NAME, branche=BRANCHE,
             wochentag=WOCHENTAGE_TEAM[jetzt.weekday()],
             datum=jetzt.strftime("%d.%m.%Y"),
             fachliches=angaben["fachliches"])
@@ -7169,8 +7736,16 @@ CREATE INDEX IF NOT EXISTS idx_autopilot_status ON autopilot(status);
 CREATE INDEX IF NOT EXISTS idx_autopilot_schluessel ON autopilot(schluessel);
 """
 
+# Mehr als so viele wartende Aufträge nimmt der Autopilot nicht an - sonst könnte
+# sich eine Fachkraft, die selbst Aufträge anlegt, endlos Arbeit schaffen.
+MAX_WARTEND = 20
+
 # Welche Fachkraft passt zu welchen Wörtern? Reihenfolge zählt: das Erste gewinnt.
 ROLLEN_STICHWORTE = (
+    ("webdesigner", ("webseite", "website", "homepage", "landingpage", "web design", "webdesign")),
+    ("chatbotbauer", ("chatbot", "chat-bot", "sprachbot", "telegram-bot")),
+    ("marketing", ("marketing", "kampagne", "newsletter", "social media", "werbung", "beitrag für")),
+    ("geschaeftsfuehrer", ("prioritäten", "prioritaeten", "was ist diese woche wichtig", "betrieb steht", "entscheidung vorbereiten")),
     ("programmierer", ("programm", "skript", "script", "code", "automatisier", "auswertung bauen")),
     ("akquisiteur", ("angebot", "nachfass", "interessent", "lead", "kunde", "kunden", "akquise", "verkauf")),
     ("postmeister", ("mail", "post ", "posteingang", "antwort auf")),
@@ -7263,6 +7838,9 @@ class Autopilot:
             if vorhanden:
                 return {"ok": True, "doppelt": True, "id": vorhanden[0]["id"],
                         "text": "Das steht schon in der Liste."}
+        if len(self.warteschlange(100)) >= MAX_WARTEND:
+            return {"ok": False, "fehler": "In der Warteschlange stehen schon %d Aufträge. "
+                                           "Erst sollen ein paar fertig werden." % MAX_WARTEND}
         gefunden = ""
         if rolle:
             gefunden = self.tools.team.rolle_finden(rolle) or ""
@@ -7913,29 +8491,60 @@ body[data-zustand="wach"] .zustandstext{color:var(--akzent)}
     stimmenLaden();
     window.speechSynthesis.onvoiceschanged = stimmenLaden;
   }
+  // Die natürlichste deutsche Stimme, die der Browser hat: erst die
+  // hochwertigen (Premium, Enhanced, Natural, Neural), dann Google, dann die
+  // übrigen bekannten, zuletzt irgendeine deutsche.
+  function besteStimme() {
+    var de = stimmen.filter(function (s) { return /^de/i.test(s.lang); });
+    var stufen = [/premium|enhanced|natural|neural|online/i, /google/i,
+                  /markus|yannick|petra|anna|viktor|hedda|katja|conrad/i];
+    for (var i = 0; i < stufen.length; i++) {
+      var treffer = de.filter(function (s) { return stufen[i].test(s.name); });
+      if (treffer.length) { return treffer[0]; }
+    }
+    return de.length ? de[0] : null;
+  }
+  // Lange Texte in einem Stück bleiben in vielen Browsern nach etwa fünfzehn
+  // Sekunden stehen oder fangen von vorn an. Deshalb in kurzen Stücken.
+  function stuecke(text) {
+    if (Array.isArray(text)) { return text.filter(Boolean); }
+    var teile = String(text || "").replace(/\s+/g, " ").match(/[^.!?]+[.!?]*/g) || [];
+    return teile.map(function (t) { return t.trim(); }).filter(Boolean);
+  }
   function sprich(text, danach) {
-    if (!window.speechSynthesis || !text) { if (danach) { danach(); } return; }
+    var liste = stuecke(text);
+    if (!window.speechSynthesis || !liste.length) { if (danach) { danach(); } return; }
     // Erkennung anhalten, sonst hört Jarvis sich selbst zu.
     hoerenPause();
     sprichtGerade = true;
     setzeZustand("spricht");
     window.speechSynthesis.cancel();
-    var satz = new SpeechSynthesisUtterance(text);
-    satz.lang = "de-DE"; satz.rate = 1.06;
-    var de = stimmen.filter(function (s) { return /^de/i.test(s.lang); });
-    var gut = de.filter(function (s) {
-      return /markus|yannick|petra|anna|viktor|google/i.test(s.name); });
-    if (gut.length) { satz.voice = gut[0]; } else if (de.length) { satz.voice = de[0]; }
-    satz.onend = satz.onerror = function () {
+    var stimme = besteStimme(), nummer = 0, fertig = false;
+    function ende() {
+      if (fertig) { return; }
+      fertig = true;
       sprichtGerade = false;
       hoerenWeiter();
       if (danach) { danach(); }
-    };
-    window.speechSynthesis.speak(satz);
+    }
+    function weiter() {
+      if (fertig) { return; }
+      if (nummer >= liste.length) { ende(); return; }
+      var satz = new SpeechSynthesisUtterance(liste[nummer++]);
+      satz.lang = "de-DE"; satz.rate = 1.0; satz.pitch = 1.0;
+      if (stimme) { satz.voice = stimme; }
+      satz.onend = weiter;
+      satz.onerror = function (e) {
+        // Wurde absichtlich abgebrochen, nicht weitermachen.
+        if (e && (e.error === "canceled" || e.error === "interrupted")) { ende(); } else { weiter(); }
+      };
+      window.speechSynthesis.speak(satz);
+    }
+    weiter();
     // Sicherheitsnetz: manche Browser feuern onend nicht.
-    setTimeout(function () {
-      if (sprichtGerade) { sprichtGerade = false; hoerenWeiter(); }
-    }, Math.min(45000, 2500 + text.length * 90));
+    var gesamt = liste.join(" ").length;
+    setTimeout(function () { if (!fertig) { window.speechSynthesis.cancel(); ende(); } },
+               Math.min(120000, 4000 + gesamt * 90));
   }
 
   /* ---------- Reden ---------- */
@@ -7953,7 +8562,7 @@ body[data-zustand="wach"] .zustandstext{color:var(--akzent)}
       el("antwort").textContent = antwort;
       el("antwort").className = "antwort" + (a.ok ? "" : " fehler");
       laeuft = false;
-      sprich(antwort, function () { setzeZustand("schlaeft"); });
+      sprich(a.sprechstuecke || antwort, function () { setzeZustand("schlaeft"); });
       lageHolen(); zahlenHolen();
     }).catch(function (f) {
       el("antwort").textContent = "Ich erreiche den Server nicht: " + f.message;
@@ -8147,7 +8756,7 @@ body[data-zustand="wach"] .zustandstext{color:var(--akzent)}
       el("antwort").textContent = m.text;
       el("antwort").className = "antwort";
       el("hinweis").style.display = "none";
-      sprich(m.text, function () { setzeZustand("schlaeft"); });
+      sprich(m.sprechstuecke || m.text, function () { setzeZustand("schlaeft"); });
       lageHolen(); zahlenHolen();
     }).catch(function () {});
   }
@@ -10115,7 +10724,8 @@ class JarvisWeb:
         except Exception:
             pass
         with self._meldesperre:
-            self.meldungen.append({"text": text, "zeit": zeitstempel()})
+            self.meldungen.append({"text": text, "sprechstuecke": sprechstuecke(text),
+                                   "zeit": zeitstempel()})
             # Mehr als zwanzig ungelesene Meldungen sind ohnehin unlesbar.
             del self.meldungen[:-20]
 
@@ -10335,6 +10945,7 @@ class JarvisWeb:
                 antwort = self.agent.denken(text)
             return self._antworten(behandler, 200,
                                    {"ok": True, "antwort": antwort,
+                                    "sprechstuecke": sprechstuecke(antwort),
                                     "zeit": zeitstempel()})
 
         if pfad == "/api/autopilot":
@@ -10839,6 +11450,10 @@ class Einrichtung:
         firma = self.fragen("Wie heißt deine Firma? (Enter zum Überspringen)")
         if firma:
             env_setzen("FIRMA", firma)
+        branche = self.fragen("In welcher Branche arbeitest du? Zum Beispiel Gebäudereinigung, "
+                              "Gastronomie, Handwerk (Enter für '%s')" % BRANCHE)
+        if branche:
+            env_setzen("BRANCHE", " ".join(branche.split())[:80])
         ort = self.fragen("In welchem Ort arbeitest du? (Enter für '%s')"
                           % WETTER_ORT)
         if ort:
@@ -11585,6 +12200,17 @@ class Werkzeuge:
                      "wird dabei nichts.",
                      {"name": text, "code": text, "zweck": text},
                      ["name", "code"]),
+            werkzeug("projekt_datei_schreiben",
+                     "Legt eine Datei in einem Projekt der Werkstatt ab: eine "
+                     "Webseite (html), die Anweisung für einen Chatbot (md), einen "
+                     "Kampagnentext (md) und so weiter. Es wird nur geschrieben, nie "
+                     "ausgeführt. Schlüssel und Passwörter werden abgelehnt.",
+                     {"projekt": text, "datei": text, "inhalt": text, "zweck": text},
+                     ["projekt", "datei", "inhalt"]),
+            werkzeug("projekt_zeigen",
+                     "Ohne Angaben: alle Projekte. Mit projekt: dessen Dateien. "
+                     "Zusätzlich mit datei: der Inhalt.",
+                     {"projekt": text, "datei": text}),
             werkzeug("skript_zeigen", "Zeigt den Code eines abgelegten Skripts.",
                      {"name": text}, ["name"]),
             werkzeug("skript_ausfuehren",
@@ -11945,6 +12571,11 @@ class Werkzeuge:
         if name == "skript_schreiben":
             return self.werkstatt.skript_schreiben(a.get("name"), a.get("code"),
                                                    a.get("zweck", ""))
+        if name == "projekt_datei_schreiben":
+            return self.werkstatt.projekt_datei_schreiben(
+                a.get("projekt"), a.get("datei"), a.get("inhalt"), a.get("zweck", ""))
+        if name == "projekt_zeigen":
+            return self.werkstatt.projekt_zeigen(a.get("projekt", ""), a.get("datei", ""))
         if name == "skript_zeigen":
             return self.werkstatt.skript_zeigen(a.get("name"))
         if name == "skript_ausfuehren":
@@ -12116,7 +12747,7 @@ MONATE_DE = ["Januar", "Februar", "März", "April", "Mai", "Juni", "Juli",
              "August", "September", "Oktober", "November", "Dezember"]
 
 SYSTEMPROMPT = """Du bist Jarvis, der persönliche Assistent von {name}.
-{name} führt eine Gebäudereinigungsfirma als Einzelunternehmer.
+{name} führt einen Betrieb als Einzelunternehmer. Branche: {branche}.
 
 So sprichst du:
 - Kurz und gesprochen. Deine Antworten werden vorgelesen — keine
@@ -12226,8 +12857,8 @@ class JarvisAgent:
             persoenlich += "So möchte %s, dass du klingst: %s\n" % (
                 NUTZER_NAME, JARVIS_STIL)
         return SYSTEMPROMPT.format(
-            name=NUTZER_NAME, wochentag=wochentag, datum=datum,
-            gedaechtnis=(persoenlich + "\n" if persoenlich else "") + gedaechtnis)
+            name=NUTZER_NAME, branche=BRANCHE, wochentag=wochentag,
+            datum=datum, gedaechtnis=(persoenlich + "\n" if persoenlich else "") + gedaechtnis)
 
     # -- Schnittstelle ------------------------------------------------------
 

@@ -32,6 +32,7 @@ from urllib.parse import parse_qs, urlparse
 
 import config
 from modules.memory import zeitstempel
+from modules.sprechtext import sprechstuecke
 from modules.autopilot import SEITE_AUTOPILOT
 from modules.lernpfad import SEITE_PFAD, lernpfad_stand
 from modules.webseite import SEITE_HTML
@@ -138,7 +139,8 @@ class JarvisWeb:
         except Exception:
             pass
         with self._meldesperre:
-            self.meldungen.append({"text": text, "zeit": zeitstempel()})
+            self.meldungen.append({"text": text, "sprechstuecke": sprechstuecke(text),
+                                   "zeit": zeitstempel()})
             # Mehr als zwanzig ungelesene Meldungen sind ohnehin unlesbar.
             del self.meldungen[:-20]
 
@@ -358,6 +360,7 @@ class JarvisWeb:
                 antwort = self.agent.denken(text)
             return self._antworten(behandler, 200,
                                    {"ok": True, "antwort": antwort,
+                                    "sprechstuecke": sprechstuecke(antwort),
                                     "zeit": zeitstempel()})
 
         if pfad == "/api/autopilot":

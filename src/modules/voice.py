@@ -17,14 +17,17 @@ import json
 import os
 import re
 import shutil
+import queue
 import subprocess
 import tempfile
+import threading
 import time
 import urllib.error
 import urllib.request
 import wave
 
 import config
+from modules.sprechtext import sprechstuecke, sprechtext
 
 try:
     import numpy as np
@@ -93,16 +96,8 @@ def mikrofon_fehlermeldung() -> str:
 
 
 def text_fuers_sprechen(text: str) -> str:
-    """Entfernt alles, was vorgelesen albern klingt: Sternchen, Striche, Überschriften."""
-    if not text:
-        return ""
-    sauber = str(text)
-    sauber = re.sub(r"```.*?```", " ", sauber, flags=re.S)
-    sauber = re.sub(r"[*_`#>]+", " ", sauber)
-    sauber = re.sub(r"^\s*[-•·]\s*", "", sauber, flags=re.M)
-    sauber = re.sub(r"\[([^\]]*)\]\([^)]*\)", r"\1", sauber)
-    sauber = re.sub(r"\s+", " ", sauber)
-    return sauber.strip()
+    """Der Text, so wie ein Mensch ihn sagen würde (siehe ``sprechtext``)."""
+    return sprechtext(text)
 
 
 def weckwort_pruefen(text: str):
@@ -134,6 +129,8 @@ class Stimme:
         self._whisper_modell = None
         self._temp = tempfile.mkdtemp(prefix="jarvis_audio_")
         self.letzter_fehler = ""
+        self._stopp = threading.Event()
+        self._abspiel_prozess = None
         if self.ist_macos():
             self.macos_stimme = config.MACOS_STIMME or self.deutsche_stimme_suchen()
 
@@ -182,25 +179,46 @@ class Stimme:
     # -- Ausgabe ------------------------------------------------------------
 
     def sprich(self, text: str) -> bool:
-        """Spricht einen Text. ElevenLabs zuerst, sonst die Systemstimme."""
-        sauber = text_fuers_sprechen(text)
-        if not sauber:
-            return False
-        print("Jarvis: %s" % sauber)
-        if config.ELEVENLABS_API_KEY:
-            if self._elevenlabs_sprechen(sauber):
-                return True
-        return self._systemstimme_sprechen(sauber)
+        """Spricht einen Text so, wie ein Mensch ihn sagen würde.
 
-    def _elevenlabs_sprechen(self, text: str) -> bool:
-        """Sprachausgabe über ElevenLabs. Scheitert sie, übernimmt ``say``."""
+        Der Text wird zuerst ins Gesprochene übersetzt (Zahlen, Beträge, Daten
+        ausgeschrieben, kein Markdown) und in Atemabschnitte geteilt. Mit
+        ElevenLabs wird der nächste Abschnitt schon geholt, während der
+        vorige läuft: kein Warten dazwischen, und jeder Abschnitt kennt den
+        Satz davor und danach, damit die Betonung durchläuft. Ohne ElevenLabs
+        spricht die Systemstimme.
+        """
+        stuecke = sprechstuecke(text)
+        if not stuecke:
+            return False
+        print("Jarvis: %s" % " ".join(stuecke))
+        self._stopp.clear()
+        gesprochen = 0
+        if config.ELEVENLABS_API_KEY:
+            gesprochen = self._elevenlabs_sprechen(stuecke)
+            if gesprochen >= len(stuecke):
+                return True
+            if self._stopp.is_set():
+                return True
+        # Was ElevenLabs nicht geschafft hat, übernimmt die Systemstimme: der
+        # Satz, bei dem es abbrach, wird nicht noch einmal von vorn gesprochen.
+        return self._systemstimme_sprechen(" ".join(stuecke[gesprochen:]))
+
+    def stoppen(self):
+        """Hält die Sprachausgabe sofort an - etwa wenn der Nutzer dazwischenredet."""
+        self._stopp.set()
+        prozess = self._abspiel_prozess
+        if prozess is not None and prozess.poll() is None:
+            try:
+                prozess.terminate()
+            except OSError:
+                pass
+
+    def _elevenlabs_holen(self, text: str, vorher: str = "", nachher: str = ""):
+        """Holt die Sprachdatei für einen Abschnitt. ``None`` bei Fehler."""
         ziel = "%s/text-to-speech/%s" % (ELEVENLABS_URL, config.ELEVENLABS_VOICE_ID)
-        # Die Klangwerte standen bisher fest im Code und waren die
-        # Voreinstellung von ElevenLabs - damit klingt jede Stimme gleich
-        # brav. Jetzt kommen sie aus der Konfiguration: ruhig, nah am
-        # Original, ohne Theatralik.
-        koerper = json.dumps({
-            "text": text[:4000],
+        inhalt = {
+            "text": text[:2500],
             "model_id": config.ELEVENLABS_MODEL,
             "voice_settings": {
                 "stability": config.ELEVENLABS_STABILITY,
@@ -208,31 +226,83 @@ class Stimme:
                 "style": config.ELEVENLABS_STYLE,
                 "use_speaker_boost": True,
             },
-        }).encode("utf-8")
-        anfrage = urllib.request.Request(ziel, data=koerper, method="POST", headers={
-            "xi-api-key": config.ELEVENLABS_API_KEY,
-            "Content-Type": "application/json",
-            "Accept": "audio/mpeg",
-        })
+        }
+        # Der Satz davor und danach: so wird eine Stimme, die in Stücken
+        # spricht, nicht zu lauter einzelnen Ansagen.
+        if vorher:
+            inhalt["previous_text"] = vorher[-300:]
+        if nachher:
+            inhalt["next_text"] = nachher[:300]
+        anfrage = urllib.request.Request(
+            ziel, data=json.dumps(inhalt).encode("utf-8"), method="POST", headers={
+                "xi-api-key": config.ELEVENLABS_API_KEY,
+                "Content-Type": "application/json",
+                "Accept": "audio/mpeg",
+            })
         try:
             with urllib.request.urlopen(anfrage, timeout=45) as antwort:
-                daten = antwort.read()
+                return antwort.read()
         except (urllib.error.URLError, OSError) as fehler:
             self.letzter_fehler = "ElevenLabs nicht erreichbar: %s" % fehler
             print("[stimme] %s - ich nehme die Systemstimme." % self.letzter_fehler)
-            return False
-        pfad = os.path.join(self._temp, "antwort_%d.mp3" % int(time.time() * 1000))
+            return None
+
+    def _elevenlabs_sprechen(self, stuecke: list) -> int:
+        """Spricht Abschnitt für Abschnitt. Gibt zurück, wie viele gesprochen wurden."""
+        fertig = queue.Queue(maxsize=2)
+        ende = threading.Event()
+
+        def holer():
+            for nummer, stueck in enumerate(stuecke):
+                if ende.is_set() or self._stopp.is_set():
+                    break
+                daten = self._elevenlabs_holen(
+                    stueck, stuecke[nummer - 1] if nummer else "",
+                    stuecke[nummer + 1] if nummer + 1 < len(stuecke) else "")
+                while not ende.is_set():
+                    try:
+                        fertig.put((nummer, daten), timeout=0.2)
+                        break
+                    except queue.Full:
+                        continue
+                if daten is None:
+                    return
+            while not ende.is_set():
+                try:
+                    fertig.put(None, timeout=0.2)
+                    return
+                except queue.Full:
+                    continue
+
+        faden = threading.Thread(target=holer, daemon=True, name="jarvis-stimme-holen")
+        faden.start()
+        gesprochen = 0
         try:
-            with open(pfad, "wb") as datei:
-                datei.write(daten)
-        except OSError:
-            return False
-        erfolg = self.abspielen(pfad)
-        try:
-            os.remove(pfad)
-        except OSError:
-            pass
-        return erfolg
+            while True:
+                eintrag = fertig.get()
+                if eintrag is None:
+                    break
+                nummer, daten = eintrag
+                if daten is None or self._stopp.is_set():
+                    break
+                pfad = os.path.join(self._temp, "antwort_%d_%d.mp3"
+                                    % (int(time.time() * 1000), nummer))
+                try:
+                    with open(pfad, "wb") as datei:
+                        datei.write(daten)
+                except OSError:
+                    break
+                erfolg = self.abspielen(pfad)
+                try:
+                    os.remove(pfad)
+                except OSError:
+                    pass
+                if not erfolg:
+                    break
+                gesprochen += 1
+        finally:
+            ende.set()
+        return gesprochen
 
     def _systemstimme_sprechen(self, text: str) -> bool:
         """Sprachausgabe über das eingebaute ``say`` von macOS."""
@@ -260,13 +330,15 @@ class Stimme:
             if not shutil.which(befehl[0]):
                 continue
             try:
-                ergebnis = subprocess.run(befehl, timeout=300, shell=False,
-                                          stdout=subprocess.DEVNULL,
-                                          stderr=subprocess.DEVNULL)
-                if ergebnis.returncode == 0:
+                self._abspiel_prozess = subprocess.Popen(
+                    befehl, shell=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                rueckgabe = self._abspiel_prozess.wait(timeout=300)
+                if rueckgabe == 0 or self._stopp.is_set():
                     return True
             except (OSError, subprocess.SubprocessError):
                 continue
+            finally:
+                self._abspiel_prozess = None
         return False
 
     def signal(self, name: str):

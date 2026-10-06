@@ -52,6 +52,10 @@ import modules.setup_wizard as wizard_modul  # noqa: E402
 from modules import autopilot as autopilot_modul  # noqa: E402
 from modules.autopilot import in_ruhezeit, rolle_raten  # noqa: E402
 from modules.tools import FREIGABE_PFLICHTIG  # noqa: E402
+import modules.voice as voice_modul  # noqa: E402
+from modules.sprechtext import (abschnitte, jahr_wort, schleifen_entfernen,  # noqa: E402
+                                sprechstuecke, sprechtext, zahl_wort)
+from modules.werkstatt import projektdatei_saeubern  # noqa: E402
 from modules.lernpfad import SEITE_PFAD, lernpfad_stand  # noqa: E402
 from modules.werkstatt import Werkstatt, name_saeubern  # noqa: E402
 from modules.voice import weckwort_pruefen  # noqa: E402
@@ -462,7 +466,7 @@ def pruefung_team(agent):
     """Die Fachkräfte - vor allem, dass die Werkzeugtrennung wirklich greift."""
     abschnitt("Team")
     team = agent.tools.team
-    pruefen("Neun Fachkräfte vorhanden", len(ROLLEN) == 9,
+    pruefen("Dreizehn Fachkräfte vorhanden", len(ROLLEN) == 13,
             ", ".join(sorted(ROLLEN)))
     treffer = {"buchhaltung": "buchhalter", "vertrieb": "akquisiteur",
                "mails sortieren": "postmeister", "cashflow": "controller",
@@ -1077,6 +1081,135 @@ def pruefung_ansichten(agent):
                     "Ordner, Auftrag, Start")
 
 
+def pruefung_sprechen(agent):
+    abschnitt("Sprechen wie ein Mensch")
+    faelle = [
+        ("Die Rechnung über 1.069,60 € ist fällig.",
+         "Die Rechnung über eintausendneunundsechzig Euro sechzig ist fällig."),
+        ("Gebühr 0,50 € und 1 Euro.", "Gebühr fünfzig Cent und ein Euro."),
+        ("Am 06.10.2026 um 14:30 Uhr.", "Am sechsten Oktober zweitausendsechsundzwanzig um vierzehn Uhr dreißig."),
+        ("Heute ist der 6.10., bis zum 1.12. ist Zeit.", "Heute ist der sechste Oktober, bis zum ersten Dezember ist Zeit."),
+        ("1.200 qm, 3,5 km und 1 h.", "eintausendzweihundert Quadratmeter, drei Komma fünf Kilometer und 1 Stunde."),
+        ("Rund 19,5 % davon.", "Rund neunzehn Komma fünf Prozent davon."),
+        ("Büros usw. Siehe unten.", "Büros und so weiter. Siehe unten."),
+    ]
+    falsch = [(a, sprechtext(a)) for a, b in faelle if sprechtext(a) != b]
+    pruefen("Beträge, Daten, Uhrzeiten, Einheiten werden ausgeschrieben",
+            not falsch, "%d Fälle" % len(faelle) if not falsch else "%r" % (falsch[0],))
+    pruefen("Zahlwörter stimmen",
+            [zahl_wort(n) for n in (1, 21, 101, 1001, 2026, 1000000, 2500000)] ==
+            ["eins", "einundzwanzig", "einhunderteins", "eintausendeins",
+             "zweitausendsechsundzwanzig", "eine Million", "zwei Millionen fünfhunderttausend"]
+            and jahr_wort(1985) == "neunzehnhundertfünfundachtzig", "sieben Zahlen und ein Jahr")
+    sprechbar = sprechtext("**Wichtig:** Ein Test\n- Punkt eins\n- Punkt zwei\n```python\nprint(1)\n```\nSiehe https://www.beispiel.at/x und info@firma.at (bitte) & mehr")
+    pruefen("Markdown, Code, Links und Zeichen fallen weg",
+            not any(z in sprechbar for z in "*`#|&()") and "print(1)" not in sprechbar
+            and "https" not in sprechbar and "Punkt eins." in sprechbar and "ät" in sprechbar,
+            sprechbar[:60])
+    pruefen("Telefonnummern und Postleitzahlen bleiben unangetastet",
+            "0664 1234567" in sprechtext("Ruf 0664 1234567 an, 1010 Wien."), "")
+    pruefen("Schleifen werden einmal gesprochen",
+            schleifen_entfernen("Ja ja ja ja, das stimmt. Das stimmt nicht ganz hier. Das stimmt nicht ganz hier.")
+            == "Ja, das stimmt. Das stimmt nicht ganz hier.", "Wortfolge und doppelter Satz")
+    lang = " ".join("Das ist der Satz Nummer %s mit etwas Text, der lang genug ist, damit er geteilt wird, und zwar an einer guten Stelle." % zahl_wort(i) for i in range(1, 9))
+    stuecke = sprechstuecke(lang)
+    pruefen("Lange Texte kommen in Atemabschnitten, nie mitten im Wort",
+            len(stuecke) >= 4 and all(len(x) <= 260 for x in stuecke)
+            and all(x[-1] in ".!?," for x in stuecke) and " ".join(stuecke).split() == sprechtext(lang).split(),
+            "%d Abschnitte, höchstens %d Zeichen" % (len(stuecke), max(len(x) for x in stuecke)))
+    pruefen("Ein langer Satz wird an Kommas geteilt",
+            all(len(x) <= 260 for x in abschnitte("Das ist " + "ein sehr langer Satz, " * 30 + "Ende.")), "")
+
+    # Die Stimme mit ElevenLabs: gestaffelt holen, in der Reihenfolge sprechen, mit Kontext.
+    stimme = voice_modul.Stimme()
+    geholt, gespielt = [], []
+    echt = (stimme._elevenlabs_holen, stimme.abspielen, config.ELEVENLABS_API_KEY)
+    config.ELEVENLABS_API_KEY = "test"
+    stimme._elevenlabs_holen = lambda text, vorher="", nachher="": (geholt.append((text, vorher, nachher)) or b"mp3")
+    stimme.abspielen = lambda pfad: gespielt.append(pfad) or True
+    try:
+        ok = stimme.sprich(lang)
+        pruefen("Die Stimme spricht jeden Abschnitt genau einmal, in Reihenfolge",
+                ok and len(gespielt) == len(stuecke) == len(geholt)
+                and [g[0] for g in geholt] == stuecke, "%d Abschnitte" % len(geholt))
+        pruefen("Jeder Abschnitt kennt den davor und den danach",
+                geholt[0][1] == "" and geholt[1][1] == stuecke[0] and geholt[0][2] == stuecke[1]
+                and geholt[-1][2] == "", "previous_text und next_text")
+
+        # Fällt ElevenLabs mitten drin aus, spricht die Systemstimme den Rest - ohne Wiederholung.
+        geholt.clear(); gespielt.clear(); gesagt = []
+        zaehler = {"n": 0}
+        def holen_mit_ausfall(text, vorher="", nachher=""):
+            zaehler["n"] += 1
+            return None if zaehler["n"] == 3 else b"mp3"
+        stimme._elevenlabs_holen = holen_mit_ausfall
+        stimme._systemstimme_sprechen = lambda text: gesagt.append(text) or True
+        stimme.sprich(lang)
+        pruefen("Fällt ElevenLabs aus, spricht die Systemstimme nur den Rest",
+                len(gespielt) == 2 and len(gesagt) == 1 and gesagt[0].startswith(stuecke[2])
+                and stuecke[0] not in gesagt[0], "2 gespielt, Rest per Systemstimme")
+    finally:
+        stimme._elevenlabs_holen, stimme.abspielen, config.ELEVENLABS_API_KEY = echt
+    pruefen("Die Web-App liefert die Abschnitte mit der Antwort",
+            "sprechstuecke" in open(os.path.join(WURZEL, "src/modules/webapp.py"), encoding="utf-8").read()
+            and "besteStimme" in SEITE_HTML and "satz.onend = weiter" in SEITE_HTML,
+            "Browser spricht Stück für Stück")
+
+
+def pruefung_neue_fachkraefte(agent):
+    abschnitt("Zweiter Chef, Webseiten, Chatbots, Marketing")
+    for rolle in ("geschaeftsfuehrer", "webdesigner", "chatbotbauer", "marketing"):
+        fehlend = [n for n in autopilot_modul.ROLLEN[rolle]["werkzeuge"] if n not in agent.tools.namen()]
+        pruefen("Fachkraft %s hat nur Werkzeuge, die es gibt" % rolle, not fehlend,
+                ", ".join(fehlend) or "%d Werkzeuge" % len(autopilot_modul.ROLLEN[rolle]["werkzeuge"]))
+    pruefen("Fachkräfte werden umgangssprachlich gefunden",
+            agent.tools.team.rolle_finden("webseite") == "webdesigner"
+            and agent.tools.team.rolle_finden("chatbot") == "chatbotbauer"
+            and agent.tools.team.rolle_finden("werbung") == "marketing"
+            and agent.tools.team.rolle_finden("chef") == "geschaeftsfuehrer", "vier Wörter")
+    pruefen("Der Autopilot ordnet Webseite, Chatbot, Marketing richtig zu",
+            rolle_raten("Bau eine Webseite für die Praxis") == "webdesigner"
+            and rolle_raten("Chatbot für Terminanfragen") == "chatbotbauer"
+            and rolle_raten("Newsletter für Oktober") == "marketing"
+            and rolle_raten("Schreib ein Angebot für Müller") == "akquisiteur", "vier Aufträge")
+    config.BRANCHE, alt = "Gastronomie", config.BRANCHE
+    try:
+        pruefen("Die Branche steht im Auftrag der Fachkraft und im Systemprompt",
+                "Gastronomie" in agent.tools.team.systemprompt("marketing")
+                and "Gastronomie" in agent.systemprompt("x"), "Branche aus der Konfiguration")
+    finally:
+        config.BRANCHE = alt
+
+    w = agent.tools.werkstatt
+    seite = w.projekt_datei_schreiben("Praxis Dr. Huber", "Start Seite.html",
+                                      "<!doctype html><title>Praxis</title><h1>Praxis Huber</h1>", "Test")
+    gelesen = w.projekt_zeigen("Praxis Dr. Huber", "start_seite.html")
+    pruefen("Eine Webseite wird im Projektordner abgelegt und nie ausgeführt",
+            seite["ok"] and "start_seite.html" in seite["pfad"] and "Ausgeführt wurde nichts" in seite["text"]
+            and "Praxis Huber" in gelesen["inhalt"], seite.get("projekt", ""))
+    boese = [w.projekt_datei_schreiben("p", "../x.html", "a")["ok"],
+             w.projekt_datei_schreiben("p", "x.py", "print(1)")["ok"],
+             w.projekt_datei_schreiben("p", "a/b.html", "a")["ok"],
+             w.projekt_datei_schreiben("../../etc", "x.html", "<p>hi</p>")["pfad"].startswith(
+                 str(config.BASIS / "werkstatt" / "projekte"))]
+    pruefen("Pfadtricks und Programmdateien werden abgelehnt, nichts verlässt den Ordner",
+            boese == [False, False, False, True], "vier Versuche")
+    schluessel = w.projekt_datei_schreiben("bot", "widget.html",
+                                           "<script>const k='sk-" + "a" * 30 + "'</script>")
+    pruefen("Eine Seite mit eingebettetem Schlüssel wird abgelehnt",
+            schluessel["ok"] is False and "Schlüssel" in schluessel["fehler"], "")
+    pruefen("Die Projektwerkzeuge stehen im Katalog",
+            {"projekt_datei_schreiben", "projekt_zeigen"} <= set(agent.tools.namen())
+            and not agent.tools.braucht_freigabe("projekt_datei_schreiben"), "")
+    aus_ap = agent.tools.autopilot
+    for i in range(25):
+        aus_ap.auftrag_anlegen("Obergrenzentest %d" % i, "x", "controller", 3, "nutzer", "ober%d" % i)
+    pruefen("Der Autopilot nimmt höchstens zwanzig wartende Aufträge an",
+            len(aus_ap.warteschlange(100)) <= 20
+            and aus_ap.auftrag_anlegen("noch einer", "x", "controller")["ok"] is False, "Obergrenze 20")
+    agent.memory._schreiben("UPDATE autopilot SET status='fertig', gesehen=1 WHERE titel LIKE 'Obergrenzentest%'")
+
+
 def pruefung_autopilot(agent):
     abschnitt("Autopilot")
     ap = agent.tools.autopilot
@@ -1624,7 +1757,9 @@ def main() -> int:
     pruefung_werkzeugvertrag(agent)
     pruefung_telefon(agent)
     pruefung_browser(agent)
+    pruefung_sprechen(agent)
     pruefung_autopilot(agent)
+    pruefung_neue_fachkraefte(agent)
     pruefung_zugang(agent)
     pruefung_lernpfad(agent)
     pruefung_webapp(agent)

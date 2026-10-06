@@ -419,6 +419,10 @@ class Einrichtung:
         firma = self.fragen("Wie heißt deine Firma? (Enter zum Überspringen)")
         if firma:
             config.env_setzen("FIRMA", firma)
+        branche = self.fragen("In welcher Branche arbeitest du? Zum Beispiel Gebäudereinigung, "
+                              "Gastronomie, Handwerk (Enter für '%s')" % config.BRANCHE)
+        if branche:
+            config.env_setzen("BRANCHE", " ".join(branche.split())[:80])
         ort = self.fragen("In welchem Ort arbeitest du? (Enter für '%s')"
                           % config.WETTER_ORT)
         if ort:

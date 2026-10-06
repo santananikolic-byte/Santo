@@ -355,6 +355,17 @@ class Werkzeuge:
                      "wird dabei nichts.",
                      {"name": text, "code": text, "zweck": text},
                      ["name", "code"]),
+            werkzeug("projekt_datei_schreiben",
+                     "Legt eine Datei in einem Projekt der Werkstatt ab: eine "
+                     "Webseite (html), die Anweisung für einen Chatbot (md), einen "
+                     "Kampagnentext (md) und so weiter. Es wird nur geschrieben, nie "
+                     "ausgeführt. Schlüssel und Passwörter werden abgelehnt.",
+                     {"projekt": text, "datei": text, "inhalt": text, "zweck": text},
+                     ["projekt", "datei", "inhalt"]),
+            werkzeug("projekt_zeigen",
+                     "Ohne Angaben: alle Projekte. Mit projekt: dessen Dateien. "
+                     "Zusätzlich mit datei: der Inhalt.",
+                     {"projekt": text, "datei": text}),
             werkzeug("skript_zeigen", "Zeigt den Code eines abgelegten Skripts.",
                      {"name": text}, ["name"]),
             werkzeug("skript_ausfuehren",
@@ -715,6 +726,11 @@ class Werkzeuge:
         if name == "skript_schreiben":
             return self.werkstatt.skript_schreiben(a.get("name"), a.get("code"),
                                                    a.get("zweck", ""))
+        if name == "projekt_datei_schreiben":
+            return self.werkstatt.projekt_datei_schreiben(
+                a.get("projekt"), a.get("datei"), a.get("inhalt"), a.get("zweck", ""))
+        if name == "projekt_zeigen":
+            return self.werkstatt.projekt_zeigen(a.get("projekt", ""), a.get("datei", ""))
         if name == "skript_zeigen":
             return self.werkstatt.skript_zeigen(a.get("name"))
         if name == "skript_ausfuehren":

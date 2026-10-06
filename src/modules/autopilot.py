@@ -55,8 +55,16 @@ CREATE INDEX IF NOT EXISTS idx_autopilot_status ON autopilot(status);
 CREATE INDEX IF NOT EXISTS idx_autopilot_schluessel ON autopilot(schluessel);
 """
 
+# Mehr als so viele wartende Aufträge nimmt der Autopilot nicht an - sonst könnte
+# sich eine Fachkraft, die selbst Aufträge anlegt, endlos Arbeit schaffen.
+MAX_WARTEND = 20
+
 # Welche Fachkraft passt zu welchen Wörtern? Reihenfolge zählt: das Erste gewinnt.
 ROLLEN_STICHWORTE = (
+    ("webdesigner", ("webseite", "website", "homepage", "landingpage", "web design", "webdesign")),
+    ("chatbotbauer", ("chatbot", "chat-bot", "sprachbot", "telegram-bot")),
+    ("marketing", ("marketing", "kampagne", "newsletter", "social media", "werbung", "beitrag für")),
+    ("geschaeftsfuehrer", ("prioritäten", "prioritaeten", "was ist diese woche wichtig", "betrieb steht", "entscheidung vorbereiten")),
     ("programmierer", ("programm", "skript", "script", "code", "automatisier", "auswertung bauen")),
     ("akquisiteur", ("angebot", "nachfass", "interessent", "lead", "kunde", "kunden", "akquise", "verkauf")),
     ("postmeister", ("mail", "post ", "posteingang", "antwort auf")),
@@ -149,6 +157,9 @@ class Autopilot:
             if vorhanden:
                 return {"ok": True, "doppelt": True, "id": vorhanden[0]["id"],
                         "text": "Das steht schon in der Liste."}
+        if len(self.warteschlange(100)) >= MAX_WARTEND:
+            return {"ok": False, "fehler": "In der Warteschlange stehen schon %d Aufträge. "
+                                           "Erst sollen ein paar fertig werden." % MAX_WARTEND}
         gefunden = ""
         if rolle:
             gefunden = self.tools.team.rolle_finden(rolle) or ""
