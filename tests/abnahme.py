@@ -1682,6 +1682,79 @@ def pruefung_telegram_dienst(agent):
         os.remove(datei)
 
 
+def pruefung_macapp():
+    abschnitt("Jarvis als Mac-Programm")
+    import plistlib
+    import run as run_modul
+    from modules import macapp
+    ordner = pathlib.Path(tempfile.mkdtemp(prefix="jarvis_app_"))
+    try:
+        projekt = ordner / "Mein Ordner's Jarvis"
+        (projekt / "assets").mkdir(parents=True)
+        (projekt / "jarvis.py").write_text("print('Jarvis')\n")
+        (ordner / "Desktop").mkdir()
+        (ordner / "Desktop" / "Jarvis.command").symlink_to(projekt / "jarvis.py")
+        ergebnis = macapp.app_bauen(ziel_ordner=ordner / "Programme", projekt=projekt,
+                                    python="/usr/bin/python3", dock=False, schreibtisch=ordner / "Desktop")
+        app = ordner / "Programme" / "Jarvis.app"
+        with open(app / "Contents" / "Info.plist", "rb") as datei:
+            info = plistlib.load(datei)
+        programm = app / "Contents" / "MacOS" / "Jarvis"
+        pruefen("Die App hat alles, woran macOS ein Programm erkennt",
+                ergebnis.get("ok") and info["CFBundleExecutable"] == "Jarvis"
+                and info["CFBundlePackageType"] == "APPL" and info["CFBundleIconFile"] == "Jarvis"
+                and os.access(programm, os.X_OK), str(app)[-40:])
+        syntax = subprocess.run(["bash", "-n", str(programm)], capture_output=True, text=True)
+        kopf = "\n".join(programm.read_text().splitlines()[:4])
+        gelesen = subprocess.run(["bash", "-c", kopf + '\nprintf "%s|%s" "$PROJEKT" "$PYTHON"'],
+                                 capture_output=True, text=True).stdout
+        pruefen("Das Startskript ist gültig, auch bei Leerzeichen und Apostroph im Pfad",
+                syntax.returncode == 0 and gelesen == "%s|/usr/bin/python3" % projekt.resolve(),
+                gelesen[-50:])
+        quelle_app = programm.read_text()
+        pruefen("Die App startet Jarvis im Hintergrund und öffnet ein eigenes Fenster",
+                "web --ohne-browser" in quelle_app and "--app=" in quelle_app and "nc -z 127.0.0.1" in quelle_app, "")
+        pruefen("Auf dem Schreibtisch liegt die App statt der Terminal-Verknüpfung",
+                (ordner / "Desktop" / "Jarvis.app").is_symlink()
+                and not (ordner / "Desktop" / "Jarvis.command").exists(), "")
+        pruefen("Ohne Mac-Werkzeuge bleibt die App ohne Symbol, statt abzubrechen",
+                macapp.symbol_bauen(projekt / "assets" / "fehlt.png", app / "x.icns") is False
+                and ergebnis.get("symbol") in (True, False), "")
+        symbol = (pathlib.Path(WURZEL) / "assets" / "Jarvis.icns").read_bytes()
+        pruefen("Das Mac-Symbol (.icns) liegt fertig bei und wird in die App gelegt",
+                symbol[:4] == b"icns" and int.from_bytes(symbol[4:8], "big") == len(symbol)
+                and b"ic10" in symbol and ergebnis.get("symbol") is not None, "%d KB" % (len(symbol) // 1024))
+        zipdatei = ordner / "Jarvis-App.zip"
+        macapp.download_zip_bauen(zipdatei, pathlib.Path(WURZEL) / "assets" / "Jarvis.icns")
+        import zipfile
+        with zipfile.ZipFile(zipdatei) as archiv:
+            eintraege = {i.filename: i.external_attr >> 16 for i in archiv.infolist()}
+            skript_dl = archiv.read("Jarvis.app/Contents/MacOS/Jarvis").decode("utf-8")
+        (ordner / "dl.sh").write_text(skript_dl)
+        pruefen("Die App zum Herunterladen: ausführbar, installiert beim ersten Start, startet danach",
+                eintraege.get("Jarvis.app/Contents/MacOS/Jarvis") == 0o100755
+                and "Jarvis.app/Contents/Resources/Jarvis.icns" in eintraege
+                and macapp.INSTALL_URL in skript_dl and 'PROJEKT="$ZIEL"' in skript_dl
+                and "web --ohne-browser" in skript_dl
+                and subprocess.run(["bash", "-n", str(ordner / "dl.sh")]).returncode == 0, "")
+        repo_zip = pathlib.Path(WURZEL) / "download" / "Jarvis-App.zip"
+        with zipfile.ZipFile(repo_zip) as archiv:
+            im_repo = archiv.read("Jarvis.app/Contents/MacOS/Jarvis").decode("utf-8")
+        pruefen("Das ZIP im Projekt ist auf dem Stand des Codes",
+                im_repo == skript_dl, "neu bauen: macapp.download_zip_bauen")
+        pruefen("Das Gehirn-Symbol liegt bei (1024 Pixel)",
+                (pathlib.Path(WURZEL) / "assets" / "jarvis_symbol.png").read_bytes()[16:24]
+                == (1024).to_bytes(4, "big") * 2, "")
+        quelle_run = open(os.path.join(WURZEL, "src/run.py"), encoding="utf-8").read()
+        install = open(os.path.join(WURZEL, "install.sh"), encoding="utf-8").read()
+        pruefen("Installation und erster Start legen die App an; ohne Mac sagt es das ehrlich",
+                'jarvis.py" macapp' in install and "macapp" in open(os.path.join(WURZEL, "JARVIS.command"), encoding="utf-8").read()
+                and "not ohne_browser" in quelle_run
+                and (sys.platform == "darwin" or run_modul.macapp_anlegen([]) == 1), "")
+    finally:
+        shutil.rmtree(ordner, ignore_errors=True)
+
+
 def pruefung_mac_zugriff(agent):
     abschnitt("Mails und SMS")
     try:
@@ -2597,6 +2670,7 @@ def main() -> int:
     pruefung_dienst(agent)
     pruefung_mac_zugriff(agent)
     pruefung_telegram_dienst(agent)
+    pruefung_macapp()
     pruefung_anzeige(agent)
     pruefung_autopilot(agent)
     pruefung_neue_fachkraefte(agent)

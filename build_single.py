@@ -75,6 +75,7 @@ BAULISTE = [
     "modules/lernpfad",
     "modules/webapp",
     "modules/setup_wizard",
+    "modules/macapp",
     "modules/tools",
     "agent",
     "run",

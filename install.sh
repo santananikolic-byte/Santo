@@ -177,11 +177,15 @@ if "$PYTHON" -c "import playwright" >/dev/null 2>&1; then
     fi
 fi
 
-# --- 6. Verknuepfung auf dem Schreibtisch ----------------------------------
+# --- 6. Jarvis als Programm: Symbol im Dock, im Programme-Ordner, auf dem Schreibtisch
 
-if [ -d "$HOME/Desktop" ] && [ "$NUR_PRUEFEN" != "1" ]; then
-    ln -sf "$ZIEL/JARVIS.command" "$HOME/Desktop/Jarvis.command" 2>/dev/null \
-        && gut "Verknuepfung auf dem Schreibtisch angelegt"
+if [ "$NUR_PRUEFEN" != "1" ]; then
+    if [ "$(uname)" = "Darwin" ] && "$PYTHON" "$ZIEL/jarvis.py" macapp >/dev/null 2>&1; then
+        gut "Jarvis ist jetzt ein Programm - das Gehirn-Symbol liegt im Dock"
+    elif [ -d "$HOME/Desktop" ]; then
+        ln -sf "$ZIEL/JARVIS.command" "$HOME/Desktop/Jarvis.command" 2>/dev/null \
+            && gut "Verknuepfung auf dem Schreibtisch angelegt"
+    fi
 fi
 
 # --- 7. Selbsttest ---------------------------------------------------------
@@ -214,7 +218,7 @@ printf "  ============================================================\n\n"
 printf "\n"
 printf "  ============================================================\n"
 printf "   FERTIG. Eine Sache noch:\n"
-printf "   Schliess dieses Fenster und starte Jarvis vom Schreibtisch.\n"
+printf "   Schliess dieses Fenster und starte Jarvis mit dem Gehirn-Symbol im Dock.\n"
 printf "   Sonst greifen die erteilten Rechte nicht.\n"
 printf "   Er oeffnet sich dann im Browser. Dort druckst du auf das\n"
 printf "   Mikrofon und sprichst einfach los.\n"

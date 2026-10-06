@@ -14,7 +14,14 @@ die Anleitung führt in drei Schritten von Claude Code zum laufenden Jarvis.
 
 ## Loslegen
 
-Der kürzeste Weg — eine Zeile ins Terminal, sonst nichts:
+**Als App:** [Jarvis-App.zip herunterladen](https://github.com/santananikolic-byte/Santo/raw/claude/new-session-o54yqu/download/Jarvis-App.zip),
+öffnen, **Jarvis** (das Gehirn-Symbol) in den Programme-Ordner ziehen und starten.
+Beim ersten Start richtet sich Jarvis im Terminal ein und liest dabei alles vor; danach
+liegt er im Dock und öffnet sich mit einem Klick in seinem eigenen Fenster. Weil die App
+nicht bei Apple registriert ist, fragt macOS beim allerersten Öffnen nach: Rechtsklick →
+Öffnen, oder Systemeinstellungen → Datenschutz & Sicherheit → „Trotzdem öffnen“.
+
+Oder der kürzeste Weg — eine Zeile ins Terminal, sonst nichts:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/santananikolic-byte/Santo/claude/new-session-o54yqu/install.sh | bash

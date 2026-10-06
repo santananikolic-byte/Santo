@@ -23,6 +23,7 @@ Terminal spricht, nimmt ``hoeren``.
     python3 jarvis.py zugang      einen Schlüssel eintragen oder ersetzen
     python3 jarvis.py zugang mail Gmail oder ein anderes Postfach verbinden
     python3 jarvis.py zugang telegram  Handy verbinden: schreiben und sprechen von unterwegs
+    python3 jarvis.py macapp      Jarvis als Programm: Symbol im Dock und im Programme-Ordner
     python3 jarvis.py autopilot   Postfach des Autopiloten (an / aus zum Schalten)
     python3 jarvis.py daemon      dauerhaft, nur Stimme, ohne Fenster (der iMac als Kopf)
     python3 jarvis.py dienst      installieren | entfernen | status | neustart | hinweise
@@ -49,6 +50,7 @@ from modules.setup_wizard import einrichtung_starten, zugang_eintragen
 from modules.speaker import Sprecherprofil
 from modules.telegram_mod import TelegramFreigabe
 from modules.voice import Stimme, weckwort_pruefen
+from modules.macapp import app_bauen
 from modules.webapp import JarvisWeb, STANDARD_PORT
 
 # Die Anzeige des Dienstes hat ihren eigenen Anschluss - so kann die Web-App per
@@ -315,6 +317,20 @@ def _port_belegt(port: int) -> bool:
         return False
 
 
+def macapp_anlegen(argumente=None) -> int:
+    """``python3 jarvis.py macapp``: Jarvis als Programm mit Symbol, im Dock und auf dem Schreibtisch."""
+    argumente = argumente or []
+    if sys.platform != "darwin" and "--ziel" not in argumente:
+        print("Die App gibt es nur auf dem Mac.")
+        return 1
+    ziel = argumente[argumente.index("--ziel") + 1] if "--ziel" in argumente[:-1] else None
+    ergebnis = app_bauen(ziel_ordner=ziel, dock="--ohne-dock" not in argumente)
+    print(ergebnis.get("text") or ergebnis.get("fehler"))
+    if ergebnis.get("ok"):
+        print("Starten: Klick auf das Gehirn im Dock, im Programme-Ordner oder auf dem Schreibtisch.")
+    return 0 if ergebnis.get("ok") else 1
+
+
 def anzeige_oeffnen(argumente=None) -> int:
     """Öffnet Gehirn und Zentrale im Browser - je ein Fenster, zum Verschieben auf die Bildschirme."""
     import shutil as _shutil
@@ -472,6 +488,8 @@ def webbetrieb(argumente=None):
     """Startet Jarvis als Web-App im Browser."""
     argumente = argumente or []
     offen = "--offen" in argumente or "offen" in argumente
+    # Die Mac-App öffnet ihr eigenes Fenster - dann hier keinen Browser-Tab dazu.
+    ohne_browser = "--ohne-browser" in argumente
     port = STANDARD_PORT
     for teil in argumente:
         if teil.isdigit():
@@ -518,7 +536,7 @@ def webbetrieb(argumente=None):
     import shutil as _shutil
     import subprocess as _subprocess
     # Eine Seite für alles: das Gehirn sitzt mitten in der Gesprächsseite.
-    if _shutil.which("open"):
+    if _shutil.which("open") and not ohne_browser:
         try:
             _subprocess.run(["open", adresse], shell=False, timeout=15,
                             stdout=_subprocess.DEVNULL, stderr=_subprocess.DEVNULL)
@@ -970,6 +988,8 @@ def hauptprogramm(argumente=None) -> int:
         return dienst_verwalten(argumente[1:])
     elif modus == "anzeige":
         return anzeige_oeffnen(argumente[1:])
+    elif modus in ("macapp", "mac-app", "programm"):
+        return macapp_anlegen(argumente[1:])
     elif modus == "autopilot":
         return autopilot_zeigen(argumente[1:])
     elif modus in ("zugang", "schluessel", "schlüssel"):
