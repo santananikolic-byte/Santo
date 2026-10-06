@@ -33,6 +33,8 @@ from urllib.parse import parse_qs, urlparse
 import config
 from modules.memory import zeitstempel
 from modules.sprechtext import sprechstuecke
+from modules.ansicht import (SEITE_GEHIRN, SEITE_ZENTRALE, gehirn_daten, lichter_liste,
+                             status_daten, zentrale_daten)
 from modules.autopilot import SEITE_AUTOPILOT
 from modules.lernpfad import SEITE_PFAD, lernpfad_stand
 from modules.webseite import SEITE_HTML
@@ -288,6 +290,18 @@ class JarvisWeb:
                 "{{SCHLUESSEL}}", self.token))
         if pfad == "/api/pfad":
             return self._antworten(behandler, 200, lernpfad_stand(werkzeuge))
+        if pfad == "/gehirn":
+            return self._html(behandler, SEITE_GEHIRN.replace("{{SCHLUESSEL}}", self.token))
+        if pfad == "/zentrale":
+            return self._html(behandler, SEITE_ZENTRALE.replace("{{SCHLUESSEL}}", self.token))
+        if pfad == "/api/gehirn":
+            return self._antworten(behandler, 200, gehirn_daten(werkzeuge, self.agent))
+        if pfad == "/api/zentrale":
+            return self._antworten(behandler, 200, zentrale_daten(werkzeuge, self.agent))
+        if pfad == "/api/status":
+            return self._antworten(behandler, 200, status_daten(werkzeuge, self.agent))
+        if pfad == "/api/lichter":
+            return self._antworten(behandler, 200, {"ok": True, "lichter": lichter_liste()})
         if pfad == "/autopilot":
             return self._html(behandler, SEITE_AUTOPILOT.replace(
                 "{{SCHLUESSEL}}", self.token))

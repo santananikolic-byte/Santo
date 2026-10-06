@@ -24,6 +24,7 @@ Terminal spricht, nimmt ``hoeren``.
     python3 jarvis.py autopilot   Postfach des Autopiloten (an / aus zum Schalten)
     python3 jarvis.py daemon      dauerhaft, nur Stimme, ohne Fenster (der iMac als Kopf)
     python3 jarvis.py dienst      installieren | entfernen | status | neustart | hinweise
+    python3 jarvis.py anzeige     Zentrale und Gehirn auf den Bildschirmen öffnen
 """
 
 import json
@@ -103,6 +104,20 @@ def dauerbetrieb(dienst: bool = False):
     for eintrag in zeitplan.uebersicht():
         print("           %s  %s" % (eintrag["uhrzeit"], eintrag["beschreibung"]))
 
+    web = None
+    if dienst and config.DIENST_ANZEIGE:
+        # Die Anzeige für die Bildschirme: nur zum Ansehen, nur auf diesem Rechner.
+        try:
+            web = JarvisWeb(agent, port=STANDARD_PORT)
+            web.starten(blockierend=False)
+            # JarvisWeb setzt sich als Freigabeweg ein - im Dienst bleibt es die Stimme.
+            agent.tools.freigabe_kanal_setzen(SprachFreigabe(stimme, profil))
+            print("[anzeige] Zentrale:  %s/zentrale\n[anzeige] Gehirn:    %s/gehirn"
+                  % (web.adresse().split("?")[0].rstrip("/"), web.adresse().split("?")[0].rstrip("/")))
+        except OSError as fehler:
+            web = None
+            print("[anzeige] Die Anzeige startet nicht (%s). Läuft Jarvis schon einmal?" % fehler)
+
     if dienst:
         agent.tools.autopilot.ausgabe = ansager.leise
         agent.tools.autopilot.start()
@@ -138,7 +153,9 @@ def dauerbetrieb(dienst: bool = False):
                                   "Bitte gib es in den Systemeinstellungen frei.")
                 time.sleep(30)
                 continue
+            agent.zustand_setzen("hoert")
             pfad = stimme.aufnehmen_bis_pause(still_signal=True)
+            agent.zustand_setzen("bereit")
             if not pfad:
                 continue
             try:
@@ -187,7 +204,25 @@ def dauerbetrieb(dienst: bool = False):
         if dienst:
             agent.tools.autopilot.stop()
             herz.stop()
+            if web is not None:
+                web.stoppen()
         agent.tools.mcp.stoppen()
+
+
+def anzeige_oeffnen(argumente=None) -> int:
+    """Öffnet Gehirn und Zentrale im Browser - je ein Fenster, zum Verschieben auf die Bildschirme."""
+    import shutil as _shutil
+    import subprocess as _subprocess
+    adressen = ["http://127.0.0.1:%d/zentrale" % STANDARD_PORT, "http://127.0.0.1:%d/gehirn" % STANDARD_PORT]
+    if not _shutil.which("open"):
+        print("Öffne diese Adressen im Browser:\n  " + "\n  ".join(adressen))
+        return 0
+    for adresse in adressen:
+        _subprocess.run(["open", adresse], shell=False, timeout=15,
+                        stdout=_subprocess.DEVNULL, stderr=_subprocess.DEVNULL)
+    print("Beide Seiten sind offen. Zentrale auf den großen Bildschirm, Gehirn auf den zweiten, "
+          "dann in der Seite mit Strg+Cmd+F auf Vollbild.")
+    return 0
 
 
 def dienst_verwalten(argumente=None) -> int:
@@ -796,6 +831,8 @@ def hauptprogramm(argumente=None) -> int:
         return dauerbetrieb(dienst=True) or 0
     elif modus == "dienst":
         return dienst_verwalten(argumente[1:])
+    elif modus == "anzeige":
+        return anzeige_oeffnen(argumente[1:])
     elif modus == "autopilot":
         return autopilot_zeigen(argumente[1:])
     elif modus in ("zugang", "schluessel", "schlüssel"):

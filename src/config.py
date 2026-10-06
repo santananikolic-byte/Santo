@@ -201,6 +201,12 @@ WETTER_ORT = _text("WETTER_ORT", "Wien")
 SUPABASE_URL = _text("SUPABASE_URL")
 SUPABASE_KEY = _text("SUPABASE_KEY")
 
+# Im Dienst läuft die Anzeige (Gehirn und Zentrale) nur auf diesem Rechner mit.
+DIENST_ANZEIGE = _wahrheit("DIENST_ANZEIGE", True)
+
+# Anzeige: ohne Namen und Texte, damit im Raum niemand mitliest.
+ANZEIGE_DISKRET = _wahrheit("ANZEIGE_DISKRET", False)
+
 # Autopilot: Jarvis arbeitet im Hintergrund weiter. Standardmäßig aus.
 # Er bereitet nur vor (Entwürfe im Postfach) und schickt nie etwas ab.
 AUTOPILOT_AN = _wahrheit("AUTOPILOT_AN", False)
