@@ -73,6 +73,13 @@ bekommt deshalb keinen Mikrofonknopf, sondern einen Hinweis.
 
 ## Aufbau: Erinnern und Umsetzen
 
+**Das Gehirn dahinter ist Claude Opus 5.5**, das stärkste allgemeine Modell von
+Anthropic. Es denkt vor jeder Antwort mit und bedient die Werkzeuge: rechnet
+Angebote, legt Kunden an, schreibt Mails, baut Webseiten und Chatbots. Nur reiner
+Smalltalk („Hallo“, „Danke“) geht an das schnelle Gemini. Eine Frage kostet je nach
+Umfang etwa 2 bis 20 Cent; das Monatslimit (`MONATSLIMIT_EURO`, anfangs 15 Euro)
+bremst, bevor es teuer wird. Halb so teuer: `CLAUDE_MODEL=claude-sonnet-5-5`.
+
 Jarvis hat zwei Bereiche, so wie ein Mensch im Betrieb.
 
 **Erinnern.** Das Gedächtnis liegt lokal in einer Datenbank: Notizen, Kunden,
@@ -248,9 +255,10 @@ Nachfassliste, die sagt wer heute dran ist, und eine Angebotskalkulation, die
 über **Leistungswerte** rechnet statt einen Quadratmeterpreis zu raten: Fläche
 geteilt durch m² pro Stunde ergibt Stunden, mal Stundensatz ergibt den Preis.
 Die Cashflow-Vorschau trennt Gesichertes von Erhofftem — ein Angebot ist kein
-Geld und wird gewichtet, nicht voll angesetzt. Mit eingeschaltetem Such-Dienst
-findet er auch neue Betriebe in einem Ort und nimmt sie auf — mit Wert null,
-bis jemand angerufen hat.
+Geld und wird gewichtet, nicht voll angesetzt. **Neue Kunden findet er auf der
+Karte** (OpenStreetMap, ohne Schlüssel): „Finde Steuerberater und Arztpraxen in
+Graz“ — echte Betriebe mit Adresse und, wo eingetragen, Telefon und Webseite. Er
+nimmt sie auf, mit Wert null, bis jemand angerufen hat.
 
 **Werkstatt.** Der Programmierer schreibt kleine Python-Skripte und legt sie ab.
 Ausgeführt wird nur nach Freigabe, und die Freigabefrage zeigt vorher den

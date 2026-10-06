@@ -463,6 +463,13 @@ class Akquise:
             return {"ok": False, "fehler": "In welchem Ort soll ich suchen?"}
         if welt is None:
             return {"ok": False, "fehler": "Die Suche ist nicht verfügbar."}
+
+        # Zuerst die Karte: echte Betriebe mit Adresse, ohne Schlüssel und ohne Raten.
+        if hasattr(welt, "betriebe_suchen"):
+            karte = welt.betriebe_suchen(ort, branche, anzahl)
+            if karte.get("ok") and karte.get("betriebe"):
+                return self._betriebe_aufnehmen(karte["betriebe"], ort, "Karte (OpenStreetMap)")
+
         if agent is None or not getattr(agent, "einsatzbereit", lambda: False)():
             return {"ok": False,
                     "fehler": "Ohne Anthropic-Schlüssel kann ich die Treffer nicht "
@@ -496,16 +503,22 @@ class Akquise:
                               % antwort.get("fehler", "")}
 
         betriebe = (antwort["daten"] or {}).get("betriebe") or []
+        return self._betriebe_aufnehmen(betriebe[:int(anzahl or 8)], ort, "Recherche")
+
+    def _betriebe_aufnehmen(self, betriebe: list, ort: str, quelle: str) -> dict:
+        """Nimmt gefundene Betriebe als Interessenten auf - Wert null, nächster Schritt: anrufen."""
         neu, bekannt = [], []
-        for eintrag in betriebe[:int(anzahl or 8)]:
+        for eintrag in betriebe:
             firma = str(eintrag.get("firma") or "").strip()
             if not firma:
                 continue
             ergebnis = self.lead_anlegen(
                 firma, telefon=str(eintrag.get("telefon") or ""),
                 adresse=str(eintrag.get("adresse") or ""),
-                quelle="Recherche %s" % ort,
-                notiz=str(eintrag.get("branche") or ""),
+                quelle="%s %s" % (quelle, ort),
+                notiz=" · ".join(x for x in (str(eintrag.get("branche") or ""),
+                                              str(eintrag.get("web") or ""),
+                                              str(eintrag.get("mail") or "")) if x),
                 naechster_schritt="anrufen und fragen, wer die Reinigung macht")
             if ergebnis.get("ok"):
                 neu.append(firma)

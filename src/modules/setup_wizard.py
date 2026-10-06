@@ -183,10 +183,11 @@ class Einrichtung:
 
     def schluessel_testen(self, schluessel: str) -> dict:
         """Prüft einen Schlüssel mit einem echten, winzigen Aufruf."""
-        koerper = json.dumps({
-            "model": config.CLAUDE_MODEL, "max_tokens": 8,
-            "messages": [{"role": "user", "content": "Sag nur: ok"}],
-        }).encode("utf-8")
+        probe = {"model": config.CLAUDE_MODEL, "max_tokens": 64,
+                 "messages": [{"role": "user", "content": "Sag nur: ok"}]}
+        if not config.CLAUDE_MODEL.startswith(("claude-haiku", "claude-sonnet-4-5", "claude-3")):
+            probe["output_config"] = {"effort": "low"}  # schnell: nur prüfen, ob der Schlüssel geht
+        koerper = json.dumps(probe).encode("utf-8")
         anfrage = urllib.request.Request(
             "https://api.anthropic.com/v1/messages", data=koerper, method="POST",
             headers={"x-api-key": schluessel, "anthropic-version": "2023-06-01",

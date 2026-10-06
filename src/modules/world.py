@@ -19,6 +19,84 @@ import urllib.request
 import config
 
 GEO_URL = "https://geocoding-api.open-meteo.com/v1/search"
+# OpenStreetMap über Overpass: frei, ohne Schlüssel. Zwei Server, falls einer voll ist.
+OVERPASS_URLS = ("https://overpass-api.de/api/interpreter",
+                 "https://overpass.kumi.systems/api/interpreter")
+
+# Welche Betriebe eine Gebäudereinigung brauchen - als OpenStreetMap-Merkmale.
+OSM_BRANCHEN = {
+    "arzt": [("amenity", "doctors"), ("amenity", "dentist"), ("amenity", "clinic"), ("healthcare", "")],
+    "praxis": [("amenity", "doctors"), ("amenity", "dentist"), ("healthcare", "")],
+    "zahnarzt": [("amenity", "dentist")],
+    "physio": [("healthcare", "physiotherapist")],
+    "steuer": [("office", "tax_advisor"), ("office", "accountant")],
+    "kanzlei": [("office", "lawyer"), ("office", "notary")],
+    "anwalt": [("office", "lawyer")],
+    "notar": [("office", "notary")],
+    "büro": [("office", "")],
+    "buero": [("office", "")],
+    "firma": [("office", "company")],
+    "hausverwaltung": [("office", "property_management"), ("office", "estate_agent")],
+    "immobil": [("office", "estate_agent"), ("office", "property_management")],
+    "versicherung": [("office", "insurance")],
+    "bank": [("amenity", "bank")],
+    "hotel": [("tourism", "hotel"), ("tourism", "guest_house")],
+    "pension": [("tourism", "guest_house")],
+    "restaurant": [("amenity", "restaurant")],
+    "autohaus": [("shop", "car")],
+    "fitness": [("leisure", "fitness_centre")],
+    "kindergarten": [("amenity", "kindergarten")],
+    "schule": [("amenity", "school")],
+    "supermarkt": [("shop", "supermarket")],
+    "geschäft": [("shop", "")],
+}
+# Ohne Angabe: die Betriebe, die am häufigsten eine Reinigung vergeben.
+OSM_STANDARD = ["arzt", "steuer", "kanzlei", "hausverwaltung", "versicherung", "autohaus",
+                "fitness", "hotel", "firma"]
+OSM_NAMEN = {"doctors": "Arztpraxis", "dentist": "Zahnarzt", "clinic": "Klinik",
+             "tax_advisor": "Steuerberatung", "accountant": "Buchhaltung", "lawyer": "Kanzlei",
+             "notary": "Notariat", "property_management": "Hausverwaltung",
+             "estate_agent": "Immobilienbüro", "insurance": "Versicherung", "company": "Firma",
+             "hotel": "Hotel", "guest_house": "Pension", "car": "Autohaus",
+             "fitness_centre": "Fitnessstudio", "kindergarten": "Kindergarten", "school": "Schule",
+             "supermarket": "Supermarkt", "bank": "Bank", "restaurant": "Restaurant",
+             "physiotherapist": "Physiotherapie"}
+
+
+def overpass_abfrage(breite: float, laenge: float, merkmale: list, radius: int = 3000,
+                     anzahl: int = 60) -> str:
+    """Baut die Overpass-Abfrage: alle Betriebe mit diesen Merkmalen im Umkreis."""
+    teile = []
+    for schluessel, wert in merkmale:
+        filter_ = '["%s"="%s"]' % (schluessel, wert) if wert else '["%s"]' % schluessel
+        teile.append('nwr%s["name"](around:%d,%.5f,%.5f);' % (filter_, int(radius), breite, laenge))
+    return "[out:json][timeout:25];(%s);out center tags %d;" % ("".join(teile), int(anzahl))
+
+
+def osm_betriebe_lesen(daten: dict) -> list:
+    """Macht aus der Overpass-Antwort eine Liste von Betrieben mit Adresse und Telefon."""
+    betriebe, gesehen = [], set()
+    for element in (daten or {}).get("elements", []):
+        tags = element.get("tags") or {}
+        name = (tags.get("name") or "").strip()
+        if not name or name.lower() in gesehen:
+            continue
+        gesehen.add(name.lower())
+        art = ""
+        for schluessel in ("amenity", "office", "healthcare", "tourism", "shop", "leisure"):
+            if tags.get(schluessel):
+                art = OSM_NAMEN.get(tags[schluessel], tags[schluessel].replace("_", " "))
+                break
+        strasse = " ".join(x for x in (tags.get("addr:street", ""), tags.get("addr:housenumber", "")) if x)
+        ort = " ".join(x for x in (tags.get("addr:postcode", ""), tags.get("addr:city", "")) if x)
+        betriebe.append({
+            "firma": name[:120], "branche": art,
+            "adresse": ", ".join(x for x in (strasse, ort) if x),
+            "telefon": (tags.get("phone") or tags.get("contact:phone") or "").strip()[:40],
+            "web": (tags.get("website") or tags.get("contact:website") or "").strip()[:200],
+            "mail": (tags.get("email") or tags.get("contact:email") or "").strip()[:120],
+        })
+    return betriebe
 WETTER_URL = "https://api.open-meteo.com/v1/forecast"
 
 # WMO-Wettercodes in verständliches Deutsch.
@@ -131,6 +209,50 @@ class Welt:
 
         return {"ok": True, "ort": koordinaten["name"], "aktuell": jetzt,
                 "tage": tage, "text": satz}
+
+    # -- Betriebe finden (OpenStreetMap) ----------------------------------
+
+    def _overpass_holen(self, abfrage: str):
+        letzter = "unbekannt"
+        for url in OVERPASS_URLS:
+            try:
+                anfrage = urllib.request.Request(
+                    url, data=urllib.parse.urlencode({"data": abfrage}).encode("utf-8"),
+                    method="POST", headers={"User-Agent": "Jarvis/1.0 (Gebaeudereinigung)"})
+                with urllib.request.urlopen(anfrage, timeout=40) as antwort:
+                    return json.loads(antwort.read().decode("utf-8")), ""
+            except (urllib.error.URLError, OSError, ValueError) as fehler:
+                letzter = str(fehler)
+        return None, "Die Karte (OpenStreetMap) ist gerade nicht erreichbar: %s" % letzter
+
+    def betriebe_suchen(self, ort: str, branche: str = "", anzahl: int = 15,
+                        radius: int = 3000, holen=None) -> dict:
+        """Sucht Betriebe in einem Ort auf OpenStreetMap - ohne Schlüssel, mit echter Adresse.
+
+        Gefunden wird, was dort eingetragen ist: Name, Art, Adresse und oft Telefon
+        und Webseite. Nichts davon wird erfunden.
+        """
+        ort = (ort or "").strip()
+        if not ort:
+            return {"ok": False, "fehler": "In welchem Ort soll ich suchen?"}
+        punkt, fehler = self.ort_finden(ort)
+        if punkt is None:
+            return {"ok": False, "fehler": fehler}
+        woerter = (branche or "").lower()
+        schluessel = [k for k in OSM_BRANCHEN if k in woerter] or OSM_STANDARD
+        merkmale = []
+        for k in schluessel:
+            for m in OSM_BRANCHEN[k]:
+                if m not in merkmale:
+                    merkmale.append(m)
+        abfrage = overpass_abfrage(punkt["breite"], punkt["laenge"], merkmale, radius,
+                                   max(20, int(anzahl or 15) * 4))
+        daten, fehler = (holen or self._overpass_holen)(abfrage)
+        if daten is None:
+            return {"ok": False, "fehler": fehler}
+        betriebe = osm_betriebe_lesen(daten)[:max(1, int(anzahl or 15))]
+        return {"ok": True, "ort": punkt.get("name") or ort, "anzahl": len(betriebe),
+                "betriebe": betriebe, "quelle": "OpenStreetMap"}
 
     # -- Recherche ----------------------------------------------------------
 

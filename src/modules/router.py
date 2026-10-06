@@ -7,9 +7,11 @@ die Werkzeuge bedienen (Buchhaltung, Kalender, Post, Telefon ...) und denkt
 gründlicher. Der Router entscheidet pro Frage mit festen, nachvollziehbaren
 Regeln - kein Modell raten lassen, was ein Modell kosten darf.
 
-**Im Zweifel Claude.** Gemini bekommt hier keine Werkzeuge. Eine Frage, hinter
-der eine Handlung oder ein Datenzugriff stecken könnte, geht deshalb immer an
-Claude. Gemini bekommt nur kurzes Gespräch und einfache Wissensfragen.
+**Im Zweifel Claude.** Gemini bekommt hier keine Werkzeuge und kein Gedächtnis
+für den Betrieb. Deshalb geht nur reiner Smalltalk an Gemini ("Hallo", "Danke",
+"Wie geht's?"). Alles andere - Angebote, Kunden, Programmieren, Fragen jeder Art -
+beantwortet Claude, der etwas tun kann. Vorher landete "Programmier mir einen
+Chatbot" bei Gemini, weil kein Stichwort passte, und die Antwort blieb leer.
 
 Jede Runde landet im **Gedankenlog** (``logs/gedankenlog.jsonl``): Frage,
 Gehirn, Dauer, Tokens, geschätzte Kosten. Daraus rechnet sich der
@@ -17,6 +19,7 @@ Monatsverbrauch, an dem das Limit hängt.
 """
 
 import json
+import re
 import time
 import urllib.error
 import urllib.request
@@ -38,6 +41,17 @@ HANDLUNGSSTAEMME = (
     "bild", "kamera", "datei", "ordner", "dashboard", "briefing", "heute",
     "morgen", "woche", "offen", "mitarbeiter", "team",
 )
+# Smalltalk - nur wenn JEDES Wort von hier ist, antwortet Gemini.
+# "Hallo, finde Firmen in Wien" ist kein Smalltalk, "Hallo Jarvis, wie geht's" schon.
+SMALLTALK_WOERTER = {
+    "hallo", "hi", "hey", "servus", "grüß", "gruess", "gott", "moin", "guten", "gute",
+    "morgen", "tag", "abend", "nacht", "danke", "dankeschön", "vielen", "dank", "wie",
+    "geht", "gehts", "s", "es", "dir", "euch", "alles", "klar", "tschüss", "tschuess",
+    "ciao", "bis", "später", "dann", "wer", "bist", "du", "erzähl", "erzähle", "mir",
+    "einen", "witz", "super", "passt", "okay", "ok", "cool", "genau", "gut", "gemacht",
+    "jarvis", "davis", "und", "ja", "nein", "schön", "toll", "bitte", "was", "machst",
+    "na", "so", "lieber", "mein", "freund", "hab", "habe", "dich", "lieb",
+}
 # Wörter, die auf echte Denkarbeit hindeuten.
 DENKSTAEMME = (
     "plane", "planen", "analysier", "rechne", "berechne", "strategie",
@@ -55,15 +69,17 @@ def gehirn_waehlen(frage: str, gemini_da: bool = None) -> tuple:
         return "claude", "kein Gemini-Schlüssel"
     if not text:
         return "claude", "leere Frage"
-    if len(text.split()) > config.ROUTER_MAX_WOERTER:
-        return "claude", "lange Frage"
+    woerter = re.findall(r"[a-zäöüß]+", text)
+    if woerter and len(woerter) <= config.ROUTER_MAX_WOERTER \
+            and all(w in SMALLTALK_WOERTER for w in woerter):
+        return "gemini", "Smalltalk"
     for stamm in DENKSTAEMME:
         if stamm in text:
             return "claude", "Denkarbeit (%s)" % stamm.strip()
     for stamm in HANDLUNGSSTAEMME:
         if stamm in text:
             return "claude", "braucht Werkzeuge (%s)" % stamm.strip()
-    return "gemini", "kurze, einfache Frage"
+    return "claude", "im Zweifel Claude"
 
 
 # -- Gemini -----------------------------------------------------------------
@@ -144,9 +160,14 @@ def gemini_testen(schluessel: str) -> dict:
 
 # -- Gedankenlog ------------------------------------------------------------
 
-def claude_kosten(tokens_ein: int, tokens_aus: int) -> float:
-    """Geschätzte Kosten einer Claude-Anfrage in Euro."""
-    dollar = (tokens_ein * config.CLAUDE_PREIS_EIN
+def claude_kosten(tokens_ein: int, tokens_aus: int, gelesen: int = 0, geschrieben: int = 0) -> float:
+    """Geschätzte Kosten einer Claude-Anfrage in Euro.
+
+    ``gelesen`` und ``geschrieben`` sind Tokens aus und in den Zwischenspeicher:
+    gelesen kostet ein Zehntel, geschrieben ein Viertel mehr als normal.
+    """
+    eingang = tokens_ein + 0.1 * gelesen + 1.25 * geschrieben
+    dollar = (eingang * config.CLAUDE_PREIS_EIN
               + tokens_aus * config.CLAUDE_PREIS_AUS) / 1_000_000
     return round(dollar * config.DOLLAR_IN_EURO, 6)
 

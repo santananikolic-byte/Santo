@@ -312,10 +312,12 @@ class Werkzeuge:
                      {"monate": ganz}),
 
             werkzeug("leads_finden",
-                     "Sucht über den Such-Dienst Betriebe in einem Ort, die "
-                     "Reinigung brauchen könnten, und nimmt sie als neue "
-                     "Interessenten auf. Sie stehen auf Wert null, bis "
-                     "angerufen wurde.",
+                     "Findet neue Kunden: sucht Betriebe in einem Ort, die Reinigung "
+                     "brauchen könnten (Arztpraxen, Kanzleien, Steuerberater, "
+                     "Hausverwaltungen, Hotels, Autohäuser, Fitnessstudios, Büros - oder "
+                     "die genannte Branche), mit echter Adresse und Telefon von "
+                     "OpenStreetMap, und nimmt sie als neue Interessenten auf. Sie stehen "
+                     "auf Wert null, bis angerufen wurde.",
                      {"ort": text, "branche": text, "anzahl": ganz}, ["ort"]),
 
             # -- Privat --

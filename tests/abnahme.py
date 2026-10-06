@@ -468,6 +468,46 @@ def pruefung_leadfinder(agent):
     pruefen("Zweiter Lauf legt nichts doppelt an",
             zweiter.get("ok") and not zweiter["neu"] and len(zweiter["bekannt"]) == 2)
 
+    # Ohne Such-Dienst und ohne Schlüssel: die Karte (OpenStreetMap).
+    from modules import world as welt_modul
+    abfrage = welt_modul.overpass_abfrage(47.07, 15.44, welt_modul.OSM_BRANCHEN["steuer"], 2500, 40)
+    pruefen("Die Kartenabfrage sucht genau die gewünschte Branche im Umkreis",
+            '["office"="tax_advisor"]["name"](around:2500,47.07000,15.44000)' in abfrage
+            and abfrage.startswith("[out:json]") and abfrage.endswith("out center tags 40;"), abfrage[:55])
+    karte = {"elements": [
+        {"tags": {"name": "Steuerberatung Huber", "office": "tax_advisor", "addr:street": "Herrengasse",
+                  "addr:housenumber": "3", "addr:postcode": "8010", "addr:city": "Graz",
+                  "phone": "+43 316 123456", "website": "https://huber.at"}},
+        {"tags": {"name": "Steuerberatung Huber", "office": "tax_advisor"}},
+        {"tags": {"office": "tax_advisor"}},
+        {"center": {"lat": 1, "lon": 2}, "tags": {"name": "Ordination Dr. Lang", "amenity": "doctors"}}]}
+    gelesen = welt_modul.osm_betriebe_lesen(karte)
+    pruefen("Aus der Karte: Name, Branche, Adresse, Telefon - doppelte und namenlose fallen weg",
+            [b["firma"] for b in gelesen] == ["Steuerberatung Huber", "Ordination Dr. Lang"]
+            and gelesen[0]["adresse"] == "Herrengasse 3, 8010 Graz" and gelesen[0]["telefon"] == "+43 316 123456"
+            and gelesen[0]["branche"] == "Steuerberatung" and gelesen[1]["branche"] == "Arztpraxis", "")
+    welt = welt_modul.Welt.__new__(welt_modul.Welt)
+    welt.ort_finden = lambda ort: ({"name": "Graz", "breite": 47.07, "laenge": 15.44}, "")
+    abfragen = []
+    gefunden = welt.betriebe_suchen("Graz", "Steuerberater", 5,
+                                    holen=lambda q: (abfragen.append(q) or (karte, "")))
+    pruefen("Betriebe suchen klappt ohne Schlüssel, mit der Branche aus der Frage",
+            gefunden.get("ok") and gefunden["anzahl"] == 2 and "tax_advisor" in abfragen[0]
+            and "doctors" not in abfragen[0], "%d Betriebe" % gefunden.get("anzahl", 0))
+    class _WeltKarte(object):
+        @staticmethod
+        def betriebe_suchen(ort, branche="", anzahl=8):
+            return {"ok": True, "betriebe": gelesen}
+        @staticmethod
+        def recherche(frage):
+            raise AssertionError("Die Karte reicht - keine Websuche nötig")
+    aus_karte = akquise.leads_finden("Graz", welt=_WeltKarte(), agent=None)
+    eingetragen = agent.tools.memory._lesen("SELECT * FROM leads WHERE quelle LIKE 'Karte%'")
+    pruefen("Kunden finden: Betriebe von der Karte landen mit Wert null in der Pipeline",
+            aus_karte.get("ok") and len(aus_karte["neu"]) == 2 and len(eingetragen) == 2
+            and all(z["wert_monat"] == 0 and z["stufe"] == "neu" for z in eingetragen)
+            and any("huber.at" in (z["notiz"] or "") for z in eingetragen), aus_karte.get("text", "")[:55])
+
 
 def pruefung_team(agent):
     """Die Fachkräfte - vor allem, dass die Werkzeugtrennung wirklich greift."""
@@ -882,10 +922,16 @@ def pruefung_kalender():
 def pruefung_router(agent):
     abschnitt("Router und Gedankenlog")
     gewaehlt = lambda frage: gehirn_waehlen(frage, True)[0]  # noqa: E731
-    pruefen("Smalltalk und einfache Frage gehen an Gemini",
-            gewaehlt("Wie geht es dir?") == "gemini"
-            and gewaehlt("Was ist die Hauptstadt von Österreich?") == "gemini",
-            "zwei Fragen")
+    pruefen("Nur reiner Smalltalk geht an Gemini",
+            gewaehlt("Wie geht es dir?") == "gemini" and gewaehlt("Hallo Jarvis") == "gemini"
+            and gewaehlt("Danke, super gemacht") == "gemini",
+            "drei Sätze")
+    kluge = ["Programmier mir einen Chatbot", "Finde Firmen in Wien", "Hallo, finde Firmen in Graz",
+             "Was kostet 300 qm Büroreinigung", "Bau mir eine Webseite für meine Reinigung",
+             "Was ist die Hauptstadt von Österreich?"]
+    falsch = [f for f in kluge if gewaehlt(f) != "claude"]
+    pruefen("Alles, was Arbeit ist, beantwortet Claude mit Werkzeugen",
+            not falsch, falsch[0] if falsch else "%d Fragen" % len(kluge))
     pruefen("Handlung oder Daten gehen an Claude",
             all(gewaehlt(f) == "claude" for f in (
                 "Leg einen Termin für Freitag an", "Wie viel Umsatz hatte ich?",
@@ -898,8 +944,74 @@ def pruefung_router(agent):
     pruefen("Ohne Gemini-Schlüssel antwortet immer Claude",
             gehirn_waehlen("Wie geht es dir?", False)[0] == "claude", "")
 
+    pruefen("Kosten mit Zwischenspeicher: gelesen ein Zehntel, geschrieben ein Viertel mehr",
+            abs(claude_kosten(0, 0, 1_000_000, 0) - 0.1 * config.CLAUDE_PREIS_EIN * config.DOLLAR_IN_EURO) < 1e-6
+            and abs(claude_kosten(0, 0, 0, 1_000_000) - 1.25 * config.CLAUDE_PREIS_EIN * config.DOLLAR_IN_EURO) < 1e-6,
+            "")
+
+    # Die Anfrage an Claude Opus 5.5: Denktiefe, Ausweichmodell, Zwischenspeicher.
+    werkzeugliste = [{"name": "a", "input_schema": {}}, {"name": "b", "input_schema": {}}]
+    opus = agent_modul.anfrage_ergaenzen({"model": "claude-opus-5-5", "tools": werkzeugliste,
+                                          "messages": []})
+    haiku = agent_modul.anfrage_ergaenzen({"model": "claude-haiku-4-5", "messages": []})
+    pruefen("Opus 5.5: Denktiefe, Ausweichmodell und Zwischenspeicher sind gesetzt",
+            config.CLAUDE_MODEL == "claude-opus-5-5" and config.CLAUDE_MAX_TOKENS >= 16000
+            and opus["output_config"]["effort"] == config.CLAUDE_EFFORT and opus["fallbacks"] == "default"
+            and opus["cache_control"] == {"type": "ephemeral"}
+            and opus["tools"][-1]["cache_control"] == {"type": "ephemeral"}
+            and "cache_control" not in werkzeugliste[-1]
+            and "output_config" not in haiku and "fallbacks" not in haiku, "")
+    alt_verlauf = [{"role": "user", "content": "Frage"},
+                   {"role": "assistant", "content": [{"type": "thinking", "thinking": "", "signature": "x"},
+                                                     {"type": "text", "text": "Antwort"}]},
+                   {"role": "assistant", "content": [{"type": "thinking", "thinking": "", "signature": "y"}]}]
+    bereinigt = agent_modul.denkspuren_entfernen(alt_verlauf)
+    pruefen("Alte Denkblöcke gehen nicht in die nächste Frage mit (sonst lehnt die Schnittstelle ab)",
+            len(bereinigt) == 2 and bereinigt[1]["content"] == [{"type": "text", "text": "Antwort"}]
+            and alt_verlauf[1]["content"][0]["type"] == "thinking", "")
+    gewechselt = agent_modul.ausweichen_bereinigen([
+        {"type": "thinking", "thinking": ""}, {"type": "tool_use", "id": "1", "name": "x", "input": {}},
+        {"type": "text", "text": "Teil"}, {"type": "fallback", "from": {}, "to": {}},
+        {"type": "tool_use", "id": "2", "name": "y", "input": {}}])
+    pruefen("Nach einem Modellwechsel zählt nur, was das neue Modell will",
+            [b["type"] for b in gewechselt] == ["text", "tool_use"] and gewechselt[1]["id"] == "2", "")
+
+    # Eine echte Anfrage über die Leitung (nur abgefangen): Kopf und Körper stimmen.
+    gesendet = {}
+    class Antwort:
+        def __init__(self, daten): self.daten = daten
+        def read(self): return json.dumps(self.daten).encode("utf-8")
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+    def abfangen(anfrage, timeout=0):
+        gesendet["kopf"] = dict(anfrage.header_items())
+        gesendet["koerper"] = json.loads(anfrage.data.decode("utf-8"))
+        gesendet["timeout"] = timeout
+        return Antwort({"content": [{"type": "text", "text": "Das kann ich nicht."}],
+                        "stop_reason": "refusal", "usage": {"input_tokens": 5, "output_tokens": 1}})
+    echt = (agent_modul.urllib.request.urlopen, config.ANTHROPIC_API_KEY, agent.verlauf)
+    agent_modul.urllib.request.urlopen = abfangen
+    config.ANTHROPIC_API_KEY = "sk-test"
+    agent.verlauf = [{"role": "user", "content": "Vorher"},
+                     {"role": "assistant", "content": [{"type": "thinking", "thinking": "", "signature": "s"},
+                                                       {"type": "text", "text": "Ok"}]}]
+    try:
+        antwort = agent._denken("Schreib mir ein Angebot für die Praxis Weber", protokollieren=False)
+        verlauf_danach = list(agent.verlauf)
+    finally:
+        agent_modul.urllib.request.urlopen, config.ANTHROPIC_API_KEY, agent.verlauf = echt
+    kopf = {k.lower(): v for k, v in gesendet.get("kopf", {}).items()}
+    gesendete = gesendet.get("koerper", {}).get("messages", [])
+    pruefen("Über die Leitung: Ausweich-Beta im Kopf, keine alten Denkblöcke, lange Wartezeit",
+            kopf.get("anthropic-beta") == "server-side-fallback-2026-07-01"
+            and gesendet["koerper"]["model"] == "claude-opus-5-5"
+            and not any(isinstance(n["content"], list) and any(b.get("type") == "thinking" for b in n["content"])
+                        for n in gesendete)
+            and gesendet["timeout"] >= 300, kopf.get("anthropic-beta", "kein Beta-Kopf"))
+    pruefen("Lehnt Claude ab, sagt Jarvis das freundlich und merkt sich keine leere Antwort",
+            "nicht helfen" in antwort and verlauf_danach[-1]["role"] == "user", antwort[:55])
     pruefen("Kostenschätzung rechnet aus den Tokens",
-            abs(claude_kosten(1_000_000, 0) - 3.0 * config.DOLLAR_IN_EURO) < 1e-6
+            abs(claude_kosten(1_000_000, 0) - config.CLAUDE_PREIS_EIN * config.DOLLAR_IN_EURO) < 1e-6
             and claude_kosten(0, 0) == 0, "1 Mio Tokens rein")
 
     # Ein ganzer Durchlauf mit vorgetäuschten Gehirnen: kein Netz, kein Geld.
@@ -926,7 +1038,7 @@ def pruefung_router(agent):
 
         agent_modul.gemini_fragen = lambda *a, **k: {
             "ok": False, "limit": True, "fehler": "Gemini meldet Fehler 429."}
-        text = agent.denken("Und wie spät ist es?")
+        text = agent.denken("Und wie geht es dir?")
         pruefen("Gemini-Limit: Claude springt ein",
                 text == "Antwort von Claude."
                 and agent.gedankenlog.zeilen()[-1]["ausgewichen"] is True, text)

@@ -26,6 +26,70 @@ from modules.tools import Werkzeuge
 
 API_URL = "https://api.anthropic.com/v1/messages"
 API_VERSION = "2023-06-01"
+# Lehnt das Modell eine Frage aus Sicherheitsgründen ab, springt ein anderes Claude-Modell
+# ein (serverseitig, "default" wählt passend zum Grund). Nur diese Modelle kennen das.
+AUSWEICH_BETA = "server-side-fallback-2026-07-01"
+AUSWEICH_MODELLE = ("claude-opus-5-5", "claude-opus-5", "claude-fable-5-1", "claude-fable-5",
+                    "claude-sonnet-5-5")
+# Ältere kleine Modelle kennen keine Denktiefe.
+OHNE_EFFORT = ("claude-haiku", "claude-sonnet-4-5", "claude-3")
+
+
+def anfrage_ergaenzen(koerper: dict, effort: str = "") -> dict:
+    """Ergänzt eine Anfrage um Denktiefe, Ausweichmodell und Zwischenspeicher.
+
+    Der Zwischenspeicher (Prompt-Caching) spart bei jeder Werkzeugrunde den
+    größten Teil der Eingabekosten: Werkzeugliste und bisheriges Gespräch
+    werden nur einmal voll bezahlt.
+    """
+    modell = str(koerper.get("model") or "")
+    effort = effort or config.CLAUDE_EFFORT
+    if effort and not modell.startswith(OHNE_EFFORT):
+        koerper.setdefault("output_config", {})["effort"] = effort
+    if modell in AUSWEICH_MODELLE:
+        koerper["fallbacks"] = "default"
+    koerper.setdefault("cache_control", {"type": "ephemeral"})
+    werkzeuge = koerper.get("tools")
+    if werkzeuge:
+        # Die Werkzeugliste ändert sich nie - ein eigener Haltepunkt hält sie über Fragen hinweg.
+        koerper["tools"] = list(werkzeuge[:-1]) + [dict(werkzeuge[-1], cache_control={"type": "ephemeral"})]
+    return koerper
+
+
+def ausweichen_bereinigen(inhalt: list) -> list:
+    """Nach einem Wechsel des Modells mitten in der Antwort: was davor lag, geht nicht zurück.
+
+    Denkblöcke und Werkzeugaufrufe des ablehnenden Modells vor dem letzten
+    Wechselzeichen bleiben weg; Text und alles danach bleiben.
+    """
+    inhalt = list(inhalt or [])
+    marken = [i for i, b in enumerate(inhalt) if isinstance(b, dict) and b.get("type") == "fallback"]
+    if not marken:
+        return inhalt
+    grenze = marken[-1]
+    return [b for i, b in enumerate(inhalt)
+            if i > grenze or (b.get("type") not in ("thinking", "redacted_thinking", "tool_use", "fallback"))]
+
+
+def denkspuren_entfernen(verlauf: list) -> list:
+    """Entfernt Denkblöcke aus früheren Runden.
+
+    Denkblöcke gehören zu genau dem Gespräch, in dem sie entstanden. Weil sich
+    der Systemprompt mit jeder Frage ändert (Erinnerungen) und alte Runden
+    vorn wegfallen, würde die Schnittstelle alte Denkblöcke ablehnen. Text,
+    Werkzeugaufrufe und Ergebnisse bleiben.
+    """
+    neu = []
+    for nachricht in verlauf:
+        inhalt = nachricht.get("content")
+        if nachricht.get("role") == "assistant" and isinstance(inhalt, list):
+            inhalt = [b for b in inhalt if not (isinstance(b, dict) and b.get("type") in
+                                                 ("thinking", "redacted_thinking", "fallback"))]
+            if not inhalt:
+                continue
+            nachricht = dict(nachricht, content=inhalt)
+        neu.append(nachricht)
+    return neu
 MAX_RUNDEN = 8
 MAX_VERLAUF = 24
 
@@ -152,7 +216,7 @@ class JarvisAgent:
 
     # -- Schnittstelle ------------------------------------------------------
 
-    def _anfrage(self, koerper: dict, timeout: int = 120) -> dict:
+    def _anfrage(self, koerper: dict, timeout: int = 300) -> dict:
         """Schickt eine Anfrage an die Claude-Schnittstelle.
 
         Fehler kommen auf Deutsch zurück und benennen den nächsten Schritt.
@@ -162,11 +226,14 @@ class JarvisAgent:
                     "fehler": "Es ist kein Anthropic-Schlüssel hinterlegt. Starte die "
                               "Einrichtung mit: python3 jarvis.py einrichten"}
         daten = json.dumps(koerper).encode("utf-8")
-        anfrage = urllib.request.Request(API_URL, data=daten, method="POST", headers={
+        kopf = {
             "x-api-key": config.ANTHROPIC_API_KEY,
             "anthropic-version": API_VERSION,
             "content-type": "application/json",
-        })
+        }
+        if koerper.get("fallbacks"):
+            kopf["anthropic-beta"] = AUSWEICH_BETA
+        anfrage = urllib.request.Request(API_URL, data=daten, method="POST", headers=kopf)
         for versuch in range(3):
             try:
                 with urllib.request.urlopen(anfrage, timeout=timeout) as antwort:
@@ -219,14 +286,14 @@ class JarvisAgent:
         ]
 
     def text_anfrage(self, auftrag: str, bild_base64: str = "",
-                     bild_typ: str = "image/jpeg", max_tokens: int = 1200) -> dict:
+                     bild_typ: str = "image/jpeg", max_tokens: int = 8000) -> dict:
         """Eine einzelne Anfrage ohne Werkzeuge - gibt reinen Text zurück."""
-        antwort = self._anfrage({
+        antwort = self._anfrage(anfrage_ergaenzen({
             "model": config.CLAUDE_MODEL,
-            "max_tokens": max_tokens,
+            "max_tokens": max(int(max_tokens or 0), 4000),
             "messages": [{"role": "user",
                           "content": self._inhalt_bauen(auftrag, bild_base64, bild_typ)}],
-        })
+        }, effort="medium"))
         if not antwort.get("ok"):
             return antwort
         teile = [block.get("text", "") for block in antwort["daten"].get("content", [])
@@ -234,7 +301,7 @@ class JarvisAgent:
         return {"ok": True, "text": "\n".join(teile).strip()}
 
     def json_anfrage(self, auftrag: str, bild_base64: str = "",
-                     bild_typ: str = "image/jpeg", max_tokens: int = 2000) -> dict:
+                     bild_typ: str = "image/jpeg", max_tokens: int = 8000) -> dict:
         """Eine Anfrage, deren Antwort als JSON erwartet wird."""
         antwort = self.text_anfrage(auftrag, bild_base64, bild_typ, max_tokens)
         if not antwort.get("ok"):
@@ -316,6 +383,7 @@ class JarvisAgent:
             self.memory.verlauf_anhaengen("user", eingabe)
         self.verlauf.append({"role": "user", "content": eingabe})
         self._verlauf_kuerzen()
+        self.verlauf = denkspuren_entfernen(self.verlauf)
 
         systemtext = self.systemprompt(eingabe)
         katalog = self.tools.katalog()
@@ -348,22 +416,22 @@ class JarvisAgent:
             return self.letzter_fehler
 
         beginn = time.time()
-        tokens_ein = tokens_aus = 0
+        tokens_ein = tokens_aus = gelesen = geschrieben = 0
 
         def _protokoll():
             self.letztes_gehirn = "claude"
             self.gedankenlog.eintragen(
                 eingabe, "claude", grund, time.time() - beginn, tokens_ein,
-                tokens_aus, claude_kosten(tokens_ein, tokens_aus), ausgewichen)
+                tokens_aus, claude_kosten(tokens_ein, tokens_aus, gelesen, geschrieben), ausgewichen)
 
         for runde in range(MAX_RUNDEN):
-            antwort = self._anfrage({
+            antwort = self._anfrage(anfrage_ergaenzen({
                 "model": config.CLAUDE_MODEL,
                 "max_tokens": config.CLAUDE_MAX_TOKENS,
                 "system": systemtext,
                 "tools": katalog,
                 "messages": self.verlauf,
-            })
+            }))
             if not antwort.get("ok"):
                 self.letzter_fehler = antwort.get("fehler", "")
                 _protokoll()
@@ -373,7 +441,13 @@ class JarvisAgent:
             nutzung = nachricht.get("usage") or {}
             tokens_ein += int(nutzung.get("input_tokens", 0) or 0)
             tokens_aus += int(nutzung.get("output_tokens", 0) or 0)
-            inhalt = nachricht.get("content", [])
+            gelesen += int(nutzung.get("cache_read_input_tokens", 0) or 0)
+            geschrieben += int(nutzung.get("cache_creation_input_tokens", 0) or 0)
+            if nachricht.get("stop_reason") == "refusal":
+                _protokoll()
+                return ("Dabei kann ich nicht helfen. Wenn du es anders meinst, sag es "
+                        "mir mit anderen Worten.")
+            inhalt = ausweichen_bereinigen(nachricht.get("content", []))
             self.verlauf.append({"role": "assistant", "content": inhalt})
 
             werkzeugaufrufe = [b for b in inhalt if b.get("type") == "tool_use"]
@@ -400,7 +474,6 @@ class JarvisAgent:
                                    "content": text,
                                    "is_error": not bool(ergebnis.get("ok"))})
             self.verlauf.append({"role": "user", "content": ergebnisse})
-            self._verlauf_kuerzen()
 
         _protokoll()
         return ("Ich habe es %d Mal versucht und komme nicht weiter. Sag mir bitte "
@@ -442,21 +515,21 @@ class JarvisAgent:
 
         nachrichten = [{"role": "user", "content": auftrag}]
         beginn = time.time()
-        tokens_ein = tokens_aus = 0
+        tokens_ein = tokens_aus = gelesen = geschrieben = 0
 
         def protokoll():
             self.gedankenlog.eintragen(
                 auftrag, "claude", grund, time.time() - beginn, tokens_ein, tokens_aus,
-                claude_kosten(tokens_ein, tokens_aus))
+                claude_kosten(tokens_ein, tokens_aus, gelesen, geschrieben))
 
         for _ in range(max(1, int(max_runden))):
-            antwort = self._anfrage({
+            antwort = self._anfrage(anfrage_ergaenzen({
                 "model": config.CLAUDE_MODEL,
                 "max_tokens": config.CLAUDE_MAX_TOKENS,
                 "system": systemtext,
                 "tools": katalog,
                 "messages": nachrichten,
-            })
+            }))
             if not antwort.get("ok"):
                 protokoll()
                 return antwort.get("fehler", "Der Auftrag ist fehlgeschlagen.")
@@ -464,7 +537,12 @@ class JarvisAgent:
             nutzung = antwort["daten"].get("usage") or {}
             tokens_ein += int(nutzung.get("input_tokens", 0) or 0)
             tokens_aus += int(nutzung.get("output_tokens", 0) or 0)
-            inhalt = antwort["daten"].get("content", [])
+            gelesen += int(nutzung.get("cache_read_input_tokens", 0) or 0)
+            geschrieben += int(nutzung.get("cache_creation_input_tokens", 0) or 0)
+            if antwort["daten"].get("stop_reason") == "refusal":
+                protokoll()
+                return "Diesen Auftrag lehnt Claude ab. Formuliere ihn bitte anders."
+            inhalt = ausweichen_bereinigen(antwort["daten"].get("content", []))
             nachrichten.append({"role": "assistant", "content": inhalt})
             aufrufe = [b for b in inhalt if b.get("type") == "tool_use"]
             if not aufrufe:

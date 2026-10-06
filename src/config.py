@@ -100,8 +100,12 @@ env_neu_laden()
 
 # Claude
 ANTHROPIC_API_KEY = _text("ANTHROPIC_API_KEY")
-CLAUDE_MODEL = _text("CLAUDE_MODEL", "claude-sonnet-4-6")
-CLAUDE_MAX_TOKENS = _ganzzahl("CLAUDE_MAX_TOKENS", 2000)
+# Das stärkste allgemeine Modell. Günstiger: CLAUDE_MODEL=claude-sonnet-5-5 (halber Preis).
+CLAUDE_MODEL = _text("CLAUDE_MODEL", "claude-opus-5-5")
+# Das Modell denkt immer mit - das Denken zählt zu den Tokens. 2000 schnitten Antworten ab.
+CLAUDE_MAX_TOKENS = _ganzzahl("CLAUDE_MAX_TOKENS", 16000)
+# Wie gründlich es denkt: low, medium, high, xhigh, max. "high" für Arbeit mit Werkzeugen.
+CLAUDE_EFFORT = _text("CLAUDE_EFFORT", "high")
 
 # Gemini: das schnelle, billige Gehirn für Smalltalk und einfache Fragen.
 # Ohne Schlüssel antwortet immer Claude. Das Modell steht hier, damit es sich
@@ -110,12 +114,14 @@ GEMINI_API_KEY = _text("GEMINI_API_KEY")
 GEMINI_MODELL = _text("GEMINI_MODELL", "gemini-flash-latest")
 GEMINI_MAX_TOKENS = _ganzzahl("GEMINI_MAX_TOKENS", 600)
 # Wie lang eine Frage höchstens sein darf, um noch an Gemini zu gehen.
-ROUTER_MAX_WOERTER = _ganzzahl("ROUTER_MAX_WOERTER", 25)
+# Gemini bekommt nur kurzen Smalltalk bis zu so vielen Wörtern - alles andere Claude.
+ROUTER_MAX_WOERTER = _ganzzahl("ROUTER_MAX_WOERTER", 8)
 
 # Kosten: Preise je eine Million Tokens in US-Dollar. Das sind Schätzwerte
 # für das Gedankenlog - maßgeblich ist immer die Rechnung der Anbieter.
-CLAUDE_PREIS_EIN = _zahl("CLAUDE_PREIS_EIN", 3.0)
-CLAUDE_PREIS_AUS = _zahl("CLAUDE_PREIS_AUS", 15.0)
+# Dollar je Million Tokens (Claude Opus 5.5). Gelesen aus dem Zwischenspeicher: ein Zehntel.
+CLAUDE_PREIS_EIN = _zahl("CLAUDE_PREIS_EIN", 4.0)
+CLAUDE_PREIS_AUS = _zahl("CLAUDE_PREIS_AUS", 20.0)
 DOLLAR_IN_EURO = _zahl("DOLLAR_IN_EURO", 0.92)
 # Ist das Monatslimit für Claude erreicht, antwortet Claude nicht mehr, bis
 # der Monat wechselt oder das Limit angehoben wird. 0 schaltet es ab.

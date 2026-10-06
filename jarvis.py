@@ -222,8 +222,12 @@ env_neu_laden()
 
 # Claude
 ANTHROPIC_API_KEY = _text("ANTHROPIC_API_KEY")
-CLAUDE_MODEL = _text("CLAUDE_MODEL", "claude-sonnet-4-6")
-CLAUDE_MAX_TOKENS = _ganzzahl("CLAUDE_MAX_TOKENS", 2000)
+# Das stärkste allgemeine Modell. Günstiger: CLAUDE_MODEL=claude-sonnet-5-5 (halber Preis).
+CLAUDE_MODEL = _text("CLAUDE_MODEL", "claude-opus-5-5")
+# Das Modell denkt immer mit - das Denken zählt zu den Tokens. 2000 schnitten Antworten ab.
+CLAUDE_MAX_TOKENS = _ganzzahl("CLAUDE_MAX_TOKENS", 16000)
+# Wie gründlich es denkt: low, medium, high, xhigh, max. "high" für Arbeit mit Werkzeugen.
+CLAUDE_EFFORT = _text("CLAUDE_EFFORT", "high")
 
 # Gemini: das schnelle, billige Gehirn für Smalltalk und einfache Fragen.
 # Ohne Schlüssel antwortet immer Claude. Das Modell steht hier, damit es sich
@@ -232,12 +236,14 @@ GEMINI_API_KEY = _text("GEMINI_API_KEY")
 GEMINI_MODELL = _text("GEMINI_MODELL", "gemini-flash-latest")
 GEMINI_MAX_TOKENS = _ganzzahl("GEMINI_MAX_TOKENS", 600)
 # Wie lang eine Frage höchstens sein darf, um noch an Gemini zu gehen.
-ROUTER_MAX_WOERTER = _ganzzahl("ROUTER_MAX_WOERTER", 25)
+# Gemini bekommt nur kurzen Smalltalk bis zu so vielen Wörtern - alles andere Claude.
+ROUTER_MAX_WOERTER = _ganzzahl("ROUTER_MAX_WOERTER", 8)
 
 # Kosten: Preise je eine Million Tokens in US-Dollar. Das sind Schätzwerte
 # für das Gedankenlog - maßgeblich ist immer die Rechnung der Anbieter.
-CLAUDE_PREIS_EIN = _zahl("CLAUDE_PREIS_EIN", 3.0)
-CLAUDE_PREIS_AUS = _zahl("CLAUDE_PREIS_AUS", 15.0)
+# Dollar je Million Tokens (Claude Opus 5.5). Gelesen aus dem Zwischenspeicher: ein Zehntel.
+CLAUDE_PREIS_EIN = _zahl("CLAUDE_PREIS_EIN", 4.0)
+CLAUDE_PREIS_AUS = _zahl("CLAUDE_PREIS_AUS", 20.0)
 DOLLAR_IN_EURO = _zahl("DOLLAR_IN_EURO", 0.92)
 # Ist das Monatslimit für Claude erreicht, antwortet Claude nicht mehr, bis
 # der Monat wechselt oder das Limit angehoben wird. 0 schaltet es ab.
@@ -761,9 +767,11 @@ class Memory:
 # gründlicher. Der Router entscheidet pro Frage mit festen, nachvollziehbaren
 # Regeln - kein Modell raten lassen, was ein Modell kosten darf.
 # 
-# **Im Zweifel Claude.** Gemini bekommt hier keine Werkzeuge. Eine Frage, hinter
-# der eine Handlung oder ein Datenzugriff stecken könnte, geht deshalb immer an
-# Claude. Gemini bekommt nur kurzes Gespräch und einfache Wissensfragen.
+# **Im Zweifel Claude.** Gemini bekommt hier keine Werkzeuge und kein Gedächtnis
+# für den Betrieb. Deshalb geht nur reiner Smalltalk an Gemini ("Hallo", "Danke",
+# "Wie geht's?"). Alles andere - Angebote, Kunden, Programmieren, Fragen jeder Art -
+# beantwortet Claude, der etwas tun kann. Vorher landete "Programmier mir einen
+# Chatbot" bei Gemini, weil kein Stichwort passte, und die Antwort blieb leer.
 # 
 # Jede Runde landet im **Gedankenlog** (``logs/gedankenlog.jsonl``): Frage,
 # Gehirn, Dauer, Tokens, geschätzte Kosten. Daraus rechnet sich der
@@ -789,6 +797,17 @@ HANDLUNGSSTAEMME = (
     "bild", "kamera", "datei", "ordner", "dashboard", "briefing", "heute",
     "morgen", "woche", "offen", "mitarbeiter", "team",
 )
+# Smalltalk - nur wenn JEDES Wort von hier ist, antwortet Gemini.
+# "Hallo, finde Firmen in Wien" ist kein Smalltalk, "Hallo Jarvis, wie geht's" schon.
+SMALLTALK_WOERTER = {
+    "hallo", "hi", "hey", "servus", "grüß", "gruess", "gott", "moin", "guten", "gute",
+    "morgen", "tag", "abend", "nacht", "danke", "dankeschön", "vielen", "dank", "wie",
+    "geht", "gehts", "s", "es", "dir", "euch", "alles", "klar", "tschüss", "tschuess",
+    "ciao", "bis", "später", "dann", "wer", "bist", "du", "erzähl", "erzähle", "mir",
+    "einen", "witz", "super", "passt", "okay", "ok", "cool", "genau", "gut", "gemacht",
+    "jarvis", "davis", "und", "ja", "nein", "schön", "toll", "bitte", "was", "machst",
+    "na", "so", "lieber", "mein", "freund", "hab", "habe", "dich", "lieb",
+}
 # Wörter, die auf echte Denkarbeit hindeuten.
 DENKSTAEMME = (
     "plane", "planen", "analysier", "rechne", "berechne", "strategie",
@@ -806,15 +825,17 @@ def gehirn_waehlen(frage: str, gemini_da: bool = None) -> tuple:
         return "claude", "kein Gemini-Schlüssel"
     if not text:
         return "claude", "leere Frage"
-    if len(text.split()) > ROUTER_MAX_WOERTER:
-        return "claude", "lange Frage"
+    woerter = re.findall(r"[a-zäöüß]+", text)
+    if woerter and len(woerter) <= ROUTER_MAX_WOERTER \
+            and all(w in SMALLTALK_WOERTER for w in woerter):
+        return "gemini", "Smalltalk"
     for stamm in DENKSTAEMME:
         if stamm in text:
             return "claude", "Denkarbeit (%s)" % stamm.strip()
     for stamm in HANDLUNGSSTAEMME:
         if stamm in text:
             return "claude", "braucht Werkzeuge (%s)" % stamm.strip()
-    return "gemini", "kurze, einfache Frage"
+    return "claude", "im Zweifel Claude"
 
 
 # -- Gemini -----------------------------------------------------------------
@@ -895,9 +916,14 @@ def gemini_testen(schluessel: str) -> dict:
 
 # -- Gedankenlog ------------------------------------------------------------
 
-def claude_kosten(tokens_ein: int, tokens_aus: int) -> float:
-    """Geschätzte Kosten einer Claude-Anfrage in Euro."""
-    dollar = (tokens_ein * CLAUDE_PREIS_EIN
+def claude_kosten(tokens_ein: int, tokens_aus: int, gelesen: int = 0, geschrieben: int = 0) -> float:
+    """Geschätzte Kosten einer Claude-Anfrage in Euro.
+
+    ``gelesen`` und ``geschrieben`` sind Tokens aus und in den Zwischenspeicher:
+    gelesen kostet ein Zehntel, geschrieben ein Viertel mehr als normal.
+    """
+    eingang = tokens_ein + 0.1 * gelesen + 1.25 * geschrieben
+    dollar = (eingang * CLAUDE_PREIS_EIN
               + tokens_aus * CLAUDE_PREIS_AUS) / 1_000_000
     return round(dollar * DOLLAR_IN_EURO, 6)
 
@@ -4552,6 +4578,13 @@ class Akquise:
             return {"ok": False, "fehler": "In welchem Ort soll ich suchen?"}
         if welt is None:
             return {"ok": False, "fehler": "Die Suche ist nicht verfügbar."}
+
+        # Zuerst die Karte: echte Betriebe mit Adresse, ohne Schlüssel und ohne Raten.
+        if hasattr(welt, "betriebe_suchen"):
+            karte = welt.betriebe_suchen(ort, branche, anzahl)
+            if karte.get("ok") and karte.get("betriebe"):
+                return self._betriebe_aufnehmen(karte["betriebe"], ort, "Karte (OpenStreetMap)")
+
         if agent is None or not getattr(agent, "einsatzbereit", lambda: False)():
             return {"ok": False,
                     "fehler": "Ohne Anthropic-Schlüssel kann ich die Treffer nicht "
@@ -4585,16 +4618,22 @@ class Akquise:
                               % antwort.get("fehler", "")}
 
         betriebe = (antwort["daten"] or {}).get("betriebe") or []
+        return self._betriebe_aufnehmen(betriebe[:int(anzahl or 8)], ort, "Recherche")
+
+    def _betriebe_aufnehmen(self, betriebe: list, ort: str, quelle: str) -> dict:
+        """Nimmt gefundene Betriebe als Interessenten auf - Wert null, nächster Schritt: anrufen."""
         neu, bekannt = [], []
-        for eintrag in betriebe[:int(anzahl or 8)]:
+        for eintrag in betriebe:
             firma = str(eintrag.get("firma") or "").strip()
             if not firma:
                 continue
             ergebnis = self.lead_anlegen(
                 firma, telefon=str(eintrag.get("telefon") or ""),
                 adresse=str(eintrag.get("adresse") or ""),
-                quelle="Recherche %s" % ort,
-                notiz=str(eintrag.get("branche") or ""),
+                quelle="%s %s" % (quelle, ort),
+                notiz=" · ".join(x for x in (str(eintrag.get("branche") or ""),
+                                              str(eintrag.get("web") or ""),
+                                              str(eintrag.get("mail") or "")) if x),
                 naechster_schritt="anrufen und fragen, wer die Reinigung macht")
             if ergebnis.get("ok"):
                 neu.append(firma)
@@ -5859,6 +5898,84 @@ class MCPClient:
 
 
 GEO_URL = "https://geocoding-api.open-meteo.com/v1/search"
+# OpenStreetMap über Overpass: frei, ohne Schlüssel. Zwei Server, falls einer voll ist.
+OVERPASS_URLS = ("https://overpass-api.de/api/interpreter",
+                 "https://overpass.kumi.systems/api/interpreter")
+
+# Welche Betriebe eine Gebäudereinigung brauchen - als OpenStreetMap-Merkmale.
+OSM_BRANCHEN = {
+    "arzt": [("amenity", "doctors"), ("amenity", "dentist"), ("amenity", "clinic"), ("healthcare", "")],
+    "praxis": [("amenity", "doctors"), ("amenity", "dentist"), ("healthcare", "")],
+    "zahnarzt": [("amenity", "dentist")],
+    "physio": [("healthcare", "physiotherapist")],
+    "steuer": [("office", "tax_advisor"), ("office", "accountant")],
+    "kanzlei": [("office", "lawyer"), ("office", "notary")],
+    "anwalt": [("office", "lawyer")],
+    "notar": [("office", "notary")],
+    "büro": [("office", "")],
+    "buero": [("office", "")],
+    "firma": [("office", "company")],
+    "hausverwaltung": [("office", "property_management"), ("office", "estate_agent")],
+    "immobil": [("office", "estate_agent"), ("office", "property_management")],
+    "versicherung": [("office", "insurance")],
+    "bank": [("amenity", "bank")],
+    "hotel": [("tourism", "hotel"), ("tourism", "guest_house")],
+    "pension": [("tourism", "guest_house")],
+    "restaurant": [("amenity", "restaurant")],
+    "autohaus": [("shop", "car")],
+    "fitness": [("leisure", "fitness_centre")],
+    "kindergarten": [("amenity", "kindergarten")],
+    "schule": [("amenity", "school")],
+    "supermarkt": [("shop", "supermarket")],
+    "geschäft": [("shop", "")],
+}
+# Ohne Angabe: die Betriebe, die am häufigsten eine Reinigung vergeben.
+OSM_STANDARD = ["arzt", "steuer", "kanzlei", "hausverwaltung", "versicherung", "autohaus",
+                "fitness", "hotel", "firma"]
+OSM_NAMEN = {"doctors": "Arztpraxis", "dentist": "Zahnarzt", "clinic": "Klinik",
+             "tax_advisor": "Steuerberatung", "accountant": "Buchhaltung", "lawyer": "Kanzlei",
+             "notary": "Notariat", "property_management": "Hausverwaltung",
+             "estate_agent": "Immobilienbüro", "insurance": "Versicherung", "company": "Firma",
+             "hotel": "Hotel", "guest_house": "Pension", "car": "Autohaus",
+             "fitness_centre": "Fitnessstudio", "kindergarten": "Kindergarten", "school": "Schule",
+             "supermarket": "Supermarkt", "bank": "Bank", "restaurant": "Restaurant",
+             "physiotherapist": "Physiotherapie"}
+
+
+def overpass_abfrage(breite: float, laenge: float, merkmale: list, radius: int = 3000,
+                     anzahl: int = 60) -> str:
+    """Baut die Overpass-Abfrage: alle Betriebe mit diesen Merkmalen im Umkreis."""
+    teile = []
+    for schluessel, wert in merkmale:
+        filter_ = '["%s"="%s"]' % (schluessel, wert) if wert else '["%s"]' % schluessel
+        teile.append('nwr%s["name"](around:%d,%.5f,%.5f);' % (filter_, int(radius), breite, laenge))
+    return "[out:json][timeout:25];(%s);out center tags %d;" % ("".join(teile), int(anzahl))
+
+
+def osm_betriebe_lesen(daten: dict) -> list:
+    """Macht aus der Overpass-Antwort eine Liste von Betrieben mit Adresse und Telefon."""
+    betriebe, gesehen = [], set()
+    for element in (daten or {}).get("elements", []):
+        tags = element.get("tags") or {}
+        name = (tags.get("name") or "").strip()
+        if not name or name.lower() in gesehen:
+            continue
+        gesehen.add(name.lower())
+        art = ""
+        for schluessel in ("amenity", "office", "healthcare", "tourism", "shop", "leisure"):
+            if tags.get(schluessel):
+                art = OSM_NAMEN.get(tags[schluessel], tags[schluessel].replace("_", " "))
+                break
+        strasse = " ".join(x for x in (tags.get("addr:street", ""), tags.get("addr:housenumber", "")) if x)
+        ort = " ".join(x for x in (tags.get("addr:postcode", ""), tags.get("addr:city", "")) if x)
+        betriebe.append({
+            "firma": name[:120], "branche": art,
+            "adresse": ", ".join(x for x in (strasse, ort) if x),
+            "telefon": (tags.get("phone") or tags.get("contact:phone") or "").strip()[:40],
+            "web": (tags.get("website") or tags.get("contact:website") or "").strip()[:200],
+            "mail": (tags.get("email") or tags.get("contact:email") or "").strip()[:120],
+        })
+    return betriebe
 WETTER_URL = "https://api.open-meteo.com/v1/forecast"
 
 # WMO-Wettercodes in verständliches Deutsch.
@@ -5971,6 +6088,50 @@ class Welt:
 
         return {"ok": True, "ort": koordinaten["name"], "aktuell": jetzt,
                 "tage": tage, "text": satz}
+
+    # -- Betriebe finden (OpenStreetMap) ----------------------------------
+
+    def _overpass_holen(self, abfrage: str):
+        letzter = "unbekannt"
+        for url in OVERPASS_URLS:
+            try:
+                anfrage = urllib.request.Request(
+                    url, data=urllib.parse.urlencode({"data": abfrage}).encode("utf-8"),
+                    method="POST", headers={"User-Agent": "Jarvis/1.0 (Gebaeudereinigung)"})
+                with urllib.request.urlopen(anfrage, timeout=40) as antwort:
+                    return json.loads(antwort.read().decode("utf-8")), ""
+            except (urllib.error.URLError, OSError, ValueError) as fehler:
+                letzter = str(fehler)
+        return None, "Die Karte (OpenStreetMap) ist gerade nicht erreichbar: %s" % letzter
+
+    def betriebe_suchen(self, ort: str, branche: str = "", anzahl: int = 15,
+                        radius: int = 3000, holen=None) -> dict:
+        """Sucht Betriebe in einem Ort auf OpenStreetMap - ohne Schlüssel, mit echter Adresse.
+
+        Gefunden wird, was dort eingetragen ist: Name, Art, Adresse und oft Telefon
+        und Webseite. Nichts davon wird erfunden.
+        """
+        ort = (ort or "").strip()
+        if not ort:
+            return {"ok": False, "fehler": "In welchem Ort soll ich suchen?"}
+        punkt, fehler = self.ort_finden(ort)
+        if punkt is None:
+            return {"ok": False, "fehler": fehler}
+        woerter = (branche or "").lower()
+        schluessel = [k for k in OSM_BRANCHEN if k in woerter] or OSM_STANDARD
+        merkmale = []
+        for k in schluessel:
+            for m in OSM_BRANCHEN[k]:
+                if m not in merkmale:
+                    merkmale.append(m)
+        abfrage = overpass_abfrage(punkt["breite"], punkt["laenge"], merkmale, radius,
+                                   max(20, int(anzahl or 15) * 4))
+        daten, fehler = (holen or self._overpass_holen)(abfrage)
+        if daten is None:
+            return {"ok": False, "fehler": fehler}
+        betriebe = osm_betriebe_lesen(daten)[:max(1, int(anzahl or 15))]
+        return {"ok": True, "ort": punkt.get("name") or ort, "anzahl": len(betriebe),
+                "betriebe": betriebe, "quelle": "OpenStreetMap"}
 
     # -- Recherche ----------------------------------------------------------
 
@@ -12985,10 +13146,11 @@ class Einrichtung:
 
     def schluessel_testen(self, schluessel: str) -> dict:
         """Prüft einen Schlüssel mit einem echten, winzigen Aufruf."""
-        koerper = json.dumps({
-            "model": CLAUDE_MODEL, "max_tokens": 8,
-            "messages": [{"role": "user", "content": "Sag nur: ok"}],
-        }).encode("utf-8")
+        probe = {"model": CLAUDE_MODEL, "max_tokens": 64,
+                 "messages": [{"role": "user", "content": "Sag nur: ok"}]}
+        if not CLAUDE_MODEL.startswith(("claude-haiku", "claude-sonnet-4-5", "claude-3")):
+            probe["output_config"] = {"effort": "low"}  # schnell: nur prüfen, ob der Schlüssel geht
+        koerper = json.dumps(probe).encode("utf-8")
         anfrage = urllib.request.Request(
             "https://api.anthropic.com/v1/messages", data=koerper, method="POST",
             headers={"x-api-key": schluessel, "anthropic-version": "2023-06-01",
@@ -13948,10 +14110,12 @@ class Werkzeuge:
                      {"monate": ganz}),
 
             werkzeug("leads_finden",
-                     "Sucht über den Such-Dienst Betriebe in einem Ort, die "
-                     "Reinigung brauchen könnten, und nimmt sie als neue "
-                     "Interessenten auf. Sie stehen auf Wert null, bis "
-                     "angerufen wurde.",
+                     "Findet neue Kunden: sucht Betriebe in einem Ort, die Reinigung "
+                     "brauchen könnten (Arztpraxen, Kanzleien, Steuerberater, "
+                     "Hausverwaltungen, Hotels, Autohäuser, Fitnessstudios, Büros - oder "
+                     "die genannte Branche), mit echter Adresse und Telefon von "
+                     "OpenStreetMap, und nimmt sie als neue Interessenten auf. Sie stehen "
+                     "auf Wert null, bis angerufen wurde.",
                      {"ort": text, "branche": text, "anzahl": ganz}, ["ort"]),
 
             # -- Privat --
@@ -14671,6 +14835,70 @@ class Werkzeuge:
 
 API_URL = "https://api.anthropic.com/v1/messages"
 API_VERSION = "2023-06-01"
+# Lehnt das Modell eine Frage aus Sicherheitsgründen ab, springt ein anderes Claude-Modell
+# ein (serverseitig, "default" wählt passend zum Grund). Nur diese Modelle kennen das.
+AUSWEICH_BETA = "server-side-fallback-2026-07-01"
+AUSWEICH_MODELLE = ("claude-opus-5-5", "claude-opus-5", "claude-fable-5-1", "claude-fable-5",
+                    "claude-sonnet-5-5")
+# Ältere kleine Modelle kennen keine Denktiefe.
+OHNE_EFFORT = ("claude-haiku", "claude-sonnet-4-5", "claude-3")
+
+
+def anfrage_ergaenzen(koerper: dict, effort: str = "") -> dict:
+    """Ergänzt eine Anfrage um Denktiefe, Ausweichmodell und Zwischenspeicher.
+
+    Der Zwischenspeicher (Prompt-Caching) spart bei jeder Werkzeugrunde den
+    größten Teil der Eingabekosten: Werkzeugliste und bisheriges Gespräch
+    werden nur einmal voll bezahlt.
+    """
+    modell = str(koerper.get("model") or "")
+    effort = effort or CLAUDE_EFFORT
+    if effort and not modell.startswith(OHNE_EFFORT):
+        koerper.setdefault("output_config", {})["effort"] = effort
+    if modell in AUSWEICH_MODELLE:
+        koerper["fallbacks"] = "default"
+    koerper.setdefault("cache_control", {"type": "ephemeral"})
+    werkzeuge = koerper.get("tools")
+    if werkzeuge:
+        # Die Werkzeugliste ändert sich nie - ein eigener Haltepunkt hält sie über Fragen hinweg.
+        koerper["tools"] = list(werkzeuge[:-1]) + [dict(werkzeuge[-1], cache_control={"type": "ephemeral"})]
+    return koerper
+
+
+def ausweichen_bereinigen(inhalt: list) -> list:
+    """Nach einem Wechsel des Modells mitten in der Antwort: was davor lag, geht nicht zurück.
+
+    Denkblöcke und Werkzeugaufrufe des ablehnenden Modells vor dem letzten
+    Wechselzeichen bleiben weg; Text und alles danach bleiben.
+    """
+    inhalt = list(inhalt or [])
+    marken = [i for i, b in enumerate(inhalt) if isinstance(b, dict) and b.get("type") == "fallback"]
+    if not marken:
+        return inhalt
+    grenze = marken[-1]
+    return [b for i, b in enumerate(inhalt)
+            if i > grenze or (b.get("type") not in ("thinking", "redacted_thinking", "tool_use", "fallback"))]
+
+
+def denkspuren_entfernen(verlauf: list) -> list:
+    """Entfernt Denkblöcke aus früheren Runden.
+
+    Denkblöcke gehören zu genau dem Gespräch, in dem sie entstanden. Weil sich
+    der Systemprompt mit jeder Frage ändert (Erinnerungen) und alte Runden
+    vorn wegfallen, würde die Schnittstelle alte Denkblöcke ablehnen. Text,
+    Werkzeugaufrufe und Ergebnisse bleiben.
+    """
+    neu = []
+    for nachricht in verlauf:
+        inhalt = nachricht.get("content")
+        if nachricht.get("role") == "assistant" and isinstance(inhalt, list):
+            inhalt = [b for b in inhalt if not (isinstance(b, dict) and b.get("type") in
+                                                 ("thinking", "redacted_thinking", "fallback"))]
+            if not inhalt:
+                continue
+            nachricht = dict(nachricht, content=inhalt)
+        neu.append(nachricht)
+    return neu
 MAX_RUNDEN = 8
 MAX_VERLAUF = 24
 
@@ -14797,7 +15025,7 @@ class JarvisAgent:
 
     # -- Schnittstelle ------------------------------------------------------
 
-    def _anfrage(self, koerper: dict, timeout: int = 120) -> dict:
+    def _anfrage(self, koerper: dict, timeout: int = 300) -> dict:
         """Schickt eine Anfrage an die Claude-Schnittstelle.
 
         Fehler kommen auf Deutsch zurück und benennen den nächsten Schritt.
@@ -14807,11 +15035,14 @@ class JarvisAgent:
                     "fehler": "Es ist kein Anthropic-Schlüssel hinterlegt. Starte die "
                               "Einrichtung mit: python3 jarvis.py einrichten"}
         daten = json.dumps(koerper).encode("utf-8")
-        anfrage = urllib.request.Request(API_URL, data=daten, method="POST", headers={
+        kopf = {
             "x-api-key": ANTHROPIC_API_KEY,
             "anthropic-version": API_VERSION,
             "content-type": "application/json",
-        })
+        }
+        if koerper.get("fallbacks"):
+            kopf["anthropic-beta"] = AUSWEICH_BETA
+        anfrage = urllib.request.Request(API_URL, data=daten, method="POST", headers=kopf)
         for versuch in range(3):
             try:
                 with urllib.request.urlopen(anfrage, timeout=timeout) as antwort:
@@ -14864,14 +15095,14 @@ class JarvisAgent:
         ]
 
     def text_anfrage(self, auftrag: str, bild_base64: str = "",
-                     bild_typ: str = "image/jpeg", max_tokens: int = 1200) -> dict:
+                     bild_typ: str = "image/jpeg", max_tokens: int = 8000) -> dict:
         """Eine einzelne Anfrage ohne Werkzeuge - gibt reinen Text zurück."""
-        antwort = self._anfrage({
+        antwort = self._anfrage(anfrage_ergaenzen({
             "model": CLAUDE_MODEL,
-            "max_tokens": max_tokens,
+            "max_tokens": max(int(max_tokens or 0), 4000),
             "messages": [{"role": "user",
                           "content": self._inhalt_bauen(auftrag, bild_base64, bild_typ)}],
-        })
+        }, effort="medium"))
         if not antwort.get("ok"):
             return antwort
         teile = [block.get("text", "") for block in antwort["daten"].get("content", [])
@@ -14879,7 +15110,7 @@ class JarvisAgent:
         return {"ok": True, "text": "\n".join(teile).strip()}
 
     def json_anfrage(self, auftrag: str, bild_base64: str = "",
-                     bild_typ: str = "image/jpeg", max_tokens: int = 2000) -> dict:
+                     bild_typ: str = "image/jpeg", max_tokens: int = 8000) -> dict:
         """Eine Anfrage, deren Antwort als JSON erwartet wird."""
         antwort = self.text_anfrage(auftrag, bild_base64, bild_typ, max_tokens)
         if not antwort.get("ok"):
@@ -14961,6 +15192,7 @@ class JarvisAgent:
             self.memory.verlauf_anhaengen("user", eingabe)
         self.verlauf.append({"role": "user", "content": eingabe})
         self._verlauf_kuerzen()
+        self.verlauf = denkspuren_entfernen(self.verlauf)
 
         systemtext = self.systemprompt(eingabe)
         katalog = self.tools.katalog()
@@ -14993,22 +15225,22 @@ class JarvisAgent:
             return self.letzter_fehler
 
         beginn = time.time()
-        tokens_ein = tokens_aus = 0
+        tokens_ein = tokens_aus = gelesen = geschrieben = 0
 
         def _protokoll():
             self.letztes_gehirn = "claude"
             self.gedankenlog.eintragen(
                 eingabe, "claude", grund, time.time() - beginn, tokens_ein,
-                tokens_aus, claude_kosten(tokens_ein, tokens_aus), ausgewichen)
+                tokens_aus, claude_kosten(tokens_ein, tokens_aus, gelesen, geschrieben), ausgewichen)
 
         for runde in range(MAX_RUNDEN):
-            antwort = self._anfrage({
+            antwort = self._anfrage(anfrage_ergaenzen({
                 "model": CLAUDE_MODEL,
                 "max_tokens": CLAUDE_MAX_TOKENS,
                 "system": systemtext,
                 "tools": katalog,
                 "messages": self.verlauf,
-            })
+            }))
             if not antwort.get("ok"):
                 self.letzter_fehler = antwort.get("fehler", "")
                 _protokoll()
@@ -15018,7 +15250,13 @@ class JarvisAgent:
             nutzung = nachricht.get("usage") or {}
             tokens_ein += int(nutzung.get("input_tokens", 0) or 0)
             tokens_aus += int(nutzung.get("output_tokens", 0) or 0)
-            inhalt = nachricht.get("content", [])
+            gelesen += int(nutzung.get("cache_read_input_tokens", 0) or 0)
+            geschrieben += int(nutzung.get("cache_creation_input_tokens", 0) or 0)
+            if nachricht.get("stop_reason") == "refusal":
+                _protokoll()
+                return ("Dabei kann ich nicht helfen. Wenn du es anders meinst, sag es "
+                        "mir mit anderen Worten.")
+            inhalt = ausweichen_bereinigen(nachricht.get("content", []))
             self.verlauf.append({"role": "assistant", "content": inhalt})
 
             werkzeugaufrufe = [b for b in inhalt if b.get("type") == "tool_use"]
@@ -15045,7 +15283,6 @@ class JarvisAgent:
                                    "content": text,
                                    "is_error": not bool(ergebnis.get("ok"))})
             self.verlauf.append({"role": "user", "content": ergebnisse})
-            self._verlauf_kuerzen()
 
         _protokoll()
         return ("Ich habe es %d Mal versucht und komme nicht weiter. Sag mir bitte "
@@ -15087,21 +15324,21 @@ class JarvisAgent:
 
         nachrichten = [{"role": "user", "content": auftrag}]
         beginn = time.time()
-        tokens_ein = tokens_aus = 0
+        tokens_ein = tokens_aus = gelesen = geschrieben = 0
 
         def protokoll():
             self.gedankenlog.eintragen(
                 auftrag, "claude", grund, time.time() - beginn, tokens_ein, tokens_aus,
-                claude_kosten(tokens_ein, tokens_aus))
+                claude_kosten(tokens_ein, tokens_aus, gelesen, geschrieben))
 
         for _ in range(max(1, int(max_runden))):
-            antwort = self._anfrage({
+            antwort = self._anfrage(anfrage_ergaenzen({
                 "model": CLAUDE_MODEL,
                 "max_tokens": CLAUDE_MAX_TOKENS,
                 "system": systemtext,
                 "tools": katalog,
                 "messages": nachrichten,
-            })
+            }))
             if not antwort.get("ok"):
                 protokoll()
                 return antwort.get("fehler", "Der Auftrag ist fehlgeschlagen.")
@@ -15109,7 +15346,12 @@ class JarvisAgent:
             nutzung = antwort["daten"].get("usage") or {}
             tokens_ein += int(nutzung.get("input_tokens", 0) or 0)
             tokens_aus += int(nutzung.get("output_tokens", 0) or 0)
-            inhalt = antwort["daten"].get("content", [])
+            gelesen += int(nutzung.get("cache_read_input_tokens", 0) or 0)
+            geschrieben += int(nutzung.get("cache_creation_input_tokens", 0) or 0)
+            if antwort["daten"].get("stop_reason") == "refusal":
+                protokoll()
+                return "Diesen Auftrag lehnt Claude ab. Formuliere ihn bitte anders."
+            inhalt = ausweichen_bereinigen(antwort["daten"].get("content", []))
             nachrichten.append({"role": "assistant", "content": inhalt})
             aufrufe = [b for b in inhalt if b.get("type") == "tool_use"]
             if not aufrufe:
