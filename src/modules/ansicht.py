@@ -419,6 +419,9 @@ canvas{position:fixed;inset:0;width:100%;height:100%;display:block}
 .etikett{position:fixed;z-index:3;pointer-events:none;font:500 11px var(--mono);letter-spacing:.08em;color:var(--hell);
  background:rgba(13,7,5,.78);border:1px solid var(--linie);padding:4px 8px;border-radius:4px;max-width:260px;display:none}
 @media (max-width:700px){.zaehler b{font-size:22px}.zaehler{gap:14px;left:16px;bottom:16px}.kopf{left:16px;top:16px}.titel{display:none}}
+/* Eingebettet in die Gesprächsseite: nur das Gehirn, ohne Hintergrund und Beschriftung. */
+html.eingebettet,html.eingebettet body{background:transparent}
+html.eingebettet .kopf,html.eingebettet .zaehler,html.eingebettet .letzte,html.eingebettet .titel{display:none}
 @media (prefers-reduced-motion:reduce){.zustand i{animation:none}}
 </style></head><body>
 <canvas id="c" aria-label="Das Gedächtnis von Jarvis als leuchtendes Gehirn"></canvas>
@@ -431,6 +434,12 @@ canvas{position:fixed;inset:0;width:100%;height:100%;display:block}
 """ + FEHLERFANG + r"""
 const SCHLUESSEL="{{SCHLUESSEL}}";
 const ANHANG=SCHLUESSEL?"?schluessel="+encodeURIComponent(SCHLUESSEL):"";
+const EINGEBETTET=new URLSearchParams(location.search).get("eingebettet")==="1";
+if(EINGEBETTET)document.documentElement.classList.add("eingebettet");
+// Die Gesprächsseite sagt, ob sie gerade hört oder spricht - das weiß der Server nicht.
+let LOKAL=null,LOKAL_ZEIT=0;
+addEventListener("message",e=>{if(e.origin!==location.origin)return;const z=e.data&&e.data.zustand;
+ if(typeof z==="string"&&/^(bereit|hoert|denkt|spricht)$/.test(z)){LOKAL=z;LOKAL_ZEIT=Date.now()}});
 const $=s=>document.querySelector(s);
 const ARTEN={notiz:{name:"Notizen",x:-0.45,y:0.3,z:0.05},kontakt:{name:"Kontakte",x:0.62,y:-0.1,z:0.25},
  lead:{name:"Interessenten",x:0.45,y:0.35,z:-0.3},aufgabe:{name:"Aufgaben",x:0.0,y:0.5,z:0.1},
@@ -462,7 +471,7 @@ function hirnpunkt(seite){
  py-=0.14*schlaefe;px+=0.05*seite*schlaefe;
  return [px,py,pz];
 }
-for(let i=0;i<5200;i++)P.push(hirnpunkt(i%2?1:-1));
+for(let i=0,n=EINGEBETTET?3200:5200;i<n;i++)P.push(hirnpunkt(i%2?1:-1));
 const KANTEN=[];
 (function(){const zelle=0.085,tab=new Map();
  const key=(x,y,z)=>Math.floor(x/zelle)+","+Math.floor(y/zelle)+","+Math.floor(z/zelle);
@@ -505,11 +514,12 @@ const glutBild=(function(){const c=document.createElement("canvas");c.width=c.he
  const gr=q.createRadialGradient(32,32,0,32,32,32);gr.addColorStop(0,"rgba(255,245,230,1)");gr.addColorStop(.18,"rgba(255,170,90,.85)");
  gr.addColorStop(.5,"rgba(255,100,30,.22)");gr.addColorStop(1,"rgba(255,80,20,0)");q.fillStyle=gr;q.fillRect(0,0,64,64);return c})();
 function rahmen(jetzt){
- const sek=(jetzt-t0)/1000,st=(DATEN.status&&DATEN.status.zustand)||"bereit";
+ const server=(DATEN.status&&DATEN.status.zustand)||"bereit";
+ const sek=(jetzt-t0)/1000,st=(LOKAL&&LOKAL!=="bereit"&&Date.now()-LOKAL_ZEIT<120000)?LOKAL:server;
  const tempo={bereit:0.5,hoert:1.4,denkt:5,spricht:3}[st]||0.5;
  if(!REDUZIERT){zielAy+=0.0002*Math.sin(sek*0.05);ay+=(Math.sin(sek*0.13)*0.22+zielAy-ay)*0.04;ax=0.74+Math.sin(sek*0.09)*0.06}
  else{ay=zielAy;ax=0.74}
- g.globalCompositeOperation="source-over";g.fillStyle="#070403";g.fillRect(0,0,W,H);
+ g.globalCompositeOperation="source-over";if(EINGEBETTET)g.clearRect(0,0,W,H);else{g.fillStyle="#070403";g.fillRect(0,0,W,H)}
  const mitte=g.createRadialGradient(W/2,H/2,0,W/2,H/2,Math.min(W,H)*0.7);mitte.addColorStop(0,"rgba(120,40,10,.30)");mitte.addColorStop(1,"rgba(7,4,3,0)");
  g.fillStyle=mitte;g.fillRect(0,0,W,H);
  const s=Math.min(W*0.40,H*0.5);g.globalCompositeOperation="lighter";

@@ -517,6 +517,16 @@ def stimme_aussuchen():
     if not stimmen:
         print("Es sind keine Stimmen hinterlegt.")
         return
+
+    def deutsch(eintrag):
+        marken = " ".join(str(v) for v in (eintrag.get("labels") or {}).values()).lower()
+        return any(w in marken for w in ("german", "deutsch", "austrian", "österreich"))
+    # Eine deutsche Muttersprachlerstimme klingt am menschlichsten - die kommen zuerst.
+    stimmen.sort(key=lambda e: (not deutsch(e), e.get("name", "")))
+    if not any(deutsch(e) for e in stimmen):
+        print("In deinem Konto ist noch keine deutsche Stimme. Am natürlichsten klingt eine "
+              "deutsche Stimme aus der Voice Library von ElevenLabs (elevenlabs.io/app/voice-library, "
+              "Sprache Deutsch). Dort \"Add to my voices\" und danach hier noch einmal wählen.\n")
     for nummer, eintrag in enumerate(stimmen, 1):
         marken = eintrag.get("labels") or {}
         print("%2d. %-22s %s" % (nummer, eintrag.get("name", "?"),

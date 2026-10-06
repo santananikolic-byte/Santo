@@ -1110,6 +1110,30 @@ def pruefung_ansichten(agent):
 def pruefung_anzeige(agent):
     abschnitt("Anzeige: zweites Gehirn und Zentrale")
     a = ansicht_modul
+    pruefen("Alles auf einer Seite: das Gehirn sitzt in der Gesprächsseite",
+            'id="hirn"' in SEITE_HTML and '/gehirn?eingebettet=1' in SEITE_HTML
+            and "postMessage" in SEITE_HTML and "e.origin!==location.origin" in a.SEITE_GEHIRN
+            and "EINGEBETTET" in a.SEITE_GEHIRN, "mit Zustand: hört, denkt, spricht")
+    js_listen = {}
+    for name in ("JA", "FUELL", "NEIN"):
+        roh = SEITE_HTML.split("var %s = [" % name, 1)[1].split("];", 1)[0]
+        js_listen[name] = set(json.loads("[" + roh.replace("\n", " ") + "]"))
+    pruefen("Das Ja im Browser kennt dieselben Wörter wie das Ja am iMac",
+            js_listen["JA"] == dienst_modul.JA_WOERTER and js_listen["FUELL"] == dienst_modul.FUELLWOERTER
+            and js_listen["NEIN"] == dienst_modul.NEIN_WOERTER, "drei Wortlisten")
+    knoten = shutil.which("node")
+    if knoten:
+        funktion = SEITE_HTML[SEITE_HTML.index("  var JA = ["):SEITE_HTML.index("  var HIRN_ZUSTAND")]
+        proben = ["ja", "ja bitte", "okay mach das", "nein", "Das ist ja unglaublich",
+                  "ich habe ja gar nichts gesagt", "ja aber an müller", "mach mal leiser", "klar und dann noch alle kunden"]
+        skript = funktion + "\nconsole.log(JSON.stringify(%s.map(t=>jaNein(t.toLowerCase()))));" % json.dumps(proben)
+        lauf = subprocess.run([knoten, "-e", skript], capture_output=True, text=True, timeout=30)
+        try:
+            ergebnis = json.loads(lauf.stdout.strip() or "null")
+        except ValueError:
+            ergebnis = None
+        pruefen("Im Browser gilt nur ein kurzes, klares Ja als Freigabe",
+                ergebnis == [True, True, True, False, None, False, False, None, None], str(ergebnis)[:55])
     pruefen("Der Ort steckt in der Anschrift",
             a.ort_aus_adresse("Hauptstr. 5, 1010 Wien") == "Wien"
             and a.ort_aus_adresse("Werkstr. 7, 6020 Innsbruck") == "Innsbruck"
@@ -1596,6 +1620,41 @@ def pruefung_sprechen(agent):
                 and gesagt[0].startswith(stuecke[1]), "1 gespielt, Rest per Systemstimme")
     finally:
         stimme._elevenlabs_holen, stimme.abspielen, config.ELEVENLABS_API_KEY = echt
+    liste = ("Alice               it_IT    # Ciao!\n"
+             "Anna                de_DE    # Hallo! Ich heiße Anna.\n"
+             "Anna (Premium)      de_DE    # Hallo! Ich heiße Anna.\n"
+             "Markus (Erweitert)  de_DE    # Hallo! Ich heiße Markus.\n"
+             "Samantha (Enhanced) en_US    # Hello\n")
+    pruefen("Ohne ElevenLabs nimmt Jarvis die natürlichste deutsche Mac-Stimme",
+            voice_modul.beste_deutsche_stimme(liste) == "Anna (Premium)"
+            and voice_modul.beste_deutsche_stimme(liste.replace("Anna (Premium)", "Anna (x)")) == "Markus (Erweitert)"
+            and voice_modul.beste_deutsche_stimme("Alex                en_US    # Hi\n") == "",
+            "Premium vor Erweitert vor einfach")
+
+    # ElevenLabs: jeder Abschnitt kennt die Kennungen der vorigen - die Stimme klingt durchgehend.
+    gesendet = []
+    class Antwort:
+        def __init__(self, nummer): self.nummer, self.headers = nummer, {"request-id": "anfrage-%d" % nummer}
+        def read(self): return b"mp3"
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+    def falsches_urlopen(anfrage, timeout=0):
+        gesendet.append(json.loads(anfrage.data.decode("utf-8")))
+        return Antwort(len(gesendet))
+    stimme2 = voice_modul.Stimme()
+    echt2 = (voice_modul.urllib.request.urlopen, config.ELEVENLABS_API_KEY, stimme2.abspielen)
+    voice_modul.urllib.request.urlopen = falsches_urlopen
+    config.ELEVENLABS_API_KEY = "test"
+    stimme2.abspielen = lambda pfad: True
+    try:
+        stimme2.sprich(lang)
+    finally:
+        voice_modul.urllib.request.urlopen, config.ELEVENLABS_API_KEY, stimme2.abspielen = echt2
+    pruefen("ElevenLabs setzt Tonfall und Tempo über die Abschnitte nahtlos fort",
+            len(gesendet) == len(stuecke) and "previous_request_ids" not in gesendet[0]
+            and gesendet[1].get("previous_request_ids") == ["anfrage-1"]
+            and gesendet[-1].get("previous_request_ids") == ["anfrage-%d" % i for i in range(len(stuecke) - 3, len(stuecke))],
+            "%d Abschnitte, je bis zu drei Vorgänger" % len(gesendet))
     pruefen("Die Web-App liefert die Abschnitte mit der Antwort",
             "sprechstuecke" in open(os.path.join(WURZEL, "src/modules/webapp.py"), encoding="utf-8").read()
             and "besteStimme" in SEITE_HTML and "satz.onend = weiter" in SEITE_HTML,
@@ -2007,7 +2066,7 @@ def pruefung_webapp(agent):
             "%d Schreibweisen" % len(weckwoerter))
     pruefen("Freigaben lassen sich sprechen",
             '"ja"' in SEITE_HTML and '"nein"' in SEITE_HTML
-            and "JA.indexOf(wort)" in SEITE_HTML,
+            and "var entscheid = jaNein(k)" in SEITE_HTML,
             "ja oder nein genügt")
     pruefen("Beim Sprechen wird das Mikrofon angehalten",
             "hoerenPause();" in SEITE_HTML,

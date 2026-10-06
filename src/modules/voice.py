@@ -53,6 +53,27 @@ WECKWOERTER = ["hey jarvis", "hey javis", "hey dscharvis", "hey charvis",
 # Bevorzugte deutsche Systemstimmen, in dieser Reihenfolge.
 WUNSCHSTIMMEN = ["Markus", "Yannick", "Petra", "Anna", "Viktor"]
 
+
+def beste_deutsche_stimme(liste: str) -> str:
+    """Wählt aus der Ausgabe von ``say -v ?`` die natürlichste deutsche Stimme."""
+    stimmen = []
+    for zeile in (liste or "").splitlines():
+        treffer = re.match(r"^(.+?)\s+([a-z]{2}_[A-Z]{2})\s+#", zeile)
+        if treffer:
+            stimmen.append((treffer.group(1).strip(), treffer.group(2)))
+    deutsch = [name for name, sprache in stimmen if sprache in ("de_DE", "de_AT", "de_CH")]
+    if not deutsch:
+        return ""
+
+    def rang(name):
+        klein = name.lower()
+        guete = 0 if "premium" in klein else 1 if ("erweitert" in klein or "enhanced" in klein) else 2
+        grund = name.split(" (")[0]
+        wunsch = WUNSCHSTIMMEN.index(grund) if grund in WUNSCHSTIMMEN else len(WUNSCHSTIMMEN)
+        return (guete, wunsch)
+
+    return sorted(deutsch, key=rang)[0]
+
 # Kurze Signaltöne - der Nutzer hört so, in welchem Zustand Jarvis ist.
 SIGNALTOENE = {
     "zuhoeren": "/System/Library/Sounds/Tink.aiff",
@@ -145,7 +166,13 @@ class Stimme:
         return shutil.which("say") is not None and os.uname().sysname == "Darwin"
 
     def deutsche_stimme_suchen(self) -> str:
-        """Sucht die beste vorhandene deutsche Systemstimme."""
+        """Sucht die natürlichste vorhandene deutsche Systemstimme.
+
+        Die Premium- und erweiterten Stimmen (zum Beispiel "Anna (Premium)")
+        klingen deutlich menschlicher als die kompakten. Ihre Namen enthalten
+        Leerzeichen und Klammern - deshalb wird die Zeile von ``say -v ?`` am
+        Sprachkürzel getrennt, nicht am ersten Leerzeichen.
+        """
         try:
             ergebnis = subprocess.run(["say", "-v", "?"], capture_output=True,
                                       text=True, timeout=10, shell=False)
@@ -153,19 +180,7 @@ class Stimme:
             return ""
         if ergebnis.returncode != 0:
             return ""
-        stimmen = []
-        for zeile in ergebnis.stdout.splitlines():
-            teile = zeile.split()
-            if len(teile) >= 2:
-                stimmen.append((teile[0], teile[1]))
-        vorhandene = {name for name, _ in stimmen}
-        for wunsch in WUNSCHSTIMMEN:
-            if wunsch in vorhandene:
-                return wunsch
-        for name, sprache in stimmen:
-            if sprache in ("de_DE", "de_AT", "de_CH"):
-                return name
-        return ""
+        return beste_deutsche_stimme(ergebnis.stdout)
 
     def zustand(self) -> dict:
         """Was ist verfügbar, was fehlt - für den Selbsttest."""
@@ -217,8 +232,14 @@ class Stimme:
             except OSError:
                 pass
 
-    def _elevenlabs_holen(self, text: str, vorher: str = "", nachher: str = ""):
-        """Holt die Sprachdatei für einen Abschnitt. ``None`` bei Fehler."""
+    def _elevenlabs_holen(self, text: str, vorher: str = "", nachher: str = "", vorige=None):
+        """Holt die Sprachdatei für einen Abschnitt. ``None`` bei Fehler.
+
+        ``vorige`` sind die Kennungen der Abschnitte davor (höchstens drei). Damit
+        setzt ElevenLabs Tonfall und Tempo nahtlos fort - die Antwort klingt wie
+        in einem Atemzug gesprochen statt wie aneinandergereihte Ansagen.
+        """
+        self._anfrage_id = None
         ziel = "%s/text-to-speech/%s" % (ELEVENLABS_URL, config.ELEVENLABS_VOICE_ID)
         inhalt = {
             "text": text[:2500],
@@ -236,6 +257,8 @@ class Stimme:
             inhalt["previous_text"] = vorher[-300:]
         if nachher:
             inhalt["next_text"] = nachher[:300]
+        if vorige:
+            inhalt["previous_request_ids"] = list(vorige)[-3:]
         anfrage = urllib.request.Request(
             ziel, data=json.dumps(inhalt).encode("utf-8"), method="POST", headers={
                 "xi-api-key": config.ELEVENLABS_API_KEY,
@@ -244,7 +267,9 @@ class Stimme:
             })
         try:
             with urllib.request.urlopen(anfrage, timeout=45) as antwort:
-                return antwort.read()
+                daten = antwort.read()
+                self._anfrage_id = antwort.headers.get("request-id") or None
+                return daten
         except (urllib.error.URLError, OSError, http.client.HTTPException, ValueError) as fehler:
             self.letzter_fehler = "ElevenLabs nicht erreichbar: %s" % fehler
             print("[stimme] %s - ich nehme die Systemstimme." % self.letzter_fehler)
@@ -267,12 +292,17 @@ class Stimme:
             # Was auch passiert: am Ende liegt immer ein Abschluss in der Warteschlange,
             # sonst wartet die Wiedergabe für immer.
             try:
+                kennungen = []
                 for nummer, stueck in enumerate(stuecke):
                     if ende.is_set() or self._stopp.is_set():
                         break
+                    self._anfrage_id = None
+                    zusatz = {"vorige": kennungen[-3:]} if kennungen else {}
                     daten = self._elevenlabs_holen(
                         stueck, stuecke[nummer - 1] if nummer else "",
-                        stuecke[nummer + 1] if nummer + 1 < len(stuecke) else "")
+                        stuecke[nummer + 1] if nummer + 1 < len(stuecke) else "", **zusatz)
+                    if getattr(self, "_anfrage_id", None):
+                        kennungen.append(self._anfrage_id)
                     ablegen((nummer, daten))
                     if daten is None:
                         return

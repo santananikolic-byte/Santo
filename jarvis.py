@@ -1595,6 +1595,27 @@ WECKWOERTER = ["hey jarvis", "hey javis", "hey dscharvis", "hey charvis",
 # Bevorzugte deutsche Systemstimmen, in dieser Reihenfolge.
 WUNSCHSTIMMEN = ["Markus", "Yannick", "Petra", "Anna", "Viktor"]
 
+
+def beste_deutsche_stimme(liste: str) -> str:
+    """Wählt aus der Ausgabe von ``say -v ?`` die natürlichste deutsche Stimme."""
+    stimmen = []
+    for zeile in (liste or "").splitlines():
+        treffer = re.match(r"^(.+?)\s+([a-z]{2}_[A-Z]{2})\s+#", zeile)
+        if treffer:
+            stimmen.append((treffer.group(1).strip(), treffer.group(2)))
+    deutsch = [name for name, sprache in stimmen if sprache in ("de_DE", "de_AT", "de_CH")]
+    if not deutsch:
+        return ""
+
+    def rang(name):
+        klein = name.lower()
+        guete = 0 if "premium" in klein else 1 if ("erweitert" in klein or "enhanced" in klein) else 2
+        grund = name.split(" (")[0]
+        wunsch = WUNSCHSTIMMEN.index(grund) if grund in WUNSCHSTIMMEN else len(WUNSCHSTIMMEN)
+        return (guete, wunsch)
+
+    return sorted(deutsch, key=rang)[0]
+
 # Kurze Signaltöne - der Nutzer hört so, in welchem Zustand Jarvis ist.
 SIGNALTOENE = {
     "zuhoeren": "/System/Library/Sounds/Tink.aiff",
@@ -1687,7 +1708,13 @@ class Stimme:
         return shutil.which("say") is not None and os.uname().sysname == "Darwin"
 
     def deutsche_stimme_suchen(self) -> str:
-        """Sucht die beste vorhandene deutsche Systemstimme."""
+        """Sucht die natürlichste vorhandene deutsche Systemstimme.
+
+        Die Premium- und erweiterten Stimmen (zum Beispiel "Anna (Premium)")
+        klingen deutlich menschlicher als die kompakten. Ihre Namen enthalten
+        Leerzeichen und Klammern - deshalb wird die Zeile von ``say -v ?`` am
+        Sprachkürzel getrennt, nicht am ersten Leerzeichen.
+        """
         try:
             ergebnis = subprocess.run(["say", "-v", "?"], capture_output=True,
                                       text=True, timeout=10, shell=False)
@@ -1695,19 +1722,7 @@ class Stimme:
             return ""
         if ergebnis.returncode != 0:
             return ""
-        stimmen = []
-        for zeile in ergebnis.stdout.splitlines():
-            teile = zeile.split()
-            if len(teile) >= 2:
-                stimmen.append((teile[0], teile[1]))
-        vorhandene = {name for name, _ in stimmen}
-        for wunsch in WUNSCHSTIMMEN:
-            if wunsch in vorhandene:
-                return wunsch
-        for name, sprache in stimmen:
-            if sprache in ("de_DE", "de_AT", "de_CH"):
-                return name
-        return ""
+        return beste_deutsche_stimme(ergebnis.stdout)
 
     def zustand(self) -> dict:
         """Was ist verfügbar, was fehlt - für den Selbsttest."""
@@ -1759,8 +1774,14 @@ class Stimme:
             except OSError:
                 pass
 
-    def _elevenlabs_holen(self, text: str, vorher: str = "", nachher: str = ""):
-        """Holt die Sprachdatei für einen Abschnitt. ``None`` bei Fehler."""
+    def _elevenlabs_holen(self, text: str, vorher: str = "", nachher: str = "", vorige=None):
+        """Holt die Sprachdatei für einen Abschnitt. ``None`` bei Fehler.
+
+        ``vorige`` sind die Kennungen der Abschnitte davor (höchstens drei). Damit
+        setzt ElevenLabs Tonfall und Tempo nahtlos fort - die Antwort klingt wie
+        in einem Atemzug gesprochen statt wie aneinandergereihte Ansagen.
+        """
+        self._anfrage_id = None
         ziel = "%s/text-to-speech/%s" % (ELEVENLABS_URL, ELEVENLABS_VOICE_ID)
         inhalt = {
             "text": text[:2500],
@@ -1778,6 +1799,8 @@ class Stimme:
             inhalt["previous_text"] = vorher[-300:]
         if nachher:
             inhalt["next_text"] = nachher[:300]
+        if vorige:
+            inhalt["previous_request_ids"] = list(vorige)[-3:]
         anfrage = urllib.request.Request(
             ziel, data=json.dumps(inhalt).encode("utf-8"), method="POST", headers={
                 "xi-api-key": ELEVENLABS_API_KEY,
@@ -1786,7 +1809,9 @@ class Stimme:
             })
         try:
             with urllib.request.urlopen(anfrage, timeout=45) as antwort:
-                return antwort.read()
+                daten = antwort.read()
+                self._anfrage_id = antwort.headers.get("request-id") or None
+                return daten
         except (urllib.error.URLError, OSError, http.client.HTTPException, ValueError) as fehler:
             self.letzter_fehler = "ElevenLabs nicht erreichbar: %s" % fehler
             print("[stimme] %s - ich nehme die Systemstimme." % self.letzter_fehler)
@@ -1809,12 +1834,17 @@ class Stimme:
             # Was auch passiert: am Ende liegt immer ein Abschluss in der Warteschlange,
             # sonst wartet die Wiedergabe für immer.
             try:
+                kennungen = []
                 for nummer, stueck in enumerate(stuecke):
                     if ende.is_set() or self._stopp.is_set():
                         break
+                    self._anfrage_id = None
+                    zusatz = {"vorige": kennungen[-3:]} if kennungen else {}
                     daten = self._elevenlabs_holen(
                         stueck, stuecke[nummer - 1] if nummer else "",
-                        stuecke[nummer + 1] if nummer + 1 < len(stuecke) else "")
+                        stuecke[nummer + 1] if nummer + 1 < len(stuecke) else "", **zusatz)
+                    if getattr(self, "_anfrage_id", None):
+                        kennungen.append(self._anfrage_id)
                     ablegen((nummer, daten))
                     if daten is None:
                         return
@@ -9464,6 +9494,9 @@ canvas{position:fixed;inset:0;width:100%;height:100%;display:block}
 .etikett{position:fixed;z-index:3;pointer-events:none;font:500 11px var(--mono);letter-spacing:.08em;color:var(--hell);
  background:rgba(13,7,5,.78);border:1px solid var(--linie);padding:4px 8px;border-radius:4px;max-width:260px;display:none}
 @media (max-width:700px){.zaehler b{font-size:22px}.zaehler{gap:14px;left:16px;bottom:16px}.kopf{left:16px;top:16px}.titel{display:none}}
+/* Eingebettet in die Gesprächsseite: nur das Gehirn, ohne Hintergrund und Beschriftung. */
+html.eingebettet,html.eingebettet body{background:transparent}
+html.eingebettet .kopf,html.eingebettet .zaehler,html.eingebettet .letzte,html.eingebettet .titel{display:none}
 @media (prefers-reduced-motion:reduce){.zustand i{animation:none}}
 </style></head><body>
 <canvas id="c" aria-label="Das Gedächtnis von Jarvis als leuchtendes Gehirn"></canvas>
@@ -9476,6 +9509,12 @@ canvas{position:fixed;inset:0;width:100%;height:100%;display:block}
 """ + FEHLERFANG + r"""
 const SCHLUESSEL="{{SCHLUESSEL}}";
 const ANHANG=SCHLUESSEL?"?schluessel="+encodeURIComponent(SCHLUESSEL):"";
+const EINGEBETTET=new URLSearchParams(location.search).get("eingebettet")==="1";
+if(EINGEBETTET)document.documentElement.classList.add("eingebettet");
+// Die Gesprächsseite sagt, ob sie gerade hört oder spricht - das weiß der Server nicht.
+let LOKAL=null,LOKAL_ZEIT=0;
+addEventListener("message",e=>{if(e.origin!==location.origin)return;const z=e.data&&e.data.zustand;
+ if(typeof z==="string"&&/^(bereit|hoert|denkt|spricht)$/.test(z)){LOKAL=z;LOKAL_ZEIT=Date.now()}});
 const $=s=>document.querySelector(s);
 const ARTEN={notiz:{name:"Notizen",x:-0.45,y:0.3,z:0.05},kontakt:{name:"Kontakte",x:0.62,y:-0.1,z:0.25},
  lead:{name:"Interessenten",x:0.45,y:0.35,z:-0.3},aufgabe:{name:"Aufgaben",x:0.0,y:0.5,z:0.1},
@@ -9507,7 +9546,7 @@ function hirnpunkt(seite){
  py-=0.14*schlaefe;px+=0.05*seite*schlaefe;
  return [px,py,pz];
 }
-for(let i=0;i<5200;i++)P.push(hirnpunkt(i%2?1:-1));
+for(let i=0,n=EINGEBETTET?3200:5200;i<n;i++)P.push(hirnpunkt(i%2?1:-1));
 const KANTEN=[];
 (function(){const zelle=0.085,tab=new Map();
  const key=(x,y,z)=>Math.floor(x/zelle)+","+Math.floor(y/zelle)+","+Math.floor(z/zelle);
@@ -9550,11 +9589,12 @@ const glutBild=(function(){const c=document.createElement("canvas");c.width=c.he
  const gr=q.createRadialGradient(32,32,0,32,32,32);gr.addColorStop(0,"rgba(255,245,230,1)");gr.addColorStop(.18,"rgba(255,170,90,.85)");
  gr.addColorStop(.5,"rgba(255,100,30,.22)");gr.addColorStop(1,"rgba(255,80,20,0)");q.fillStyle=gr;q.fillRect(0,0,64,64);return c})();
 function rahmen(jetzt){
- const sek=(jetzt-t0)/1000,st=(DATEN.status&&DATEN.status.zustand)||"bereit";
+ const server=(DATEN.status&&DATEN.status.zustand)||"bereit";
+ const sek=(jetzt-t0)/1000,st=(LOKAL&&LOKAL!=="bereit"&&Date.now()-LOKAL_ZEIT<120000)?LOKAL:server;
  const tempo={bereit:0.5,hoert:1.4,denkt:5,spricht:3}[st]||0.5;
  if(!REDUZIERT){zielAy+=0.0002*Math.sin(sek*0.05);ay+=(Math.sin(sek*0.13)*0.22+zielAy-ay)*0.04;ax=0.74+Math.sin(sek*0.09)*0.06}
  else{ay=zielAy;ax=0.74}
- g.globalCompositeOperation="source-over";g.fillStyle="#070403";g.fillRect(0,0,W,H);
+ g.globalCompositeOperation="source-over";if(EINGEBETTET)g.clearRect(0,0,W,H);else{g.fillStyle="#070403";g.fillRect(0,0,W,H)}
  const mitte=g.createRadialGradient(W/2,H/2,0,W/2,H/2,Math.min(W,H)*0.7);mitte.addColorStop(0,"rgba(120,40,10,.30)");mitte.addColorStop(1,"rgba(7,4,3,0)");
  g.fillStyle=mitte;g.fillRect(0,0,W,H);
  const s=Math.min(W*0.40,H*0.5);g.globalCompositeOperation="lighter";
@@ -9880,6 +9920,11 @@ main{flex:1;display:flex;flex-direction:column;align-items:center;
 
 .kugel{position:relative;width:min(46vmin,260px);height:min(46vmin,260px);
        flex:none;display:grid;place-items:center;cursor:pointer}
+/* Das Gehirn ist das Gesicht von Jarvis: es atmet, hört, denkt und spricht mit. */
+.kugel.hirn{width:min(70vmin,560px);height:min(52vmin,440px)}
+.kugel.hirn iframe{position:absolute;inset:0;width:100%;height:100%;border:0;
+                   pointer-events:none;background:transparent;color-scheme:normal}
+.kugel.hirn .ring,.kugel.hirn .kern,.kugel.hirn .welle{display:none}
 .kugel .ring{position:absolute;inset:0;border-radius:50%;
              border:1px solid var(--rand-hell);transition:border-color .4s}
 .kugel .ring2{inset:9%;opacity:.6}
@@ -9947,6 +9992,7 @@ body[data-zustand="wach"] .zustandstext{color:var(--akzent)}
 .tippen{position:fixed;left:50%;transform:translateX(-50%);bottom:88px;
         width:min(92vw,620px);display:none;gap:9px}
 .tippen.zeigen{display:flex}
+main:has(~ .tippen.zeigen){padding-bottom:84px}
 .tippen input{flex:1;background:var(--panel);border:1px solid var(--rand-hell);
               border-radius:11px;padding:12px 15px;color:var(--text);
               font-family:inherit;font-size:15px}
@@ -10003,8 +10049,9 @@ body[data-zustand="wach"] .zustandstext{color:var(--akzent)}
 </div>
 
 <main>
-  <div class="kugel" id="kugel" role="button" tabindex="0"
+  <div class="kugel hirn" id="kugel" role="button" tabindex="0"
        title="Antippen weckt Jarvis auch ohne Weckwort">
+    <iframe id="hirn" title="Das Gedächtnis von Jarvis als leuchtendes Gehirn" tabindex="-1"></iframe>
     <span class="ring"></span><span class="ring ring2"></span><span class="ring ring3"></span>
     <span class="welle"></span><span class="welle w2"></span><span class="welle w3"></span>
     <span class="kern"></span>
@@ -10054,18 +10101,44 @@ body[data-zustand="wach"] .zustandstext{color:var(--akzent)}
   var WECKWOERTER = ["hey jarvis","hey javis","hey dscharvis","hey charvis",
                      "hey travis","hey jervis","hey service","hey chavis",
                      "jarvis","javis"];
-  var JA = ["ja","jo","jup","okay","ok","passt","mach","machen","los","sicher",
-            "einverstanden","erlaubt","freigabe","yes"];
-  var NEIN = ["nein","ne","nee","no","stop","stopp","abbrechen","abbruch",
-              "lass","nicht","niemals","nope"];
+  // Dieselben Wörter wie bei der Sprachfreigabe am iMac (dienst.py): Ein Ja zählt
+  // nur als kurze, eindeutige Antwort, die mit Ja beginnt - nie ein "ja" mitten im Satz.
+  var JA = ["ja","jo","jawohl","jep","klar","okay","ok","einverstanden","freigegeben",
+            "genehmigt","mach","machs"];
+  var FUELL = ["ja","bitte","gerne","gern","mach","machs","das","es","so","los","danke",
+               "genau","klar","okay","ok","jarvis"];
+  var NEIN = ["nein","nee","ne","nö","noe","nicht","nichts","nix","stopp","stop",
+              "abbrechen","lass","lassen","kein","keine","keinen","keinem","keiner",
+              "keinesfalls","niemals","nie","halt","warte","falsch","bloß","bloss",
+              "moment","ohne","vergiss","aber","sondern","statt","anders","später",
+              "spaeter","gar","nochmal","warum","wieso"];
+  var MAX_ANTWORT = 4;
+  function jaNein(k) {
+    var w = (k || "").split(" ").filter(function (x) { return x; });
+    if (!w.length) { return null; }
+    for (var i = 0; i < w.length; i++) { if (NEIN.indexOf(w[i]) >= 0) { return false; } }
+    if (w.length > MAX_ANTWORT) { return null; }
+    if (JA.indexOf(w[0]) < 0) { return null; }
+    for (var j = 1; j < w.length; j++) {
+      if (FUELL.indexOf(w[j]) < 0 && JA.indexOf(w[j]) < 0) { return null; }
+    }
+    return true;
+  }
 
   var el = function (id) { return document.getElementById(id); };
   var zustand = "aus", wachBis = 0, laeuft = false;
   var freigabe = null, sprichtGerade = false;
 
+  var HIRN_ZUSTAND = {aus: "bereit", schlaeft: "bereit", wach: "hoert",
+                      denkt: "denkt", spricht: "spricht"};
   function setzeZustand(neu, text) {
     zustand = neu;
     document.body.dataset.zustand = neu;
+    var hirn = el("hirn");
+    if (hirn && hirn.contentWindow) {
+      try { hirn.contentWindow.postMessage({zustand: HIRN_ZUSTAND[neu] || "bereit"},
+                                           location.origin); } catch (e) {}
+    }
     el("zustandstext").textContent = text || {
       aus: "Mikrofon aus", schlaeft: "Sag Hey Jarvis",
       wach: "Ich höre", denkt: "Ich arbeite", spricht: "…"
@@ -10080,6 +10153,9 @@ body[data-zustand="wach"] .zustandstext{color:var(--akzent)}
   // Die Verknüpfungen im Kopf brauchen im Handy-Modus den Schlüssel.
   Array.prototype.forEach.call(document.querySelectorAll(".ticker a[href^='/']"),
     function (a) { a.href = url(a.getAttribute("href")); });
+  // Das Gehirn in der Mitte: ohne eigene Beschriftung, mit dem Zustand dieser Seite.
+  el("hirn").src = url("/gehirn?eingebettet=1");
+  el("hirn").addEventListener("load", function () { setzeZustand(zustand); });
   function holen(p, k) {
     var o = { headers: { "Content-Type": "application/json" } };
     if (k !== undefined) { o.method = "POST"; o.body = JSON.stringify(k); }
@@ -10264,9 +10340,8 @@ body[data-zustand="wach"] .zustandstext{color:var(--akzent)}
 
       // Bei offener Freigabe zählt nur ja oder nein.
       if (freigabe) {
-        var wort = k.split(" ").filter(function (w) {
-          return JA.indexOf(w) >= 0 || NEIN.indexOf(w) >= 0; })[0];
-        if (wort) { antworten(JA.indexOf(wort) >= 0); }
+        var entscheid = jaNein(k);
+        if (entscheid !== null) { antworten(entscheid); }
         return;
       }
       if (laeuft || sprichtGerade) { return; }
@@ -15573,6 +15648,16 @@ def stimme_aussuchen():
     if not stimmen:
         print("Es sind keine Stimmen hinterlegt.")
         return
+
+    def deutsch(eintrag):
+        marken = " ".join(str(v) for v in (eintrag.get("labels") or {}).values()).lower()
+        return any(w in marken for w in ("german", "deutsch", "austrian", "österreich"))
+    # Eine deutsche Muttersprachlerstimme klingt am menschlichsten - die kommen zuerst.
+    stimmen.sort(key=lambda e: (not deutsch(e), e.get("name", "")))
+    if not any(deutsch(e) for e in stimmen):
+        print("In deinem Konto ist noch keine deutsche Stimme. Am natürlichsten klingt eine "
+              "deutsche Stimme aus der Voice Library von ElevenLabs (elevenlabs.io/app/voice-library, "
+              "Sprache Deutsch). Dort \"Add to my voices\" und danach hier noch einmal wählen.\n")
     for nummer, eintrag in enumerate(stimmen, 1):
         marken = eintrag.get("labels") or {}
         print("%2d. %-22s %s" % (nummer, eintrag.get("name", "?"),

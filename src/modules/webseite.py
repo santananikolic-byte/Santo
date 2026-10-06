@@ -61,6 +61,11 @@ main{flex:1;display:flex;flex-direction:column;align-items:center;
 
 .kugel{position:relative;width:min(46vmin,260px);height:min(46vmin,260px);
        flex:none;display:grid;place-items:center;cursor:pointer}
+/* Das Gehirn ist das Gesicht von Jarvis: es atmet, hört, denkt und spricht mit. */
+.kugel.hirn{width:min(70vmin,560px);height:min(52vmin,440px)}
+.kugel.hirn iframe{position:absolute;inset:0;width:100%;height:100%;border:0;
+                   pointer-events:none;background:transparent;color-scheme:normal}
+.kugel.hirn .ring,.kugel.hirn .kern,.kugel.hirn .welle{display:none}
 .kugel .ring{position:absolute;inset:0;border-radius:50%;
              border:1px solid var(--rand-hell);transition:border-color .4s}
 .kugel .ring2{inset:9%;opacity:.6}
@@ -128,6 +133,7 @@ body[data-zustand="wach"] .zustandstext{color:var(--akzent)}
 .tippen{position:fixed;left:50%;transform:translateX(-50%);bottom:88px;
         width:min(92vw,620px);display:none;gap:9px}
 .tippen.zeigen{display:flex}
+main:has(~ .tippen.zeigen){padding-bottom:84px}
 .tippen input{flex:1;background:var(--panel);border:1px solid var(--rand-hell);
               border-radius:11px;padding:12px 15px;color:var(--text);
               font-family:inherit;font-size:15px}
@@ -184,8 +190,9 @@ body[data-zustand="wach"] .zustandstext{color:var(--akzent)}
 </div>
 
 <main>
-  <div class="kugel" id="kugel" role="button" tabindex="0"
+  <div class="kugel hirn" id="kugel" role="button" tabindex="0"
        title="Antippen weckt Jarvis auch ohne Weckwort">
+    <iframe id="hirn" title="Das Gedächtnis von Jarvis als leuchtendes Gehirn" tabindex="-1"></iframe>
     <span class="ring"></span><span class="ring ring2"></span><span class="ring ring3"></span>
     <span class="welle"></span><span class="welle w2"></span><span class="welle w3"></span>
     <span class="kern"></span>
@@ -235,18 +242,44 @@ body[data-zustand="wach"] .zustandstext{color:var(--akzent)}
   var WECKWOERTER = ["hey jarvis","hey javis","hey dscharvis","hey charvis",
                      "hey travis","hey jervis","hey service","hey chavis",
                      "jarvis","javis"];
-  var JA = ["ja","jo","jup","okay","ok","passt","mach","machen","los","sicher",
-            "einverstanden","erlaubt","freigabe","yes"];
-  var NEIN = ["nein","ne","nee","no","stop","stopp","abbrechen","abbruch",
-              "lass","nicht","niemals","nope"];
+  // Dieselben Wörter wie bei der Sprachfreigabe am iMac (dienst.py): Ein Ja zählt
+  // nur als kurze, eindeutige Antwort, die mit Ja beginnt - nie ein "ja" mitten im Satz.
+  var JA = ["ja","jo","jawohl","jep","klar","okay","ok","einverstanden","freigegeben",
+            "genehmigt","mach","machs"];
+  var FUELL = ["ja","bitte","gerne","gern","mach","machs","das","es","so","los","danke",
+               "genau","klar","okay","ok","jarvis"];
+  var NEIN = ["nein","nee","ne","nö","noe","nicht","nichts","nix","stopp","stop",
+              "abbrechen","lass","lassen","kein","keine","keinen","keinem","keiner",
+              "keinesfalls","niemals","nie","halt","warte","falsch","bloß","bloss",
+              "moment","ohne","vergiss","aber","sondern","statt","anders","später",
+              "spaeter","gar","nochmal","warum","wieso"];
+  var MAX_ANTWORT = 4;
+  function jaNein(k) {
+    var w = (k || "").split(" ").filter(function (x) { return x; });
+    if (!w.length) { return null; }
+    for (var i = 0; i < w.length; i++) { if (NEIN.indexOf(w[i]) >= 0) { return false; } }
+    if (w.length > MAX_ANTWORT) { return null; }
+    if (JA.indexOf(w[0]) < 0) { return null; }
+    for (var j = 1; j < w.length; j++) {
+      if (FUELL.indexOf(w[j]) < 0 && JA.indexOf(w[j]) < 0) { return null; }
+    }
+    return true;
+  }
 
   var el = function (id) { return document.getElementById(id); };
   var zustand = "aus", wachBis = 0, laeuft = false;
   var freigabe = null, sprichtGerade = false;
 
+  var HIRN_ZUSTAND = {aus: "bereit", schlaeft: "bereit", wach: "hoert",
+                      denkt: "denkt", spricht: "spricht"};
   function setzeZustand(neu, text) {
     zustand = neu;
     document.body.dataset.zustand = neu;
+    var hirn = el("hirn");
+    if (hirn && hirn.contentWindow) {
+      try { hirn.contentWindow.postMessage({zustand: HIRN_ZUSTAND[neu] || "bereit"},
+                                           location.origin); } catch (e) {}
+    }
     el("zustandstext").textContent = text || {
       aus: "Mikrofon aus", schlaeft: "Sag Hey Jarvis",
       wach: "Ich höre", denkt: "Ich arbeite", spricht: "…"
@@ -261,6 +294,9 @@ body[data-zustand="wach"] .zustandstext{color:var(--akzent)}
   // Die Verknüpfungen im Kopf brauchen im Handy-Modus den Schlüssel.
   Array.prototype.forEach.call(document.querySelectorAll(".ticker a[href^='/']"),
     function (a) { a.href = url(a.getAttribute("href")); });
+  // Das Gehirn in der Mitte: ohne eigene Beschriftung, mit dem Zustand dieser Seite.
+  el("hirn").src = url("/gehirn?eingebettet=1");
+  el("hirn").addEventListener("load", function () { setzeZustand(zustand); });
   function holen(p, k) {
     var o = { headers: { "Content-Type": "application/json" } };
     if (k !== undefined) { o.method = "POST"; o.body = JSON.stringify(k); }
@@ -445,9 +481,8 @@ body[data-zustand="wach"] .zustandstext{color:var(--akzent)}
 
       // Bei offener Freigabe zählt nur ja oder nein.
       if (freigabe) {
-        var wort = k.split(" ").filter(function (w) {
-          return JA.indexOf(w) >= 0 || NEIN.indexOf(w) >= 0; })[0];
-        if (wort) { antworten(JA.indexOf(wort) >= 0); }
+        var entscheid = jaNein(k);
+        if (entscheid !== null) { antworten(entscheid); }
         return;
       }
       if (laeuft || sprichtGerade) { return; }
