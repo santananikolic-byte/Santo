@@ -178,6 +178,7 @@ class Werkzeuge:
         """Verknüpft den Katalog mit dem Agenten, damit Werkzeuge Claude nutzen können."""
         self.agent = agent
         self.bildschirm.agent = agent
+        self.browser.agent = agent
         self.team.agent = agent
 
     # -- Katalog für Claude -------------------------------------------------

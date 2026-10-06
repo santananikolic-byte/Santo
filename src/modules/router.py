@@ -13,6 +13,11 @@ für den Betrieb. Deshalb geht nur reiner Smalltalk an Gemini ("Hallo", "Danke",
 beantwortet Claude, der etwas tun kann. Vorher landete "Programmier mir einen
 Chatbot" bei Gemini, weil kein Stichwort passte, und die Antwort blieb leer.
 
+**Antworten gehören dem, der gefragt hat.** Hat Claude gerade etwas gefragt
+oder getan, ist "Ja", "Genau" oder "Und morgen?" die Antwort darauf - das geht
+an Claude, der das Gespräch kennt. Nur ein reines "Danke" oder "Tschüss" nach
+einer fertigen Antwort darf noch an Gemini.
+
 Jede Runde landet im **Gedankenlog** (``logs/gedankenlog.jsonl``): Frage,
 Gehirn, Dauer, Tokens, geschätzte Kosten. Daraus rechnet sich der
 Monatsverbrauch, an dem das Limit hängt.
@@ -45,12 +50,18 @@ HANDLUNGSSTAEMME = (
 # "Hallo, finde Firmen in Wien" ist kein Smalltalk, "Hallo Jarvis, wie geht's" schon.
 SMALLTALK_WOERTER = {
     "hallo", "hi", "hey", "servus", "grüß", "gruess", "gott", "moin", "guten", "gute",
-    "morgen", "tag", "abend", "nacht", "danke", "dankeschön", "vielen", "dank", "wie",
+    "tag", "abend", "nacht", "danke", "dankeschön", "vielen", "dank", "wie",
     "geht", "gehts", "s", "es", "dir", "euch", "alles", "klar", "tschüss", "tschuess",
     "ciao", "bis", "später", "dann", "wer", "bist", "du", "erzähl", "erzähle", "mir",
     "einen", "witz", "super", "passt", "okay", "ok", "cool", "genau", "gut", "gemacht",
     "jarvis", "davis", "und", "ja", "nein", "schön", "toll", "bitte", "was", "machst",
     "na", "so", "lieber", "mein", "freund", "hab", "habe", "dich", "lieb",
+}
+# Nach einer Antwort von Claude geht nur noch an Gemini, was keine Antwort sein kann.
+ABSCHLUSS_WOERTER = {
+    "hallo", "hi", "hey", "servus", "danke", "dankeschön", "vielen", "dank", "tschüss",
+    "tschuess", "ciao", "bis", "später", "gute", "nacht", "jarvis", "davis", "lieber",
+    "mein", "freund", "dir", "sehr", "schön",
 }
 # Wörter, die auf echte Denkarbeit hindeuten.
 DENKSTAEMME = (
@@ -60,8 +71,12 @@ DENKSTAEMME = (
 )
 
 
-def gehirn_waehlen(frage: str, gemini_da: bool = None) -> tuple:
-    """Gibt ``(gehirn, grund)`` zurück: ``"gemini"`` oder ``"claude"``."""
+def gehirn_waehlen(frage: str, gemini_da: bool = None, vorher: str = None) -> tuple:
+    """Gibt ``(gehirn, grund)`` zurück: ``"gemini"`` oder ``"claude"``.
+
+    ``vorher`` ist der Text der Claude-Antwort direkt davor (``None``: davor
+    sprach nicht Claude). Fragte Claude etwas, gehört jede Antwort ihm.
+    """
     if gemini_da is None:
         gemini_da = bool(config.GEMINI_API_KEY)
     text = (frage or "").strip().lower()
@@ -69,7 +84,11 @@ def gehirn_waehlen(frage: str, gemini_da: bool = None) -> tuple:
         return "claude", "kein Gemini-Schlüssel"
     if not text:
         return "claude", "leere Frage"
-    woerter = re.findall(r"[a-zäöüß]+", text)
+    # "Guten Morgen" ist ein Gruß, "Morgen" allein meint den Kalender.
+    woerter = re.findall(r"[a-zäöüß0-9]+", re.sub(r"\bguten\s+morgen\b", "hallo", text))
+    if vorher is not None and (vorher.rstrip().endswith("?")
+                               or not all(w in ABSCHLUSS_WOERTER for w in woerter)):
+        return "claude", "Antwort auf Claude"
     if woerter and len(woerter) <= config.ROUTER_MAX_WOERTER \
             and all(w in SMALLTALK_WOERTER for w in woerter):
         return "gemini", "Smalltalk"
@@ -88,14 +107,17 @@ def gemini_fragen(frage: str, systemtext: str, verlauf: list = None,
                   timeout: int = 30) -> dict:
     """Fragt Gemini. Rückgabe: ``{"ok", "text", "tokens_ein", "tokens_aus"}``.
 
-    Der Verlauf ist die Claude-Liste; nur reine Textrunden werden übernommen,
-    Werkzeugaufrufe bleiben draußen.
+    Der Verlauf ist die Claude-Liste; übernommen wird nur Text - auch der
+    Text aus Claudes Antworten. Werkzeugaufrufe und Ergebnisse bleiben draußen.
     """
     if not config.GEMINI_API_KEY:
         return {"ok": False, "fehler": "Kein Gemini-Schlüssel hinterlegt."}
     inhalte = []
     for nachricht in (verlauf or [])[-10:]:
         text = nachricht.get("content")
+        if isinstance(text, list) and nachricht.get("role") == "assistant":
+            text = "\n".join(b.get("text", "") for b in text
+                             if isinstance(b, dict) and b.get("type") == "text")
         if isinstance(text, str) and text.strip():
             rolle = "user" if nachricht.get("role") == "user" else "model"
             if inhalte and inhalte[-1]["role"] == rolle:
@@ -164,10 +186,11 @@ def claude_kosten(tokens_ein: int, tokens_aus: int, gelesen: int = 0, geschriebe
     """Geschätzte Kosten einer Claude-Anfrage in Euro.
 
     ``gelesen`` und ``geschrieben`` sind Tokens aus und in den Zwischenspeicher:
-    gelesen kostet ein Zehntel, geschrieben ein Viertel mehr als normal.
+    gelesen hat einen eigenen Preis (``CLAUDE_PREIS_GELESEN``, bei Opus 5.5 ein
+    Zwanzigstel), geschrieben kostet ein Viertel mehr als normal.
     """
-    eingang = tokens_ein + 0.1 * gelesen + 1.25 * geschrieben
-    dollar = (eingang * config.CLAUDE_PREIS_EIN
+    eingang = tokens_ein + 1.25 * geschrieben
+    dollar = (eingang * config.CLAUDE_PREIS_EIN + gelesen * config.CLAUDE_PREIS_GELESEN
               + tokens_aus * config.CLAUDE_PREIS_AUS) / 1_000_000
     return round(dollar * config.DOLLAR_IN_EURO, 6)
 

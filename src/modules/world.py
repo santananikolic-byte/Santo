@@ -28,6 +28,10 @@ OSM_BRANCHEN = {
     "arzt": [("amenity", "doctors"), ("amenity", "dentist"), ("amenity", "clinic"), ("healthcare", "")],
     "praxis": [("amenity", "doctors"), ("amenity", "dentist"), ("healthcare", "")],
     "zahnarzt": [("amenity", "dentist")],
+    "tierarzt": [("amenity", "veterinary")],
+    "klinik": [("amenity", "clinic"), ("amenity", "hospital")],
+    "apothek": [("amenity", "pharmacy")],
+    "pflege": [("amenity", "nursing_home"), ("social_facility", "nursing_home")],
     "physio": [("healthcare", "physiotherapist")],
     "steuer": [("office", "tax_advisor"), ("office", "accountant")],
     "kanzlei": [("office", "lawyer"), ("office", "notary")],
@@ -43,6 +47,16 @@ OSM_BRANCHEN = {
     "hotel": [("tourism", "hotel"), ("tourism", "guest_house")],
     "pension": [("tourism", "guest_house")],
     "restaurant": [("amenity", "restaurant")],
+    "gastro": [("amenity", "restaurant"), ("amenity", "cafe")],
+    "café": [("amenity", "cafe")],
+    "cafe": [("amenity", "cafe")],
+    "bäcker": [("shop", "bakery")],
+    "friseur": [("shop", "hairdresser")],
+    "kosmetik": [("shop", "beauty")],
+    "architekt": [("office", "architect")],
+    "baufirm": [("craft", "builder"), ("office", "construction_company")],
+    "bauunternehm": [("craft", "builder"), ("office", "construction_company")],
+    "baumeister": [("craft", "builder"), ("office", "construction_company")],
     "autohaus": [("shop", "car")],
     "fitness": [("leisure", "fitness_centre")],
     "kindergarten": [("amenity", "kindergarten")],
@@ -50,6 +64,9 @@ OSM_BRANCHEN = {
     "supermarkt": [("shop", "supermarket")],
     "geschäft": [("shop", "")],
 }
+# Allgemeine Wörter ohne eigene Branche - dafür gilt die Standardmischung.
+OSM_ALLGEMEIN = ("betrieb", "firmen", "unternehm", "gewerbe", "kunde", "alle", "egal",
+                 "irgend", "reinigung")
 # Ohne Angabe: die Betriebe, die am häufigsten eine Reinigung vergeben.
 OSM_STANDARD = ["arzt", "steuer", "kanzlei", "hausverwaltung", "versicherung", "autohaus",
                 "fitness", "hotel", "firma"]
@@ -61,6 +78,32 @@ OSM_NAMEN = {"doctors": "Arztpraxis", "dentist": "Zahnarzt", "clinic": "Klinik",
              "fitness_centre": "Fitnessstudio", "kindergarten": "Kindergarten", "school": "Schule",
              "supermarket": "Supermarkt", "bank": "Bank", "restaurant": "Restaurant",
              "physiotherapist": "Physiotherapie"}
+
+
+def _flach(text: str) -> str:
+    """Kleinschreibung ohne Umlaute - so findet "Ärzte" den Stamm "arzt"."""
+    return ((text or "").lower().replace("ä", "a").replace("ö", "o").replace("ü", "u")
+            .replace("ß", "ss"))
+
+
+def osm_schluessel(branche: str):
+    """Welche Kartenbranchen gemeint sind - ``None``, wenn die Branche unbekannt ist.
+
+    Mehrzahl und Umlaute ("Zahnärzte", "Autohäuser") finden den Stamm. Passt ein
+    längerer Stamm ("tierarzt"), fällt der kürzere darin ("arzt") weg. Ohne
+    Branche oder mit einem allgemeinen Wort ("Firmen") gilt die Standardmischung.
+    """
+    text = _flach(branche)
+    if not text.strip():
+        return list(OSM_STANDARD)
+    treffer = [k for k in OSM_BRANCHEN if _flach(k) in text]
+    treffer = [k for k in treffer
+               if not any(k != l and _flach(k) in _flach(l) for l in treffer)]
+    if treffer:
+        return treffer
+    if any(wort in text for wort in OSM_ALLGEMEIN):
+        return list(OSM_STANDARD)
+    return None
 
 
 def overpass_abfrage(breite: float, laenge: float, merkmale: list, radius: int = 3000,
@@ -235,11 +278,13 @@ class Welt:
         ort = (ort or "").strip()
         if not ort:
             return {"ok": False, "fehler": "In welchem Ort soll ich suchen?"}
+        schluessel = osm_schluessel(branche)
+        if schluessel is None:
+            return {"ok": False, "unbekannt": True,
+                    "fehler": "Die Branche '%s' kenne ich auf der Karte nicht." % branche.strip()}
         punkt, fehler = self.ort_finden(ort)
         if punkt is None:
-            return {"ok": False, "fehler": fehler}
-        woerter = (branche or "").lower()
-        schluessel = [k for k in OSM_BRANCHEN if k in woerter] or OSM_STANDARD
+            return {"ok": False, "fehler": (fehler or "").replace("Der Wetterdienst", "Die Ortssuche")}
         merkmale = []
         for k in schluessel:
             for m in OSM_BRANCHEN[k]:
@@ -250,7 +295,9 @@ class Welt:
         daten, fehler = (holen or self._overpass_holen)(abfrage)
         if daten is None:
             return {"ok": False, "fehler": fehler}
-        betriebe = osm_betriebe_lesen(daten)[:max(1, int(anzahl or 15))]
+        # Alles zurück, nicht nur "anzahl": Was schon in der Liste steht, überspringt
+        # der Aufrufer - sonst liefert derselbe Ort immer dieselben ersten Treffer.
+        betriebe = osm_betriebe_lesen(daten)
         return {"ok": True, "ort": punkt.get("name") or ort, "anzahl": len(betriebe),
                 "betriebe": betriebe, "quelle": "OpenStreetMap"}
 

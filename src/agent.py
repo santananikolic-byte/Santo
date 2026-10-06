@@ -12,6 +12,8 @@ Ablauf pro Eingabe:
 """
 
 import json
+import socket
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -35,12 +37,15 @@ AUSWEICH_MODELLE = ("claude-opus-5-5", "claude-opus-5", "claude-fable-5-1", "cla
 OHNE_EFFORT = ("claude-haiku", "claude-sonnet-4-5", "claude-3")
 
 
-def anfrage_ergaenzen(koerper: dict, effort: str = "") -> dict:
+def anfrage_ergaenzen(koerper: dict, effort: str = "", zwischenspeicher: bool = True) -> dict:
     """Ergänzt eine Anfrage um Denktiefe, Ausweichmodell und Zwischenspeicher.
 
-    Der Zwischenspeicher (Prompt-Caching) spart bei jeder Werkzeugrunde den
-    größten Teil der Eingabekosten: Werkzeugliste und bisheriges Gespräch
-    werden nur einmal voll bezahlt.
+    Der Zwischenspeicher (Prompt-Caching) spart in den Werkzeugrunden einer
+    Frage den größten Teil der Eingabekosten: Die zweite Runde liest Werkzeuge,
+    Systemprompt und Gespräch für einen Bruchteil. Die Werkzeugliste hat einen
+    eigenen Haltepunkt und hält über Fragen hinweg. Einzelanfragen
+    (``zwischenspeicher=False``) werden nie wieder gelesen - dort wäre das
+    Speichern nur ein Aufschlag.
     """
     modell = str(koerper.get("model") or "")
     effort = effort or config.CLAUDE_EFFORT
@@ -48,7 +53,8 @@ def anfrage_ergaenzen(koerper: dict, effort: str = "") -> dict:
         koerper.setdefault("output_config", {})["effort"] = effort
     if modell in AUSWEICH_MODELLE:
         koerper["fallbacks"] = "default"
-    koerper.setdefault("cache_control", {"type": "ephemeral"})
+    if zwischenspeicher:
+        koerper.setdefault("cache_control", {"type": "ephemeral"})
     werkzeuge = koerper.get("tools")
     if werkzeuge:
         # Die Werkzeugliste ändert sich nie - ein eigener Haltepunkt hält sie über Fragen hinweg.
@@ -74,10 +80,10 @@ def ausweichen_bereinigen(inhalt: list) -> list:
 def denkspuren_entfernen(verlauf: list) -> list:
     """Entfernt Denkblöcke aus früheren Runden.
 
-    Denkblöcke gehören zu genau dem Gespräch, in dem sie entstanden. Weil sich
-    der Systemprompt mit jeder Frage ändert (Erinnerungen) und alte Runden
-    vorn wegfallen, würde die Schnittstelle alte Denkblöcke ablehnen. Text,
-    Werkzeugaufrufe und Ergebnisse bleiben.
+    Denkblöcke gehören zu genau dem Gespräch, in dem sie entstanden. Weil alte
+    Runden vorn wegfallen und sich der Systemprompt mit dem Tag ändert, würde
+    die Schnittstelle alte Denkblöcke ablehnen. Text, Werkzeugaufrufe und
+    Ergebnisse bleiben.
     """
     neu = []
     for nachricht in verlauf:
@@ -90,8 +96,37 @@ def denkspuren_entfernen(verlauf: list) -> list:
             nachricht = dict(nachricht, content=inhalt)
         neu.append(nachricht)
     return neu
+
+
+DENKTIEFEN = ("low", "medium", "high", "xhigh", "max")
+
+
+def denktiefe() -> str:
+    """Die eingestellte Denktiefe - ein Tippfehler in der Konfiguration wird zu "high"."""
+    wert = str(config.CLAUDE_EFFORT or "").strip().lower()
+    return wert if wert in DENKTIEFEN else "high"
+
+
+def nutzung_addieren(summe: dict, nachricht: dict) -> None:
+    """Zählt die Tokens einer Antwort zur Summe (ein, aus, gelesen, geschrieben)."""
+    nutzung = (nachricht or {}).get("usage") or {}
+    for schluessel, feld in (("ein", "input_tokens"), ("aus", "output_tokens"),
+                             ("gelesen", "cache_read_input_tokens"),
+                             ("geschrieben", "cache_creation_input_tokens")):
+        summe[schluessel] = summe.get(schluessel, 0) + int(nutzung.get(feld, 0) or 0)
+
+
+def summe_kosten(summe: dict) -> float:
+    return claude_kosten(summe.get("ein", 0), summe.get("aus", 0),
+                         summe.get("gelesen", 0), summe.get("geschrieben", 0))
+
+
 MAX_RUNDEN = 8
 MAX_VERLAUF = 24
+# Schneidet die Grenze eine Antwort ab, versucht er es einmal mit weniger Nachdenken.
+WENIGER_DENKEN = {"max": "medium", "xhigh": "medium", "high": "medium", "medium": "low"}
+ABGESCHNITTEN = ("Meine Antwort ist zu lang geworden und wurde abgeschnitten. Ich habe "
+                 "nichts davon ausgeführt. Teil die Aufgabe bitte in kleinere Schritte.")
 
 WOCHENTAGE_DE = ["Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag",
                  "Samstag", "Sonntag"]
@@ -123,6 +158,8 @@ So arbeitest du:
 - Du hast ein Gedächtnis über frühere Tage. Nutze es beiläufig, ohne es
   anzukündigen. Sag nie "laut meinem Gedächtnis".
 - Ging etwas schief, sagst du es. Du erfindest keine Ergebnisse.
+- Steht vor seiner Nachricht ein Abschnitt <erinnerung>, sind das Treffer aus
+  deinem Gedächtnis zu dieser Frage. Er hat sie nicht gesagt - nutze sie still.
 
 Die Buchhaltung führst du vor — die fachliche Prüfung macht sein Steuerberater.
 
@@ -174,6 +211,8 @@ class JarvisAgent:
         if stimme is not None:
             self.tools.stimme_setzen(stimme)
         self.verlauf = []
+        # Stimme, Telegram, Web und Zeitplan teilen sich den Verlauf - einer nach dem anderen.
+        self._denk_sperre = threading.RLock()
         self.letzter_fehler = ""
         self.gedankenlog = Gedankenlog()
         self.letztes_gehirn = ""
@@ -216,10 +255,12 @@ class JarvisAgent:
 
     # -- Schnittstelle ------------------------------------------------------
 
-    def _anfrage(self, koerper: dict, timeout: int = 300) -> dict:
+    def _anfrage(self, koerper: dict, timeout: int = 600) -> dict:
         """Schickt eine Anfrage an die Claude-Schnittstelle.
 
         Fehler kommen auf Deutsch zurück und benennen den nächsten Schritt.
+        Läuft die Wartezeit ab, ist die Anfrage schon angekommen und wird
+        berechnet - dann wird nicht noch einmal geschickt.
         """
         if not self.einsatzbereit():
             return {"ok": False,
@@ -263,6 +304,11 @@ class JarvisAgent:
                 return {"ok": False,
                         "fehler": "Claude meldet einen Fehler (%d): %s"
                                   % (fehler.code, meldung[:300])}
+            except socket.timeout:
+                # Die Anfrage ist angekommen und Claude arbeitet noch - nicht doppelt bezahlen.
+                return {"ok": False,
+                        "fehler": "Claude hat länger als %d Sekunden gebraucht. Teil die "
+                                  "Aufgabe bitte in kleinere Schritte." % timeout}
             except (urllib.error.URLError, OSError) as fehler:
                 if versuch < 2:
                     time.sleep(2 * (versuch + 1))
@@ -273,6 +319,29 @@ class JarvisAgent:
             except ValueError as fehler:
                 return {"ok": False, "fehler": "Die Antwort war unlesbar: %s" % fehler}
         return {"ok": False, "fehler": "Claude hat nicht geantwortet."}
+
+    def _claude_runde(self, koerper: dict, summe: dict, effort: str = "",
+                      zwischenspeicher: bool = True) -> dict:
+        """Eine Anfrage; schneidet die Grenze sie ab, einmal mit weniger Nachdenken.
+
+        Das Denken zählt zu den Tokens. Reicht die Grenze nicht, war es meist
+        zu viel Denken - ein zweiter Versuch eine Stufe flacher passt dann.
+        Die Tokens beider Versuche landen in ``summe``.
+        """
+        effort = effort or denktiefe()
+        modell = str(koerper.get("model") or "")
+        for versuch in range(2):
+            antwort = self._anfrage(anfrage_ergaenzen(dict(koerper), effort, zwischenspeicher))
+            if not antwort.get("ok"):
+                return antwort
+            nutzung_addieren(summe, antwort["daten"])
+            weniger = WENIGER_DENKEN.get(effort)
+            if antwort["daten"].get("stop_reason") != "max_tokens" or versuch or not weniger \
+                    or modell.startswith(OHNE_EFFORT):
+                return antwort
+            print("[agent] Antwort abgeschnitten - noch einmal mit Denktiefe %s" % weniger)
+            effort = weniger
+        return antwort
 
     @staticmethod
     def _inhalt_bauen(auftrag: str, bild_base64: str = "", bild_typ: str = "image/jpeg"):
@@ -287,18 +356,33 @@ class JarvisAgent:
 
     def text_anfrage(self, auftrag: str, bild_base64: str = "",
                      bild_typ: str = "image/jpeg", max_tokens: int = 8000) -> dict:
-        """Eine einzelne Anfrage ohne Werkzeuge - gibt reinen Text zurück."""
-        antwort = self._anfrage(anfrage_ergaenzen({
+        """Eine einzelne Anfrage ohne Werkzeuge - gibt reinen Text zurück.
+
+        Zählt wie jede Claude-Runde zum Monatslimit und landet im Gedankenlog.
+        """
+        if self.gedankenlog.limit_erreicht():
+            return {"ok": False, "fehler": self._limit_meldung()}
+        beginn = time.time()
+        summe = {}
+        antwort = self._claude_runde({
             "model": config.CLAUDE_MODEL,
-            "max_tokens": max(int(max_tokens or 0), 4000),
+            "max_tokens": max(int(max_tokens or 0), 8000),
             "messages": [{"role": "user",
                           "content": self._inhalt_bauen(auftrag, bild_base64, bild_typ)}],
-        }, effort="medium"))
+        }, summe, effort="medium", zwischenspeicher=False)
+        if summe:
+            self.gedankenlog.eintragen(auftrag, "claude", "Einzelauftrag", time.time() - beginn,
+                                       summe.get("ein", 0), summe.get("aus", 0), summe_kosten(summe))
         if not antwort.get("ok"):
             return antwort
+        if antwort["daten"].get("stop_reason") == "refusal":
+            return {"ok": False, "fehler": "Diesen Auftrag lehnt Claude ab."}
         teile = [block.get("text", "") for block in antwort["daten"].get("content", [])
                  if block.get("type") == "text"]
-        return {"ok": True, "text": "\n".join(teile).strip()}
+        text = "\n".join(teile).strip()
+        if antwort["daten"].get("stop_reason") == "max_tokens" and not text:
+            return {"ok": False, "fehler": "Die Antwort war zu lang und wurde abgeschnitten."}
+        return {"ok": True, "text": text}
 
     def json_anfrage(self, auftrag: str, bild_base64: str = "",
                      bild_typ: str = "image/jpeg", max_tokens: int = 8000) -> dict:
@@ -313,20 +397,30 @@ class JarvisAgent:
                     "rohtext": antwort["text"][:500]}
         return {"ok": True, "daten": daten}
 
+    @staticmethod
+    def _limit_meldung() -> str:
+        return ("Das Monatslimit von %.2f Euro für Claude ist erreicht. Das Limit hebst "
+                "du mit MONATSLIMIT_EURO in der Konfiguration an." % config.MONATSLIMIT_EURO)
+
     # -- Verlauf ------------------------------------------------------------
 
     def _verlauf_kuerzen(self):
-        """Kürzt den Verlauf auf 24 Nachrichten - immer beginnend bei einer Nutzerfrage.
+        """Kürzt den Verlauf - immer beginnend bei einer Nutzerfrage.
 
-        Beginnt der Verlauf mit einer Antwort oder einem Werkzeugergebnis, weist
-        die Schnittstelle die ganze Anfrage ab. Deshalb wird vorne so lange
-        abgeschnitten, bis eine echte Nutzernachricht am Anfang steht.
+        Ist er länger als 24 Nachrichten, bleibt auf einen Schlag nur die
+        jüngere Hälfte. So ändert sich der Anfang selten, und der
+        Zwischenspeicher trägt über viele Fragen. Beginnt der Verlauf mit einer
+        Antwort oder einem Werkzeugergebnis, weist die Schnittstelle die ganze
+        Anfrage ab - deshalb wird vorne bis zur nächsten echten Nutzerfrage
+        abgeschnitten.
         """
         if len(self.verlauf) <= MAX_VERLAUF:
             return
-        rest = self.verlauf[-MAX_VERLAUF:]
+        rest = self.verlauf[-(MAX_VERLAUF // 2):]
         while rest and not self._ist_echte_nutzerfrage(rest[0]):
             rest.pop(0)
+        if not rest:
+            rest = self.verlauf[-1:]
         self.verlauf = rest
 
     @staticmethod
@@ -344,7 +438,25 @@ class JarvisAgent:
 
     def verlauf_leeren(self):
         """Beginnt ein neues Gespräch."""
-        self.verlauf = []
+        with self._denk_sperre:
+            self.verlauf = []
+
+    def _claude_zuvor(self):
+        """Was Claude direkt vor der neuen Frage gesagt hat - ``None``, wenn nicht Claude.
+
+        Gemini-Antworten stehen als reiner Text im Verlauf, Claude-Antworten als
+        Blöcke. Stand davor ein Werkzeugergebnis, lief gerade eine Aufgabe.
+        """
+        if len(self.verlauf) < 2:
+            return None
+        vorige = self.verlauf[-2]
+        inhalt = vorige.get("content")
+        if not isinstance(inhalt, list):
+            return None
+        if vorige.get("role") != "assistant":
+            return "?"
+        return " ".join(b.get("text", "") for b in inhalt
+                        if isinstance(b, dict) and b.get("type") == "text").strip()
 
     # -- Zustand ------------------------------------------------------------
 
@@ -357,16 +469,34 @@ class JarvisAgent:
     def denken(self, eingabe: str, protokollieren: bool = True, anzeigen: bool = True) -> str:
         """Die Hauptschleife, mit Zustand für die Anzeige.
 
-        Hintergrundarbeit (Briefing, Routinen) läuft mit ``anzeigen=False``: Sie soll
-        der Anzeige nicht mitten im Gespräch "bereit" melden.
+        Hintergrundarbeit (Briefing) läuft mit ``anzeigen=False``: Sie soll der
+        Anzeige nicht mitten im Gespräch "bereit" melden. Wer gleichzeitig
+        fragt, wartet - der Verlauf verträgt nur einen Schreiber.
         """
-        if not anzeigen:
-            return self._denken(eingabe, protokollieren)
-        self.zustand_setzen("denkt")
-        try:
-            return self._denken(eingabe, protokollieren)
-        finally:
-            self.zustand_setzen("bereit")
+        with self._denk_sperre:
+            if not anzeigen:
+                return self._denken(eingabe, protokollieren)
+            self.zustand_setzen("denkt")
+            try:
+                return self._denken(eingabe, protokollieren)
+            finally:
+                self.zustand_setzen("bereit")
+
+    def _gemini_antwort(self, eingabe: str, systemtext: str, grund: str,
+                        protokollieren: bool):
+        """Fragt Gemini und hängt die Antwort an. ``None``, wenn Gemini nicht kann."""
+        beginn = time.time()
+        gemini = gemini_fragen(eingabe, systemtext, self.verlauf)
+        if not gemini.get("ok"):
+            return None, gemini.get("fehler", "")
+        text = gemini["text"]
+        self.verlauf.append({"role": "assistant", "content": text})
+        if protokollieren:
+            self.memory.verlauf_anhaengen("assistant", text)
+        self.gedankenlog.eintragen(eingabe, "gemini", grund, time.time() - beginn,
+                                   gemini["tokens_ein"], gemini["tokens_aus"])
+        self.letztes_gehirn = "gemini"
+        return text, ""
 
     def _denken(self, eingabe: str, protokollieren: bool = True) -> str:
         """Die Hauptschleife: fragen, Werkzeuge ausführen, antworten."""
@@ -379,82 +509,100 @@ class JarvisAgent:
         # Ein neuer Gedankengang: Fremdes ist noch nicht gelesen worden.
         self.tools.lauf_beginnen(hintergrund=False)
 
+        # Der Systemprompt bleibt von Frage zu Frage gleich - dann liest der
+        # Zwischenspeicher ihn samt Gespräch. Was zur Frage passt, kommt in die
+        # Nachricht selbst. Erst nachschlagen, dann die Frage speichern - sonst
+        # findet er seine eigene Frage.
+        systemtext = self.systemprompt("")
+        try:
+            treffer = self.recall.treffer_block(eingabe)
+        except Exception as fehler:
+            treffer = ""
+            print("[agent] Gedächtnis nicht lesbar: %s" % fehler)
+        inhalt = ("<erinnerung>\n%s\n</erinnerung>\n\n%s" % (treffer, eingabe)
+                  if treffer else eingabe)
         if protokollieren:
             self.memory.verlauf_anhaengen("user", eingabe)
-        self.verlauf.append({"role": "user", "content": eingabe})
+        self.verlauf.append({"role": "user", "content": inhalt})
         self._verlauf_kuerzen()
         self.verlauf = denkspuren_entfernen(self.verlauf)
-
-        systemtext = self.systemprompt(eingabe)
+        beginn_runde = len(self.verlauf) - 1  # hier beginnt diese Frage
         katalog = self.tools.katalog()
 
-        gehirn, grund = gehirn_waehlen(eingabe)
+        gehirn, grund = gehirn_waehlen(eingabe, vorher=self._claude_zuvor())
         ausgewichen = False
+        gemini_system = systemtext + ("\n\n" + treffer if treffer else "")
         if gehirn == "gemini":
-            beginn = time.time()
-            gemini = gemini_fragen(eingabe, systemtext, self.verlauf)
-            if gemini.get("ok"):
-                text = gemini["text"]
-                self.verlauf.append({"role": "assistant", "content": text})
-                if protokollieren:
-                    self.memory.verlauf_anhaengen("assistant", text)
-                self.gedankenlog.eintragen(
-                    eingabe, "gemini", grund, time.time() - beginn,
-                    gemini["tokens_ein"], gemini["tokens_aus"])
-                self.letztes_gehirn = "gemini"
+            text, fehler = self._gemini_antwort(eingabe, gemini_system, grund, protokollieren)
+            if text is not None:
                 return text
             # Limit oder Ausfall: Claude übernimmt, der Nutzer merkt nichts.
             ausgewichen = True
-            grund = "Gemini ausgefallen: %s" % gemini.get("fehler", "")
+            grund = "Gemini ausgefallen: %s" % fehler
 
         if self.gedankenlog.limit_erreicht():
-            self.verlauf.pop()  # die unbeantwortete Frage nicht im Verlauf lassen
-            self.letzter_fehler = (
-                "Das Monatslimit von %.2f Euro für Claude ist erreicht. Einfache "
-                "Fragen beantwortet noch Gemini. Das Limit hebst du mit "
-                "MONATSLIMIT_EURO in der Konfiguration an." % config.MONATSLIMIT_EURO)
+            if config.GEMINI_API_KEY and not ausgewichen:
+                text, _ = self._gemini_antwort(eingabe, gemini_system + (
+                    "\n\nHINWEIS: Das Claude-Monatslimit ist erreicht. Du hast gerade KEINE "
+                    "Werkzeuge. Behaupte nie, etwas erledigt zu haben. Braucht die Bitte "
+                    "Werkzeuge, sag, dass das erst wieder geht, wenn das Monatslimit "
+                    "(MONATSLIMIT_EURO) angehoben ist."), "Monatslimit erreicht", protokollieren)
+                if text is not None:
+                    return text
+            del self.verlauf[beginn_runde:]  # die unbeantwortete Frage nicht im Verlauf lassen
+            self.letzter_fehler = self._limit_meldung()
             return self.letzter_fehler
 
         beginn = time.time()
-        tokens_ein = tokens_aus = gelesen = geschrieben = 0
+        summe = {}
 
         def _protokoll():
             self.letztes_gehirn = "claude"
             self.gedankenlog.eintragen(
-                eingabe, "claude", grund, time.time() - beginn, tokens_ein,
-                tokens_aus, claude_kosten(tokens_ein, tokens_aus, gelesen, geschrieben), ausgewichen)
+                eingabe, "claude", grund, time.time() - beginn, summe.get("ein", 0),
+                summe.get("aus", 0), summe_kosten(summe), ausgewichen)
 
         for runde in range(MAX_RUNDEN):
-            antwort = self._anfrage(anfrage_ergaenzen({
+            antwort = self._claude_runde({
                 "model": config.CLAUDE_MODEL,
                 "max_tokens": config.CLAUDE_MAX_TOKENS,
                 "system": systemtext,
                 "tools": katalog,
                 "messages": self.verlauf,
-            }))
+            }, summe)
             if not antwort.get("ok"):
                 self.letzter_fehler = antwort.get("fehler", "")
                 _protokoll()
                 return self.letzter_fehler
 
             nachricht = antwort["daten"]
-            nutzung = nachricht.get("usage") or {}
-            tokens_ein += int(nutzung.get("input_tokens", 0) or 0)
-            tokens_aus += int(nutzung.get("output_tokens", 0) or 0)
-            gelesen += int(nutzung.get("cache_read_input_tokens", 0) or 0)
-            geschrieben += int(nutzung.get("cache_creation_input_tokens", 0) or 0)
             if nachricht.get("stop_reason") == "refusal":
+                # Die abgelehnte Frage samt halber Werkzeugrunde nicht wieder mitschicken.
+                del self.verlauf[beginn_runde:]
                 _protokoll()
                 return ("Dabei kann ich nicht helfen. Wenn du es anders meinst, sag es "
                         "mir mit anderen Worten.")
             inhalt = ausweichen_bereinigen(nachricht.get("content", []))
-            self.verlauf.append({"role": "assistant", "content": inhalt})
-
+            text = "\n".join(b.get("text", "") for b in inhalt
+                             if b.get("type") == "text").strip()
             werkzeugaufrufe = [b for b in inhalt if b.get("type") == "tool_use"]
+
+            if nachricht.get("stop_reason") == "max_tokens":
+                # Abgeschnitten: kein halber Werkzeugaufruf wird ausgeführt.
+                if text and not werkzeugaufrufe:
+                    text += " ... (Hier ist meine Antwort abgeschnitten.)"
+                else:
+                    text = ABGESCHNITTEN
+                self.verlauf.append({"role": "assistant",
+                                     "content": [{"type": "text", "text": text}]})
+                _protokoll()
+                if protokollieren:
+                    self.memory.verlauf_anhaengen("assistant", text)
+                return text
+
+            self.verlauf.append({"role": "assistant", "content": inhalt})
             if not werkzeugaufrufe:
                 _protokoll()
-                text = "\n".join(b.get("text", "") for b in inhalt
-                                 if b.get("type") == "text").strip()
                 if protokollieren and text:
                     self.memory.verlauf_anhaengen("assistant", text)
                 return text or "Dazu habe ich nichts zu sagen."
@@ -481,7 +629,11 @@ class JarvisAgent:
 
     def arbeiten(self, systemtext: str, auftrag: str, werkzeugnamen: list = None,
                  max_runden: int = 6, grund: str = "Team", hintergrund: bool = False) -> str:
-        """Wie ``_arbeiten``, mit dem Hintergrund-Merker für den Werkzeugkatalog."""
+        """Wie ``_arbeiten``, mit dem Hintergrund-Merker für den Werkzeugkatalog.
+
+        Ohne Sperre: Die Schleife hat ihre eigene Nachrichtenliste, und der
+        Autopilot soll niemanden warten lassen, der gerade mit Jarvis spricht.
+        """
         vorher = self.tools.im_hintergrund()
         self.tools.hintergrund_setzen(vorher or hintergrund)
         try:
@@ -501,9 +653,7 @@ class JarvisAgent:
         if not self.einsatzbereit():
             return ("Es ist kein Anthropic-Schlüssel hinterlegt.")
         if self.gedankenlog.limit_erreicht():
-            return ("Das Monatslimit von %.2f Euro für Claude ist erreicht. Das Limit "
-                    "hebst du mit MONATSLIMIT_EURO in der Konfiguration an."
-                    % config.MONATSLIMIT_EURO)
+            return self._limit_meldung()
 
         katalog = self.tools.katalog()
         erlaubt = None
@@ -515,40 +665,41 @@ class JarvisAgent:
 
         nachrichten = [{"role": "user", "content": auftrag}]
         beginn = time.time()
-        tokens_ein = tokens_aus = gelesen = geschrieben = 0
+        summe = {}
 
         def protokoll():
             self.gedankenlog.eintragen(
-                auftrag, "claude", grund, time.time() - beginn, tokens_ein, tokens_aus,
-                claude_kosten(tokens_ein, tokens_aus, gelesen, geschrieben))
+                auftrag, "claude", grund, time.time() - beginn, summe.get("ein", 0),
+                summe.get("aus", 0), summe_kosten(summe))
 
         for _ in range(max(1, int(max_runden))):
-            antwort = self._anfrage(anfrage_ergaenzen({
+            antwort = self._claude_runde({
                 "model": config.CLAUDE_MODEL,
                 "max_tokens": config.CLAUDE_MAX_TOKENS,
                 "system": systemtext,
                 "tools": katalog,
                 "messages": nachrichten,
-            }))
+            }, summe)
             if not antwort.get("ok"):
                 protokoll()
                 return antwort.get("fehler", "Der Auftrag ist fehlgeschlagen.")
 
-            nutzung = antwort["daten"].get("usage") or {}
-            tokens_ein += int(nutzung.get("input_tokens", 0) or 0)
-            tokens_aus += int(nutzung.get("output_tokens", 0) or 0)
-            gelesen += int(nutzung.get("cache_read_input_tokens", 0) or 0)
-            geschrieben += int(nutzung.get("cache_creation_input_tokens", 0) or 0)
             if antwort["daten"].get("stop_reason") == "refusal":
                 protokoll()
                 return "Diesen Auftrag lehnt Claude ab. Formuliere ihn bitte anders."
             inhalt = ausweichen_bereinigen(antwort["daten"].get("content", []))
-            nachrichten.append({"role": "assistant", "content": inhalt})
+            text = "\n".join(b.get("text", "") for b in inhalt
+                             if b.get("type") == "text").strip()
             aufrufe = [b for b in inhalt if b.get("type") == "tool_use"]
+            if antwort["daten"].get("stop_reason") == "max_tokens":
+                protokoll()
+                if text and not aufrufe:
+                    return text + " ... (Hier ist die Antwort abgeschnitten.)"
+                return ABGESCHNITTEN
+            nachrichten.append({"role": "assistant", "content": inhalt})
             if not aufrufe:
                 protokoll()
-                return "\n".join(b.get("text", "") for b in inhalt
-                                  if b.get("type") == "text").strip()
+                return text
 
             ergebnisse = []
             for aufruf in aufrufe:

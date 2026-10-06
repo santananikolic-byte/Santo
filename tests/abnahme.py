@@ -496,7 +496,7 @@ def pruefung_leadfinder(agent):
             and "doctors" not in abfragen[0], "%d Betriebe" % gefunden.get("anzahl", 0))
     class _WeltKarte(object):
         @staticmethod
-        def betriebe_suchen(ort, branche="", anzahl=8):
+        def betriebe_suchen(ort, branche="", anzahl=8, **rest):
             return {"ok": True, "betriebe": gelesen}
         @staticmethod
         def recherche(frage):
@@ -757,9 +757,11 @@ def pruefung_browser(agent):
                 return True
 
             @staticmethod
-            def json_anfrage(system, anfrage):
-                return {"gedanke": "jetzt bestellen", "aktion": "klicken",
-                        "ziel": 1, "text": ""}
+            def json_anfrage(auftrag, bild_base64="", **rest):
+                # Wie der echte Agent: ein Auftrag, kein Bild, Antwort in "daten".
+                assert not bild_base64, "Seitentext darf nicht als Bild gehen"
+                return {"ok": True, "daten": {"gedanke": "jetzt bestellen", "aktion": "klicken",
+                                              "ziel": 1, "text": ""}}
 
         browser.agent = FalscherAgent()
         gefragt = []
@@ -781,8 +783,8 @@ def pruefung_browser(agent):
 
         class Endlos(FalscherAgent):
             @staticmethod
-            def json_anfrage(system, anfrage):
-                return {"gedanke": "warten", "aktion": "warten", "text": ""}
+            def json_anfrage(auftrag, **rest):
+                return {"ok": True, "daten": {"gedanke": "warten", "aktion": "warten", "text": ""}}
 
         browser.agent = Endlos()
         ergebnis = browser.erledigen("endlos", basis, schritte_max=2)
@@ -792,8 +794,8 @@ def pruefung_browser(agent):
 
         class Muell(FalscherAgent):
             @staticmethod
-            def json_anfrage(system, anfrage):
-                return "kein JSON"
+            def json_anfrage(auftrag, **rest):
+                return {"ok": False, "fehler": "Die Antwort war kein auswertbares JSON."}
 
         browser.agent = Muell()
         ergebnis = browser.erledigen("x", basis)
@@ -944,8 +946,9 @@ def pruefung_router(agent):
     pruefen("Ohne Gemini-Schlüssel antwortet immer Claude",
             gehirn_waehlen("Wie geht es dir?", False)[0] == "claude", "")
 
-    pruefen("Kosten mit Zwischenspeicher: gelesen ein Zehntel, geschrieben ein Viertel mehr",
-            abs(claude_kosten(0, 0, 1_000_000, 0) - 0.1 * config.CLAUDE_PREIS_EIN * config.DOLLAR_IN_EURO) < 1e-6
+    pruefen("Kosten mit Zwischenspeicher: gelesen 0,20 Dollar (Opus 5.5), geschrieben ein Viertel mehr",
+            abs(claude_kosten(0, 0, 1_000_000, 0) - config.CLAUDE_PREIS_GELESEN * config.DOLLAR_IN_EURO) < 1e-6
+            and config.CLAUDE_PREIS_GELESEN == 0.20
             and abs(claude_kosten(0, 0, 0, 1_000_000) - 1.25 * config.CLAUDE_PREIS_EIN * config.DOLLAR_IN_EURO) < 1e-6,
             "")
 
@@ -956,7 +959,7 @@ def pruefung_router(agent):
     haiku = agent_modul.anfrage_ergaenzen({"model": "claude-haiku-4-5", "messages": []})
     pruefen("Opus 5.5: Denktiefe, Ausweichmodell und Zwischenspeicher sind gesetzt",
             config.CLAUDE_MODEL == "claude-opus-5-5" and config.CLAUDE_MAX_TOKENS >= 16000
-            and opus["output_config"]["effort"] == config.CLAUDE_EFFORT and opus["fallbacks"] == "default"
+            and opus["output_config"]["effort"] == agent_modul.denktiefe() and opus["fallbacks"] == "default"
             and opus["cache_control"] == {"type": "ephemeral"}
             and opus["tools"][-1]["cache_control"] == {"type": "ephemeral"}
             and "cache_control" not in werkzeugliste[-1]
@@ -1007,9 +1010,11 @@ def pruefung_router(agent):
             and gesendet["koerper"]["model"] == "claude-opus-5-5"
             and not any(isinstance(n["content"], list) and any(b.get("type") == "thinking" for b in n["content"])
                         for n in gesendete)
-            and gesendet["timeout"] >= 300, kopf.get("anthropic-beta", "kein Beta-Kopf"))
-    pruefen("Lehnt Claude ab, sagt Jarvis das freundlich und merkt sich keine leere Antwort",
-            "nicht helfen" in antwort and verlauf_danach[-1]["role"] == "user", antwort[:55])
+            and gesendet["timeout"] >= 600, kopf.get("anthropic-beta", "kein Beta-Kopf"))
+    pruefen("Lehnt Claude ab, sagt Jarvis das freundlich und schickt die Frage nie wieder mit",
+            "nicht helfen" in antwort and len(verlauf_danach) == 2
+            and not any("Praxis Weber" in str(n.get("content")) for n in verlauf_danach)
+            and verlauf_danach[-1]["role"] == "assistant", antwort[:55])
     pruefen("Kostenschätzung rechnet aus den Tokens",
             abs(claude_kosten(1_000_000, 0) - config.CLAUDE_PREIS_EIN * config.DOLLAR_IN_EURO) < 1e-6
             and claude_kosten(0, 0) == 0, "1 Mio Tokens rein")
@@ -1038,6 +1043,7 @@ def pruefung_router(agent):
 
         agent_modul.gemini_fragen = lambda *a, **k: {
             "ok": False, "limit": True, "fehler": "Gemini meldet Fehler 429."}
+        agent.verlauf_leeren()  # ein neues Gespräch - sonst gehört die Antwort Claude
         text = agent.denken("Und wie geht es dir?")
         pruefen("Gemini-Limit: Claude springt ein",
                 text == "Antwort von Claude."
@@ -1051,16 +1057,291 @@ def pruefung_router(agent):
                 "%s Euro" % bilanz["kosten"])
 
         config.MONATSLIMIT_EURO = bilanz["kosten"] / 2
-        agent_modul.gemini_fragen = echt[0]
+        gesehen = {}
+
+        def gemini_im_limit(frage, systemtext, verlauf=None, **rest):
+            gesehen["system"] = systemtext
+            return {"ok": True, "text": "Antwort von Gemini.", "tokens_ein": 5, "tokens_aus": 5}
+        agent_modul.gemini_fragen = gemini_im_limit
+        agent._anfrage = lambda koerper, timeout=120: (_ for _ in ()).throw(
+            AssertionError("Claude darf im Limit nicht gefragt werden"))
+        agent.verlauf_leeren()
         text = agent.denken("Schreib mir ein Angebot")
-        pruefen("Monatslimit erreicht: Claude wird nicht mehr gefragt",
-                "Monatslimit" in text and agent.gedankenlog.monatsbilanz()["anfragen"] == 3,
-                text[:60])
+        bilanz = agent.gedankenlog.monatsbilanz()
+        pruefen("Monatslimit erreicht: Gemini antwortet weiter, ohne Werkzeuge vorzutäuschen",
+                text == "Antwort von Gemini." and "KEINE Werkzeuge" in gesehen.get("system", "")
+                and bilanz["claude"] == 2, text[:60])
+        agent_modul.gemini_fragen = lambda *a, **k: {"ok": False, "fehler": "aus"}
+        text = agent.denken("Schreib mir noch ein Angebot")
+        pruefen("Monatslimit erreicht und Gemini aus: eine ehrliche Meldung",
+                "Monatslimit" in text and "Gemini" not in text
+                and agent.gedankenlog.monatsbilanz()["claude"] == 2
+                and agent.verlauf[-1]["role"] == "assistant", text[:60])
     finally:
         (agent_modul.gemini_fragen, agent._anfrage, config.GEMINI_API_KEY,
          config.MONATSLIMIT_EURO, config.ANTHROPIC_API_KEY) = echt
         del agent._anfrage
         agent.verlauf_leeren()
+
+
+def pruefung_kluger_kern(agent):
+    """Die Fehler, die die Prüfer im neuen Claude-Kern fanden - jeder hat hier seine Probe."""
+    abschnitt("Kluger Kern")
+    import socket
+    import urllib.error
+    from modules import router as router_modul
+    from modules import world as welt_modul
+
+    # Antworten auf Claudes Rückfragen gehören Claude, nicht dem Smalltalk-Gehirn.
+    waehlen = lambda frage, vorher=None: gehirn_waehlen(frage, True, vorher)[0]  # noqa: E731
+    pruefen("Ja, Genau, Wie bitte? nach Claude gehen an Claude",
+            all(waehlen(f, "Soll ich es Dr. Huber per Mail schicken?") == "claude"
+                for f in ("Ja", "Ja bitte", "Genau", "Wie bitte?", "Danke"))
+            and waehlen("Genau", "Ich habe drei Termine eingetragen.") == "claude", "")
+    pruefen("Nur ein reines Danke nach einer fertigen Antwort darf an Gemini",
+            waehlen("Danke", "Ich habe drei Termine eingetragen.") == "gemini"
+            and waehlen("Danke dir Jarvis", "Erledigt.") == "gemini", "")
+    pruefen("Morgen meint den Kalender, Guten Morgen ist ein Gruß, Zahlen sind kein Smalltalk",
+            waehlen("Morgen") == "claude" and waehlen("Und morgen?") == "claude"
+            and waehlen("Was geht morgen?") == "claude" and waehlen("Guten Morgen") == "gemini"
+            and waehlen("Ja, 300") == "claude", "")
+
+    class _Antwort:
+        def __init__(self, daten): self.daten = daten
+        def read(self): return json.dumps(self.daten).encode("utf-8")
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+    gemini_koerper = {}
+
+    def gemini_abfangen(anfrage, timeout=0):
+        gemini_koerper.update(json.loads(anfrage.data.decode("utf-8")))
+        return _Antwort({"candidates": [{"content": {"parts": [{"text": "Gern."}]}}]})
+    echt = (router_modul.urllib.request.urlopen, config.GEMINI_API_KEY)
+    router_modul.urllib.request.urlopen = gemini_abfangen
+    config.GEMINI_API_KEY = "test"
+    try:
+        router_modul.gemini_fragen("Danke", "System", [
+            {"role": "user", "content": "Schreib Huber"},
+            {"role": "assistant", "content": [{"type": "thinking", "thinking": ""},
+                                              {"type": "text", "text": "Soll ich es Huber schicken?"}]},
+            {"role": "user", "content": "Danke"}])
+    finally:
+        router_modul.urllib.request.urlopen, config.GEMINI_API_KEY = echt
+    pruefen("Gemini sieht auch Claudes Antworten im Gespräch",
+            "Soll ich es Huber schicken?" in json.dumps(gemini_koerper.get("contents", []),
+                                                         ensure_ascii=False), "")
+
+    # Ein ganzer Durchlauf: Antwort auf Claude geht an Claude, auch wenn Gemini da wäre.
+    gesendet, laeufe = [], []
+    antworten = []
+
+    def anfrage_fake(koerper, timeout=600):
+        gesendet.append(copy.deepcopy(koerper))
+        return {"ok": True, "daten": antworten.pop(0)}
+    echt = (agent_modul.gemini_fragen, config.GEMINI_API_KEY, config.ANTHROPIC_API_KEY,
+            agent.gedankenlog, agent.tools.run, config.MONATSLIMIT_EURO)
+    agent_modul.gemini_fragen = lambda *a, **k: (_ for _ in ()).throw(
+        AssertionError("Gemini darf hier nicht gefragt werden"))
+    config.GEMINI_API_KEY = config.ANTHROPIC_API_KEY = "test"
+    config.MONATSLIMIT_EURO = 0
+    agent.gedankenlog = Gedankenlog(pathlib.Path(ARBEITSVERZEICHNIS) / "kern_test.jsonl")
+    agent._anfrage = anfrage_fake
+    agent.tools.run = lambda name, argumente: laeufe.append(name) or {"ok": True}
+    text_antwort = lambda t, grund="end_turn": {  # noqa: E731
+        "content": [{"type": "thinking", "thinking": "", "signature": "s"}, {"type": "text", "text": t}],
+        "stop_reason": grund, "usage": {"input_tokens": 10, "output_tokens": 5}}
+    try:
+        agent.verlauf_leeren()
+        antworten[:] = [text_antwort("Soll ich die Mail an Huber schicken?"), text_antwort("Gesendet.")]
+        agent.denken("Schreib Huber eine Mail zum Termin")
+        system_eins = gesendet[0]["system"]
+        text = agent.denken("Ja bitte")
+        pruefen("Ein Ja auf Claudes Rückfrage beantwortet Claude im selben Gespräch",
+                text == "Gesendet." and agent.letztes_gehirn == "claude"
+                and gesendet[1]["messages"][-1]["content"].endswith("Ja bitte"), text)
+        pruefen("Der Systemprompt bleibt von Frage zu Frage gleich (Zwischenspeicher greift)",
+                gesendet[1]["system"] == system_eins and "Ja bitte" not in system_eins
+                and "Huber eine Mail" not in system_eins, "")
+
+        # Abgeschnitten: einmal flacher denken; dann nichts Halbes ausführen.
+        abgeschnitten = {"content": [{"type": "thinking", "thinking": "", "signature": "s"},
+                                     {"type": "tool_use", "id": "t1", "name": "projekt_datei_schreiben",
+                                      "input": {"inhalt": "import sys\ndef ma"}}],
+                         "stop_reason": "max_tokens", "usage": {"input_tokens": 10, "output_tokens": 16000}}
+        gesendet.clear()
+        antworten[:] = [abgeschnitten, copy.deepcopy(abgeschnitten)]
+        text = agent.denken("Programmier mir ein großes Skript")
+        pruefen("Abgeschnittene Antwort: kein halber Werkzeugaufruf läuft, klare Meldung",
+                not laeufe and "abgeschnitten" in text and len(gesendet) == 2
+                and gesendet[1]["output_config"]["effort"] == "medium"
+                and agent.verlauf[-1]["role"] == "assistant"
+                and not any(b.get("type") == "tool_use" for b in agent.verlauf[-1]["content"]),
+                text[:55])
+        gesendet.clear()
+        antworten[:] = [{"content": [{"type": "thinking", "thinking": "", "signature": "s"}],
+                         "stop_reason": "max_tokens", "usage": {}}, text_antwort("Hier ist der Plan.")]
+        text = agent.denken("Plane meine Woche gründlich")
+        pruefen("Nur Denken, keine Antwort: ein zweiter Versuch mit weniger Denken antwortet",
+                text == "Hier ist der Plan." and len(gesendet) == 2, text)
+
+        # Einzelanfragen: kein Zwischenspeicher-Aufschlag, aber im Gedankenlog und im Limit.
+        gesendet.clear()
+        vorher = len(agent.gedankenlog.zeilen())
+        antworten[:] = [text_antwort('{"a": 1}')]
+        daten = agent.json_anfrage("Gib JSON")
+        pruefen("Einzelanfragen zahlen keinen Speicheraufschlag und zählen zum Monatslimit",
+                daten.get("daten") == {"a": 1} and "cache_control" not in gesendet[0]
+                and gesendet[0]["output_config"]["effort"] == "medium"
+                and len(agent.gedankenlog.zeilen()) == vorher + 1
+                and agent.gedankenlog.zeilen()[-1]["grund"] == "Einzelauftrag", "")
+        config.MONATSLIMIT_EURO = 0.000001
+        gesendet.clear()
+        gesperrt = agent.json_anfrage("Gib JSON")
+        pruefen("Ist das Limit erreicht, geht auch keine Einzelanfrage mehr raus",
+                not gesperrt.get("ok") and "Monatslimit" in gesperrt.get("fehler", "") and not gesendet, "")
+        config.MONATSLIMIT_EURO = 0
+
+        # Eine Routine als Werkzeug mitten in einer Frage fasst den Gesprächsverlauf nicht an.
+        agent.tools.routines.routine_anlegen("Kernprobe", "Sag kurz Hallo.")
+        offen = [{"role": "user", "content": "Mach die Kernprobe"},
+                 {"role": "assistant", "content": [{"type": "tool_use", "id": "r1",
+                                                    "name": "routine_ausfuehren", "input": {}}]}]
+        agent.verlauf = copy.deepcopy(offen)
+        gesendet.clear()
+        antworten[:] = [text_antwort("Hallo.")]
+        ergebnis = agent.tools.routines.routine_ausfuehren("Kernprobe", agent)
+        pruefen("Eine Routine läuft in eigener Schleife - der offene Werkzeugaufruf bleibt heil",
+                ergebnis.get("text") == "Hallo." and agent.verlauf == offen
+                and len(gesendet[0]["messages"]) == 1, ergebnis.get("text", "")[:40])
+        agent.tools.routines.routine_loeschen("Kernprobe")
+
+        # Wer gleichzeitig fragt, wartet, bis der Verlauf frei ist.
+        agent.verlauf_leeren()
+        antworten[:] = [text_antwort("Später.")]
+        fertig = []
+        agent._denk_sperre.acquire()
+        try:
+            faden = threading.Thread(target=lambda: fertig.append(agent.denken("Was steht an?")),
+                                     daemon=True)
+            faden.start()
+            faden.join(0.4)
+            wartete = faden.is_alive() and not fertig
+        finally:
+            agent._denk_sperre.release()
+        faden.join(5)
+        pruefen("Zeitplan, Stimme, Telegram und Web denken nacheinander, nie gleichzeitig",
+                wartete and fertig == ["Später."], "")
+
+        # Langer Verlauf: auf einen Schlag die Hälfte, damit der Anfang lange gleich bleibt.
+        agent.verlauf = [{"role": "user" if i % 2 == 0 else "assistant", "content": "x%d" % i}
+                         for i in range(25)]
+        agent._verlauf_kuerzen()
+        pruefen("Ein langer Verlauf wird selten und auf einmal gekürzt, beginnend mit einer Frage",
+                len(agent.verlauf) <= agent_modul.MAX_VERLAUF // 2 and agent.verlauf[0]["role"] == "user", "")
+    finally:
+        (agent_modul.gemini_fragen, config.GEMINI_API_KEY, config.ANTHROPIC_API_KEY,
+         agent.gedankenlog, agent.tools.run, config.MONATSLIMIT_EURO) = echt
+        del agent._anfrage
+        agent.verlauf_leeren()
+
+    # Läuft die Wartezeit ab, ist die Anfrage schon bezahlt - nicht noch zweimal schicken.
+    versuche = []
+
+    def zu_langsam(anfrage, timeout=0):
+        versuche.append(timeout)
+        raise socket.timeout("timed out")
+
+    def kein_netz(anfrage, timeout=0):
+        versuche.append(timeout)
+        raise urllib.error.URLError(ConnectionRefusedError("refused"))
+    echt = (agent_modul.urllib.request.urlopen, config.ANTHROPIC_API_KEY, agent_modul.time.sleep)
+    config.ANTHROPIC_API_KEY = "test"
+    agent_modul.time.sleep = lambda s: None
+    try:
+        agent_modul.urllib.request.urlopen = zu_langsam
+        langsam = agent._anfrage({"model": "x", "messages": []})
+        langsam_versuche = len(versuche)
+        versuche.clear()
+        agent_modul.urllib.request.urlopen = kein_netz
+        weg = agent._anfrage({"model": "x", "messages": []})
+    finally:
+        agent_modul.urllib.request.urlopen, config.ANTHROPIC_API_KEY, agent_modul.time.sleep = echt
+    pruefen("Zeitüberschreitung: einmal geschickt, ehrliche Meldung; ohne Netz drei Versuche",
+            langsam_versuche == 1 and "Sekunden" in langsam.get("fehler", "")
+            and len(versuche) == 3 and "Internet" in weg.get("fehler", ""), langsam.get("fehler", "")[:50])
+
+    # Denktiefe: ein Tippfehler wird "high"; Claude Codes eigene Einstellung zählt nicht.
+    alt = config.CLAUDE_EFFORT
+    config.CLAUDE_EFFORT = "quatsch"
+    falsch = agent_modul.denktiefe()
+    config.CLAUDE_EFFORT = " XHigh "
+    gross = agent_modul.denktiefe()
+    config.CLAUDE_EFFORT = alt
+    umgebung = dict(os.environ, CLAUDE_EFFORT="max")
+    umgebung.pop("JARVIS_EFFORT", None)
+    gelesen = subprocess.run(
+        [sys.executable, "-c", "import config; print(config.CLAUDE_EFFORT, config._ROHWERTE.get('CLAUDE_EFFORT', ''))"],
+        cwd=str(pathlib.Path(__file__).resolve().parent.parent / "src"), env=umgebung,
+        capture_output=True, text=True, timeout=60).stdout.split()
+    pruefen("Denktiefe: Tippfehler werden high, CLAUDE_EFFORT aus Claude Code zählt nicht",
+            falsch == "high" and gross == "xhigh" and gelesen
+            and gelesen[0] == ((gelesen[1] if len(gelesen) > 1 else "") or "high").lower(), " ".join(gelesen))
+
+    pruefen("Der Browser-Auftrag kennt Claude (sonst geht er nie)",
+            agent.tools.browser.agent is agent, "")
+
+    # Kundensuche auf der Karte: Mehrzahl, unbekannte Branchen, wiederholte Suche, echte Gründe.
+    schluessel = {b: welt_modul.osm_schluessel(b) for b in (
+        "Ärzte", "Zahnärzte", "Tierärzte", "Anwälte", "Autohäuser", "Kindergärten", "Firmen", "Apotheken")}
+    pruefen("Branchen in der Mehrzahl und mit Umlaut werden erkannt",
+            schluessel["Ärzte"] == ["arzt"] and schluessel["Zahnärzte"] == ["zahnarzt"]
+            and schluessel["Tierärzte"] == ["tierarzt"] and schluessel["Anwälte"] == ["anwalt"]
+            and schluessel["Autohäuser"] == ["autohaus"] and schluessel["Kindergärten"] == ["kindergarten"]
+            and schluessel["Firmen"] == welt_modul.OSM_STANDARD and schluessel["Apotheken"] == ["apothek"]
+            and welt_modul.osm_schluessel("Schwimmbäder") is None, "")
+    welt = welt_modul.Welt.__new__(welt_modul.Welt)
+    welt.ort_finden = lambda ort: (_ for _ in ()).throw(AssertionError("erst die Branche prüfen"))
+    unbekannt = welt.betriebe_suchen("Graz", "Schwimmbäder")
+    pruefen("Eine Branche, die die Karte nicht kennt, wird nicht durch die Standardmischung ersetzt",
+            not unbekannt.get("ok") and "Schwimmbäder" in unbekannt.get("fehler", ""), "")
+
+    akquise = agent.tools.akquise
+    viele = [{"firma": "Kernbetrieb %02d" % i, "branche": "Arztpraxis"} for i in range(12)]
+
+    class _WeltViele(object):
+        @staticmethod
+        def betriebe_suchen(ort, branche="", anzahl=8, **rest):
+            return {"ok": True, "betriebe": list(viele)}
+
+        @staticmethod
+        def recherche(frage):
+            return {"ok": False, "fehler": "aus"}
+    erster = akquise.leads_finden("Kernstadt", anzahl=3, welt=_WeltViele(), agent=None)
+    zweiter = akquise.leads_finden("Kernstadt", anzahl=3, welt=_WeltViele(), agent=None)
+    for _ in range(3):
+        letzter = akquise.leads_finden("Kernstadt", anzahl=3, welt=_WeltViele(), agent=None)
+    pruefen("Dieselbe Stadt noch einmal bringt die nächsten Betriebe statt 'keiner ist neu'",
+            len(erster["neu"]) == 3 and len(zweiter["neu"]) == 3 and not set(erster["neu"]) & set(zweiter["neu"])
+            and not letzter["neu"] and "Nachbarort" in letzter["text"], letzter.get("text", "")[:55])
+
+    class _WeltOhneOrt(object):
+        @staticmethod
+        def betriebe_suchen(ort, branche="", anzahl=8, **rest):
+            return {"ok": False, "fehler": "Den Ort 'Wiener Neustat' finde ich nicht."}
+
+        @staticmethod
+        def recherche(frage):
+            return {"ok": False, "fehler": "Such-Dienst fehlt"}
+
+    class _AgentJa(object):
+        @staticmethod
+        def einsatzbereit():
+            return True
+    ohne_ort = akquise.leads_finden("Wiener Neustat", welt=_WeltOhneOrt(), agent=_AgentJa())
+    ohne_schluessel = akquise.leads_finden("Wiener Neustat", welt=_WeltOhneOrt(), agent=None)
+    pruefen("Scheitert die Karte, hört er den echten Grund statt 'Brave einrichten'",
+            "finde ich nicht" in ohne_ort.get("fehler", "") and "Brave" not in ohne_ort.get("fehler", "")
+            and "finde ich nicht" in ohne_schluessel.get("fehler", ""), ohne_ort.get("fehler", "")[:55])
 
 
 def pruefung_dashboard(agent):
@@ -2681,6 +2962,7 @@ def main() -> int:
     pruefung_zeitplan()
     pruefung_kalender()
     pruefung_router(agent)
+    pruefung_kluger_kern(agent)
     pruefung_dashboard(agent)
     pruefung_ansichten(agent)
     pruefung_sicherheit(agent)

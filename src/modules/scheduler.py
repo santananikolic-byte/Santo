@@ -104,6 +104,9 @@ class Scheduler:
     def _routine_starter(self, routinen_name: str):
         """Baut die Funktion, die eine bestimmte Routine startet."""
         def starten():
+            werkzeuge = getattr(self.agent, "tools", None)
+            if werkzeuge is not None:
+                werkzeuge.lauf_beginnen(hintergrund=False)  # ein frischer Lauf je Routine
             ergebnis = self.routines.routine_ausfuehren(routinen_name, self.agent)
             return ergebnis.get("text") or ergebnis.get("fehler", "")
         return starten

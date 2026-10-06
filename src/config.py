@@ -100,12 +100,16 @@ env_neu_laden()
 
 # Claude
 ANTHROPIC_API_KEY = _text("ANTHROPIC_API_KEY")
-# Das stärkste allgemeine Modell. Günstiger: CLAUDE_MODEL=claude-sonnet-5-5 (halber Preis).
+# Das stärkste allgemeine Modell. Günstiger: CLAUDE_MODEL=claude-sonnet-5-5 (halber Preis;
+# dann auch CLAUDE_PREIS_EIN=2 und CLAUDE_PREIS_AUS=10 eintragen).
 CLAUDE_MODEL = _text("CLAUDE_MODEL", "claude-opus-5-5")
 # Das Modell denkt immer mit - das Denken zählt zu den Tokens. 2000 schnitten Antworten ab.
 CLAUDE_MAX_TOKENS = _ganzzahl("CLAUDE_MAX_TOKENS", 16000)
-# Wie gründlich es denkt: low, medium, high, xhigh, max. "high" für Arbeit mit Werkzeugen.
-CLAUDE_EFFORT = _text("CLAUDE_EFFORT", "high")
+# Wie gründlich es denkt: low, medium, high, xhigh, max. "high" für Arbeit mit Werkzeugen;
+# xhigh und max brauchen mehr als 16000 Tokens und sind ohne Streaming zu langsam.
+# Nur aus config/.env (oder JARVIS_EFFORT) - Claude Code setzt CLAUDE_EFFORT für sich selbst.
+CLAUDE_EFFORT = (_ROHWERTE.get("CLAUDE_EFFORT") or os.environ.get("JARVIS_EFFORT")
+                 or "high").strip().lower()
 
 # Gemini: das schnelle, billige Gehirn für Smalltalk und einfache Fragen.
 # Ohne Schlüssel antwortet immer Claude. Das Modell steht hier, damit es sich
@@ -119,9 +123,11 @@ ROUTER_MAX_WOERTER = _ganzzahl("ROUTER_MAX_WOERTER", 8)
 
 # Kosten: Preise je eine Million Tokens in US-Dollar. Das sind Schätzwerte
 # für das Gedankenlog - maßgeblich ist immer die Rechnung der Anbieter.
-# Dollar je Million Tokens (Claude Opus 5.5). Gelesen aus dem Zwischenspeicher: ein Zehntel.
+# Dollar je Million Tokens (Claude Opus 5.5). In den Zwischenspeicher schreiben: 1,25-fach.
 CLAUDE_PREIS_EIN = _zahl("CLAUDE_PREIS_EIN", 4.0)
 CLAUDE_PREIS_AUS = _zahl("CLAUDE_PREIS_AUS", 20.0)
+# Aus dem Zwischenspeicher gelesen (Opus 5.5 und Sonnet 5.5: 0,20 Dollar).
+CLAUDE_PREIS_GELESEN = _zahl("CLAUDE_PREIS_GELESEN", 0.20)
 DOLLAR_IN_EURO = _zahl("DOLLAR_IN_EURO", 0.92)
 # Ist das Monatslimit für Claude erreicht, antwortet Claude nicht mehr, bis
 # der Monat wechselt oder das Limit angehoben wird. 0 schaltet es ab.

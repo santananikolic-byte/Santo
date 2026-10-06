@@ -52,6 +52,7 @@ import select
 import shlex
 import shutil
 import smtplib
+import socket
 import sqlite3
 import ssl
 import subprocess
@@ -224,12 +225,16 @@ env_neu_laden()
 
 # Claude
 ANTHROPIC_API_KEY = _text("ANTHROPIC_API_KEY")
-# Das stärkste allgemeine Modell. Günstiger: CLAUDE_MODEL=claude-sonnet-5-5 (halber Preis).
+# Das stärkste allgemeine Modell. Günstiger: CLAUDE_MODEL=claude-sonnet-5-5 (halber Preis;
+# dann auch CLAUDE_PREIS_EIN=2 und CLAUDE_PREIS_AUS=10 eintragen).
 CLAUDE_MODEL = _text("CLAUDE_MODEL", "claude-opus-5-5")
 # Das Modell denkt immer mit - das Denken zählt zu den Tokens. 2000 schnitten Antworten ab.
 CLAUDE_MAX_TOKENS = _ganzzahl("CLAUDE_MAX_TOKENS", 16000)
-# Wie gründlich es denkt: low, medium, high, xhigh, max. "high" für Arbeit mit Werkzeugen.
-CLAUDE_EFFORT = _text("CLAUDE_EFFORT", "high")
+# Wie gründlich es denkt: low, medium, high, xhigh, max. "high" für Arbeit mit Werkzeugen;
+# xhigh und max brauchen mehr als 16000 Tokens und sind ohne Streaming zu langsam.
+# Nur aus config/.env (oder JARVIS_EFFORT) - Claude Code setzt CLAUDE_EFFORT für sich selbst.
+CLAUDE_EFFORT = (_ROHWERTE.get("CLAUDE_EFFORT") or os.environ.get("JARVIS_EFFORT")
+                 or "high").strip().lower()
 
 # Gemini: das schnelle, billige Gehirn für Smalltalk und einfache Fragen.
 # Ohne Schlüssel antwortet immer Claude. Das Modell steht hier, damit es sich
@@ -243,9 +248,11 @@ ROUTER_MAX_WOERTER = _ganzzahl("ROUTER_MAX_WOERTER", 8)
 
 # Kosten: Preise je eine Million Tokens in US-Dollar. Das sind Schätzwerte
 # für das Gedankenlog - maßgeblich ist immer die Rechnung der Anbieter.
-# Dollar je Million Tokens (Claude Opus 5.5). Gelesen aus dem Zwischenspeicher: ein Zehntel.
+# Dollar je Million Tokens (Claude Opus 5.5). In den Zwischenspeicher schreiben: 1,25-fach.
 CLAUDE_PREIS_EIN = _zahl("CLAUDE_PREIS_EIN", 4.0)
 CLAUDE_PREIS_AUS = _zahl("CLAUDE_PREIS_AUS", 20.0)
+# Aus dem Zwischenspeicher gelesen (Opus 5.5 und Sonnet 5.5: 0,20 Dollar).
+CLAUDE_PREIS_GELESEN = _zahl("CLAUDE_PREIS_GELESEN", 0.20)
 DOLLAR_IN_EURO = _zahl("DOLLAR_IN_EURO", 0.92)
 # Ist das Monatslimit für Claude erreicht, antwortet Claude nicht mehr, bis
 # der Monat wechselt oder das Limit angehoben wird. 0 schaltet es ab.
@@ -775,6 +782,11 @@ class Memory:
 # beantwortet Claude, der etwas tun kann. Vorher landete "Programmier mir einen
 # Chatbot" bei Gemini, weil kein Stichwort passte, und die Antwort blieb leer.
 # 
+# **Antworten gehören dem, der gefragt hat.** Hat Claude gerade etwas gefragt
+# oder getan, ist "Ja", "Genau" oder "Und morgen?" die Antwort darauf - das geht
+# an Claude, der das Gespräch kennt. Nur ein reines "Danke" oder "Tschüss" nach
+# einer fertigen Antwort darf noch an Gemini.
+# 
 # Jede Runde landet im **Gedankenlog** (``logs/gedankenlog.jsonl``): Frage,
 # Gehirn, Dauer, Tokens, geschätzte Kosten. Daraus rechnet sich der
 # Monatsverbrauch, an dem das Limit hängt.
@@ -803,12 +815,18 @@ HANDLUNGSSTAEMME = (
 # "Hallo, finde Firmen in Wien" ist kein Smalltalk, "Hallo Jarvis, wie geht's" schon.
 SMALLTALK_WOERTER = {
     "hallo", "hi", "hey", "servus", "grüß", "gruess", "gott", "moin", "guten", "gute",
-    "morgen", "tag", "abend", "nacht", "danke", "dankeschön", "vielen", "dank", "wie",
+    "tag", "abend", "nacht", "danke", "dankeschön", "vielen", "dank", "wie",
     "geht", "gehts", "s", "es", "dir", "euch", "alles", "klar", "tschüss", "tschuess",
     "ciao", "bis", "später", "dann", "wer", "bist", "du", "erzähl", "erzähle", "mir",
     "einen", "witz", "super", "passt", "okay", "ok", "cool", "genau", "gut", "gemacht",
     "jarvis", "davis", "und", "ja", "nein", "schön", "toll", "bitte", "was", "machst",
     "na", "so", "lieber", "mein", "freund", "hab", "habe", "dich", "lieb",
+}
+# Nach einer Antwort von Claude geht nur noch an Gemini, was keine Antwort sein kann.
+ABSCHLUSS_WOERTER = {
+    "hallo", "hi", "hey", "servus", "danke", "dankeschön", "vielen", "dank", "tschüss",
+    "tschuess", "ciao", "bis", "später", "gute", "nacht", "jarvis", "davis", "lieber",
+    "mein", "freund", "dir", "sehr", "schön",
 }
 # Wörter, die auf echte Denkarbeit hindeuten.
 DENKSTAEMME = (
@@ -818,8 +836,12 @@ DENKSTAEMME = (
 )
 
 
-def gehirn_waehlen(frage: str, gemini_da: bool = None) -> tuple:
-    """Gibt ``(gehirn, grund)`` zurück: ``"gemini"`` oder ``"claude"``."""
+def gehirn_waehlen(frage: str, gemini_da: bool = None, vorher: str = None) -> tuple:
+    """Gibt ``(gehirn, grund)`` zurück: ``"gemini"`` oder ``"claude"``.
+
+    ``vorher`` ist der Text der Claude-Antwort direkt davor (``None``: davor
+    sprach nicht Claude). Fragte Claude etwas, gehört jede Antwort ihm.
+    """
     if gemini_da is None:
         gemini_da = bool(GEMINI_API_KEY)
     text = (frage or "").strip().lower()
@@ -827,7 +849,11 @@ def gehirn_waehlen(frage: str, gemini_da: bool = None) -> tuple:
         return "claude", "kein Gemini-Schlüssel"
     if not text:
         return "claude", "leere Frage"
-    woerter = re.findall(r"[a-zäöüß]+", text)
+    # "Guten Morgen" ist ein Gruß, "Morgen" allein meint den Kalender.
+    woerter = re.findall(r"[a-zäöüß0-9]+", re.sub(r"\bguten\s+morgen\b", "hallo", text))
+    if vorher is not None and (vorher.rstrip().endswith("?")
+                               or not all(w in ABSCHLUSS_WOERTER for w in woerter)):
+        return "claude", "Antwort auf Claude"
     if woerter and len(woerter) <= ROUTER_MAX_WOERTER \
             and all(w in SMALLTALK_WOERTER for w in woerter):
         return "gemini", "Smalltalk"
@@ -846,14 +872,17 @@ def gemini_fragen(frage: str, systemtext: str, verlauf: list = None,
                   timeout: int = 30) -> dict:
     """Fragt Gemini. Rückgabe: ``{"ok", "text", "tokens_ein", "tokens_aus"}``.
 
-    Der Verlauf ist die Claude-Liste; nur reine Textrunden werden übernommen,
-    Werkzeugaufrufe bleiben draußen.
+    Der Verlauf ist die Claude-Liste; übernommen wird nur Text - auch der
+    Text aus Claudes Antworten. Werkzeugaufrufe und Ergebnisse bleiben draußen.
     """
     if not GEMINI_API_KEY:
         return {"ok": False, "fehler": "Kein Gemini-Schlüssel hinterlegt."}
     inhalte = []
     for nachricht in (verlauf or [])[-10:]:
         text = nachricht.get("content")
+        if isinstance(text, list) and nachricht.get("role") == "assistant":
+            text = "\n".join(b.get("text", "") for b in text
+                             if isinstance(b, dict) and b.get("type") == "text")
         if isinstance(text, str) and text.strip():
             rolle = "user" if nachricht.get("role") == "user" else "model"
             if inhalte and inhalte[-1]["role"] == rolle:
@@ -922,10 +951,11 @@ def claude_kosten(tokens_ein: int, tokens_aus: int, gelesen: int = 0, geschriebe
     """Geschätzte Kosten einer Claude-Anfrage in Euro.
 
     ``gelesen`` und ``geschrieben`` sind Tokens aus und in den Zwischenspeicher:
-    gelesen kostet ein Zehntel, geschrieben ein Viertel mehr als normal.
+    gelesen hat einen eigenen Preis (``CLAUDE_PREIS_GELESEN``, bei Opus 5.5 ein
+    Zwanzigstel), geschrieben kostet ein Viertel mehr als normal.
     """
-    eingang = tokens_ein + 0.1 * gelesen + 1.25 * geschrieben
-    dollar = (eingang * CLAUDE_PREIS_EIN
+    eingang = tokens_ein + 1.25 * geschrieben
+    dollar = (eingang * CLAUDE_PREIS_EIN + gelesen * CLAUDE_PREIS_GELESEN
               + tokens_aus * CLAUDE_PREIS_AUS) / 1_000_000
     return round(dollar * DOLLAR_IN_EURO, 6)
 
@@ -1160,27 +1190,39 @@ class Recall:
                 zeilen.append(satz)
             teile.append("\n".join(zeilen))
 
-        if frage:
-            treffer = self.nachschlagen(frage)
-            zeilen = []
-            for notiz in treffer["notizen"]:
-                zeilen.append("- Notiz vom %s: %s" % (notiz["angelegt"][:10], notiz["text"]))
-            for kontakt in treffer["kontakte"]:
-                beschreibung = ", ".join(
-                    [t for t in (kontakt["firma"], kontakt["telefon"], kontakt["email"],
-                                 kontakt["notiz"]) if t])
-                zeilen.append("- Kontakt %s: %s" % (kontakt["name"], beschreibung or "keine Details"))
-            for bericht in treffer["berichte"]:
-                zeilen.append("- Tagesbericht %s: %s" % (bericht["datum"],
-                                                         bericht["zusammenfassung"]))
-            for zeile in treffer["aeusserungen"]:
-                zeilen.append("- Er sagte am %s: %s" % (zeile["zeit"][:10], zeile["text"][:200]))
-            if zeilen:
-                teile.append("Passend zur aktuellen Frage:\n" + "\n".join(zeilen[:14]))
+        treffer = self.treffer_block(frage) if frage else ""
+        if treffer:
+            teile.append(treffer)
 
         if not teile:
             return ""
         return "Das weißt du aus früheren Tagen:\n\n" + "\n\n".join(teile)
+
+    def treffer_block(self, frage: str) -> str:
+        """Was das Gedächtnis zu genau dieser Frage weiß - leer, wenn nichts passt.
+
+        Gehört in die Nachricht, nicht in den Systemprompt: Der bleibt so von
+        Frage zu Frage gleich, und der Zwischenspeicher kann ihn lesen.
+        """
+        if not frage:
+            return ""
+        treffer = self.nachschlagen(frage)
+        zeilen = []
+        for notiz in treffer["notizen"]:
+            zeilen.append("- Notiz vom %s: %s" % (notiz["angelegt"][:10], notiz["text"]))
+        for kontakt in treffer["kontakte"]:
+            beschreibung = ", ".join(
+                [t for t in (kontakt["firma"], kontakt["telefon"], kontakt["email"],
+                             kontakt["notiz"]) if t])
+            zeilen.append("- Kontakt %s: %s" % (kontakt["name"], beschreibung or "keine Details"))
+        for bericht in treffer["berichte"]:
+            zeilen.append("- Tagesbericht %s: %s" % (bericht["datum"],
+                                                     bericht["zusammenfassung"]))
+        for zeile in treffer["aeusserungen"]:
+            zeilen.append("- Er sagte am %s: %s" % (zeile["zeit"][:10], zeile["text"][:200]))
+        if not zeilen:
+            return ""
+        return "Passend zur aktuellen Frage:\n" + "\n".join(zeilen[:14])
 
     # -- Tag zusammenfassen -------------------------------------------------
 
@@ -4582,21 +4624,44 @@ class Akquise:
             return {"ok": False, "fehler": "Die Suche ist nicht verfügbar."}
 
         # Zuerst die Karte: echte Betriebe mit Adresse, ohne Schlüssel und ohne Raten.
+        # Stehen alle Treffer schon in der Liste, ein zweiter Blick weiter hinaus.
+        anzahl = max(1, int(anzahl or 8))
+        karten_grund, alles_bekannt = "", None
         if hasattr(welt, "betriebe_suchen"):
-            karte = welt.betriebe_suchen(ort, branche, anzahl)
-            if karte.get("ok") and karte.get("betriebe"):
-                return self._betriebe_aufnehmen(karte["betriebe"], ort, "Karte (OpenStreetMap)")
+            for weiter in (False, True):
+                karte = (welt.betriebe_suchen(ort, branche, anzahl * 4, radius=7000) if weiter
+                         else welt.betriebe_suchen(ort, branche, anzahl))
+                if not (karte.get("ok") and karte.get("betriebe")):
+                    if not weiter:
+                        karten_grund = karte.get("fehler") or (
+                            "Auf der Karte finde ich in %s keine passenden Betriebe." % ort)
+                    break
+                ergebnis = self._betriebe_aufnehmen(karte["betriebe"], ort,
+                                                    "Karte (OpenStreetMap)", hoechstens=anzahl)
+                if ergebnis.get("neu"):
+                    return ergebnis
+                alles_bekannt = dict(ergebnis, text=(
+                    "Auf der Karte stehen in %s %d passende Betriebe - alle hast du schon in "
+                    "der Liste. Nimm einen Nachbarort oder eine andere Branche."
+                    % (ort, ergebnis.get("gefunden", 0))))
 
         if agent is None or not getattr(agent, "einsatzbereit", lambda: False)():
+            if alles_bekannt:
+                return alles_bekannt
             return {"ok": False,
-                    "fehler": "Ohne Anthropic-Schlüssel kann ich die Treffer nicht "
-                              "auswerten."}
+                    "fehler": karten_grund or "Ohne Anthropic-Schlüssel kann ich die "
+                                              "Treffer nicht auswerten."}
 
         branchen = branche.strip() if branche else \
             "Arztpraxen, Steuerberater, Kanzleien, Autohäuser, Fitnessstudios"
         anfrage = ("%s in %s mit Adresse und Telefonnummer" % (branchen, ort))
         gefunden = welt.recherche(anfrage)
         if not gefunden.get("ok"):
+            # Ohne Such-Dienst zählt, was die Karte gesagt hat - nicht der Brave-Hinweis.
+            if alles_bekannt:
+                return alles_bekannt
+            if karten_grund:
+                return {"ok": False, "fehler": karten_grund}
             return {"ok": False,
                     "fehler": "Für die Suche fehlt der Such-Dienst. In "
                               "config/mcp_servers.json den Eintrag 'suche' auf "
@@ -4620,12 +4685,18 @@ class Akquise:
                               % antwort.get("fehler", "")}
 
         betriebe = (antwort["daten"] or {}).get("betriebe") or []
-        return self._betriebe_aufnehmen(betriebe[:int(anzahl or 8)], ort, "Recherche")
+        return self._betriebe_aufnehmen(betriebe[:anzahl], ort, "Recherche")
 
-    def _betriebe_aufnehmen(self, betriebe: list, ort: str, quelle: str) -> dict:
-        """Nimmt gefundene Betriebe als Interessenten auf - Wert null, nächster Schritt: anrufen."""
+    def _betriebe_aufnehmen(self, betriebe: list, ort: str, quelle: str,
+                            hoechstens: int = 0) -> dict:
+        """Nimmt gefundene Betriebe als Interessenten auf - Wert null, nächster Schritt: anrufen.
+
+        Mit ``hoechstens`` ist nach so vielen neuen Schluss; bekannte zählen nicht.
+        """
         neu, bekannt = [], []
         for eintrag in betriebe:
+            if hoechstens and len(neu) >= hoechstens:
+                break
             firma = str(eintrag.get("firma") or "").strip()
             if not firma:
                 continue
@@ -5335,7 +5406,11 @@ class Routines:
         auftrag = ("Führe jetzt die gespeicherte Routine '%s' aus. Das ist die Anweisung:\n\n%s\n\n"
                    "Nutze dafür deine Werkzeuge und melde am Ende kurz, was du getan hast."
                    % (treffer["name"], treffer["anweisung"]))
-        antwort = agent.denken(auftrag, protokollieren=False, anzeigen=False)
+        # Eine eigene Arbeitsschleife: Läuft die Routine als Werkzeug mitten in einer
+        # Frage, darf sie den Gesprächsverlauf nicht anfassen - sonst steht ein
+        # Werkzeugaufruf ohne Ergebnis darin, und jede weitere Anfrage scheitert.
+        antwort = agent.arbeiten(agent.systemprompt(auftrag), auftrag, max_runden=8,
+                                 grund="Routine %s" % treffer["name"])
         return {"ok": True, "name": treffer["name"], "text": antwort}
 
     def statistik(self) -> dict:
@@ -5909,6 +5984,10 @@ OSM_BRANCHEN = {
     "arzt": [("amenity", "doctors"), ("amenity", "dentist"), ("amenity", "clinic"), ("healthcare", "")],
     "praxis": [("amenity", "doctors"), ("amenity", "dentist"), ("healthcare", "")],
     "zahnarzt": [("amenity", "dentist")],
+    "tierarzt": [("amenity", "veterinary")],
+    "klinik": [("amenity", "clinic"), ("amenity", "hospital")],
+    "apothek": [("amenity", "pharmacy")],
+    "pflege": [("amenity", "nursing_home"), ("social_facility", "nursing_home")],
     "physio": [("healthcare", "physiotherapist")],
     "steuer": [("office", "tax_advisor"), ("office", "accountant")],
     "kanzlei": [("office", "lawyer"), ("office", "notary")],
@@ -5924,6 +6003,16 @@ OSM_BRANCHEN = {
     "hotel": [("tourism", "hotel"), ("tourism", "guest_house")],
     "pension": [("tourism", "guest_house")],
     "restaurant": [("amenity", "restaurant")],
+    "gastro": [("amenity", "restaurant"), ("amenity", "cafe")],
+    "café": [("amenity", "cafe")],
+    "cafe": [("amenity", "cafe")],
+    "bäcker": [("shop", "bakery")],
+    "friseur": [("shop", "hairdresser")],
+    "kosmetik": [("shop", "beauty")],
+    "architekt": [("office", "architect")],
+    "baufirm": [("craft", "builder"), ("office", "construction_company")],
+    "bauunternehm": [("craft", "builder"), ("office", "construction_company")],
+    "baumeister": [("craft", "builder"), ("office", "construction_company")],
     "autohaus": [("shop", "car")],
     "fitness": [("leisure", "fitness_centre")],
     "kindergarten": [("amenity", "kindergarten")],
@@ -5931,6 +6020,9 @@ OSM_BRANCHEN = {
     "supermarkt": [("shop", "supermarket")],
     "geschäft": [("shop", "")],
 }
+# Allgemeine Wörter ohne eigene Branche - dafür gilt die Standardmischung.
+OSM_ALLGEMEIN = ("betrieb", "firmen", "unternehm", "gewerbe", "kunde", "alle", "egal",
+                 "irgend", "reinigung")
 # Ohne Angabe: die Betriebe, die am häufigsten eine Reinigung vergeben.
 OSM_STANDARD = ["arzt", "steuer", "kanzlei", "hausverwaltung", "versicherung", "autohaus",
                 "fitness", "hotel", "firma"]
@@ -5942,6 +6034,32 @@ OSM_NAMEN = {"doctors": "Arztpraxis", "dentist": "Zahnarzt", "clinic": "Klinik",
              "fitness_centre": "Fitnessstudio", "kindergarten": "Kindergarten", "school": "Schule",
              "supermarket": "Supermarkt", "bank": "Bank", "restaurant": "Restaurant",
              "physiotherapist": "Physiotherapie"}
+
+
+def _flach(text: str) -> str:
+    """Kleinschreibung ohne Umlaute - so findet "Ärzte" den Stamm "arzt"."""
+    return ((text or "").lower().replace("ä", "a").replace("ö", "o").replace("ü", "u")
+            .replace("ß", "ss"))
+
+
+def osm_schluessel(branche: str):
+    """Welche Kartenbranchen gemeint sind - ``None``, wenn die Branche unbekannt ist.
+
+    Mehrzahl und Umlaute ("Zahnärzte", "Autohäuser") finden den Stamm. Passt ein
+    längerer Stamm ("tierarzt"), fällt der kürzere darin ("arzt") weg. Ohne
+    Branche oder mit einem allgemeinen Wort ("Firmen") gilt die Standardmischung.
+    """
+    text = _flach(branche)
+    if not text.strip():
+        return list(OSM_STANDARD)
+    treffer = [k for k in OSM_BRANCHEN if _flach(k) in text]
+    treffer = [k for k in treffer
+               if not any(k != l and _flach(k) in _flach(l) for l in treffer)]
+    if treffer:
+        return treffer
+    if any(wort in text for wort in OSM_ALLGEMEIN):
+        return list(OSM_STANDARD)
+    return None
 
 
 def overpass_abfrage(breite: float, laenge: float, merkmale: list, radius: int = 3000,
@@ -6116,11 +6234,13 @@ class Welt:
         ort = (ort or "").strip()
         if not ort:
             return {"ok": False, "fehler": "In welchem Ort soll ich suchen?"}
+        schluessel = osm_schluessel(branche)
+        if schluessel is None:
+            return {"ok": False, "unbekannt": True,
+                    "fehler": "Die Branche '%s' kenne ich auf der Karte nicht." % branche.strip()}
         punkt, fehler = self.ort_finden(ort)
         if punkt is None:
-            return {"ok": False, "fehler": fehler}
-        woerter = (branche or "").lower()
-        schluessel = [k for k in OSM_BRANCHEN if k in woerter] or OSM_STANDARD
+            return {"ok": False, "fehler": (fehler or "").replace("Der Wetterdienst", "Die Ortssuche")}
         merkmale = []
         for k in schluessel:
             for m in OSM_BRANCHEN[k]:
@@ -6131,7 +6251,9 @@ class Welt:
         daten, fehler = (holen or self._overpass_holen)(abfrage)
         if daten is None:
             return {"ok": False, "fehler": fehler}
-        betriebe = osm_betriebe_lesen(daten)[:max(1, int(anzahl or 15))]
+        # Alles zurück, nicht nur "anzahl": Was schon in der Liste steht, überspringt
+        # der Aufrufer - sonst liefert derselbe Ort immer dieselben ersten Treffer.
+        betriebe = osm_betriebe_lesen(daten)
         return {"ok": True, "ort": punkt.get("name") or ort, "anzahl": len(betriebe),
                 "betriebe": betriebe, "quelle": "OpenStreetMap"}
 
@@ -6659,7 +6781,11 @@ class Browser:
         if seite.get("letzter_fehler"):
             anfrage += ("\n\nDer letzte Schritt ist fehlgeschlagen: %s"
                         % seite["letzter_fehler"])
-        plan = self.agent.json_anfrage(STEUER_PROMPT_browser, anfrage)
+        antwort = self.agent.json_anfrage(STEUER_PROMPT_browser + "\n\n" + anfrage)
+        if isinstance(antwort, dict) and not antwort.get("ok") and antwort.get("fehler") \
+                and "JSON" not in antwort["fehler"]:
+            return {"ok": False, "fehler": antwort["fehler"]}  # Limit, Netz, Schlüssel
+        plan = antwort.get("daten") if isinstance(antwort, dict) and antwort.get("ok") else None
         if not isinstance(plan, dict) or not plan.get("aktion"):
             return {"ok": False,
                     "fehler": "Ich bekomme keinen brauchbaren nächsten Schritt zurück."}
@@ -12118,6 +12244,9 @@ class Scheduler:
     def _routine_starter(self, routinen_name: str):
         """Baut die Funktion, die eine bestimmte Routine startet."""
         def starten():
+            werkzeuge = getattr(self.agent, "tools", None)
+            if werkzeuge is not None:
+                werkzeuge.lauf_beginnen(hintergrund=False)  # ein frischer Lauf je Routine
             ergebnis = self.routines.routine_ausfuehren(routinen_name, self.agent)
             return ergebnis.get("text") or ergebnis.get("fehler", "")
         return starten
@@ -14264,6 +14393,7 @@ class Werkzeuge:
         """Verknüpft den Katalog mit dem Agenten, damit Werkzeuge Claude nutzen können."""
         self.agent = agent
         self.bildschirm.agent = agent
+        self.browser.agent = agent
         self.team.agent = agent
 
     # -- Katalog für Claude -------------------------------------------------
@@ -15132,12 +15262,15 @@ AUSWEICH_MODELLE = ("claude-opus-5-5", "claude-opus-5", "claude-fable-5-1", "cla
 OHNE_EFFORT = ("claude-haiku", "claude-sonnet-4-5", "claude-3")
 
 
-def anfrage_ergaenzen(koerper: dict, effort: str = "") -> dict:
+def anfrage_ergaenzen(koerper: dict, effort: str = "", zwischenspeicher: bool = True) -> dict:
     """Ergänzt eine Anfrage um Denktiefe, Ausweichmodell und Zwischenspeicher.
 
-    Der Zwischenspeicher (Prompt-Caching) spart bei jeder Werkzeugrunde den
-    größten Teil der Eingabekosten: Werkzeugliste und bisheriges Gespräch
-    werden nur einmal voll bezahlt.
+    Der Zwischenspeicher (Prompt-Caching) spart in den Werkzeugrunden einer
+    Frage den größten Teil der Eingabekosten: Die zweite Runde liest Werkzeuge,
+    Systemprompt und Gespräch für einen Bruchteil. Die Werkzeugliste hat einen
+    eigenen Haltepunkt und hält über Fragen hinweg. Einzelanfragen
+    (``zwischenspeicher=False``) werden nie wieder gelesen - dort wäre das
+    Speichern nur ein Aufschlag.
     """
     modell = str(koerper.get("model") or "")
     effort = effort or CLAUDE_EFFORT
@@ -15145,7 +15278,8 @@ def anfrage_ergaenzen(koerper: dict, effort: str = "") -> dict:
         koerper.setdefault("output_config", {})["effort"] = effort
     if modell in AUSWEICH_MODELLE:
         koerper["fallbacks"] = "default"
-    koerper.setdefault("cache_control", {"type": "ephemeral"})
+    if zwischenspeicher:
+        koerper.setdefault("cache_control", {"type": "ephemeral"})
     werkzeuge = koerper.get("tools")
     if werkzeuge:
         # Die Werkzeugliste ändert sich nie - ein eigener Haltepunkt hält sie über Fragen hinweg.
@@ -15171,10 +15305,10 @@ def ausweichen_bereinigen(inhalt: list) -> list:
 def denkspuren_entfernen(verlauf: list) -> list:
     """Entfernt Denkblöcke aus früheren Runden.
 
-    Denkblöcke gehören zu genau dem Gespräch, in dem sie entstanden. Weil sich
-    der Systemprompt mit jeder Frage ändert (Erinnerungen) und alte Runden
-    vorn wegfallen, würde die Schnittstelle alte Denkblöcke ablehnen. Text,
-    Werkzeugaufrufe und Ergebnisse bleiben.
+    Denkblöcke gehören zu genau dem Gespräch, in dem sie entstanden. Weil alte
+    Runden vorn wegfallen und sich der Systemprompt mit dem Tag ändert, würde
+    die Schnittstelle alte Denkblöcke ablehnen. Text, Werkzeugaufrufe und
+    Ergebnisse bleiben.
     """
     neu = []
     for nachricht in verlauf:
@@ -15187,8 +15321,37 @@ def denkspuren_entfernen(verlauf: list) -> list:
             nachricht = dict(nachricht, content=inhalt)
         neu.append(nachricht)
     return neu
+
+
+DENKTIEFEN = ("low", "medium", "high", "xhigh", "max")
+
+
+def denktiefe() -> str:
+    """Die eingestellte Denktiefe - ein Tippfehler in der Konfiguration wird zu "high"."""
+    wert = str(CLAUDE_EFFORT or "").strip().lower()
+    return wert if wert in DENKTIEFEN else "high"
+
+
+def nutzung_addieren(summe: dict, nachricht: dict) -> None:
+    """Zählt die Tokens einer Antwort zur Summe (ein, aus, gelesen, geschrieben)."""
+    nutzung = (nachricht or {}).get("usage") or {}
+    for schluessel, feld in (("ein", "input_tokens"), ("aus", "output_tokens"),
+                             ("gelesen", "cache_read_input_tokens"),
+                             ("geschrieben", "cache_creation_input_tokens")):
+        summe[schluessel] = summe.get(schluessel, 0) + int(nutzung.get(feld, 0) or 0)
+
+
+def summe_kosten(summe: dict) -> float:
+    return claude_kosten(summe.get("ein", 0), summe.get("aus", 0),
+                         summe.get("gelesen", 0), summe.get("geschrieben", 0))
+
+
 MAX_RUNDEN = 8
 MAX_VERLAUF = 24
+# Schneidet die Grenze eine Antwort ab, versucht er es einmal mit weniger Nachdenken.
+WENIGER_DENKEN = {"max": "medium", "xhigh": "medium", "high": "medium", "medium": "low"}
+ABGESCHNITTEN = ("Meine Antwort ist zu lang geworden und wurde abgeschnitten. Ich habe "
+                 "nichts davon ausgeführt. Teil die Aufgabe bitte in kleinere Schritte.")
 
 WOCHENTAGE_DE = ["Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag",
                  "Samstag", "Sonntag"]
@@ -15220,6 +15383,8 @@ So arbeitest du:
 - Du hast ein Gedächtnis über frühere Tage. Nutze es beiläufig, ohne es
   anzukündigen. Sag nie "laut meinem Gedächtnis".
 - Ging etwas schief, sagst du es. Du erfindest keine Ergebnisse.
+- Steht vor seiner Nachricht ein Abschnitt <erinnerung>, sind das Treffer aus
+  deinem Gedächtnis zu dieser Frage. Er hat sie nicht gesagt - nutze sie still.
 
 Die Buchhaltung führst du vor — die fachliche Prüfung macht sein Steuerberater.
 
@@ -15271,6 +15436,8 @@ class JarvisAgent:
         if stimme is not None:
             self.tools.stimme_setzen(stimme)
         self.verlauf = []
+        # Stimme, Telegram, Web und Zeitplan teilen sich den Verlauf - einer nach dem anderen.
+        self._denk_sperre = threading.RLock()
         self.letzter_fehler = ""
         self.gedankenlog = Gedankenlog()
         self.letztes_gehirn = ""
@@ -15313,10 +15480,12 @@ class JarvisAgent:
 
     # -- Schnittstelle ------------------------------------------------------
 
-    def _anfrage(self, koerper: dict, timeout: int = 300) -> dict:
+    def _anfrage(self, koerper: dict, timeout: int = 600) -> dict:
         """Schickt eine Anfrage an die Claude-Schnittstelle.
 
         Fehler kommen auf Deutsch zurück und benennen den nächsten Schritt.
+        Läuft die Wartezeit ab, ist die Anfrage schon angekommen und wird
+        berechnet - dann wird nicht noch einmal geschickt.
         """
         if not self.einsatzbereit():
             return {"ok": False,
@@ -15360,6 +15529,11 @@ class JarvisAgent:
                 return {"ok": False,
                         "fehler": "Claude meldet einen Fehler (%d): %s"
                                   % (fehler.code, meldung[:300])}
+            except socket.timeout:
+                # Die Anfrage ist angekommen und Claude arbeitet noch - nicht doppelt bezahlen.
+                return {"ok": False,
+                        "fehler": "Claude hat länger als %d Sekunden gebraucht. Teil die "
+                                  "Aufgabe bitte in kleinere Schritte." % timeout}
             except (urllib.error.URLError, OSError) as fehler:
                 if versuch < 2:
                     time.sleep(2 * (versuch + 1))
@@ -15370,6 +15544,29 @@ class JarvisAgent:
             except ValueError as fehler:
                 return {"ok": False, "fehler": "Die Antwort war unlesbar: %s" % fehler}
         return {"ok": False, "fehler": "Claude hat nicht geantwortet."}
+
+    def _claude_runde(self, koerper: dict, summe: dict, effort: str = "",
+                      zwischenspeicher: bool = True) -> dict:
+        """Eine Anfrage; schneidet die Grenze sie ab, einmal mit weniger Nachdenken.
+
+        Das Denken zählt zu den Tokens. Reicht die Grenze nicht, war es meist
+        zu viel Denken - ein zweiter Versuch eine Stufe flacher passt dann.
+        Die Tokens beider Versuche landen in ``summe``.
+        """
+        effort = effort or denktiefe()
+        modell = str(koerper.get("model") or "")
+        for versuch in range(2):
+            antwort = self._anfrage(anfrage_ergaenzen(dict(koerper), effort, zwischenspeicher))
+            if not antwort.get("ok"):
+                return antwort
+            nutzung_addieren(summe, antwort["daten"])
+            weniger = WENIGER_DENKEN.get(effort)
+            if antwort["daten"].get("stop_reason") != "max_tokens" or versuch or not weniger \
+                    or modell.startswith(OHNE_EFFORT):
+                return antwort
+            print("[agent] Antwort abgeschnitten - noch einmal mit Denktiefe %s" % weniger)
+            effort = weniger
+        return antwort
 
     @staticmethod
     def _inhalt_bauen(auftrag: str, bild_base64: str = "", bild_typ: str = "image/jpeg"):
@@ -15384,18 +15581,33 @@ class JarvisAgent:
 
     def text_anfrage(self, auftrag: str, bild_base64: str = "",
                      bild_typ: str = "image/jpeg", max_tokens: int = 8000) -> dict:
-        """Eine einzelne Anfrage ohne Werkzeuge - gibt reinen Text zurück."""
-        antwort = self._anfrage(anfrage_ergaenzen({
+        """Eine einzelne Anfrage ohne Werkzeuge - gibt reinen Text zurück.
+
+        Zählt wie jede Claude-Runde zum Monatslimit und landet im Gedankenlog.
+        """
+        if self.gedankenlog.limit_erreicht():
+            return {"ok": False, "fehler": self._limit_meldung()}
+        beginn = time.time()
+        summe = {}
+        antwort = self._claude_runde({
             "model": CLAUDE_MODEL,
-            "max_tokens": max(int(max_tokens or 0), 4000),
+            "max_tokens": max(int(max_tokens or 0), 8000),
             "messages": [{"role": "user",
                           "content": self._inhalt_bauen(auftrag, bild_base64, bild_typ)}],
-        }, effort="medium"))
+        }, summe, effort="medium", zwischenspeicher=False)
+        if summe:
+            self.gedankenlog.eintragen(auftrag, "claude", "Einzelauftrag", time.time() - beginn,
+                                       summe.get("ein", 0), summe.get("aus", 0), summe_kosten(summe))
         if not antwort.get("ok"):
             return antwort
+        if antwort["daten"].get("stop_reason") == "refusal":
+            return {"ok": False, "fehler": "Diesen Auftrag lehnt Claude ab."}
         teile = [block.get("text", "") for block in antwort["daten"].get("content", [])
                  if block.get("type") == "text"]
-        return {"ok": True, "text": "\n".join(teile).strip()}
+        text = "\n".join(teile).strip()
+        if antwort["daten"].get("stop_reason") == "max_tokens" and not text:
+            return {"ok": False, "fehler": "Die Antwort war zu lang und wurde abgeschnitten."}
+        return {"ok": True, "text": text}
 
     def json_anfrage(self, auftrag: str, bild_base64: str = "",
                      bild_typ: str = "image/jpeg", max_tokens: int = 8000) -> dict:
@@ -15410,20 +15622,30 @@ class JarvisAgent:
                     "rohtext": antwort["text"][:500]}
         return {"ok": True, "daten": daten}
 
+    @staticmethod
+    def _limit_meldung() -> str:
+        return ("Das Monatslimit von %.2f Euro für Claude ist erreicht. Das Limit hebst "
+                "du mit MONATSLIMIT_EURO in der Konfiguration an." % MONATSLIMIT_EURO)
+
     # -- Verlauf ------------------------------------------------------------
 
     def _verlauf_kuerzen(self):
-        """Kürzt den Verlauf auf 24 Nachrichten - immer beginnend bei einer Nutzerfrage.
+        """Kürzt den Verlauf - immer beginnend bei einer Nutzerfrage.
 
-        Beginnt der Verlauf mit einer Antwort oder einem Werkzeugergebnis, weist
-        die Schnittstelle die ganze Anfrage ab. Deshalb wird vorne so lange
-        abgeschnitten, bis eine echte Nutzernachricht am Anfang steht.
+        Ist er länger als 24 Nachrichten, bleibt auf einen Schlag nur die
+        jüngere Hälfte. So ändert sich der Anfang selten, und der
+        Zwischenspeicher trägt über viele Fragen. Beginnt der Verlauf mit einer
+        Antwort oder einem Werkzeugergebnis, weist die Schnittstelle die ganze
+        Anfrage ab - deshalb wird vorne bis zur nächsten echten Nutzerfrage
+        abgeschnitten.
         """
         if len(self.verlauf) <= MAX_VERLAUF:
             return
-        rest = self.verlauf[-MAX_VERLAUF:]
+        rest = self.verlauf[-(MAX_VERLAUF // 2):]
         while rest and not self._ist_echte_nutzerfrage(rest[0]):
             rest.pop(0)
+        if not rest:
+            rest = self.verlauf[-1:]
         self.verlauf = rest
 
     @staticmethod
@@ -15441,7 +15663,25 @@ class JarvisAgent:
 
     def verlauf_leeren(self):
         """Beginnt ein neues Gespräch."""
-        self.verlauf = []
+        with self._denk_sperre:
+            self.verlauf = []
+
+    def _claude_zuvor(self):
+        """Was Claude direkt vor der neuen Frage gesagt hat - ``None``, wenn nicht Claude.
+
+        Gemini-Antworten stehen als reiner Text im Verlauf, Claude-Antworten als
+        Blöcke. Stand davor ein Werkzeugergebnis, lief gerade eine Aufgabe.
+        """
+        if len(self.verlauf) < 2:
+            return None
+        vorige = self.verlauf[-2]
+        inhalt = vorige.get("content")
+        if not isinstance(inhalt, list):
+            return None
+        if vorige.get("role") != "assistant":
+            return "?"
+        return " ".join(b.get("text", "") for b in inhalt
+                        if isinstance(b, dict) and b.get("type") == "text").strip()
 
     # -- Zustand ------------------------------------------------------------
 
@@ -15454,16 +15694,34 @@ class JarvisAgent:
     def denken(self, eingabe: str, protokollieren: bool = True, anzeigen: bool = True) -> str:
         """Die Hauptschleife, mit Zustand für die Anzeige.
 
-        Hintergrundarbeit (Briefing, Routinen) läuft mit ``anzeigen=False``: Sie soll
-        der Anzeige nicht mitten im Gespräch "bereit" melden.
+        Hintergrundarbeit (Briefing) läuft mit ``anzeigen=False``: Sie soll der
+        Anzeige nicht mitten im Gespräch "bereit" melden. Wer gleichzeitig
+        fragt, wartet - der Verlauf verträgt nur einen Schreiber.
         """
-        if not anzeigen:
-            return self._denken(eingabe, protokollieren)
-        self.zustand_setzen("denkt")
-        try:
-            return self._denken(eingabe, protokollieren)
-        finally:
-            self.zustand_setzen("bereit")
+        with self._denk_sperre:
+            if not anzeigen:
+                return self._denken(eingabe, protokollieren)
+            self.zustand_setzen("denkt")
+            try:
+                return self._denken(eingabe, protokollieren)
+            finally:
+                self.zustand_setzen("bereit")
+
+    def _gemini_antwort(self, eingabe: str, systemtext: str, grund: str,
+                        protokollieren: bool):
+        """Fragt Gemini und hängt die Antwort an. ``None``, wenn Gemini nicht kann."""
+        beginn = time.time()
+        gemini = gemini_fragen(eingabe, systemtext, self.verlauf)
+        if not gemini.get("ok"):
+            return None, gemini.get("fehler", "")
+        text = gemini["text"]
+        self.verlauf.append({"role": "assistant", "content": text})
+        if protokollieren:
+            self.memory.verlauf_anhaengen("assistant", text)
+        self.gedankenlog.eintragen(eingabe, "gemini", grund, time.time() - beginn,
+                                   gemini["tokens_ein"], gemini["tokens_aus"])
+        self.letztes_gehirn = "gemini"
+        return text, ""
 
     def _denken(self, eingabe: str, protokollieren: bool = True) -> str:
         """Die Hauptschleife: fragen, Werkzeuge ausführen, antworten."""
@@ -15476,82 +15734,100 @@ class JarvisAgent:
         # Ein neuer Gedankengang: Fremdes ist noch nicht gelesen worden.
         self.tools.lauf_beginnen(hintergrund=False)
 
+        # Der Systemprompt bleibt von Frage zu Frage gleich - dann liest der
+        # Zwischenspeicher ihn samt Gespräch. Was zur Frage passt, kommt in die
+        # Nachricht selbst. Erst nachschlagen, dann die Frage speichern - sonst
+        # findet er seine eigene Frage.
+        systemtext = self.systemprompt("")
+        try:
+            treffer = self.recall.treffer_block(eingabe)
+        except Exception as fehler:
+            treffer = ""
+            print("[agent] Gedächtnis nicht lesbar: %s" % fehler)
+        inhalt = ("<erinnerung>\n%s\n</erinnerung>\n\n%s" % (treffer, eingabe)
+                  if treffer else eingabe)
         if protokollieren:
             self.memory.verlauf_anhaengen("user", eingabe)
-        self.verlauf.append({"role": "user", "content": eingabe})
+        self.verlauf.append({"role": "user", "content": inhalt})
         self._verlauf_kuerzen()
         self.verlauf = denkspuren_entfernen(self.verlauf)
-
-        systemtext = self.systemprompt(eingabe)
+        beginn_runde = len(self.verlauf) - 1  # hier beginnt diese Frage
         katalog = self.tools.katalog()
 
-        gehirn, grund = gehirn_waehlen(eingabe)
+        gehirn, grund = gehirn_waehlen(eingabe, vorher=self._claude_zuvor())
         ausgewichen = False
+        gemini_system = systemtext + ("\n\n" + treffer if treffer else "")
         if gehirn == "gemini":
-            beginn = time.time()
-            gemini = gemini_fragen(eingabe, systemtext, self.verlauf)
-            if gemini.get("ok"):
-                text = gemini["text"]
-                self.verlauf.append({"role": "assistant", "content": text})
-                if protokollieren:
-                    self.memory.verlauf_anhaengen("assistant", text)
-                self.gedankenlog.eintragen(
-                    eingabe, "gemini", grund, time.time() - beginn,
-                    gemini["tokens_ein"], gemini["tokens_aus"])
-                self.letztes_gehirn = "gemini"
+            text, fehler = self._gemini_antwort(eingabe, gemini_system, grund, protokollieren)
+            if text is not None:
                 return text
             # Limit oder Ausfall: Claude übernimmt, der Nutzer merkt nichts.
             ausgewichen = True
-            grund = "Gemini ausgefallen: %s" % gemini.get("fehler", "")
+            grund = "Gemini ausgefallen: %s" % fehler
 
         if self.gedankenlog.limit_erreicht():
-            self.verlauf.pop()  # die unbeantwortete Frage nicht im Verlauf lassen
-            self.letzter_fehler = (
-                "Das Monatslimit von %.2f Euro für Claude ist erreicht. Einfache "
-                "Fragen beantwortet noch Gemini. Das Limit hebst du mit "
-                "MONATSLIMIT_EURO in der Konfiguration an." % MONATSLIMIT_EURO)
+            if GEMINI_API_KEY and not ausgewichen:
+                text, _ = self._gemini_antwort(eingabe, gemini_system + (
+                    "\n\nHINWEIS: Das Claude-Monatslimit ist erreicht. Du hast gerade KEINE "
+                    "Werkzeuge. Behaupte nie, etwas erledigt zu haben. Braucht die Bitte "
+                    "Werkzeuge, sag, dass das erst wieder geht, wenn das Monatslimit "
+                    "(MONATSLIMIT_EURO) angehoben ist."), "Monatslimit erreicht", protokollieren)
+                if text is not None:
+                    return text
+            del self.verlauf[beginn_runde:]  # die unbeantwortete Frage nicht im Verlauf lassen
+            self.letzter_fehler = self._limit_meldung()
             return self.letzter_fehler
 
         beginn = time.time()
-        tokens_ein = tokens_aus = gelesen = geschrieben = 0
+        summe = {}
 
         def _protokoll():
             self.letztes_gehirn = "claude"
             self.gedankenlog.eintragen(
-                eingabe, "claude", grund, time.time() - beginn, tokens_ein,
-                tokens_aus, claude_kosten(tokens_ein, tokens_aus, gelesen, geschrieben), ausgewichen)
+                eingabe, "claude", grund, time.time() - beginn, summe.get("ein", 0),
+                summe.get("aus", 0), summe_kosten(summe), ausgewichen)
 
         for runde in range(MAX_RUNDEN):
-            antwort = self._anfrage(anfrage_ergaenzen({
+            antwort = self._claude_runde({
                 "model": CLAUDE_MODEL,
                 "max_tokens": CLAUDE_MAX_TOKENS,
                 "system": systemtext,
                 "tools": katalog,
                 "messages": self.verlauf,
-            }))
+            }, summe)
             if not antwort.get("ok"):
                 self.letzter_fehler = antwort.get("fehler", "")
                 _protokoll()
                 return self.letzter_fehler
 
             nachricht = antwort["daten"]
-            nutzung = nachricht.get("usage") or {}
-            tokens_ein += int(nutzung.get("input_tokens", 0) or 0)
-            tokens_aus += int(nutzung.get("output_tokens", 0) or 0)
-            gelesen += int(nutzung.get("cache_read_input_tokens", 0) or 0)
-            geschrieben += int(nutzung.get("cache_creation_input_tokens", 0) or 0)
             if nachricht.get("stop_reason") == "refusal":
+                # Die abgelehnte Frage samt halber Werkzeugrunde nicht wieder mitschicken.
+                del self.verlauf[beginn_runde:]
                 _protokoll()
                 return ("Dabei kann ich nicht helfen. Wenn du es anders meinst, sag es "
                         "mir mit anderen Worten.")
             inhalt = ausweichen_bereinigen(nachricht.get("content", []))
-            self.verlauf.append({"role": "assistant", "content": inhalt})
-
+            text = "\n".join(b.get("text", "") for b in inhalt
+                             if b.get("type") == "text").strip()
             werkzeugaufrufe = [b for b in inhalt if b.get("type") == "tool_use"]
+
+            if nachricht.get("stop_reason") == "max_tokens":
+                # Abgeschnitten: kein halber Werkzeugaufruf wird ausgeführt.
+                if text and not werkzeugaufrufe:
+                    text += " ... (Hier ist meine Antwort abgeschnitten.)"
+                else:
+                    text = ABGESCHNITTEN
+                self.verlauf.append({"role": "assistant",
+                                     "content": [{"type": "text", "text": text}]})
+                _protokoll()
+                if protokollieren:
+                    self.memory.verlauf_anhaengen("assistant", text)
+                return text
+
+            self.verlauf.append({"role": "assistant", "content": inhalt})
             if not werkzeugaufrufe:
                 _protokoll()
-                text = "\n".join(b.get("text", "") for b in inhalt
-                                 if b.get("type") == "text").strip()
                 if protokollieren and text:
                     self.memory.verlauf_anhaengen("assistant", text)
                 return text or "Dazu habe ich nichts zu sagen."
@@ -15578,7 +15854,11 @@ class JarvisAgent:
 
     def arbeiten(self, systemtext: str, auftrag: str, werkzeugnamen: list = None,
                  max_runden: int = 6, grund: str = "Team", hintergrund: bool = False) -> str:
-        """Wie ``_arbeiten``, mit dem Hintergrund-Merker für den Werkzeugkatalog."""
+        """Wie ``_arbeiten``, mit dem Hintergrund-Merker für den Werkzeugkatalog.
+
+        Ohne Sperre: Die Schleife hat ihre eigene Nachrichtenliste, und der
+        Autopilot soll niemanden warten lassen, der gerade mit Jarvis spricht.
+        """
         vorher = self.tools.im_hintergrund()
         self.tools.hintergrund_setzen(vorher or hintergrund)
         try:
@@ -15598,9 +15878,7 @@ class JarvisAgent:
         if not self.einsatzbereit():
             return ("Es ist kein Anthropic-Schlüssel hinterlegt.")
         if self.gedankenlog.limit_erreicht():
-            return ("Das Monatslimit von %.2f Euro für Claude ist erreicht. Das Limit "
-                    "hebst du mit MONATSLIMIT_EURO in der Konfiguration an."
-                    % MONATSLIMIT_EURO)
+            return self._limit_meldung()
 
         katalog = self.tools.katalog()
         erlaubt = None
@@ -15612,40 +15890,41 @@ class JarvisAgent:
 
         nachrichten = [{"role": "user", "content": auftrag}]
         beginn = time.time()
-        tokens_ein = tokens_aus = gelesen = geschrieben = 0
+        summe = {}
 
         def protokoll():
             self.gedankenlog.eintragen(
-                auftrag, "claude", grund, time.time() - beginn, tokens_ein, tokens_aus,
-                claude_kosten(tokens_ein, tokens_aus, gelesen, geschrieben))
+                auftrag, "claude", grund, time.time() - beginn, summe.get("ein", 0),
+                summe.get("aus", 0), summe_kosten(summe))
 
         for _ in range(max(1, int(max_runden))):
-            antwort = self._anfrage(anfrage_ergaenzen({
+            antwort = self._claude_runde({
                 "model": CLAUDE_MODEL,
                 "max_tokens": CLAUDE_MAX_TOKENS,
                 "system": systemtext,
                 "tools": katalog,
                 "messages": nachrichten,
-            }))
+            }, summe)
             if not antwort.get("ok"):
                 protokoll()
                 return antwort.get("fehler", "Der Auftrag ist fehlgeschlagen.")
 
-            nutzung = antwort["daten"].get("usage") or {}
-            tokens_ein += int(nutzung.get("input_tokens", 0) or 0)
-            tokens_aus += int(nutzung.get("output_tokens", 0) or 0)
-            gelesen += int(nutzung.get("cache_read_input_tokens", 0) or 0)
-            geschrieben += int(nutzung.get("cache_creation_input_tokens", 0) or 0)
             if antwort["daten"].get("stop_reason") == "refusal":
                 protokoll()
                 return "Diesen Auftrag lehnt Claude ab. Formuliere ihn bitte anders."
             inhalt = ausweichen_bereinigen(antwort["daten"].get("content", []))
-            nachrichten.append({"role": "assistant", "content": inhalt})
+            text = "\n".join(b.get("text", "") for b in inhalt
+                             if b.get("type") == "text").strip()
             aufrufe = [b for b in inhalt if b.get("type") == "tool_use"]
+            if antwort["daten"].get("stop_reason") == "max_tokens":
+                protokoll()
+                if text and not aufrufe:
+                    return text + " ... (Hier ist die Antwort abgeschnitten.)"
+                return ABGESCHNITTEN
+            nachrichten.append({"role": "assistant", "content": inhalt})
             if not aufrufe:
                 protokoll()
-                return "\n".join(b.get("text", "") for b in inhalt
-                                  if b.get("type") == "text").strip()
+                return text
 
             ergebnisse = []
             for aufruf in aufrufe:
