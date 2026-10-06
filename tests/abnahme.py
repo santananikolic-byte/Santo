@@ -1242,6 +1242,17 @@ def pruefung_anzeige(agent):
             rueckgabe == 1 and time.time() - beginn < 30 and run_modul.ANZEIGE_PORT != run_modul.STANDARD_PORT
             and "JarvisWeb(agent, port=ANZEIGE_PORT, nur_anzeige=True)" in quelle_run,
             "Dienst-Anzeige auf %d" % run_modul.ANZEIGE_PORT)
+    echt_belegt = run_modul._port_belegt
+    run_modul._port_belegt = lambda port: False
+    try:
+        tot = run_modul.anzeige_oeffnen([])
+    finally:
+        run_modul._port_belegt = echt_belegt
+    pruefen("Läuft keine Anzeige, sagt 'jarvis.py anzeige' das, statt Erfolg zu melden",
+            tot == 1, "")
+    pruefen("Im Dienst gehört die Anzeige dem, der gerade denkt (auch Telegram)",
+            "def zustand_wenn_frei(zustand):" in quelle_run and "denk_sperre.acquire(blocking=False)" in quelle_run
+            and 'zustand_wenn_frei("spricht")' in quelle_run and 'agent.zustand_setzen("hoert")' not in quelle_run, "")
     pruefen("Startet die Anzeige nicht, bleibt die Freigabe bei der Stimme",
             "finally:" in anzeige_teil and "SprachFreigabe(stimme, profil)" in anzeige_teil.split("finally:")[1], "")
 
@@ -1318,7 +1329,7 @@ def pruefung_anzeige(agent):
         agent.tools.freigabe_kanal = echt_kanal
     quelle = open(os.path.join(WURZEL, "jarvis.py"), encoding="utf-8").read()
     pruefen("Der Dienst startet die Anzeige und meldet den Zustand",
-            "DIENST_ANZEIGE" in quelle and 'agent.zustand_setzen("hoert")' in quelle
+            "DIENST_ANZEIGE" in quelle and 'zustand_wenn_frei("hoert")' in quelle
             and "def anzeige_oeffnen" in quelle, "")
 
 

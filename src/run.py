@@ -209,15 +209,27 @@ def dauerbetrieb(dienst: bool = False):
     mikro_gemeldet = 0.0
     mikro_seit = 0.0
 
+    def zustand_wenn_frei(zustand):
+        # Denkt gerade Telegram (hält die Sperre), gehört die Anzeige ihm.
+        if denk_sperre.acquire(blocking=False):
+            try:
+                agent.zustand_setzen(zustand)
+            finally:
+                denk_sperre.release()
+
     try:
         while True:
             if herz is not None:
                 herz.schlagen()
-            if ansager is not None:
-                ansager.ausliefern()
-            agent.zustand_setzen("hoert")
+            if ansager is not None and ansager.wartend():
+                zustand_wenn_frei("spricht")
+                try:
+                    ansager.ausliefern()
+                finally:
+                    zustand_wenn_frei("bereit")
+            zustand_wenn_frei("hoert")
             pfad = stimme.aufnehmen_bis_pause(still_signal=True)
-            agent.zustand_setzen("bereit")
+            zustand_wenn_frei("bereit")
             if not pfad:
                 if dienst and getattr(stimme, "mikro_fehler", ""):
                     # Kein Tippen im Dienst: weiter versuchen, einmal pro Stunde Bescheid sagen,
@@ -258,11 +270,11 @@ def dauerbetrieb(dienst: bool = False):
             stimme.signal("verstanden")
             if not befehl:
                 stimme.sprich("Ja?")
-                agent.zustand_setzen("hoert")
+                zustand_wenn_frei("hoert")
                 try:
                     nachtrag = stimme.zuhoeren()
                 finally:
-                    agent.zustand_setzen("bereit")
+                    zustand_wenn_frei("bereit")
                 if not nachtrag:
                     continue
                 befehl = nachtrag
@@ -308,7 +320,15 @@ def anzeige_oeffnen(argumente=None) -> int:
     import shutil as _shutil
     import subprocess as _subprocess
     # Läuft der Dienst, zeigt seine Anzeige; sonst die Web-App per Doppelklick.
-    port = ANZEIGE_PORT if _port_belegt(ANZEIGE_PORT) else STANDARD_PORT
+    if _port_belegt(ANZEIGE_PORT):
+        port = ANZEIGE_PORT
+    elif _port_belegt(STANDARD_PORT):
+        port = STANDARD_PORT
+    else:
+        print("Die Anzeige läuft gerade nicht. Sie läuft im Dienst mit "
+              "(python3 jarvis.py dienst status, sonst dienst installieren; DIENST_ANZEIGE=ja) "
+              "oder nach Doppelklick auf JARVIS.")
+        return 1
     adressen = ["http://127.0.0.1:%d/zentrale" % port, "http://127.0.0.1:%d/gehirn" % port]
     if not _shutil.which("open"):
         print("Öffne diese Adressen im Browser:\n  " + "\n  ".join(adressen))
