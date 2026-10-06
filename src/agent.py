@@ -113,8 +113,6 @@ class JarvisAgent:
         self.letzter_fehler = ""
         self.gedankenlog = Gedankenlog()
         self.letztes_gehirn = ""
-        # Was Jarvis gerade tut - die Anzeige (Gehirn, Zentrale) liest das mit.
-        self.status = {"zustand": "bereit", "seit": time.time(), "satz": ""}
 
     # -- Grundlagen ---------------------------------------------------------
 
@@ -279,23 +277,9 @@ class JarvisAgent:
         """Beginnt ein neues Gespräch."""
         self.verlauf = []
 
-    # -- Zustand ------------------------------------------------------------
-
-    def zustand_setzen(self, zustand: str, satz: str = ""):
-        """bereit, hoert, denkt oder spricht - für die Anzeige."""
-        self.status = {"zustand": zustand, "seit": time.time(), "satz": satz}
-
     # -- Denkschleife -------------------------------------------------------
 
     def denken(self, eingabe: str, protokollieren: bool = True) -> str:
-        """Die Hauptschleife, mit Zustand für die Anzeige."""
-        self.zustand_setzen("denkt")
-        try:
-            return self._denken(eingabe, protokollieren)
-        finally:
-            self.zustand_setzen("bereit")
-
-    def _denken(self, eingabe: str, protokollieren: bool = True) -> str:
         """Die Hauptschleife: fragen, Werkzeuge ausführen, antworten."""
         eingabe = (eingabe or "").strip()
         if not eingabe:
@@ -477,11 +461,7 @@ class JarvisAgent:
         """Denken und die Antwort aussprechen."""
         antwort = self.denken(eingabe)
         if antwort and self.stimme is not None:
-            self.zustand_setzen("spricht")
-            try:
-                self.stimme.sprich(antwort)
-            finally:
-                self.zustand_setzen("bereit")
+            self.stimme.sprich(antwort)
         elif antwort:
             print("Jarvis: %s" % antwort)
         return antwort

@@ -32,14 +32,6 @@ Alles per Stimme. "Hey Jarvis" und dann sagen, was du brauchst.
 - **Beenden:** "Jarvis, schalte dich ab". Danach bleibt er aus, bis zur nächsten Anmeldung.
 - **Vom Handy:** Sprachnachrichten per Telegram gehen an denselben Kopf.
 
-## Bildschirme
-
-Der iMac ist der Kopf, die Bildschirme sind sein Gesicht. `python3 jarvis.py anzeige` öffnet
-**Zentrale** (`/zentrale`) und **Gehirn** (`/gehirn`) in je einem Fenster. Zentrale auf den
-großen Bildschirm, Gehirn auf den zweiten, dann mit Strg, Cmd und F in den Vollbildmodus.
-Beide Seiten laden sich selbst nach und haben kein Eingabefeld: Bedient wird nur mit der
-Stimme. Soll im Raum niemand mitlesen, `ANZEIGE_DISKRET=ja` in `config/.env`.
-
 ## Befehle
 
 | Befehl | Wirkung |
@@ -50,7 +42,6 @@ Stimme. Soll im Raum niemand mitlesen, `ANZEIGE_DISKRET=ja` in `config/.env`.
 | `python3 jarvis.py dienst neustart` | neu starten |
 | `python3 jarvis.py dienst entfernen` | wieder entfernen |
 | `python3 jarvis.py dienst installieren --trocken` | zeigen, was passieren würde |
-| `python3 jarvis.py anzeige` | Zentrale und Gehirn auf den Bildschirmen öffnen |
 
 Protokoll: `logs/dienst.log` (wird bei 5 Megabyte beiseitegelegt).
 

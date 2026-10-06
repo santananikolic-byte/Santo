@@ -174,8 +174,6 @@ body[data-zustand="wach"] .zustandstext{color:var(--akzent)}
   <span id="lage">Stand wird geholt …</span>
   <span class="rechts">
     <button class="mini" id="tippenAn" title="Notweg, falls das Mikrofon streikt">Tippen</button>
-    <a href="/zentrale" id="zentraleLink" target="_blank" rel="noopener">Zentrale</a>
-    <a href="/gehirn" id="gehirnLink" target="_blank" rel="noopener">Gehirn</a>
     <a href="/autopilot" id="autopilotLink">Autopilot</a>
     <a href="/pfad" id="pfadLink">Pfad</a>
     <a href="/dashboard" target="_blank" rel="noopener">Cockpit</a>
