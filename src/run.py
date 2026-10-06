@@ -22,7 +22,6 @@ Terminal spricht, nimmt ``hoeren``.
     python3 jarvis.py einrichten  geführte Ersteinrichtung
     python3 jarvis.py zugang      einen Schlüssel eintragen oder ersetzen
     python3 jarvis.py zugang mail Gmail oder ein anderes Postfach verbinden
-    python3 jarvis.py zugang mac  SMS, iMessage, Kontakte und Kalender freigeben
     python3 jarvis.py autopilot   Postfach des Autopiloten (an / aus zum Schalten)
     python3 jarvis.py daemon      dauerhaft, nur Stimme, ohne Fenster (der iMac als Kopf)
     python3 jarvis.py dienst      installieren | entfernen | status | neustart | hinweise

@@ -97,9 +97,6 @@ def freigabe_ansage(aktion: str, details: str = "") -> str:
     if aktion == "termin_anlegen":
         return "Ich soll einen Termin anlegen: %s, Beginn %s." % (
             d.get("titel") or "ohne Titel", d.get("beginn") or "ohne Zeit")
-    if aktion == "mac_termin_anlegen":
-        return "Ich soll in deinen Kalender eintragen: %s, am %s um %s." % (
-            d.get("titel") or "ohne Titel", d.get("datum") or "?", d.get("uhrzeit") or "?")
     if aktion == "anrufen":
         return "Ich soll %s anrufen. Ansage: %s" % (d.get("name") or d.get("nummer") or "jemanden",
                                                      _anfang(d.get("ansage") or d.get("text"), 70))

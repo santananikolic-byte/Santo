@@ -133,14 +133,11 @@ python3 jarvis.py dienst status
 
 Auf dem Mac kann er Dateien suchen und lesen (Schlüssel, Anmeldungen, Verläufe und
 `.env` sind gesperrt) und mit Freigabe neue Textdateien in Dokumente, Schreibtisch
-oder Downloads anlegen. Er liest deine **SMS und iMessages**, sucht im
-**Adressbuch**, sieht in den **Kalender** des Macs (auch Google-Kalender) und
-durchsucht dein **Gmail**-Postfach - verschickt und eingetragen wird nur nach
-deinem Ja:
+oder Downloads anlegen. Er durchsucht dein **Gmail**-Postfach und schickt SMS
+mit deiner eigenen Nummer über das iPhone - verschickt wird nur nach deinem Ja:
 
 ```
 python3 jarvis.py zugang mail     # Gmail mit App-Passwort verbinden
-python3 jarvis.py zugang mac      # SMS, Kontakte, Kalender freigeben
 ```
 
 Alles Weitere, auch zum Thema eigener Benutzer oder virtuelle Maschine statt
@@ -211,7 +208,7 @@ im Angebot.
 **eigenem Werkzeugsatz**: Buchhalter, Verkäufer, Terminplaner, Postbearbeiter,
 Kundenberater, Rechercheur, Controller, Programmierer, Privatsekretär, der zweite
 Chef, Webdesigner, Chatbot-Bauer und Marketing. Die Trennung ist echt — der
-Verkäufer sieht 18 von 79 Werkzeugen und kann weder buchen noch mailen, der
+Verkäufer sieht 17 von 75 Werkzeugen und kann weder buchen noch mailen, der
 Rechercheur kann gar nichts eintragen. Wer alles darf, macht irgendwann alles,
 auch das Falsche.
 
@@ -240,12 +237,11 @@ vollständigen Code samt Hinweis, ob er ins Netz will oder Dateien anfasst.
 per Telegram schicken. Jeden Tag um 18 Uhr.“ Danach genügt „Mach den
 Tagesbericht“. Routinen mit Uhrzeit laufen von selbst.
 
-**E-Mail, SMS, Kontakte, Kalender, Wetter, Kamera, Bildschirm.** Post lesen,
-vorsortieren und durchsuchen (Gmail und andere), SMS und iMessages vom iPhone
-lesen und mit der eigenen Nummer beantworten, Kontakte aus dem Adressbuch,
-Termine aus der Kalender-App samt Überschneidungen, echtes Wetter, ein Blick
-durch die Kamera, und auf Wunsch Bedienung des Bildschirms — Schritt für
-Schritt, jeder einzeln bestätigt.
+**E-Mail, SMS, Kalender, Wetter, Kamera, Bildschirm.** Post lesen,
+vorsortieren und durchsuchen (Gmail und andere), SMS mit der eigenen Nummer
+verschicken, Termine samt Überschneidungen, echtes Wetter, ein Blick durch die
+Kamera, und auf Wunsch Bedienung des Bildschirms — Schritt für Schritt, jeder
+einzeln bestätigt.
 
 **Command Center.** `dashboard/dashboard.html` zeigt Monatszahlen mit
 30-Tage-Verlauf, die Belegquote als Ring, Ausgaben je Kategorie, Termine,
@@ -337,7 +333,6 @@ Der **Selbsttest** geht jeden Baustein durch:
 | Er redet englisch oder klingt falsch | `EXTRAS.command` → 9, deutsche Stimme installieren lassen |
 | Kamera geht nicht | `brew install imagesnap`, dann Kamera-Recht erteilen |
 | Mail geht nicht | Bei Gmail, iCloud und Outlook braucht es ein **App-Passwort**, nicht das normale: `python3 jarvis.py zugang mail` |
-| Er kommt nicht an SMS, Kontakte oder Kalender | `python3 jarvis.py zugang mac` — zeigt, was fehlt, und öffnet die Einstellung |
 | SMS gehen nicht raus | Am iPhone: Einstellungen → Nachrichten → SMS-Weiterleitung → diesen Mac einschalten |
 | Irgendetwas anderes | `EXTRAS.command` → 1 (Selbsttest) |
 

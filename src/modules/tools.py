@@ -40,7 +40,6 @@ from modules.messenger import Messenger
 from modules.recall import Recall
 from modules.routines import Routines
 from modules.autopilot import Autopilot
-from modules.apple import MacApps
 from modules.mac import MacZugriff
 from modules.team import ROLLEN, Team
 from modules.telefon import Telefon, nummer_pruefen
@@ -80,7 +79,7 @@ PARAMETER_AKTIONEN = {
 FREIGABE_PFLICHTIG = {"mail_senden", "termin_anlegen", "bildschirm_bedienen",
                       "nachricht_senden", "skript_ausfuehren", "anrufen",
                       "sms_senden", "browser_auftrag", "autopilot_schalten",
-                      "datei_schreiben", "browser_oeffnen", "mac_termin_anlegen"}
+                      "datei_schreiben", "browser_oeffnen"}
 
 # Werkzeuge, die frei formulierten Text ins Netz tragen. Wer vorher etwas Fremdes
 # gelesen hat (eine Datei, eine Mail, eine Nachricht), könnte von diesem Text dazu
@@ -89,9 +88,9 @@ FREIGABE_PFLICHTIG = {"mail_senden", "termin_anlegen", "bildschirm_bedienen",
 NETZ_SENDEND = {"recherche", "flug_suchen", "browser_oeffnen", "browser_auftrag",
                 "browser_lesen"}
 # Werkzeuge, deren Ergebnis Text von anderen ist.
-FREMDE_INHALTE = {"datei_lesen", "mails_lesen", "mails_suchen", "handy_nachrichten_lesen",
-                  "browser_lesen", "browser_oeffnen", "recherche", "lagebericht",
-                  "dateien_suchen", "mac_termine", "termine_lesen"}
+FREMDE_INHALTE = {"datei_lesen", "mails_lesen", "mails_suchen", "browser_lesen",
+                  "browser_oeffnen", "recherche", "lagebericht", "dateien_suchen",
+                  "termine_lesen"}
 
 
 def parameter_pruefen(wert: str):
@@ -142,7 +141,6 @@ class Werkzeuge:
                                    akquise=self.akquise, team=self.team,
                                    privat=self.privat)
         self.mac = MacZugriff()
-        self.apple = MacApps()
         # Je Faden: Läuft das gerade im Hintergrund, und wurde schon Fremdes gelesen?
         self._lauf = threading.local()
         self.autopilot = Autopilot(self)
@@ -419,15 +417,6 @@ class Werkzeuge:
                      "Sucht im Postfach nach Absender, Betreff oder Text, auch in schon "
                      "gelesenen Mails - etwa 'die Mail von Müller wegen dem Angebot'.",
                      {"begriff": text, "tage": ganz, "limit": ganz}, ["begriff"]),
-            werkzeug("handy_nachrichten_lesen",
-                     "Liest SMS und iMessages der letzten Stunden vom Mac (sie kommen "
-                     "vom iPhone). Nur lesend. Optional nur von einer Nummer oder einem "
-                     "Namen, oder nur eingehende.",
-                     {"stunden": ganz, "von": text, "limit": ganz, "nur_eingang": wahr}),
-            werkzeug("adressbuch_suchen",
-                     "Sucht im Adressbuch des Macs (Kontakte-App, auch iPhone und "
-                     "iCloud) nach Name oder Firma und nennt Nummern und Mailadressen.",
-                     {"begriff": text}, ["begriff"]),
             werkzeug("mail_senden",
                      "Verschickt eine E-Mail. Braucht eine Freigabe.",
                      {"an": text, "betreff": text, "text": text},
@@ -448,15 +437,6 @@ class Werkzeuge:
                      "Trägt einen Termin ein. Braucht eine Freigabe.",
                      {"titel": text, "beginn": text, "dauer_minuten": ganz,
                       "ort": text, "beschreibung": text}, ["titel", "beginn"]),
-            werkzeug("mac_termine",
-                     "Termine aus der Kalender-App des Macs, ab heute - dort stehen auch "
-                     "Google- und iCloud-Kalender, wenn sie am Mac verbunden sind.",
-                     {"tage": ganz}),
-            werkzeug("mac_termin_anlegen",
-                     "Trägt einen Termin in die Kalender-App des Macs ein (damit auch "
-                     "aufs iPhone). Datum JJJJ-MM-TT, Uhrzeit HH:MM. Braucht eine Freigabe.",
-                     {"titel": text, "datum": text, "uhrzeit": text, "dauer_minuten": ganz,
-                      "ort": text, "kalender": text}, ["titel", "datum", "uhrzeit"]),
 
             # -- Welt --
             werkzeug("wetter", "Aktuelles Wetter und Vorhersage für einen Ort.",
@@ -884,11 +864,6 @@ class Werkzeuge:
         if name == "mails_suchen":
             return self.mail.suchen(a.get("begriff", ""), int(a.get("tage") or 180),
                                     int(a.get("limit") or 10))
-        if name == "handy_nachrichten_lesen":
-            return self.apple.nachrichten(int(a.get("stunden") or 24), a.get("von", ""),
-                                          int(a.get("limit") or 30), bool(a.get("nur_eingang")))
-        if name == "adressbuch_suchen":
-            return self.apple.kontakte_suchen(a.get("begriff", ""))
         if name == "mail_senden":
             return self.mail.senden(a.get("an"), a.get("betreff"), a.get("text"))
         if name == "nachricht_senden":
@@ -903,12 +878,6 @@ class Werkzeuge:
             return self.kalender.termin_anlegen(
                 a.get("titel"), a.get("beginn"), int(a.get("dauer_minuten") or 60),
                 a.get("ort", ""), a.get("beschreibung", ""))
-        if name == "mac_termine":
-            return self.apple.termine(int(a.get("tage") or 7))
-        if name == "mac_termin_anlegen":
-            return self.apple.termin_anlegen(
-                a.get("titel"), a.get("datum", ""), a.get("uhrzeit", ""),
-                int(a.get("dauer_minuten") or 60), a.get("ort", ""), a.get("kalender", ""))
 
         # -- Welt --
         if name == "wetter":
@@ -1030,5 +999,4 @@ class Werkzeuge:
             "bildschirm": self.bildschirm.zustand(),
             "browser": self.browser.zustand(),
             "versand": self.messenger.zustand(),
-            "mac_apps": self.apple.zustand(),
         }

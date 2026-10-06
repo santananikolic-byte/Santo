@@ -26,7 +26,6 @@ import urllib.error
 import urllib.request
 
 import config
-from modules.apple import MacApps
 from modules.camera import Kamera
 from modules.mcp_client import vorlage_schreiben
 from modules.memory import Memory
@@ -47,10 +46,6 @@ EINSTELLUNG_BEDIENHILFEN = ("x-apple.systempreferences:com.apple.preference.secu
                             "?Privacy_Accessibility")
 EINSTELLUNG_KAMERA = ("x-apple.systempreferences:com.apple.preference.security"
                       "?Privacy_Camera")
-EINSTELLUNG_VOLLZUGRIFF = ("x-apple.systempreferences:com.apple.preference.security"
-                           "?Privacy_AllFiles")
-EINSTELLUNG_AUTOMATION = ("x-apple.systempreferences:com.apple.preference.security"
-                          "?Privacy_Automation")
 EINSTELLUNG_SPRACHE = "x-apple.systempreferences:com.apple.preference.speech"
 
 # Kein Einzelunternehmer kennt seinen IMAP-Servernamen. Er tippt seine
@@ -505,47 +500,19 @@ class Einrichtung:
         ("ohren", "OpenAI (Spracherkennung)", "OPENAI_API_KEY", "https://platform.openai.com/api-keys"),
     )
 
-    WEITERE_ZUGAENGE = (
-        ("mail", "E-Mail (Gmail, GMX, Outlook ...) lesen, suchen und senden"),
-        ("mac", "Mac: SMS und iMessage, Kontakte, Kalender"),
-    )
     MAIL_WOERTER = ("mail", "gmail", "email", "e-mail", "post", "postfach")
-    MAC_WOERTER = ("mac", "handy", "sms", "imessage", "nachrichten", "kontakte", "kalender")
+    MAIL_TITEL = "E-Mail (Gmail, GMX, Outlook ...) lesen, suchen und senden"
 
     def mail_nachtragen(self) -> bool:
         """Postfach verbinden: ``python3 jarvis.py zugang mail``."""
         self.schritt_mail(nachfragen=False)
         return self.ergebnisse.get("email") == "eingerichtet"
 
-    def mac_rechte(self) -> bool:
-        """Prüft Nachrichten, Kontakte und Kalender und öffnet, was fehlt."""
-        if sys.platform != "darwin":
-            print("Das geht nur auf dem Mac.")
-            return False
-        self.sagen("Ich prüfe, ob ich an deine Nachrichten, Kontakte und Kalender komme. "
-                   "Wenn macOS fragt, bitte mit OK bestätigen.")
-        stand = MacApps().rechte_pruefen()
-        for name, (ok, fehler) in stand.items():
-            print("  %s %s%s" % ("[ok]" if ok else "[fehlt]", name, "" if ok else ": " + fehler))
-        if not stand.get("Nachrichten", (True, ""))[0]:
-            self.sagen("Für SMS und iMessages braucht das Terminal den Festplattenvollzugriff. "
-                       "Ich öffne die Einstellung. Dort Terminal einschalten, dann Jarvis neu starten.")
-            self.oeffnen(EINSTELLUNG_VOLLZUGRIFF)
-        if any(not ok for name, (ok, _) in stand.items() if name != "Nachrichten"):
-            self.oeffnen(EINSTELLUNG_AUTOMATION)
-        alles = all(ok for ok, _ in stand.values())
-        if alles:
-            self.sagen("Alles da: Nachrichten, Kontakte und Kalender. Für SMS mit deiner "
-                       "Nummer muss auf dem iPhone die SMS-Weiterleitung an diesen Mac an sein.")
-        return alles
-
     def zugang_nachtragen(self, welcher: str = "") -> bool:
         """Trägt genau einen Zugang ein oder ersetzt ihn - ohne die ganze Einrichtung."""
         welcher = (welcher or "").strip().lower()
         if welcher in self.MAIL_WOERTER:
             return self.mail_nachtragen()
-        if welcher in self.MAC_WOERTER:
-            return self.mac_rechte()
         wahl = [z for z in self.ZUGAENGE if welcher in (z[0], z[2].lower())]
         if not wahl:
             print("Welchen Zugang möchtest du eintragen?")
@@ -556,17 +523,14 @@ class Einrichtung:
             for nummer, z in enumerate(self.ZUGAENGE, start=1):
                 print("  %d  %s%s" % (nummer, z[1],
                                        "   (schon eingetragen)" if vorhanden.get(z[2]) else ""))
-            for nummer, (_, titel) in enumerate(self.WEITERE_ZUGAENGE, start=len(self.ZUGAENGE) + 1):
-                print("  %d  %s%s" % (nummer, titel, "   (schon eingetragen)"
-                                       if nummer == len(self.ZUGAENGE) + 1 and config.IMAP_USER else ""))
+            print("  %d  %s%s" % (len(self.ZUGAENGE) + 1, self.MAIL_TITEL,
+                                   "   (schon eingetragen)" if config.IMAP_USER else ""))
             eingabe = self.fragen("Nummer:")
-            gesamt = len(self.ZUGAENGE) + len(self.WEITERE_ZUGAENGE)
-            if not eingabe.isdigit() or not 1 <= int(eingabe) <= gesamt:
+            if not eingabe.isdigit() or not 1 <= int(eingabe) <= len(self.ZUGAENGE) + 1:
                 print("Das war keine gültige Nummer.")
                 return False
-            if int(eingabe) > len(self.ZUGAENGE):
-                kennung = self.WEITERE_ZUGAENGE[int(eingabe) - len(self.ZUGAENGE) - 1][0]
-                return self.mail_nachtragen() if kennung == "mail" else self.mac_rechte()
+            if int(eingabe) == len(self.ZUGAENGE) + 1:
+                return self.mail_nachtragen()
             wahl = [self.ZUGAENGE[int(eingabe) - 1]]
         kennung, titel, variable, seite = wahl[0]
         print("Ich öffne die Seite für %s. Dort erzeugst du den Schlüssel." % titel)
