@@ -3443,6 +3443,23 @@ def main() -> int:
 
     pruefung_syntax()
     agent = pruefung_agent()
+    nur = [n.strip() for n in os.environ.get("ABNAHME_NUR", "").split(",") if n.strip()]
+    if nur:
+        # Nur die genannten Prüf-Funktionen, etwa: ABNAHME_NUR=pruefung_buehne,pruefung_sicht
+        # Spart den Paket-Bauern die ganze Reihe; die volle Abnahme läuft beim Zusammenführen.
+        import inspect
+        for name in nur:
+            funktion = globals().get(name)
+            if funktion is None:
+                print("Unbekannte Prüfung: %s" % name)
+                DURCHGEFALLEN.append("Prüfung vorhanden: %s" % name)
+                continue
+            funktion(agent) if inspect.signature(funktion).parameters else funktion()
+        print("\n%d von %d Punkten bestanden (nur: %s)."
+              % (len(BESTANDEN), len(BESTANDEN) + len(DURCHGEFALLEN), ", ".join(nur)))
+        for eintrag in DURCHGEFALLEN:
+            print("  - %s" % eintrag)
+        return 1 if DURCHGEFALLEN else 0
     pruefung_buchhaltung(agent)
     pruefung_vertrieb(agent)
     pruefung_akquise(agent)
