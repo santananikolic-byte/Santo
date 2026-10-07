@@ -246,6 +246,16 @@ EINRICHTUNG_FERTIG = _wahrheit("EINRICHTUNG_FERTIG", False)
 ANZEIGE_DAUER = _ganzzahl("ANZEIGE_DAUER", 180)
 # [P1 Bühne] Ende
 # [P2 Weltlage] Anfang
+# Nachrichtenquellen für Weltlage und Lagebild (tagesschau, google, dw - kommagetrennt).
+NACHRICHTEN_QUELLEN = _text("NACHRICHTEN_QUELLEN", "tagesschau,google,dw")
+# Was "die Märkte" ohne Auswahl heißt: dax, atx, eurostoxx, sp500, nasdaq, nasdaq100,
+# vix, brent, wti, gold, eurusd, bitcoin, ethereum.
+MARKT_BEOBACHTUNG = _text("MARKT_BEOBACHTUNG", "dax,sp500,nasdaq,eurostoxx,brent,gold,eurusd,bitcoin")
+# Freiwilliger, kostenloser Demo-Schlüssel von CoinGecko (Krypto-Ersatzquelle).
+COINGECKO_SCHLUESSEL = _text("COINGECKO_SCHLUESSEL")
+# Schlagzeilen und Kurse im Morgenbriefing.
+BRIEFING_WELTLAGE = _wahrheit("BRIEFING_WELTLAGE", False)
+BRIEFING_MAERKTE = _wahrheit("BRIEFING_MAERKTE", False)
 # [P2 Weltlage] Ende
 # [P3 Telefon] Anfang
 # [P3 Telefon] Ende
