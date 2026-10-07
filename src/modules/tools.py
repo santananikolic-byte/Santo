@@ -50,6 +50,8 @@ from modules.werkstatt import Werkstatt
 from modules.world import Welt
 # Importe der Pakete.
 # [P1 Bühne] Anfang
+from modules.anzeige import ANZEIGE_MODI
+from modules.ansicht import kennzahlen_kacheln
 # [P1 Bühne] Ende
 # [P2 Weltlage] Anfang
 # [P2 Weltlage] Ende
@@ -620,6 +622,17 @@ class Werkzeuge:
                      {"programm": text}, ["programm"]),
             werkzeug("dashboard_bauen", "Baut das Command Center neu.", {}),
             # [P1 Bühne] Anfang
+            # -- Anzeige --
+            werkzeug("anzeige_zeigen",
+                     "Schaltet die große Anzeige (Zentrale) um: uebersicht (Betrieb), "
+                     "kennzahlen (Kacheln aus Kasse, Bedarf, Pipeline, Belegquote), globus "
+                     "(Erde) oder zurück zu einer zuletzt gezeigten Ansicht (maerkte, anruf, "
+                     "sicht, untertitel, recherche, inhalte). Ändert nur die Anzeige.",
+                     {"modus": {"type": "string",
+                                "enum": ["uebersicht", "kennzahlen", "globus", "maerkte",
+                                         "anruf", "sicht", "untertitel", "recherche",
+                                         "inhalte"]},
+                      "sekunden": ganz}, ["modus"]),
             # [P1 Bühne] Ende
             # [P2 Weltlage] Anfang
             # [P2 Weltlage] Ende
@@ -1083,6 +1096,8 @@ class Werkzeuge:
             return self.dashboard.bauen(mit_netz=True)
 
         # [P1 Bühne] Anfang
+        if name == "anzeige_zeigen":
+            return self.anzeige_umschalten(a.get("modus", ""), a.get("sekunden"))
         # [P1 Bühne] Ende
         # [P2 Weltlage] Anfang
         # [P2 Weltlage] Ende
@@ -1101,6 +1116,65 @@ class Werkzeuge:
 
     # -- Methoden der Pakete -----------------------------------------------
     # [P1 Bühne] Anfang
+    # Wie die Ansichten in einem gesprochenen Satz heißen.
+    ANSICHT_NAMEN = {"uebersicht": "die Übersicht", "kennzahlen": "die Kennzahlen",
+                     "globus": "den Globus", "maerkte": "die Märkte", "anruf": "das Telefonat",
+                     "sicht": "die Sicht", "untertitel": "die Untertitel",
+                     "recherche": "die Recherche", "inhalte": "den Redaktionsplan",
+                     "folge": "das Lagebild", "hochfahren": "den Start"}
+
+    def anzeige_umschalten(self, modus: str, sekunden=None) -> dict:
+        """Schaltet die Zentrale auf eine Ansicht - für das Werkzeug ``anzeige_zeigen``.
+
+        Kennzahlen werden frisch gerechnet, Übersicht und Globus brauchen nichts.
+        Alles andere (Märkte, Telefonat, Recherche ...) kommt aus dem, was zuletzt
+        dort gezeigt wurde - erfunden wird nichts.
+        """
+        modus = str(modus or "").strip().lower()
+        if modus not in ANZEIGE_MODI or modus in ("folge", "hochfahren"):
+            return {"ok": False,
+                    "fehler": "Diese Ansicht gibt es nicht: %s. Möglich sind: uebersicht, "
+                              "kennzahlen, globus, maerkte, anruf, sicht, untertitel, "
+                              "recherche, inhalte." % (modus or "(leer)")}
+        if self.im_hintergrund():
+            return {"ok": False, "fehler": "Im Hintergrund schalte ich die Anzeige nicht um."}
+        dauer = None
+        if sekunden not in (None, ""):
+            try:
+                dauer = min(1800, max(10, int(float(sekunden))))
+            except (TypeError, ValueError, OverflowError):
+                dauer = None
+        if modus == "kennzahlen":
+            kacheln = kennzahlen_kacheln(self)
+            if not kacheln:
+                return {"ok": False,
+                        "fehler": "Für die Kennzahlen habe ich noch keine Zahlen: in diesem "
+                                  "Monat keine Buchung, keine Interessenten und keine "
+                                  "Fixkosten."}
+            daten = {"titel": "Betrieb", "kacheln": kacheln}
+        elif modus in ("uebersicht", "globus"):
+            daten = {}
+            # Die Übersicht ist der Ruhezustand - sie läuft nicht ab.
+            if modus == "uebersicht":
+                dauer = 0
+        else:
+            letzte = self.anzeige.letzte(modus)
+            if letzte is None:
+                return {"ok": False,
+                        "fehler": "Dazu habe ich noch nichts gezeigt. Frag mich zuerst "
+                                  "danach, dann kann ich es zurückholen."}
+            daten = {k: v for k, v in letzte.items() if k not in ("modus", "quelle")}
+        ergebnis = self.zeigen(modus, daten, dauer, quelle="anzeige_zeigen")
+        if not ergebnis or not ergebnis.get("ok"):
+            return {"ok": False,
+                    "fehler": (ergebnis or {}).get("fehler")
+                              or "Die Anzeige ließ sich gerade nicht umschalten."}
+        antwort = {"ok": True, "modus": modus,
+                   "text": "Die Zentrale zeigt jetzt %s." % self.ANSICHT_NAMEN.get(modus, modus)}
+        if modus == "kennzahlen":
+            antwort["kacheln"] = [{"name": k["name"], "wert": k["wert"], "einheit": k["einheit"]}
+                                  for k in daten["kacheln"]]
+        return antwort
     # [P1 Bühne] Ende
     # [P2 Weltlage] Anfang
     # [P2 Weltlage] Ende

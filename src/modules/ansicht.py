@@ -394,6 +394,91 @@ def _euro(wert) -> str:
         return "0,00"
 
 
+def _echte_zahl(wert) -> bool:
+    """Nur eine echte, endliche Zahl - kein None, kein Wahrheitswert, kein Text."""
+    return (isinstance(wert, (int, float)) and not isinstance(wert, bool)
+            and wert == wert and wert not in (float("inf"), float("-inf")))
+
+
+def _prozent_text(anteil: float) -> str:
+    return "%d %%" % round(anteil * 100)
+
+
+def kennzahlen_kacheln(tools) -> list:
+    """Die Kacheln der Kennzahlen-Ansicht: Kasse, Bedarf, Pipeline, Belegquote.
+
+    Eine Kachel kommt nur dazu, wenn ihr Wert eine echte Zahl ist - fehlt eine
+    Rechnung (keine Buchungen, keine Fixkosten), fehlt die Kachel, statt eine
+    Null zu zeigen. Gelesen wird wie bei der Zentrale, nur ohne Orte und ohne
+    Netz. ``anteil`` (0..1, optional) füllt den Ring, wenn die Kachel ein Ziel hat.
+    """
+    try:
+        d = tools.dashboard.daten_sammeln(False)
+    except Exception as fehler:
+        print("[anzeige] Kennzahlen nicht lesbar: %s" % fehler)
+        return []
+    monat = d.get("monat") or {}
+    # Ohne eine einzige Buchung im Monat wäre jede Kassenzahl eine bloße Null.
+    if not monat.get("ok", True) or not monat.get("anzahl"):
+        monat = {}
+    bedarf = d.get("bedarf") or {}
+    berechenbar = bool(bedarf.get("berechenbar"))
+    pipeline = d.get("pipeline") or {}
+    # Ebenso ohne einen einzigen Interessenten keine Pipeline-Kacheln.
+    stufen = pipeline.get("stufen") or {}
+    if not pipeline.get("ok", True) or not sum(
+            (s.get("anzahl") or 0) if isinstance(s, dict) else 0 for s in stufen.values()):
+        pipeline = {}
+    quote = (d.get("belegquote") or {}).get("quote")
+    kacheln = []
+
+    def kachel(name, wert, einheit="€", ziel=None, text="", farbe="neutral", anteil=None):
+        if not _echte_zahl(wert):
+            return
+        eintrag = {"name": name, "wert": round(float(wert), 2), "einheit": einheit,
+                   "ziel": round(float(ziel), 2) if _echte_zahl(ziel) and ziel else None,
+                   "text": text, "farbe": farbe}
+        if _echte_zahl(anteil):
+            eintrag["anteil"] = round(max(0.0, float(anteil)), 4)
+        kacheln.append(eintrag)
+
+    ergebnis, zahllast = monat.get("ergebnis"), monat.get("zahllast")
+    gewinn = bedarf.get("gewinn") if berechenbar else None
+    if _echte_zahl(ergebnis):
+        if _echte_zahl(gewinn) and gewinn > 0:
+            # Wie der Ring der Zentrale: Gewinn nach Umsatzsteuer gegen den nötigen Gewinn.
+            netto = ergebnis - (zahllast if _echte_zahl(zahllast) else 0.0)
+            anteil = netto / gewinn
+            kachel("Ergebnis Monat", ergebnis, "€", gewinn,
+                   "%s vom Bedarf" % _prozent_text(anteil),
+                   "gut" if ergebnis >= 0 else "schlecht", anteil)
+        else:
+            kachel("Ergebnis Monat", ergebnis, "€", None, "Einnahmen minus Ausgaben",
+                   "gut" if ergebnis >= 0 else "schlecht")
+    kachel("Einnahmen Monat", monat.get("einnahmen"), "€", None, "brutto")
+    kachel("Ausgaben Monat", monat.get("ausgaben"), "€", None, "brutto")
+    kachel("Zahllast", zahllast, "€", None, "Umsatzsteuer minus Vorsteuer")
+    if _echte_zahl(quote):
+        kachel("Belegquote", quote, "%", 100, "der Ausgaben belegt",
+               "gut" if quote >= 90 else ("schlecht" if quote < 50 else "neutral"), quote / 100.0)
+    gewichtet = pipeline.get("gewichteter_wert_monat")
+    offen = pipeline.get("offener_wert_monat")
+    kachel("Pipeline gewichtet", gewichtet, "€", None,
+           ("von %s € offen" % _euro(offen).replace(",00", "")) if _echte_zahl(offen) and offen else
+           "nach Wahrscheinlichkeit")
+    gesichert = pipeline.get("laufender_umsatz_monat")
+    noetig = bedarf.get("noetiger_umsatz") if berechenbar else None
+    if _echte_zahl(gesichert) and _echte_zahl(noetig) and noetig > 0:
+        kachel("Gesichert je Monat", gesichert, "€", noetig,
+               "%s vom nötigen Umsatz" % _prozent_text(gesichert / noetig),
+               "gut" if gesichert >= noetig else "schlecht", gesichert / noetig)
+    else:
+        kachel("Gesichert je Monat", gesichert, "€", None, "aus gewonnenen Aufträgen")
+    if _echte_zahl(noetig):
+        kachel("Nötiger Umsatz", noetig, "€", None, "je Monat, damit das Private gedeckt ist")
+    return kacheln[:8]
+
+
 # -- Gemeinsames für beide Seiten ---------------------------------------------------------
 
 BASIS_STIL = r"""
