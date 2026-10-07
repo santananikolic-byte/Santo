@@ -2886,6 +2886,438 @@ def pruefung_sprache_und_welt(agent):
             else "Optionen genannt, nichts gebucht")
 
 
+def pruefung_kern(agent):
+    """Das Gerüst für die sieben Pakete: Anzeige-Speicher, Freigaben mit Was/Warum/Wie,
+    Meldungen ins Gespräch, Bauliste und Marken."""
+    abschnitt("Kern: Anzeige, Freigaben, Meldungen, Bauliste")
+    import contextlib
+    import importlib.util
+    import io
+    import socket as _socket
+    import urllib.error as _fehler
+    import urllib.request as _netz
+    from urllib.parse import urlparse
+    from modules.anzeige import Anzeige, anzeige_nach_lesen
+    from modules.freigabe import (FREIGABE_ANGABEN, FREIGABE_AUFLOESEN, GESTE_GESPERRT,
+                                  freigabe_beschreiben, freigabe_lesen, freigabe_text)
+    w = agent.tools
+
+    # -- Anzeige-Speicher --------------------------------------------------
+    a = Anzeige()
+    v1, v2 = a.melden("buehne", {"modus": "uebersicht"}), a.melden("buehne", {"modus": "globus"})
+    pruefen("Anzeige: jede Meldung zählt die Version des Kanals hoch",
+            v1 == 1 and v2 == 2 and a.stand("buehne")["version"] == 2
+            and a.stand("anruf")["version"] == 0 and a.stand("gibtsnicht") is None, "1, dann 2")
+    beginn = time.monotonic()
+    sofort = a.warten({"buehne": 0}, 5)
+    dauer_sofort = time.monotonic() - beginn
+    beginn = time.monotonic()
+    leer = a.warten({"buehne": 2}, 0.3)
+    dauer_leer = time.monotonic() - beginn
+    threading.Timer(0.1, lambda: a.melden("buehne", {"modus": "maerkte"})).start()
+    beginn = time.monotonic()
+    geweckt = a.warten({"buehne": 2, "foo": 1}, 5)
+    dauer_geweckt = time.monotonic() - beginn
+    pruefen("Anzeige: Warten kommt sofort, nach der Frist leer oder bei einer Änderung",
+            "buehne" in sofort and dauer_sofort < 0.5 and leer == {} and 0.25 <= dauer_leer < 2
+            and geweckt.get("buehne", {}).get("version") == 3 and dauer_geweckt < 1
+            and set(geweckt) == {"buehne"},
+            "%.2f s / %.2f s / %.2f s" % (dauer_sofort, dauer_leer, dauer_geweckt))
+    with contextlib.redirect_stdout(io.StringIO()):
+        falsch, gross = a.zeigen("quatsch"), a.zeigen("globus", {"x": "y" * 70000})
+        abgewiesen = (a.melden("buehne", ["kein", "dict"]), a.melden("foo", {}),
+                      a.melden("buehne", {"x": float("nan")}))
+    pruefen("Anzeige: unbekannte Ansicht, zu Großes und Ungültiges werden abgewiesen",
+            falsch["ok"] is False and "gibt es nicht" in falsch["fehler"]
+            and gross["ok"] is False and "zu groß" in gross["fehler"]
+            and abgewiesen == (-1, -1, -1) and a.stand("buehne")["version"] == 3, falsch["fehler"][:50])
+    uhr = {"t": 1000.0}
+    b = Anzeige(uhr=lambda: uhr["t"])
+    b.zeigen("globus", {}, dauer_s=10)
+    vorher = b.kurz()["modus"]
+    uhr["t"] += 11
+    nachher = b.kurz()["modus"]
+    beginn = time.monotonic()
+    stehend = b.warten({"buehne": 1}, 0.2)   # die Prüf-Uhr steht - das Warten nicht
+    dauer_stehend = time.monotonic() - beginn
+    pruefen("Anzeige: Ablauf nach der eingespeisten Uhr, Warten nach der echten",
+            vorher == "globus" and nachher == "uebersicht" and b.start == 1000.0
+            and stehend == {} and dauer_stehend < 1.5, "%.2f s" % dauer_stehend)
+    c = Anzeige(uhr=lambda: 500.0)
+    c.zeigen("kennzahlen", {"titel": "Betrieb"})
+    mit_dauer = c.stand("buehne")["bis"]
+    gezeigt = c.zeigen("globus", {}, dauer_s=0, quelle="abnahme")
+    pruefen("Anzeige: ohne Dauer gilt ANZEIGE_DAUER, 0 heißt kein Ablauf, letzte merkt sich",
+            mit_dauer == 500.0 + config.ANZEIGE_DAUER and c.stand("buehne")["bis"] == 0.0
+            and gezeigt == {"ok": True, "modus": "globus", "version": 2}
+            and c.stand("buehne")["daten"] == {"modus": "globus", "quelle": "abnahme"}
+            and c.letzte("kennzahlen")["titel"] == "Betrieb" and c.letzte("recherche") is None
+            and c.kurz()["modus"] == "globus", "%s Sekunden" % config.ANZEIGE_DAUER)
+    d = Anzeige()
+    d.melden("anruf", {"nummer": "+43 664 1234567", "ziel": "Asia Wok", "phase": "verbunden",
+                       "mitschrift": [{"wer": "jarvis", "text": "Guten Tag", "t": 3}]})
+    d.melden("sicht", {"handruhe": {"mm": 0.31, "fps": 30, "vergleich": "ruhiger als sonst"},
+                       "erholung": {"wert": 71, "band": "gruen", "quelle": "oura", "tag": "2026-10-07"},
+                       "zusammenhang": {"text": "Mehr Abschlüsse", "n": 14,
+                                        "tabelle": [{"stufe": "gruen", "tage": 5}]},
+                       "hinweis": "Selbstbeobachtung, kein Medizinprodukt."})
+    d.melden("hochfahren", {"schritte": [{"name": "Kalender", "ok": True, "text": "Um neun kommt Huber"}],
+                            "begruessung": "Guten Morgen, um neun kommt Huber.", "fertig": True})
+    d.melden("untertitel", {"original": "Hello", "uebersetzung": "Hallo", "sprecher": "gast"})
+    d.melden("stimme", {"art": "satz", "text": "Hallo"})
+    d.zeigen("inhalte", {"eintraege": [{"datum": "2026-10-08", "titel": "Fensterputz im Herbst"}]})
+    echt_diskret = config.ANZEIGE_DISKRET
+    try:
+        config.ANZEIGE_DISKRET = True
+        anruf, sicht, hoch, unter, stimme, buehne = (
+            d.stand(k)["daten"] for k in ("anruf", "sicht", "hochfahren", "untertitel", "stimme", "buehne"))
+    finally:
+        config.ANZEIGE_DISKRET = echt_diskret
+    pruefen("Diskretmodus: Anruf ohne Nummer, Ziel und Mitschrift; der Speicher bleibt heil",
+            anruf["nummer"] == "" and anruf["ziel"] == "Anruf" and anruf["mitschrift"][0]["text"] == ""
+            and anruf["phase"] == "verbunden" and d.stand("anruf")["daten"]["nummer"].startswith("+43"),
+            "nur beim Herausgeben gefiltert")
+    pruefen("Diskretmodus: Sicht nur mit Quelle, Start ohne Begrüßung, Untertitel und Titel leer",
+            sicht["handruhe"]["mm"] is None and sicht["erholung"]["wert"] is None
+            and sicht["erholung"]["band"] == "" and sicht["erholung"]["quelle"] == "oura"
+            and sicht["zusammenhang"]["n"] is None and sicht["zusammenhang"]["tabelle"][0]["tage"] is None
+            and sicht["hinweis"] == "" and hoch["begruessung"] == ""
+            and hoch["schritte"][0]["text"] == "Kalender" and hoch["fertig"] is True
+            and unter["original"] == "" and unter["uebersetzung"] == "" and stimme["text"] == "Hallo"
+            and buehne["eintraege"][0]["titel"] == "Beitrag", "Stimme bleibt ungefiltert")
+    pruefen("Anzeige: die Kanalliste aus der Adresse",
+            anzeige_nach_lesen("buehne:7,anruf:x,foo:3") == {"buehne": 7, "anruf": -1}
+            and anzeige_nach_lesen("") == {} and anzeige_nach_lesen("stimme:-1") == {"stimme": -1}, "")
+
+    # -- Werkzeuge.zeigen und melden ----------------------------------------
+    buehne_vorher, anruf_vorher = w.anzeige.stand("buehne")["version"], w.anzeige.stand("anruf")["version"]
+    try:
+        w.lauf_beginnen(hintergrund=True)
+        hinten = (w.zeigen("globus", {}), w.melden("anruf", {"phase": "waehlt"}))
+    finally:
+        w.lauf_beginnen()
+    still = (w.anzeige.stand("buehne")["version"], w.anzeige.stand("anruf")["version"])
+    vorne = w.zeigen("globus", {"titel": "Test"}, dauer_s=5, quelle="abnahme")
+    gemeldet = w.melden("anruf", {"phase": "waehlt"})
+
+    class KaputteAnzeige:
+        def zeigen(self, *argumente, **schluessel):
+            raise RuntimeError("kaputt")
+        melden = zeigen
+    echt_anzeige = w.anzeige
+    w.anzeige = KaputteAnzeige()
+    try:
+        with contextlib.redirect_stdout(io.StringIO()):
+            kaputt = (w.zeigen("globus"), w.melden("anruf", {}))
+    finally:
+        w.anzeige = echt_anzeige
+    pruefen("Werkzeuge.zeigen und melden: im Hintergrund nichts, vorne ja, nie eine Ausnahme",
+            hinten == (None, None) and still == (buehne_vorher, anruf_vorher)
+            and vorne.get("ok") and vorne["version"] == buehne_vorher + 1
+            and gemeldet == anruf_vorher + 1 and kaputt == (None, None), "Autopilot schaltet nicht um")
+
+    # -- Freigaben mit Was, Warum und Wie ------------------------------------
+    beschrieben = freigabe_beschreiben("mail_senden", {
+        "an": "a@b.at", "betreff": "Angebot", "text": "Hallo Herr Huber",
+        "begruendung": "Er wartet seit Montag auf das Angebot."})
+    ohne = freigabe_beschreiben("mail_senden", {"an": "a@b.at", "betreff": "Angebot", "text": "Hallo"})
+    fremd = freigabe_beschreiben("mcp__kalender__loeschen", {"id": "alle"})
+    pruefen("Freigabe: Was nennt Empfänger und Betreff, Warum ist die Begründung",
+            "a@b.at" in beschrieben["was"] and "Angebot" in beschrieben["was"]
+            and beschrieben["warum"] == "Er wartet seit Montag auf das Angebot." and beschrieben["wie"]
+            and beschrieben["argumente"] == {"an": "a@b.at", "betreff": "Angebot", "text": "Hallo Herr Huber"},
+            beschrieben["was"][:55])
+    pruefen("Freigabe: fehlende Begründung steht sichtbar da, fremde Werkzeuge sind lesbar",
+            "ohne Begründung" in ohne["warum"] and "kalender" in fremd["was"] and "alle" in fremd["was"]
+            and fremd["wie"] and "skript_ausfuehren" in GESTE_GESPERRT, ohne["warum"][:50])
+    elf = ["mail_senden", "termin_anlegen", "bildschirm_bedienen", "nachricht_senden",
+           "skript_ausfuehren", "anrufen", "sms_senden", "browser_auftrag", "autopilot_schalten",
+           "datei_schreiben", "browser_oeffnen"]
+    katalog = {k["name"]: k["input_schema"] for k in w.katalog()}
+    ohne_grund = [n for n in elf if n not in FREIGABE_PFLICHTIG or n not in FREIGABE_ANGABEN
+                  or "begruendung" not in katalog[n]["required"]
+                  or "begruendung" not in katalog[n]["properties"]]
+    pruefen("Alle elf Freigabewerkzeuge verlangen eine Begründung und haben Was und Wie",
+            not ohne_grund, ", ".join(ohne_grund) or "11 Werkzeuge")
+    sms = json.dumps(freigabe_beschreiben("sms_senden", {"nummer": "+43664", "text": "Komme um neun",
+                                                         "begruendung": "Er wartet."}), ensure_ascii=False)
+    ansage = dienst_modul.freigabe_ansage("sms_senden", sms)
+    klartext = freigabe_text("sms_senden", sms)
+    pruefen("Stimme, Telegram und Terminal zeigen Was, Warum und Wie statt JSON",
+            ansage.startswith("Ich soll ") and "Komme um neun" in ansage and "Grund: Er wartet." in ansage
+            and "{" not in ansage and klartext.startswith("Was:") and "\nWarum:   Er wartet." in klartext
+            and "\nWie:" in klartext and "\nDetails: {" in klartext
+            and freigabe_text("skript_ausfuehren", "Skript x\n\nprint(1)") == "Skript x\n\nprint(1)"
+            and freigabe_lesen("print(1)") is None and freigabe_lesen('{"an": "x"}') is None, ansage[:55])
+    gefragt = []
+
+    class Fragender:
+        def anfordern(self, aktion, details):
+            gefragt.append((aktion, details))
+            return {"erlaubt": False, "grund": "abgelehnt"}
+    echt_kanal = w.freigabe_kanal
+    w.freigabe_kanal = Fragender()
+    FREIGABE_AUFLOESEN["mail_senden"] = lambda werkzeuge, a: {"an": "Huber <%s>" % a.get("an")}
+    try:
+        w.lauf_beginnen()
+        w.run("mail_senden", {"an": "h@b.at", "betreff": "A", "text": "B", "begruendung": "Weil."})
+        FREIGABE_AUFLOESEN["mail_senden"] = lambda werkzeuge, a: 1 / 0
+        with contextlib.redirect_stdout(io.StringIO()):
+            w.run("mail_senden", {"an": "h@b.at", "betreff": "A", "text": "B", "begruendung": "Weil."})
+        w.run("skript_ausfuehren", {"name": "gibtsnicht_kern", "begruendung": "Probe"})
+    finally:
+        FREIGABE_AUFLOESEN.pop("mail_senden", None)
+        w.freigabe_kanal = echt_kanal
+    erst = freigabe_lesen(gefragt[0][1]) if len(gefragt) > 0 else None
+    zweit = freigabe_lesen(gefragt[1][1]) if len(gefragt) > 1 else None
+    pruefen("Freigabe im Werkzeug: ein Auflöser macht Was lesbar, scheitert er, die rohen Argumente",
+            len(gefragt) == 3 and erst and "Huber <h@b.at>" in erst["was"] and erst["warum"] == "Weil."
+            and erst["argumente"]["an"] == "h@b.at" and zweit and "h@b.at" in zweit["was"]
+            and "Huber" not in zweit["was"] and freigabe_lesen(gefragt[2][1]) is None,
+            "Skript bleibt beim alten Text")
+
+    bruecke = WebFreigabe(timeout=8)
+    ergebnis = {}
+    faden = threading.Thread(target=lambda: ergebnis.update(bruecke.anfordern(
+        "mail_senden", json.dumps(beschrieben, ensure_ascii=False))), daemon=True)
+    faden.start()
+    time.sleep(0.3)
+    offen = bruecke.offene()
+    eintrag = offen[0] if offen else {}
+    geste = bruecke.beantworten(eintrag.get("id", ""), True, "geste")
+    grund = bruecke.letzter_grund
+    noch_offen = len(bruecke.offene()) == 1
+    klick = bruecke.beantworten(eintrag.get("id", ""), True, "klick")
+    faden.join(4)
+    try:
+        argumente = json.loads(eintrag.get("details") or "null")
+    except ValueError:
+        argumente = None
+    pruefen("Browser-Freigabe liefert Was, Warum und Wie, die Argumente eingerückt",
+            eintrag.get("was") == beschrieben["was"] and eintrag.get("warum") == beschrieben["warum"]
+            and eintrag.get("wie") == beschrieben["wie"] and argumente == beschrieben["argumente"]
+            and "\n" in eintrag.get("details", "") and eintrag.get("geste_erlaubt") is False, "")
+    pruefen("Eine Geste gibt in dieser Stufe nichts frei, ein Klick schon",
+            geste is False and grund == "Gesten-Freigabe ist noch nicht eingebaut." and noch_offen
+            and klick is True and ergebnis.get("erlaubt") is True and ergebnis.get("weg") == "klick", grund)
+
+    # -- Echte Anfragen an die Web-App ---------------------------------------
+    probe = _socket.socket()
+    probe.bind(("127.0.0.1", 0))
+    port = probe.getsockname()[1]
+    probe.close()
+    echt_kanal = w.freigabe_kanal
+    web = JarvisWeb(agent, port=port)
+    web.starten(blockierend=False)
+    time.sleep(0.3)
+
+    def rufen(pfad, koerper=None):
+        anfrage = _netz.Request("http://127.0.0.1:%d%s" % (port, pfad))
+        if koerper is not None:
+            anfrage.data = json.dumps(koerper).encode("utf-8")
+            anfrage.add_header("Content-Type", "application/json")
+        try:
+            with _netz.urlopen(anfrage, timeout=10) as antwort:
+                return antwort.status, json.loads(antwort.read().decode("utf-8") or "{}")
+        except _fehler.HTTPError as ausnahme:
+            return ausnahme.code, {}
+
+    try:
+        code, daten = rufen("/api/anzeige?nach=buehne:-1&warten=0")
+        pruefen("GET /api/anzeige liefert die geänderten Kanäle samt Serverzeit",
+                code == 200 and daten.get("ok") is True and "buehne" in daten.get("kanaele", {})
+                and daten.get("start") == w.anzeige.start and abs(daten.get("jetzt", 0) - time.time()) < 5,
+                "%d" % code)
+        stimme_vorher = w.anzeige.stand("stimme")["version"]
+        code, daten = rufen("/api/anzeige/satz", {"text": "Iran"})
+        satz = w.anzeige.stand("stimme")
+        pruefen("POST /api/anzeige/satz schreibt den gesprochenen Satz in den Kanal stimme",
+                code == 200 and daten.get("ok") is True and satz["version"] == stimme_vorher + 1
+                and satz["daten"].get("text") == "Iran" and satz["daten"].get("art") == "satz", "")
+        code, daten = rufen("/api/status")
+        pruefen("/api/status kennt den Stand der Anzeige",
+                code == 200 and daten.get("anzeige", {}).get("versionen", {}).get("stimme") == satz["version"], "")
+        offen_web = {}
+        faden = threading.Thread(target=lambda: offen_web.update(web.freigabe.anfordern(
+            "sms_senden", sms)), daemon=True)
+        faden.start()
+        time.sleep(0.3)
+        _, liste = rufen("/api/freigaben")
+        kennung = ((liste.get("offen") or [{}])[0]).get("id", "")
+        code_geste, geste = rufen("/api/freigabe", {"id": kennung, "ja": True, "kanal": "geste"})
+        code_klick, klick = rufen("/api/freigabe", {"id": kennung, "ja": False, "kanal": "klick"})
+        faden.join(4)
+        protokoll = agent.memory._lesen("SELECT argumente, status FROM aktionen WHERE werkzeug='freigabe' "
+                                        "ORDER BY id DESC LIMIT 2")
+        pruefen("/api/freigabe nimmt den Weg an: Geste abgelehnt, Klick zählt, beides im Protokoll",
+                code_geste == 200 and geste.get("ok") is False
+                and geste.get("text") == "Gesten-Freigabe ist noch nicht eingebaut."
+                and code_klick == 200 and klick.get("ok") is True and offen_web.get("erlaubt") is False
+                and len(protokoll) == 2 and '"klick"' in protokoll[0]["argumente"]
+                and '"geste"' in protokoll[1]["argumente"] and protokoll[1]["status"] == "abgelehnt", "")
+    finally:
+        web.stoppen()
+        w.freigabe_kanal_setzen(echt_kanal)
+
+    class Anfrage:
+        def __init__(self, pfad):
+            self.path, self.headers = pfad, {"Host": "127.0.0.1:8766"}
+    gesehen = []
+    nur = JarvisWeb(agent, port=0, nur_anzeige=True)
+    nur._antworten = lambda b, code, daten, zusatz=None: gesehen.append((urlparse(b.path).path, code, daten))
+    nur._koerper = lambda b: {"text": "Iran"}
+    nur._behandeln(Anfrage("/api/anzeige?nach=buehne:-1&warten=0"), "GET")
+    nur._behandeln(Anfrage("/api/anzeige/satz"), "POST")
+    codes = {pfad: code for pfad, code, _ in gesehen}
+    pruefen("Dienst-Anzeige: /api/anzeige lesen ja, einen Satz schreiben nein",
+            codes.get("/api/anzeige") == 200 and codes.get("/api/anzeige/satz") == 404
+            and "buehne" in (gesehen[0][2] or {}).get("kanaele", {}) and w.freigabe_kanal is echt_kanal,
+            str(codes)[:55])
+
+    # -- Meldungen ins Gespräch ----------------------------------------------
+    pruefen("Der Systemprompt trägt die Zusatzregeln als eigene Zeilen",
+            "\n- Bei allem, was eine Freigabe braucht, schreibst du in begruendung" in agent.systemprompt("")
+            and "dann meint er diesen Vorschlag" in agent.systemprompt("")
+            and len(agent_modul.ZUSATZREGELN) >= 2, "")
+    vorschlag = "Soll ich morgen zwei Termine streichen?"
+    gesendet, antworten = [], []
+
+    def anfrage(koerper, timeout=600):
+        gesendet.append(copy.deepcopy(koerper["messages"]))
+        return {"ok": True, "daten": antworten.pop(0)}
+
+    def text_antwort(text):
+        return {"content": [{"type": "text", "text": text}], "stop_reason": "end_turn",
+                "usage": {"input_tokens": 10, "output_tokens": 5}}
+    werkzeug_antwort = {"content": [{"type": "tool_use", "id": "kern1", "name": "punkte_offen", "input": {}}],
+                        "stop_reason": "tool_use", "usage": {"input_tokens": 10, "output_tokens": 5}}
+    echt = (config.ANTHROPIC_API_KEY, config.GEMINI_API_KEY, config.MONATSLIMIT_EURO,
+            agent_modul.gemini_fragen, agent.gedankenlog)
+    echt_run = w.run
+
+    def run_mit_meldung(name, argumente=None):
+        # Während das Werkzeug läuft, meldet sich der Zeitplan aus einem anderen Faden.
+        melder = threading.Thread(target=agent.meldung_vormerken, args=(vorschlag, "vorschlag"))
+        melder.start()
+        melder.join(2)
+        return echt_run(name, argumente)
+    try:
+        config.ANTHROPIC_API_KEY, config.GEMINI_API_KEY, config.MONATSLIMIT_EURO = "test", "", 0
+        agent.gedankenlog = Gedankenlog(pathlib.Path(ARBEITSVERZEICHNIS) / "kern_test.jsonl")
+        agent_modul.gemini_fragen = lambda *x, **k: {"ok": True, "text": "Gemini.", "tokens_ein": 1,
+                                                     "tokens_aus": 1}
+        agent._anfrage = anfrage
+        agent.verlauf_leeren()
+        w.run = run_mit_meldung
+        antworten[:] = [werkzeug_antwort, text_antwort("Drei Punkte sind offen.")]
+        agent.denken("Was ist bei mir offen?")
+        del w.run
+        erste_runde = copy.deepcopy(agent.verlauf)
+        doppelt = agent.meldung_vormerken(vorschlag, "vorschlag")
+        config.GEMINI_API_KEY = "test"
+        antworten[:] = [text_antwort("Gut, ich streiche sie.")]
+        agent.denken("ja")
+        zweite = gesendet[-1] if gesendet else []
+        gehirn = agent.letztes_gehirn
+        agent.meldung_vormerken("Gut, ich streiche sie.", "zeitplan")
+        config.GEMINI_API_KEY = ""
+        antworten[:] = [text_antwort("Gern.")]
+        agent.denken("Danke dir, das war alles für heute")
+        dritte = gesendet[-1] if gesendet else []
+        for nummer in range(7):
+            agent.meldung_vormerken("Meldung %d" % nummer)
+        wartend = [m["text"] for m in agent._meldungen]
+        agent.verlauf = [{"role": "user", "content": "Mach"},
+                         {"role": "assistant", "content": [{"type": "tool_use", "id": "x", "name": "punkte_offen",
+                                                            "input": {}}]}]
+        eingefuegt = agent._meldungen_einbringen()
+        offen_bleibt = len(agent.verlauf) == 2 and len(agent._meldungen) == 5
+    finally:
+        (config.ANTHROPIC_API_KEY, config.GEMINI_API_KEY, config.MONATSLIMIT_EURO,
+         agent_modul.gemini_fragen, agent.gedankenlog) = echt
+        if "run" in vars(w):
+            del w.run
+        if "_anfrage" in vars(agent):
+            del agent._anfrage
+        agent._meldungen = []
+        agent.verlauf_leeren()
+    rollen = [n["role"] for n in erste_runde]
+    pruefen("Eine Meldung während eines Werkzeugs landet nicht zwischen Aufruf und Ergebnis",
+            rollen == ["user", "assistant", "user", "assistant"]
+            and erste_runde[1]["content"][0]["type"] == "tool_use"
+            and erste_runde[2]["content"][0]["type"] == "tool_result" and doppelt is False,
+            " ".join(rollen))
+    hinweis = zweite[-3]["content"] if len(zweite) >= 3 else ""
+    pruefen("Vor der neuen Frage steht das Hinweis-Paar, ein Ja geht an Claude",
+            len(zweite) == 7 and zweite[:4] == erste_runde and zweite[-3]["role"] == "user"
+            and '<hinweis quelle="vorschlag">' in hinweis and "keine Frage von" in hinweis
+            and zweite[-2] == {"role": "assistant", "content": [{"type": "text", "text": vorschlag}]}
+            and str(zweite[-1]["content"]).endswith("ja") and gehirn == "claude", gehirn)
+    pruefen("Was schon als letzte Antwort dasteht, kommt nicht doppelt; höchstens fünf warten",
+            len(dritte) == 9 and sum("<hinweis" in str(n.get("content")) for n in dritte) == 1
+            and wartend == ["Meldung %d" % i for i in range(2, 7)]
+            and eingefuegt == 0 and offen_bleibt, "%d Nachrichten" % len(dritte))
+
+    # -- Bauliste und Marken -------------------------------------------------
+    spec = importlib.util.spec_from_file_location("bau_kern", os.path.join(WURZEL, "build_single.py"))
+    bau = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(bau)
+    erwartet = ("config memory router recall sprechtext anzeige freigabe netzsocket stimmanbieter voice "
+                "speaker mail calendar_mod telegram_mod telefon bookkeeping call_analysis akquise privat "
+                "routines vorschlaege camera mcp_client world nachrichten maerkte weblesen lokale browser "
+                "messenger computer_use werkstatt team mac hardware steuerung inhalte telefonagent sicht "
+                "erholung leistung autopilot dienst weltkarte ansicht webseite sehen dolmetscher "
+                "dashboard_teile dashboard sales_view scheduler lernpfad webapp setup_wizard macapp tools "
+                "agent run").split()
+    erwartet = [n if n in ("config", "agent", "run") else "modules/" + n for n in erwartet]
+    reihe = [n for n in bau.BAULISTE if n in erwartet]
+    leer_pfad = pathlib.Path(ARBEITSVERZEICHNIS) / "leer_modul.py"
+    leer_pfad.write_text('#!/usr/bin/env python3\n"""Leer - wird später gebaut."""\n', encoding="utf-8")
+    zerlegt = bau.modul_zerlegen(leer_pfad, "leer_modul")
+    with contextlib.redirect_stdout(io.StringIO()):
+        warnungen = bau.bauliste_pruefen()
+        gebaut = bau.bauen(pathlib.Path(ARBEITSVERZEICHNIS) / "jarvis_probe.py")
+    pruefen("Bauliste: alle neuen Module in fester Reihenfolge, leere Module bauen mit",
+            reihe == erwartet and not warnungen and not __import__("ast").parse(zerlegt["rumpf"]).body
+            and not zerlegt["namen"] and zerlegt["doku"].startswith("Leer") and gebaut == 0,
+            "%d Module" % len(bau.BAULISTE))
+    pakete = ["P1 Bühne", "P2 Weltlage", "P3 Telefon", "P4 Büro", "P5 Sicht", "P6 Stimme", "P7 Start"]
+    folge = []
+    for paket in pakete:
+        folge += ["# [%s] Anfang" % paket, "# [%s] Ende" % paket]
+    stellen = {"src/modules/tools.py": 7, "src/modules/webapp.py": 5, "src/config.py": 2,
+               "config/.env.beispiel": 1, "src/agent.py": 3, "src/run.py": 3, "src/modules/team.py": 1,
+               "src/modules/setup_wizard.py": 1, "src/modules/freigabe.py": 1, "tests/abnahme.py": 2}
+    schief = []
+    for datei, anzahl in stellen.items():
+        with open(os.path.join(WURZEL, datei), encoding="utf-8") as quelle:
+            marken = [z.strip() for z in quelle if re.match(r"\s*# \[P\d [^\]]+\] (Anfang|Ende)\s*$", z)]
+        if marken != folge * anzahl:
+            schief.append(datei)
+    pruefen("Marken: je Stelle ein Paar je Paket, in der Reihenfolge P1 bis P7",
+            not schief, ", ".join(schief) or "%d Stellen in %d Dateien" % (sum(stellen.values()), len(stellen)))
+
+
+# ---------------------------------------------------------------------------
+# Prüfungen der Pakete - jedes Paket schreibt seine Funktionen zwischen seine Marken
+# ---------------------------------------------------------------------------
+
+# [P1 Bühne] Anfang
+# [P1 Bühne] Ende
+# [P2 Weltlage] Anfang
+# [P2 Weltlage] Ende
+# [P3 Telefon] Anfang
+# [P3 Telefon] Ende
+# [P4 Büro] Anfang
+# [P4 Büro] Ende
+# [P5 Sicht] Anfang
+# [P5 Sicht] Ende
+# [P6 Stimme] Anfang
+# [P6 Stimme] Ende
+# [P7 Start] Anfang
+# [P7 Start] Ende
+
+
 def pruefung_einzeldatei():
     abschnitt("Einzeldatei")
     pfad = os.path.join(WURZEL, "jarvis.py")
@@ -2969,6 +3401,21 @@ def main() -> int:
     pruefung_freigaben()
     pruefung_mcp()
     pruefung_sprache_und_welt(agent)
+    pruefung_kern(agent)
+    # [P1 Bühne] Anfang
+    # [P1 Bühne] Ende
+    # [P2 Weltlage] Anfang
+    # [P2 Weltlage] Ende
+    # [P3 Telefon] Anfang
+    # [P3 Telefon] Ende
+    # [P4 Büro] Anfang
+    # [P4 Büro] Ende
+    # [P5 Sicht] Anfang
+    # [P5 Sicht] Ende
+    # [P6 Stimme] Anfang
+    # [P6 Stimme] Ende
+    # [P7 Start] Anfang
+    # [P7 Start] Ende
     pruefung_einzeldatei()
 
     print("\n" + "=" * 74)

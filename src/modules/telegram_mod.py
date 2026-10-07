@@ -18,6 +18,7 @@ import urllib.parse
 import urllib.request
 
 import config
+from modules.freigabe import freigabe_lesen, freigabe_text
 
 TELEGRAM_BASIS = "https://api.telegram.org"
 
@@ -174,9 +175,10 @@ class Telegram:
         auch bei Timeout, Netzwerkfehler oder unverständlicher Antwort.
         """
         timeout = int(timeout if timeout is not None else config.FREIGABE_TIMEOUT)
+        # Was, Warum und Wie lesbar statt rohem JSON - alter Text bleibt, wie er ist.
         frage = ("Jarvis fragt um Freigabe.\n\nAktion: %s\n%s\n\n"
                  "Antworte mit JA oder NEIN. Ohne Antwort in %d Sekunden "
-                 "führe ich nichts aus." % (aktion, details or "", timeout))
+                 "führe ich nichts aus." % (aktion, freigabe_text(aktion, details), timeout))
 
         if self.verfuegbar():
             ergebnis = self._freigabe_ueber_telegram(frage, timeout)
@@ -232,7 +234,13 @@ class Telegram:
                     "grund": "Kein Freigabekanal verfügbar - deshalb nicht ausgeführt."}
         print("\n--- FREIGABE NÖTIG ---")
         print("Aktion : %s" % aktion)
-        if details:
+        lesbar = freigabe_lesen(details)
+        if lesbar is not None:
+            print("Was    : %s" % lesbar["was"])
+            print("Warum  : %s" % lesbar["warum"])
+            print("Wie    : %s" % lesbar["wie"])
+            print("Details: %s" % json.dumps(lesbar["argumente"], ensure_ascii=False, default=str))
+        elif details:
             print("Details: %s" % details)
         print("Mit ja bestätigen, alles andere bricht ab (%d Sekunden Zeit)." % timeout)
         sys.stdout.write("> ")

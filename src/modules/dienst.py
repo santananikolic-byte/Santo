@@ -38,6 +38,7 @@ from pathlib import Path
 
 import config
 from modules.autopilot import in_ruhezeit
+from modules.freigabe import erster_satz, freigabe_lesen
 
 LABEL = "at.jarvis.imac"
 HERZSCHLAG_GRENZE = 1800  # Sekunden ohne Lebenszeichen, dann Neustart
@@ -83,7 +84,16 @@ def _anfang(text, n: int = 90) -> str:
 
 
 def freigabe_ansage(aktion: str, details: str = "") -> str:
-    """Was Jarvis vor einer Freigabe laut sagt: wer, was, wohin. Nie der ganze Code."""
+    """Was Jarvis vor einer Freigabe laut sagt: wer, was, wohin. Nie der ganze Code.
+
+    Neue Freigaben kommen mit Was, Warum und Wie: "Ich soll ... Grund: ...", dazu
+    der erste Satz von Wie. Alte Texte und Argument-JSONs gehen den bisherigen Weg.
+    """
+    lesbar = freigabe_lesen(details)
+    if lesbar is not None:
+        return "Ich soll %s. Grund: %s. %s" % (
+            lesbar["was"].strip().rstrip("."), lesbar["warum"].strip().rstrip("."),
+            erster_satz(lesbar["wie"]))
     daten = None
     try:
         daten = json.loads(details) if details and details.lstrip().startswith("{") else None

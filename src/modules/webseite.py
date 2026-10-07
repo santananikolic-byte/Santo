@@ -482,7 +482,7 @@ main:has(~ .tippen.zeigen){padding-bottom:84px}
       // Bei offener Freigabe zählt nur ja oder nein.
       if (freigabe) {
         var entscheid = jaNein(k);
-        if (entscheid !== null) { antworten(entscheid); }
+        if (entscheid !== null) { antworten(entscheid, "sprache"); }
         return;
       }
       if (laeuft || sprichtGerade) { return; }
@@ -547,23 +547,27 @@ main:has(~ .tippen.zeigen){padding-bottom:84px}
       }
       freigabe = offen;
       el("fAktion").textContent = offen.aktion;
-      el("fDetails").textContent = offen.details || "(ohne Angaben)";
+      // Was, Warum und Wie lesbar; die Argumente stehen darunter.
+      el("fDetails").textContent = (offen.warum ? "Was: " + offen.was + "\nWarum: " + offen.warum
+        + "\nWie: " + offen.wie + "\n\n" : "") + (offen.details || "(ohne Angaben)");
       el("rest").textContent = offen.rest + " s";
       el("schleier").classList.add("zeigen");
-      sprich("Ich brauche eine Freigabe für " + offen.aktion + ". Ja oder nein?");
+      sprich(offen.was && offen.warum
+        ? "Ich brauche eine Freigabe. Ich soll " + offen.was + ". Grund: " + offen.warum + ". Ja oder nein?"
+        : "Ich brauche eine Freigabe für " + offen.aktion + ". Ja oder nein?");
     }).catch(function () {});
   }
   function schliessen() {
     freigabe = null;
     el("schleier").classList.remove("zeigen");
   }
-  function antworten(ja) {
+  function antworten(ja, kanal) {
     if (!freigabe) { return; }
     var id = freigabe.id;
     schliessen();
     if (window.speechSynthesis) { window.speechSynthesis.cancel(); }
     sprichtGerade = false; hoerenWeiter();
-    holen("/api/freigabe", { id: id, ja: ja }).then(function () { lageHolen(); });
+    holen("/api/freigabe", { id: id, ja: ja, kanal: kanal || "klick" }).then(function () { lageHolen(); });
   }
   el("fJa").addEventListener("click", function () { antworten(true); });
   el("fNein").addEventListener("click", function () { antworten(false); });

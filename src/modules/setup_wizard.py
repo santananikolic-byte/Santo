@@ -499,6 +499,20 @@ class Einrichtung:
         ("gemini", "Gemini (Google)", "GEMINI_API_KEY", "https://aistudio.google.com/apikey"),
         ("stimme", "ElevenLabs (Stimme)", "ELEVENLABS_API_KEY", "https://elevenlabs.io/app/settings/api-keys"),
         ("ohren", "OpenAI (Spracherkennung)", "OPENAI_API_KEY", "https://platform.openai.com/api-keys"),
+        # [P1 Bühne] Anfang
+        # [P1 Bühne] Ende
+        # [P2 Weltlage] Anfang
+        # [P2 Weltlage] Ende
+        # [P3 Telefon] Anfang
+        # [P3 Telefon] Ende
+        # [P4 Büro] Anfang
+        # [P4 Büro] Ende
+        # [P5 Sicht] Anfang
+        # [P5 Sicht] Ende
+        # [P6 Stimme] Anfang
+        # [P6 Stimme] Ende
+        # [P7 Start] Anfang
+        # [P7 Start] Ende
     )
 
     MAIL_WOERTER = ("mail", "gmail", "email", "e-mail", "post", "postfach")

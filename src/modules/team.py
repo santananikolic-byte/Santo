@@ -290,6 +290,22 @@ statt es zu umgehen.""",
     },
 }
 
+# Die Pakete ergänzen die Rollen hier, etwa ROLLEN["rechercheur"]["werkzeuge"] += [...].
+# [P1 Bühne] Anfang
+# [P1 Bühne] Ende
+# [P2 Weltlage] Anfang
+# [P2 Weltlage] Ende
+# [P3 Telefon] Anfang
+# [P3 Telefon] Ende
+# [P4 Büro] Anfang
+# [P4 Büro] Ende
+# [P5 Sicht] Anfang
+# [P5 Sicht] Ende
+# [P6 Stimme] Anfang
+# [P6 Stimme] Ende
+# [P7 Start] Anfang
+# [P7 Start] Ende
+
 
 class Team:
     """Verteilt Aufträge an Rollen und hält den Gesamtstand."""

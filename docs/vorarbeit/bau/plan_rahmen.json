@@ -1,0 +1,183 @@
+{
+ "zusammenfassung": "Plan: deliver all 13 use cases and the three demo-video behaviours inside the existing Jarvis, without changing its architecture. The core stays standard-library Python: http.server, the direct Claude Messages API brain (claude-opus-5-5), the approval layer in tools.py, the single-file build jarvis.py, and the /zentrale and /gehirn displays. The user's FastAPI/React/Three.js/Claude-CLI stack is not adopted. Its ideas are adopted where they are clearly better, but in a form that fits this codebase:\n- MediaPipe hand tracking runs in the browser from locally served files, not via Python mediapipe.\n- Fish Audio becomes an extra TTS provider.\n- Vapi drives the phone agent through outbound REST polling, not webhooks.\n- The HUD and globe look is drawn on a 2D canvas with real coastlines, not Three.js from a CDN.\n\n**One display contract.** A new module, anzeige.py (owned by P1), holds a thread-safe state store with six channels:\n- buehne: which view the stage shows, including a 'folge' mode that steps through topics while Jarvis speaks\n- stimme: the speech loudness curve\n- anruf: the phone HUD\n- sicht, untertitel, hochfahren\n\nEvery other package only writes to it via anzeige.zeigen()/melden(). Each page reads it through a single multi-channel long-poll, GET /api/anzeige?nach=kanal:version, which is read-only and also allowed on the Dienst display. That gives:\n- Video 1: the globe flies to the region on weltlage, switches to market charts on maerkte and to KPI tiles on kennzahlen, and a 'lagebild' runs as a sequence synced to the spoken keywords.\n- Video 2: a /sehen page with webcam, a 21-point overlay, Handruhe measurement, thumbs-up as an opt-in approval channel, and a particle orb driven by real loudness.\n- Video 3: OSM restaurant search, an autonomous Vapi call (optionally Retell for a true live transcript), a phone HUD, and a calendar entry proposal that goes through the normal approval.\n\n**Seven parallel packages:**\n- P1 Bühne: the display, contract and pages\n- P2 Weltlage/Märkte/Web-Lesen: use cases 4, 9, 10\n- P3 Telefonagent/Lokale: use case 12, Video 3\n- P4 Büro: calendar fixes and deleting or moving appointments, mail threads and drafts, structured what/why/how approvals with a required 'begruendung', server-enforced gesture rules, and proactive proposals that land in agent.verlauf so a spoken 'ja' has context. Use cases 5, 6, 13.\n- P5 Sicht & Erholung: MediaPipe asset download and serving, Handruhe storage, Apple Health/Oura/Whoop recovery, the correlation with close rate, and the overload rule. Use cases 11, 13, Video 2.\n- P6 Stimme & Dolmetscher: Fish/ElevenLabs provider chain, WAV loudness curves for the orb, server TTS played in the browser, and a turn-based interpreter page. Use cases 8 and the orb.\n- P7 Start/Steuerung/Dateien/Inhalte: hardware report and boot greeting, Shortcuts/window layouts/volume, the datei_oeffnen fix, plan-then-approve file sorting with undo, and the content pipeline. Use cases 1, 2, 3, 7.\n\n**How parallel building works.**\n- Each package owns its new modules.\n- Edits to shared files (tools.py, config.py, build_single.py, webapp.py, agent.py, run.py, team.py, tests/abnahme.py) are listed exactly per package, so an integrator can merge them.\n- Merge order: first a small 'contract core' (P1 anzeige.py, P4 freigabe.py plus agent.meldung_einbringen). Then all other packages in any order.\n- Every test uses injected fetchers and fakes, so nothing touches the network.\n\n**Hard constraints are kept:**\n- No inbound connections. Everything is outbound REST or WSS polling; the OAuth redirect is browser-local.\n- The Mac's Messages, Contacts and Calendar databases are not read.\n- Keys live only in config/.env.\n- Every outward action asks for approval with what, why and how.\n- Every source degrades with a German 'what is missing' message and never shows invented data.",
+ "entscheidungen": [
+  {
+   "frage": "Adopt the proposed stack (FastAPI + React/Vite/Three.js + Claude Code CLI subprocess with claude-3-7-sonnet + Python MediaPipe)?",
+   "entscheidung": "No. Keep stdlib http.server, the direct Messages API loop in agent.py (claude-opus-5-5), the inline-HTML pages and the single-file build. Adopted parts, adapted: MediaPipe in the browser served from local files; Fish Audio as an optional TTS provider; Vapi for the phone agent through REST polling (no webhooks); the HUD/globe look on a 2D canvas.",
+   "begruendung": "75 tools, the approval/background safety model, about 317 acceptance checks and the 'python3 jarvis.py' single-file install all rest on the current core. FastAPI/uvicorn and a Vite build add pip and npm installs on the iMac. A Claude Code CLI subprocess bypasses FREIGABE_PFLICHTIG and the tool allowlist, brings its own permission model, and pins an outdated model. Python mediapipe breaks the stdlib rule. Webhooks are blocked by hard constraint 1."
+  },
+  {
+   "frage": "How do other modules drive the display?",
+   "entscheidung": "One Anzeige store (src/modules/anzeige.py) with six versioned channels: buehne, stimme, anruf, sicht, untertitel, hochfahren. Tools that have a view write it explicitly through anzeige.zeigen()/melden(). Claude can also switch views with the tool anzeige_zeigen. Pages read through ONE long-poll per page (GET /api/anzeige?nach=...), and /api/status carries a short summary. No implicit tool-name mapping inside Werkzeuge.run.",
+   "begruendung": "agent.status is replaced wholesale and only carries tool names, not arguments. A 2 s poll is too slow for the phone transcript and the orb. SSE would need custom header handling, while a long-poll works with the existing _antworten(). One held connection per page stays well inside Chrome's limit of 6 connections per host. Explicit writes keep the display honest: only a tool that actually got data shows it."
+  },
+  {
+   "frage": "How does the display switch topics during a spoken briefing (globe -> finance -> KPI)?",
+   "entscheidung": "The lagebild tool writes buehne modus 'folge', a list of steps each with a keyword. The Zentrale advances to the next step when a stimme event carries that keyword. In Dienst mode the event comes from the server voice, which publishes each chunk's text with its loudness curve. In web mode the browser posts each chunk to POST /api/anzeige/satz. A step also advances after a 30 s timeout. The tool result tells Claude to speak in that order and to open each section with its keyword.",
+   "begruendung": "The display window, the speaking page and the server are separate. Keyword sync is deterministic, needs no cross-window browser API (the Zentrale may run in its own Chrome profile), and degrades to a timer."
+  },
+  {
+   "frage": "Globe: Three.js 3D or the existing 2D canvas?",
+   "entscheidung": "Keep the canvas orthographic dot globe and upgrade it:\n- real coastlines from Natural Earth 110m (world-atlas@2 land-110m.json), rasterised once at 0.25° into a run-length-encoded mask committed as src/modules/weltkarte.py and served from /api/weltkarte;\n- dot density chosen by zoom;\n- eased fly-to transitions with zoom 1 to 6;\n- HUD crosshair, coordinates, news markers, great-circle arcs.",
+   "begruendung": "Four acceptance tests forbid http(s) in pages, and Jarvis promises 'lädt nichts aus dem Netz nach'. Vendoring Three.js would need a static route and a larger page for a look the dotted globe already gives. Committed raster data is offline, public-domain (Natural Earth) and about 20-100 KB."
+  },
+  {
+   "frage": "Hand-tracking engine?",
+   "entscheidung": "MediaPipe Tasks Vision 0.10.35 GestureRecognizer in the browser. It gives 21 landmarks plus a Thumb_Up class from one model. JS, WASM and model are downloaded once by an explicit 'python3 jarvis.py sicht laden' (known hashes pinned, the rest trust-on-first-use) and served from GET /sicht/dateien/<whitelisted name>. The /sehen page sends a Content-Security-Policy with connect-src 'self'.",
+   "begruendung": "Python mediapipe breaks the stdlib rule. A Swift Vision helper needs Xcode tools and a 30 Hz bridge into the browser. 1.x builds send usage metrics to Google; 0.10.35 does not. Local serving keeps the pages free of network URLs and the frames inside the browser."
+  },
+  {
+   "frage": "Live camera versus the 'kein Dauervideo' principle?",
+   "entscheidung": "Change the principle deliberately and narrowly. The server still only takes single stills. A live image exists only in the browser on /sehen, only when SICHT_AN=ja and after a button click. It is never recorded or uploaded; only measurement numbers are POSTed. The camera.py docstring and the umschauen tool text are updated.",
+   "begruendung": "Video 2 needs live video. Keeping frames client-side, with no toDataURL, MediaRecorder or getImageData (enforced by a test), keeps the privacy promise for biometric data."
+  },
+  {
+   "frage": "What is actually measured as 'micro-tremor'?",
+   "entscheidung": "'Handruhe': visible hand unsteadiness in mm, estimated from fingertip motion relative to palm length.\n- 30 Hz resampling, high-pass filter, RMS, and a 3-14 Hz DFT that reports a rhythm only when its peak is clear.\n- Refused below 25 fps.\n- Compared against the user's own 14-day median and a resting measurement.\n- Always labelled 'Selbstbeobachtung, kein Medizinprodukt'.",
+   "begruendung": "A webcam cannot see normal physiological tremor at micrometre scale. Honest framing (constraint 4) also keeps the feature clear of medical-device rules."
+  },
+  {
+   "frage": "Gesture as 'yes'?",
+   "entscheidung": "An opt-in parallel channel (GESTEN_FREIGABE, default off), web mode only. It works only on /sehen while exactly one approval is open and its Was/Warum/Wie card is visible. Thumbs-up must be held 1.5 s, with hysteresis, only after a 0.5 s thumb-free arming period, and with a 3 s lockout. The server enforces the rules again in WebFreigabe.beantworten(kanal='geste'): flag on, exactly one open approval, approval at least 2 s old, action not in GESTE_GESPERRT (scripts, screen/browser control, file writes and sorting, autopilot). Thumbs-down = no. Never on the Dienst display.",
+   "begruendung": "The Dienst display is deliberately GET-only and a test enforces it; the voice stays the channel there. Enforcing on the server means a buggy or malicious page cannot turn a gesture into a blanket yes. Clicks and voice keep working at the same time."
+  },
+  {
+   "frage": "Phone agent provider and transport?",
+   "entscheidung": "Vapi is the default:\n- POST /call, poll GET /call/{id} every 1.5 s, hang up via monitor.controlUrl;\n- transcript and structured result after the call;\n- the in-call model is Vapi's 'claude-haiku-4-5-20251001' (configurable as VAPI_MODELL), Azure German voice, Deepgram nova-3 'de', recordingEnabled false, at most 4 minutes, AI disclosure in the first sentence.\nRetell is optional (TELEFONAGENT_ANBIETER=retell): an outbound WSS monitor gives a real live transcript of both sides. After the call, Claude only PROPOSES the calendar entry; termin_anlegen still asks for approval.",
+   "begruendung": "Twilio ConversationRelay and Media Streams need inbound access to the Mac, which is blocked. Vapi's request shape was validated against its OpenAPI spec. Vapi does not offer Opus 5.5, and a live call needs low latency. Recording is off and the first sentence discloses the AI because of EU AI Act Art. 50 and § 201 StGB / § 120 öStGB."
+  },
+  {
+   "frage": "News and market sources?",
+   "entscheidung": "Keyless and tested:\n- tagesschau api2u (at most 50 calls per hour, cached);\n- Google News RSS search and section feeds;\n- Deutsche Welle RDF as fallback;\n- Yahoo v8 spark with User-Agent exactly 'Mozilla/5.0';\n- CoinGecko and the ECB EUR/USD rate as fallbacks.\nEvery item carries source and time; failures are listed by name; caches are 10 min for news and 60 s for prices. Stooq is not used.",
+   "begruendung": "No keys needed, and all were verified from the sandbox except Stooq, which now needs a key. Terms are personal or non-commercial; this is a private assistant and the risk is documented."
+  },
+  {
+   "frage": "Wearable source?",
+   "entscheidung": "Three sources:\n- Primary: Apple Health export.zip import, streamed with iterparse, giving a recovery score of HRV/resting-pulse/sleep against a 30-day baseline, labelled 'eigene Schätzung'.\n- Optional: Oura OAuth2 and Whoop OAuth2. The redirect goes to http://localhost:8765/<dienst>/rueckruf, with a paste-the-URL fallback in the terminal. The rotating refresh token is stored through config.env_setzen.\n- Always: manual entry.",
+   "begruendung": "Apple has no Mac API, and reading Mac databases is forbidden; a file the user supplies is fine. Oura personal tokens are gone, so OAuth is required. A localhost redirect is browser-local, not public ingress. No webhooks, so data is polled once or twice a day."
+  },
+  {
+   "frage": "How do approvals show what, why and how?",
+   "entscheidung": "Every FREIGABE_PFLICHTIG tool gets a required 'begruendung' argument. A new src/modules/freigabe.py (FREIGABE_ANGABEN) builds {was, warum, wie, argumente} per tool. Werkzeuge._freigabe passes it as JSON to every channel: web, Telegram, terminal and voice. freigabe_ansage speaks 'Ich soll … Grund: … …'. skript_ausfuehren keeps its full-code text.",
+   "begruendung": "Constraint 3. One registry means new tools add a single entry instead of editing four channel implementations, and the old JSON form stays accepted so existing tests keep passing."
+  },
+  {
+   "frage": "How does a proactive question ('Soll ich morgen zwei Termine streichen?') get a working 'ja'?",
+   "entscheidung": "agent.meldung_einbringen(text, quelle) appends a marker user turn plus an assistant text block to agent.verlauf, under the think lock and without duplicates. A Vorschlaege store adds one entry per rule per day. JarvisWeb.melden and the Dienst output wrappers call meldung_einbringen. The actual change (termine_absagen / termin_verschieben) still asks for its own approval listing every appointment.",
+   "begruendung": "web.melden used to bypass agent.verlauf, so a 'ja' had no context (gap 0.11). The router already sends answers to a Claude question back to Claude. A double confirmation for deleting appointments is intended."
+  },
+  {
+   "frage": "Deleting and moving calendar entries safely?",
+   "entscheidung": "termine() keeps href, etag and a short id. termine_absagen(ids[]) and termin_verschieben(id) work only on ids listed in the last 30 minutes, use If-Match, refuse series and changed entries, and put each deleted ICS into kalender_papierkorb with termin_wiederherstellen. Times are written in UTC (Z) and read correctly (Z, TZID, VALUE=DATE). REPORT requests use <C:expand> with a minimal local RRULE fallback. CALDAV_KALENDER is now used.",
+   "begruendung": "The CalDAV DELETE/PUT needs the href and etag the current code throws away, and today's timezone bugs would shift a reservation by two hours. The trash makes a mistaken delete reversible."
+  },
+  {
+   "frage": "Orb amplitude source?",
+   "entscheidung": "Two paths, honestly labelled:\n- Dienst mode: the server voice produces WAV (ElevenLabs pcm_22050, Fish wav, or say -o … --data-format=LEI16@22050 with an aiff/afconvert fallback), computes a 20 ms loudness curve with stdlib wave/array, and publishes it on the stimme channel just before afplay.\n- Web mode with a TTS key: the page plays /api/sprache MP3 through an AnalyserNode (real level).\n- Otherwise: speechSynthesis start/boundary/end events drive an animation labelled 'Pegel nachempfunden'.",
+   "begruendung": "speechSynthesis audio cannot be captured, and stdlib Python cannot decode MP3. audioop and aifc are gone in Python 3.13, so wave/array are used. Same machine means the same clock, so the curve stays in sync."
+  },
+  {
+   "frage": "Real-time translation scope?",
+   "entscheidung": "Tier A now: a /dolmetscher page with per-turn recognition language, POST /api/uebersetzen (Gemini if a key exists, else Claude Opus 5.5 at effort low), voice per language, two-language subtitles on the Zentrale. Gemini Live speech-to-speech (Tier B) is a later option.",
+   "begruendung": "Tier A uses only existing keys and code and costs about 1.5-3 s per turn. Tier B needs an outbound browser WebSocket, ephemeral-token minting and AudioWorklet code; it is not needed for a first working interpreter."
+  },
+  {
+   "frage": "Smart home and workplace control?",
+   "entscheidung": "macOS Shortcuts limited to the folder 'Jarvis' (KURZBEFEHL_ORDNER): only names in the live list may run, input goes through stdin and is checked with parameter_pruefen. Fixed window layouts defined in code (fenster_anordnen), volume through osascript. No direct Hue integration.",
+   "begruendung": "Shortcuts can trigger HomeKit scenes and Focus without new keys or packages, and an allowlisted folder is the same pattern as SYSTEM_AKTIONEN. Claude never writes AppleScript freely."
+  },
+  {
+   "frage": "Interval work (call polling, market refresh)?",
+   "entscheidung": "No Scheduler change for intervals. The phone agent owns its polling thread. News and prices refresh on demand with caches. One new daily job is added to the Scheduler: the overload check at BELASTUNG_PRUEFEN_UM.",
+   "begruendung": "The Scheduler only knows fixed daily times, and a dedicated thread per call is simpler and testable with injected clocks."
+  },
+  {
+   "frage": "Tests and portability rules for builders?",
+   "entscheidung": "Every network class takes an injectable holen/ausfuehren function. Each package adds one pruefung_<bereich>(agent) to tests/abnahme.py and calls it from main() before pruefung_einzeldatei. New pages get the same no-network/{{SCHLUESSEL}} checks. Code stays Python 3.9-safe: no match statements, no statistics.correlation, no audioop or aifc. jarvis.py is rebuilt after every merge.",
+   "begruendung": "The existing abnahme runs offline except for one weather check, enforces that jarvis.py is up to date, and the iMac's command-line-tools Python may be 3.9."
+  }
+ ],
+ "config_schluessel": [
+  "ANZEIGE_DAUER (int, 180) – seconds before the Zentrale returns to Übersicht – P1",
+  "NACHRICHTEN_QUELLEN (text, 'tagesschau,google,dw') – P2",
+  "MARKT_BEOBACHTUNG (text, 'dax,sp500,nasdaq,eurostoxx,brent,gold,eurusd,bitcoin') – P2",
+  "COINGECKO_SCHLUESSEL (text, '') – optional demo key – P2",
+  "BRIEFING_WELTLAGE (bool, False) – headlines in the morning briefing – P2",
+  "BRIEFING_MAERKTE (bool, False) – prices in the morning briefing – P2",
+  "VAPI_SCHLUESSEL (text, '') – Vapi private key – P3",
+  "VAPI_BASIS (text, 'https://api.vapi.ai'; EU organisation: https://api.eu.vapi.ai) – P3",
+  "VAPI_TELEFON_ID (text, '') – Twilio number imported into Vapi – P3",
+  "VAPI_MODELL (text, 'claude-haiku-4-5-20251001') – model inside the call – P3",
+  "VAPI_STIMME (text, 'de-DE-ConradNeural') – Azure voice – P3",
+  "TELEFONAGENT_ANBIETER (text, 'vapi' | 'retell') – P3",
+  "TELEFONAGENT_MAX_MINUTEN (int, 4) – P3",
+  "TELEFONAGENT_RUECKRUF (text, '') – callback number the agent may give – P3",
+  "RETELL_SCHLUESSEL (text, '') – optional, gives a live transcript – P3",
+  "RETELL_AGENT_ID (text, '') – P3",
+  "RETELL_NUMMER (text, '') – P3",
+  "CALDAV_ZEITZONE (text, 'Europe/Vienna') – P4",
+  "CALDAV_KALENDER (existing, now used: collection URL or name) – P4",
+  "GESTEN_FREIGABE (bool, False) – thumbs-up as an opt-in approval channel in web mode – P4",
+  "VORSCHLAEGE_AN (bool, True) – proactive proposals – P4",
+  "SICHT_AN (bool, False) – live camera on /sehen – P5",
+  "HANDLAENGE_MM (number, 95) – palm length for the mm estimate – P5",
+  "OURA_CLIENT_ID (text, '') – P5",
+  "OURA_CLIENT_SECRET (text, '') – P5",
+  "OURA_REFRESH_TOKEN (text, written by the OAuth flow) – P5",
+  "WHOOP_CLIENT_ID (text, '') – P5",
+  "WHOOP_CLIENT_SECRET (text, '') – P5",
+  "WHOOP_REFRESH_TOKEN (text, written by the OAuth flow) – P5",
+  "VERKAUFS_STICHWOERTER (text, 'besichtigung,angebot,erstgespräch,beratung,vor ort,akquise,objektbegehung') – P5",
+  "BELASTUNG_SCHWELLE (int, 34) – recovery value below which a day counts as low – P5",
+  "BELASTUNG_MIN_TERMINE (int, 4) – P5",
+  "BELASTUNG_PRUEFEN_UM (text 'HH:MM', '18:25') – daily overload check – P5",
+  "MODELL_VERZEICHNIS (path constant BASIS/'modelle', not an .env key) – P5",
+  "STIMME_ANBIETER (text, 'auto' | 'fish' | 'elevenlabs' | 'mac') – P6",
+  "FISH_API_KEY (text, '') – P6",
+  "FISH_STIMME_ID (text, '') – Fish reference_id – P6",
+  "FISH_MODELL (text, 's2.1-pro'; for free testing 's2.1-pro-free') – P6",
+  "FISH_LATENZ (text, 'balanced') – P6",
+  "STIMME_IM_BROWSER (bool, True) – play the server voice in the browser when a key exists – P6",
+  "STIMME_VORLAUF_MS (int, 60) – afplay start delay for the orb sync – P6",
+  "DOLMETSCHER_GEHIRN (text, 'auto' | 'gemini' | 'claude') – P6",
+  "DOLMETSCHER_SPRACHEN (text, 'tr,hr,sr,bs,sq,pl,ro,hu,en,uk,ru,ar') – P6",
+  "BEGRUESSUNG_AN (bool, True) – P7",
+  "KURZBEFEHL_ORDNER (text, 'Jarvis') – P7",
+  "ANZEIGE_BILDSCHIRM (int, 1) – display index for the Zentrale layout – P7",
+  "INHALTE_PLATTFORMEN (text, 'instagram,facebook,google') – P7"
+ ],
+ "nicht_moeglich": [
+  "A live two-way phone conversation through Twilio to the Mac (ConversationRelay, Media Streams, TwiML webhooks) needs inbound access and is blocked. Alternative: a hosted voice agent started and watched outbound. Vapi gives status live but the transcript only after the call. Retell gives a real live transcript of both sides over an outbound WSS connection. Jarvis cannot look things up for the voice agent during the call, such as checking the calendar mid-conversation. Every rule (time window, party size, never pay) goes into the brief up front, and the call can be hung up through the control URL.",
+  "Reading the Mac's Messages, iMessage, Contacts or Calendar databases stays forbidden. Calendar access stays CalDAV, contacts stay in Jarvis' own database, and messages are only sent (with approval), never read from the Mac.",
+  "Real 'micro-tremor' (physiological 8-12 Hz at micrometre amplitude) and anything like 'Gedanken lesen' or stress detection are not possible with a webcam. Alternative: 'Handruhe', visible unsteadiness in mm compared with the user's own baseline, labelled 'Selbstbeobachtung, kein Medizinprodukt'. Correlations with close rate always show n and say 'Zusammenhang, keine Ursache'.",
+  "The iMac's temperature in degrees cannot be read without sudo (powermetrics or SMC). Alternative: the thermal pressure level (normal / erhöht / stark / kritisch), with the reason stated plainly.",
+  "Push data from wearables (Oura and Whoop webhooks) needs public ingress. Alternative: polling once or twice a day. Apple Health has no Mac API. Alternative: importing export.zip, by AirDrop or an iCloud Drive folder fed by an iOS Shortcut.",
+  "A true WebGL/Three.js 3D globe loaded from a CDN would break the 'nothing from the network' rule and four tests. Alternative: the canvas globe with real Natural Earth coastlines, fly-to zoom and a HUD. There are no satellite textures and no country borders; the focus is shown with brackets instead.",
+  "Gesture approval on the Dienst display: that server is deliberately GET-only and test-enforced, so the voice stays the approval channel there. The gesture works only in web mode, on /sehen.",
+  "A real loudness level while the browser speaks with speechSynthesis cannot be read, because browsers expose no audio. Alternative: an event-driven animation labelled 'Pegel nachempfunden'. With an ElevenLabs or Fish key, the server audio plays in the browser and gives the real level.",
+  "Auto-posting to social networks (OAuth app review, an outward action) and generating images or videos are not built. Alternative: complete posts, scripts, shot lists and an editorial calendar as drafts. Publishing stays manual, or a later approval-gated tool.",
+  "Speech-to-speech translation with no turn delay (Gemini Live) is not in this build. Alternative: a turn-based interpreter at about 1.5-3 s per utterance. Gemini Live (outbound browser WebSocket with an ephemeral token) is possible later.",
+  "A travel-time check between appointments is not built, because there is no reliable keyless routing service and estimated times would be invented. Alternative: freie_zeiten, plus the existing conflict detection.",
+  "Claude Opus 5.5 cannot run inside the phone call, because Vapi does not offer it. Alternative: Haiku 4.5 in the call (VAPI_MODELL is configurable), with Opus 5.5 as the brain before and after.",
+  "Stooq market data now needs a key obtained via CAPTCHA, so it is not used. Alternative: Yahoo (unofficial), CoinGecko and the ECB.",
+  "Multi-file project runs and git in the Werkstatt are not part of this build; scripts stay single files with a 60 s limit.",
+  "Direct Philips Hue control is not built. Lights and scenes go through macOS Shortcuts and HomeKit in the 'Jarvis' folder."
+ ],
+ "risiken": [
+  "Data source terms and stability:\n- Yahoo v8 spark is unofficial; it works only with User-Agent exactly 'Mozilla/5.0' and can break at any time.\n- Google News RSS allows personal, non-commercial use only.\n- tagesschau allows private use and at most 60 calls per hour.\nMitigation: caches, labels such as 'Quelle … verzögert', a fallback chain, and a clear 'nicht verfügbar' instead of guessed values.",
+  "Vapi details not yet verified:\n- Whether the per-call Twilio credentials object ('phoneNumber') also rewrites the Twilio number's webhook. Recommendation: a separate Twilio number imported into Vapi (VAPI_TELEFON_ID).\n- Whether inline structuredOutputs are accepted; if not, create one with POST /structured-output once and reference its ID.\n- That no live transcript is available during the call.\n- Geo permissions for AT/DE must be enabled in the Twilio console.\n- German local numbers require business documents.",
+  "Legal duties of the phone agent: the AI disclosure in the first sentence (EU AI Act Art. 50) and no recording (§ 201 StGB, § 120 öStGB). The wording must be reviewed by the user. Retell needs identity verification (KYC), and Retell numbers do not cover Austria. Each call costs about $0.30-0.60.",
+  "Content-Security-Policy and MediaPipe on /sehen: the WASM loader may need 'unsafe-eval' in addition to 'wasm-unsafe-eval'. The page reports such a violation, and the builder decides on the Mac. Other open points:\n- GPU delegate support in Chrome, Edge and Safari.\n- A download of about 20 MB on first use.\n- The WASM and JS hashes are trust-on-first-use.\n- 0.10.35 is pinned, because 1.x sends telemetry.",
+  "Browser autoplay rules may block the AudioContext or <audio> until the first user gesture. Fallback: speechSynthesis and a 'Ton einschalten' button. Chrome allows 6 connections per host, so each page may hold only one long-poll.",
+  "OAuth redirects to localhost may be rejected by Oura or Whoop when the app is registered. Fallback: pasting the URL in the terminal. The GET callback route is the only GET that changes state, protected by a single-use state of at most 10 minutes. Oura refresh tokens rotate and must be stored after every refresh.",
+  "CalDAV servers differ (iCloud, Nextcloud, Google): support for <C:expand>, If-Match behaviour, iCloud's handling of DELETE, missing VTIMEZONE. Tests use fakes only, so the builder must check against the user's real calendar. Writing times in UTC avoids timezone ambiguity.",
+  "'say -o x.wav --data-format=LEI16@22050' was not tested on a Mac; an aiff plus afconvert fallback is specified. The afplay start delay (STIMME_VORLAUF_MS) must be measured on the iMac so the orb stays in sync.",
+  "The tool catalog grows from about 75 to about 115 tools. That raises the tokens sent in every Claude round, and the first round after the merge loses the prompt cache once. Mitigation: short tool descriptions, new tools appended at the end of the list, measure the cost in the thought log; tool search can be considered later.",
+  "Merge conflicts in the shared files (tools.py, webapp.py, agent.py, config.py, build_single.py, abnahme.py). Mitigation: exact edit lists per package; merge the contract core first (P1 anzeige.py, P4 freigabe.py and meldung_einbringen); rebuild jarvis.py and run the full abnahme after every merge.",
+  "Health data is sensitive (GDPR Art. 9): recovery and Handruhe values stay local, are hidden by ANZEIGE_DISKRET, can be deleted with 'gesundheit vergessen', and no image is ever stored. The live camera changes the old 'kein Dauervideo' principle; this is opt-in through SICHT_AN.",
+  "Shortcuts in the 'Jarvis' folder run without approval. If the user puts a shortcut there that sends messages, constraint 3 is bypassed. The folder rule is documented in the setup and in the empty-list hint.",
+  "Gesture false positives: mitigated by opt-in, double conditions (geometry plus the model class), arming and lockout, server-side checks (exactly one open approval, at least 2 s old, a blocked list), and logging in the action log.",
+  "Unwanted proactive proposals: at most one per rule per day, VORSCHLAEGE_AN to turn them off, and they never act on their own; deleting or moving appointments still needs its own approval.",
+  "Python 3.9 on the iMac: no match statements, no statistics.correlation, no audioop or aifc; fromisoformat only accepts timestamps with 3 or 6 fractional digits. The weltkarte data module adds 20-120 KB to jarvis.py."
+ ]
+}

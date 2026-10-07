@@ -311,10 +311,16 @@ def status_daten(tools, agent=None) -> dict:
         aktionen = tools.memory._lesen("SELECT id,werkzeug,status,zeit FROM aktionen ORDER BY id DESC LIMIT 8")
     except Exception:
         aktionen = []
+    try:
+        # Welche Ansicht die Zentrale zeigt und welche Kanäle sich geändert haben.
+        anzeige = tools.anzeige.kurz() if getattr(tools, "anzeige", None) else {}
+    except Exception:
+        anzeige = {}
     return {"zustand": status.get("zustand", "bereit"), "satz": status.get("satz", ""),
             "seit": status.get("seit", 0), "jetzt": status["jetzt"],
             "aktionen": [{"id": a["id"], "werkzeug": a["werkzeug"], "status": a["status"], "zeit": a["zeit"]}
-                         for a in aktionen]}
+                         for a in aktionen],
+            "anzeige": anzeige}
 
 
 # -- Zentrale --------------------------------------------------------------------------

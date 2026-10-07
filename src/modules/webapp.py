@@ -33,11 +33,28 @@ from urllib.parse import parse_qs, urlparse
 import config
 from modules.memory import zeitstempel
 from modules.sprechtext import sprechstuecke
+from modules.anzeige import anzeige_nach_lesen
+from modules.freigabe import freigabe_lesen, lesbarer_name
 from modules.ansicht import (SEITE_GEHIRN, SEITE_ZENTRALE, gehirn_daten, lichter_liste,
                              status_daten, zentrale_daten)
 from modules.autopilot import SEITE_AUTOPILOT
 from modules.lernpfad import SEITE_PFAD, lernpfad_stand
 from modules.webseite import SEITE_HTML
+# Importe der Pakete.
+# [P1 Bühne] Anfang
+# [P1 Bühne] Ende
+# [P2 Weltlage] Anfang
+# [P2 Weltlage] Ende
+# [P3 Telefon] Anfang
+# [P3 Telefon] Ende
+# [P4 Büro] Anfang
+# [P4 Büro] Ende
+# [P5 Sicht] Anfang
+# [P5 Sicht] Ende
+# [P6 Stimme] Anfang
+# [P6 Stimme] Ende
+# [P7 Start] Anfang
+# [P7 Start] Ende
 
 STANDARD_PORT = 8765
 MAX_KOERPER = 512 * 1024
@@ -51,26 +68,48 @@ SYMBOL_SVG = (
     '<circle cx="32" cy="32" r="6" fill="#E8622C"/></svg>')
 
 
+# Wie eine Antwort im Browser zustande kam: Klick, gesprochenes Ja/Nein oder Geste.
+FREIGABE_WEGE = ("klick", "sprache", "geste")
+
+
 class WebFreigabe:
     """Freigaben über den Browser statt über Telegram oder das Terminal.
 
     Eine Anfrage wird abgelegt und blockiert den Werkzeugaufruf, bis der Nutzer
     im Browser antwortet oder die Zeit abläuft. **Zeitablauf gilt als Nein** -
     wie überall sonst im Programm.
+
+    Der Browser bekommt Was, Warum und Wie lesbar, dazu die Argumente als
+    eingerücktes JSON. Eine Geste zählt in dieser Stufe nie als Antwort.
     """
 
-    def __init__(self, timeout: int = None):
+    def __init__(self, timeout: int = None, memory=None):
         self.timeout = int(timeout if timeout is not None else config.FREIGABE_TIMEOUT)
+        self.memory = memory
         self._offen = {}
         self._sperre = threading.Lock()
+        # Warum die letzte Antwort nicht angenommen wurde - für die Rückmeldung im Browser.
+        self.letzter_grund = ""
 
     def anfordern(self, aktion: str, details: str = "") -> dict:
         """Legt eine Freigabefrage ab und wartet auf die Antwort."""
         kennung = uuid.uuid4().hex[:12]
         ereignis = threading.Event()
-        eintrag = {"id": kennung, "aktion": aktion, "details": details,
+        lesbar = freigabe_lesen(details)
+        if lesbar is not None:
+            was, warum, wie = lesbar["was"], lesbar["warum"], lesbar["wie"]
+            try:
+                anzeigen = json.dumps(lesbar["argumente"], ensure_ascii=False, indent=2,
+                                      default=str)
+            except (TypeError, ValueError):
+                anzeigen = str(lesbar["argumente"])
+        else:
+            # Alter Freitext (etwa der Code eines Skripts) bleibt, wie er ist.
+            was, warum, wie, anzeigen = lesbarer_name(aktion), "", "", details
+        eintrag = {"id": kennung, "aktion": aktion, "details": anzeigen,
+                   "was": was, "warum": warum, "wie": wie,
                    "gestellt": zeitstempel(), "ereignis": ereignis,
-                   "antwort": None,
+                   "antwort": None, "weg": "",
                    "laeuft_ab": time.time() + self.timeout}
         with self._sperre:
             self._offen[kennung] = eintrag
@@ -82,32 +121,79 @@ class WebFreigabe:
         if not erhalten or eintrag["antwort"] is not True:
             grund = ("abgelehnt" if erhalten
                      else "keine Antwort innerhalb von %d Sekunden" % self.timeout)
-            return {"erlaubt": False, "kanal": "web", "grund": grund}
-        return {"erlaubt": True, "kanal": "web", "grund": "Freigabe erteilt"}
+            return {"erlaubt": False, "kanal": "web", "weg": eintrag["weg"], "grund": grund}
+        return {"erlaubt": True, "kanal": "web", "weg": eintrag["weg"], "grund": "Freigabe erteilt"}
 
     def offene(self) -> list:
         """Alle wartenden Freigabefragen - die holt sich der Browser ab."""
         jetzt = time.time()
         with self._sperre:
-            return [{"id": e["id"], "aktion": e["aktion"], "details": e["details"],
+            return [{"id": e["id"], "aktion": e["aktion"], "was": e["was"],
+                     "warum": e["warum"], "wie": e["wie"], "details": e["details"],
                      "gestellt": e["gestellt"],
-                     "rest": max(0, int(e["laeuft_ab"] - jetzt))}
+                     "rest": max(0, int(e["laeuft_ab"] - jetzt)),
+                     "geste_erlaubt": False}
                     for e in self._offen.values()]
 
-    def beantworten(self, kennung: str, ja: bool) -> bool:
-        """Beantwortet eine Freigabefrage."""
+    def beantworten(self, kennung: str, ja: bool, kanal: str = "klick") -> bool:
+        """Beantwortet eine Freigabefrage. ``kanal``: klick, sprache oder geste.
+
+        Ist die Antwort nicht angenommen, steht der Grund in ``letzter_grund``.
+        """
+        kanal = str(kanal or "klick").strip().lower()
         with self._sperre:
             eintrag = self._offen.get(kennung)
-            if eintrag is None:
-                return False
-            eintrag["antwort"] = bool(ja)
+            if kanal not in FREIGABE_WEGE:
+                grund = "Diesen Freigabeweg kenne ich nicht."
+            elif eintrag is None:
+                grund = "Diese Frage ist nicht mehr offen."
+            elif kanal == "geste":
+                grund = "Gesten-Freigabe ist noch nicht eingebaut."
+            else:
+                grund = ""
+                eintrag["antwort"] = bool(ja)
+                eintrag["weg"] = kanal
+            self.letzter_grund = grund
+        self._protokollieren(eintrag, kanal, ja, grund)
+        if grund:
+            return False
         eintrag["ereignis"].set()
         return True
+
+    def _protokollieren(self, eintrag, kanal: str, ja: bool, grund: str):
+        """Hält fest, auf welchem Weg geantwortet wurde - auch eine abgewiesene Antwort."""
+        if eintrag is None:
+            return
+        text = grund or ("per %s %s" % (kanal, "ja" if ja else "nein"))
+        print("[freigabe] %s: %s" % (eintrag["aktion"], text))
+        if self.memory is None:
+            return
+        try:
+            self.memory.aktion_protokollieren(
+                "freigabe", {"aktion": eintrag["aktion"], "kanal": kanal, "ja": bool(ja)},
+                text, "abgelehnt" if grund else "ok")
+        except Exception:
+            pass
 
 
 # Was die Anzeige im Dienst braucht - nur ansehen, nichts auslösen.
 ANZEIGE_PFADE = {"/gehirn", "/zentrale", "/api/gehirn", "/api/zentrale", "/api/status",
-                 "/api/lichter", "/favicon.ico", "/symbol.svg"}
+                 "/api/lichter", "/favicon.ico", "/symbol.svg", "/api/anzeige"}
+# Die Pakete ergänzen hier, etwa ANZEIGE_PFADE |= {"/api/weltkarte"}.
+# [P1 Bühne] Anfang
+# [P1 Bühne] Ende
+# [P2 Weltlage] Anfang
+# [P2 Weltlage] Ende
+# [P3 Telefon] Anfang
+# [P3 Telefon] Ende
+# [P4 Büro] Anfang
+# [P4 Büro] Ende
+# [P5 Sicht] Anfang
+# [P5 Sicht] Ende
+# [P6 Stimme] Anfang
+# [P6 Stimme] Ende
+# [P7 Start] Anfang
+# [P7 Start] Ende
 
 
 class JarvisWeb:
@@ -125,7 +211,7 @@ class JarvisWeb:
         self.port = int(port or STANDARD_PORT)
         # Im WLAN ist ein Schlüssel Pflicht - dieser Server darf zu viel.
         self.token = token or (secrets.token_urlsafe(18) if self.offen else "")
-        self.freigabe = WebFreigabe()
+        self.freigabe = WebFreigabe(memory=getattr(agent, "memory", None))
         # Was Jarvis von sich aus sagt - Briefings, Routinen, Zeitplan. Der
         # Browser holt es ab, liest es vor und zeigt es im Gespraech.
         self.meldungen = []
@@ -134,6 +220,20 @@ class JarvisWeb:
         self._denkt = threading.Lock()
         if not self.nur_anzeige:
             agent.tools.freigabe_kanal_setzen(self.freigabe)
+        # [P1 Bühne] Anfang
+        # [P1 Bühne] Ende
+        # [P2 Weltlage] Anfang
+        # [P2 Weltlage] Ende
+        # [P3 Telefon] Anfang
+        # [P3 Telefon] Ende
+        # [P4 Büro] Anfang
+        # [P4 Büro] Ende
+        # [P5 Sicht] Anfang
+        # [P5 Sicht] Ende
+        # [P6 Stimme] Anfang
+        # [P6 Stimme] Ende
+        # [P7 Start] Anfang
+        # [P7 Start] Ende
 
     def melden(self, text: str):
         """Nimmt eine Meldung des Zeitplans auf.
@@ -294,6 +394,7 @@ class JarvisWeb:
 
     def _get(self, behandler, pfad: str):
         werkzeuge = self.agent.tools
+        frage = parse_qs(urlparse(behandler.path).query)
 
         if pfad == "/":
             return self._html(behandler, SEITE_HTML.replace(
@@ -315,6 +416,17 @@ class JarvisWeb:
             return self._antworten(behandler, 200, status_daten(werkzeuge, self.agent))
         if pfad == "/api/lichter":
             return self._antworten(behandler, 200, {"ok": True, "lichter": lichter_liste()})
+        if pfad == "/api/anzeige":
+            # Long-Poll: kommt zurück, sobald sich einer der genannten Kanäle ändert.
+            try:
+                warten = min(25.0, max(0.0, float(frage.get("warten", ["20"])[0])))
+            except ValueError:
+                warten = 20.0
+            kanaele = werkzeuge.anzeige.warten(anzeige_nach_lesen(frage.get("nach", [""])[0]),
+                                               warten)
+            return self._antworten(behandler, 200, {
+                "ok": True, "jetzt": time.time(), "start": werkzeuge.anzeige.start,
+                "kanaele": kanaele})
         if pfad == "/autopilot":
             return self._html(behandler, SEITE_AUTOPILOT.replace(
                 "{{SCHLUESSEL}}", self.token))
@@ -365,6 +477,20 @@ class JarvisWeb:
             datei = config.DASHBOARD_VERZEICHNIS / (
                 "dashboard.html" if pfad == "/dashboard" else "sales.html")
             return self._datei(behandler, str(datei))
+        # [P1 Bühne] Anfang
+        # [P1 Bühne] Ende
+        # [P2 Weltlage] Anfang
+        # [P2 Weltlage] Ende
+        # [P3 Telefon] Anfang
+        # [P3 Telefon] Ende
+        # [P4 Büro] Anfang
+        # [P4 Büro] Ende
+        # [P5 Sicht] Anfang
+        # [P5 Sicht] Ende
+        # [P6 Stimme] Anfang
+        # [P6 Stimme] Ende
+        # [P7 Start] Anfang
+        # [P7 Start] Ende
         return self._antworten(behandler, 404, {"fehler": "Diese Seite gibt es nicht."})
 
     def _post(self, behandler, pfad: str):
@@ -412,11 +538,23 @@ class JarvisWeb:
         if pfad == "/api/freigabe":
             kennung = str(daten.get("id") or "")
             ja = bool(daten.get("ja"))
-            erledigt = self.freigabe.beantworten(kennung, ja)
+            # klick, sprache oder geste - eine Geste gibt in dieser Stufe nichts frei.
+            kanal = str(daten.get("kanal") or "klick")
+            erledigt = self.freigabe.beantworten(kennung, ja, kanal)
             return self._antworten(behandler, 200, {
                 "ok": erledigt,
                 "text": ("Freigabe erteilt." if ja else "Abgelehnt.") if erledigt
-                        else "Diese Frage ist nicht mehr offen."})
+                        else (self.freigabe.letzter_grund or "Diese Frage ist nicht mehr offen.")})
+
+        if pfad == "/api/anzeige/satz":
+            # Der Satz, den der Browser gerade vorliest - für den Pegel der Anzeige.
+            text = str(daten.get("text") or "").strip()[:400]
+            if not text:
+                return self._antworten(behandler, 400,
+                                       {"ok": False, "fehler": "Es kam kein Text an."})
+            werkzeuge.melden("stimme", {"art": "satz", "text": text,
+                                        "start_ms": time.time() * 1000, "quelle": "browser"})
+            return self._antworten(behandler, 200, {"ok": True})
 
         if pfad == "/api/werkzeug":
             name = str(daten.get("name") or "")
@@ -431,6 +569,20 @@ class JarvisWeb:
             return self._antworten(behandler, 200,
                                    {"ok": True, "text": "Neues Gespräch."})
 
+        # [P1 Bühne] Anfang
+        # [P1 Bühne] Ende
+        # [P2 Weltlage] Anfang
+        # [P2 Weltlage] Ende
+        # [P3 Telefon] Anfang
+        # [P3 Telefon] Ende
+        # [P4 Büro] Anfang
+        # [P4 Büro] Ende
+        # [P5 Sicht] Anfang
+        # [P5 Sicht] Ende
+        # [P6 Stimme] Anfang
+        # [P6 Stimme] Ende
+        # [P7 Start] Anfang
+        # [P7 Start] Ende
         return self._antworten(behandler, 404, {"fehler": "Das gibt es nicht."})
 
     # -- Antworten ----------------------------------------------------------
@@ -450,27 +602,36 @@ class JarvisWeb:
             return {}
 
     @staticmethod
-    def _kopf_setzen(behandler, code: int, typ: str, laenge: int):
+    def _kopf_setzen(behandler, code: int, typ: str, laenge: int, zusatz: dict = None):
+        """Setzt die Antwortköpfe. ``zusatz`` ersetzt Cache-Control oder fügt Köpfe
+        hinzu - etwa eine eigene Content-Security-Policy für eine Seite."""
+        zusatz = dict(zusatz or {})
+        cache = "no-store"
+        for name in list(zusatz):
+            if name.lower() == "cache-control":
+                cache = zusatz.pop(name)
         behandler.send_response(code)
         behandler.send_header("Content-Type", typ)
         behandler.send_header("Content-Length", str(laenge))
-        behandler.send_header("Cache-Control", "no-store")
+        behandler.send_header("Cache-Control", cache)
         behandler.send_header("X-Content-Type-Options", "nosniff")
         behandler.send_header("Referrer-Policy", "no-referrer")
+        for name, wert in zusatz.items():
+            behandler.send_header(name, wert)
         behandler.end_headers()
 
-    def _antworten(self, behandler, code: int, nutzlast: dict):
+    def _antworten(self, behandler, code: int, nutzlast: dict, zusatz: dict = None):
         """Schickt eine JSON-Antwort."""
         try:
             roh = json.dumps(nutzlast, ensure_ascii=False, default=str).encode("utf-8")
         except (TypeError, ValueError):
             roh = json.dumps({"fehler": "Antwort nicht darstellbar"}).encode("utf-8")
-        self._kopf_setzen(behandler, code, "application/json; charset=utf-8", len(roh))
+        self._kopf_setzen(behandler, code, "application/json; charset=utf-8", len(roh), zusatz)
         behandler.wfile.write(roh)
 
-    def _html(self, behandler, text: str):
+    def _html(self, behandler, text: str, zusatz: dict = None):
         roh = text.encode("utf-8")
-        self._kopf_setzen(behandler, 200, "text/html; charset=utf-8", len(roh))
+        self._kopf_setzen(behandler, 200, "text/html; charset=utf-8", len(roh), zusatz)
         behandler.wfile.write(roh)
 
     def _datei(self, behandler, pfad: str):

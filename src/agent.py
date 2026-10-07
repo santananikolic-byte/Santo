@@ -12,6 +12,7 @@ Ablauf pro Eingabe:
 """
 
 import json
+import re
 import socket
 import threading
 import time
@@ -159,13 +160,45 @@ So arbeitest du:
   anzukündigen. Sag nie "laut meinem Gedächtnis".
 - Ging etwas schief, sagst du es. Du erfindest keine Ergebnisse.
 - Steht vor seiner Nachricht ein Abschnitt <erinnerung>, sind das Treffer aus
-  deinem Gedächtnis zu dieser Frage. Er hat sie nicht gesagt - nutze sie still.
+  deinem Gedächtnis zu dieser Frage. Er hat sie nicht gesagt - nutze sie still.{zusatz}
 
 Die Buchhaltung führst du vor — die fachliche Prüfung macht sein Steuerberater.
 
 Heute ist {wochentag}, der {datum}.
 
 {gedaechtnis}"""
+
+# Weitere Regeln für den Systemprompt - jede wird dort zu einer eigenen Zeile "- ...",
+# direkt nach den Regeln unter "So arbeitest du". Jedes Paket schreibt zwischen seine
+# Marken, jede Regel mit Komma am Ende (sonst klebt Python sie an die nächste). Der
+# Text bleibt von Frage zu Frage gleich, der Zwischenspeicher hält.
+ZUSATZREGELN = (
+    # [P1 Bühne] Anfang
+    # [P1 Bühne] Ende
+    # [P2 Weltlage] Anfang
+    # [P2 Weltlage] Ende
+    # [P3 Telefon] Anfang
+    # [P3 Telefon] Ende
+    # [P4 Büro] Anfang
+    "Bei allem, was eine Freigabe braucht, schreibst du in begruendung in einem Satz, "
+    "warum. Die Freigabe zeigt Was, Warum und Wie.",
+    "Steht vor deiner letzten Antwort ein Hinweis, dass du etwas von dir aus gesagt hast, "
+    "und er antwortet mit ja, dann meint er diesen Vorschlag. Die nötigen Werkzeuge "
+    "fragen trotzdem einzeln nach Freigabe.",
+    # [P4 Büro] Ende
+    # [P5 Sicht] Anfang
+    # [P5 Sicht] Ende
+    # [P6 Stimme] Anfang
+    # [P6 Stimme] Ende
+    # [P7 Start] Anfang
+    # [P7 Start] Ende
+)
+
+# Was Jarvis von sich aus gesagt hat (Vorschlag, Briefing), kommt so ins Gespräch.
+HINWEIS_VON_SICH_AUS = ('<hinweis quelle="%s">Das Folgende hat Jarvis gerade von sich aus '
+                        'gesagt. Es ist keine Frage von %s.</hinweis>')
+# Mehr wartende Meldungen behält er nicht - die ältesten fallen weg.
+MAX_MELDUNGEN = 5
 
 
 def datum_deutsch(zeitpunkt: datetime = None) -> tuple:
@@ -218,6 +251,10 @@ class JarvisAgent:
         self.letztes_gehirn = ""
         # Was Jarvis gerade tut - die Anzeige (Gehirn, Zentrale) liest das mit.
         self.status = {"zustand": "bereit", "seit": time.time(), "satz": ""}
+        # Was er von sich aus gesagt hat und beim nächsten Gedanken ins Gespräch gehört.
+        # Eigene kleine Sperre - nie die Denk-Sperre, damit niemand darauf wartet.
+        self._meldungen = []
+        self._meldesperre = threading.Lock()
 
     # -- Grundlagen ---------------------------------------------------------
 
@@ -249,9 +286,11 @@ class JarvisAgent:
         if config.JARVIS_STIL:
             persoenlich += "So möchte %s, dass du klingst: %s\n" % (
                 config.NUTZER_NAME, config.JARVIS_STIL)
+        zusatz = "".join("\n- %s" % regel for regel in ZUSATZREGELN if regel)
         return SYSTEMPROMPT.format(
             name=config.NUTZER_NAME, branche=config.BRANCHE, wochentag=wochentag,
-            datum=datum, gedaechtnis=(persoenlich + "\n" if persoenlich else "") + gedaechtnis)
+            datum=datum, gedaechtnis=(persoenlich + "\n" if persoenlich else "") + gedaechtnis,
+            zusatz=zusatz)
 
     # -- Schnittstelle ------------------------------------------------------
 
@@ -508,6 +547,9 @@ class JarvisAgent:
                     "Einrichtung, dann kann ich dir antworten.")
         # Ein neuer Gedankengang: Fremdes ist noch nicht gelesen worden.
         self.tools.lauf_beginnen(hintergrund=False)
+        # Was er inzwischen von sich aus gesagt hat, steht vor der neuen Frage im
+        # Gespräch - nie zwischen einem Werkzeugaufruf und seinem Ergebnis.
+        self._meldungen_einbringen()
 
         # Der Systemprompt bleibt von Frage zu Frage gleich - dann liest der
         # Zwischenspeicher ihn samt Gespräch. Was zur Frage passt, kommt in die
@@ -806,6 +848,21 @@ class JarvisAgent:
             muster = self.tools.call_analysis.verkaufsmuster(30)
             teile.append("Vertrieb: %s" % muster.get("text", ""))
 
+        # [P1 Bühne] Anfang
+        # [P1 Bühne] Ende
+        # [P2 Weltlage] Anfang
+        # [P2 Weltlage] Ende
+        # [P3 Telefon] Anfang
+        # [P3 Telefon] Ende
+        # [P4 Büro] Anfang
+        # [P4 Büro] Ende
+        # [P5 Sicht] Anfang
+        # [P5 Sicht] Ende
+        # [P6 Stimme] Anfang
+        # [P6 Stimme] Ende
+        # [P7 Start] Anfang
+        # [P7 Start] Ende
+
         return "\n".join(teile)
 
     @staticmethod
@@ -816,6 +873,91 @@ class JarvisAgent:
                 "Feierabend. Ohne Anthropic-Schlüssel kann ich nur die nackten Zahlen "
                 "vorlesen.")
         return "%s\n%s" % (kopf, bausteine)
+
+    # -- Meldungen ins Gespräch ---------------------------------------------
+
+    def meldung_vormerken(self, text: str, quelle: str = "zeitplan") -> bool:
+        """Merkt sich, was Jarvis von sich aus gesagt hat - für den nächsten Gedanken.
+
+        Ein Vorschlag wie "Soll ich morgen zwei Termine streichen?" muss im
+        Gespräch stehen, sonst weiß Claude bei "ja" nicht, was gemeint ist.
+        Eingefügt wird erst am Anfang der nächsten Frage (:meth:`_denken`), nie
+        mittendrin: Zwischen einem Werkzeugaufruf und seinem Ergebnis darf
+        nichts stehen, sonst weist die Schnittstelle jede weitere Anfrage ab.
+
+        Nimmt nur die eigene kleine Sperre, wartet also nie auf einen laufenden
+        Gedanken. Höchstens fünf Meldungen warten, doppelte fallen weg.
+        Werkzeuge rufen das nie auf - sie geben einen Vorschlag als Text zurück.
+        """
+        text = str(text or "").strip()
+        if not text:
+            return False
+        quelle = re.sub(r"[^\w-]", "", str(quelle or ""))[:30] or "zeitplan"
+        with self._meldesperre:
+            if any(m["text"] == text for m in self._meldungen):
+                return False
+            self._meldungen.append({"text": text, "quelle": quelle})
+            del self._meldungen[:-MAX_MELDUNGEN]
+        return True
+
+    def _letzte_antwort(self) -> str:
+        """Der Text der letzten Antwort im Verlauf - leer, wenn noch keine."""
+        for nachricht in reversed(self.verlauf):
+            if nachricht.get("role") != "assistant":
+                continue
+            inhalt = nachricht.get("content")
+            if isinstance(inhalt, str):
+                return inhalt.strip()
+            return " ".join(b.get("text", "") for b in inhalt or []
+                            if isinstance(b, dict) and b.get("type") == "text").strip()
+        return ""
+
+    def _meldungen_einbringen(self) -> int:
+        """Hängt die vorgemerkten Meldungen als Paar an den Verlauf. Gibt die Zahl zurück.
+
+        Je Meldung ein Hinweis (Nutzerrolle) und die Meldung selbst (Jarvis).
+        Steht der Text schon als letzte Antwort im Verlauf, fällt er weg. Endet
+        der Verlauf mit einem Werkzeugaufruf ohne Ergebnis, bleibt alles liegen.
+        """
+        with self._meldesperre:
+            offen, self._meldungen = self._meldungen, []
+        if not offen:
+            return 0
+        letzte = self.verlauf[-1] if self.verlauf else {}
+        if letzte.get("role") == "assistant" and isinstance(letzte.get("content"), list) and any(
+                isinstance(b, dict) and b.get("type") == "tool_use" for b in letzte["content"]):
+            with self._meldesperre:
+                self._meldungen = (offen + self._meldungen)[-MAX_MELDUNGEN:]
+            return 0
+        angehaengt = 0
+        for meldung in offen:
+            text = meldung["text"]
+            zuletzt = self._letzte_antwort()
+            if zuletzt and zuletzt in (text, text[:4000]):
+                continue
+            self.verlauf.append({"role": "user", "content": HINWEIS_VON_SICH_AUS
+                                 % (meldung["quelle"], config.NUTZER_NAME)})
+            self.verlauf.append({"role": "assistant",
+                                 "content": [{"type": "text", "text": text[:4000]}]})
+            angehaengt += 1
+        return angehaengt
+
+    # -- Methoden der Pakete -----------------------------------------------
+
+    # [P1 Bühne] Anfang
+    # [P1 Bühne] Ende
+    # [P2 Weltlage] Anfang
+    # [P2 Weltlage] Ende
+    # [P3 Telefon] Anfang
+    # [P3 Telefon] Ende
+    # [P4 Büro] Anfang
+    # [P4 Büro] Ende
+    # [P5 Sicht] Anfang
+    # [P5 Sicht] Ende
+    # [P6 Stimme] Anfang
+    # [P6 Stimme] Ende
+    # [P7 Start] Anfang
+    # [P7 Start] Ende
 
     # -- Übersicht ----------------------------------------------------------
 

@@ -187,6 +187,23 @@ def dauerbetrieb(dienst: bool = False):
         agent.tools.autopilot.start()
         print("[autopilot] %s" % ("an" if config.AUTOPILOT_AN else "aus (python3 jarvis.py autopilot an)"))
 
+    # Agent, Stimme und Ausgabewege stehen - hier verdrahten die Pakete (etwa Ausgaben),
+    # bevor die Hauptschleife läuft.
+    # [P1 Bühne] Anfang
+    # [P1 Bühne] Ende
+    # [P2 Weltlage] Anfang
+    # [P2 Weltlage] Ende
+    # [P3 Telefon] Anfang
+    # [P3 Telefon] Ende
+    # [P4 Büro] Anfang
+    # [P4 Büro] Ende
+    # [P5 Sicht] Anfang
+    # [P5 Sicht] Ende
+    # [P6 Stimme] Anfang
+    # [P6 Stimme] Ende
+    # [P7 Start] Anfang
+    # [P7 Start] Ende
+
     if not stimme.mikrofon_bereit() and not dienst:
         print("\n[!] Kein Mikrofonzugriff. Ich wechsle in den Tippbetrieb.")
         stimme.sprich("Ich komme nicht an das Mikrofon. Wir tippen erst einmal.")
@@ -521,6 +538,23 @@ def webbetrieb(argumente=None):
     autopilot.start()
     print("  Autopilot: %s" % ("an, arbeitet im Hintergrund" if config.AUTOPILOT_AN
                                else "aus (einschalten auf der Seite Autopilot)"))
+
+    # Agent, Server und Ausgabewege stehen - hier verdrahten die Pakete (etwa Ausgaben),
+    # bevor der Browser aufgeht und die Hauptschleife läuft.
+    # [P1 Bühne] Anfang
+    # [P1 Bühne] Ende
+    # [P2 Weltlage] Anfang
+    # [P2 Weltlage] Ende
+    # [P3 Telefon] Anfang
+    # [P3 Telefon] Ende
+    # [P4 Büro] Anfang
+    # [P4 Büro] Ende
+    # [P5 Sicht] Anfang
+    # [P5 Sicht] Ende
+    # [P6 Stimme] Anfang
+    # [P6 Stimme] Ende
+    # [P7 Start] Anfang
+    # [P7 Start] Ende
 
     adresse = web.adresse()
     print("  Jarvis läuft jetzt im Browser:")
@@ -994,6 +1028,21 @@ def hauptprogramm(argumente=None) -> int:
         return autopilot_zeigen(argumente[1:])
     elif modus in ("zugang", "schluessel", "schlüssel"):
         return 0 if zugang_eintragen(argumente[1] if len(argumente) > 1 else "") else 1
+    # Neue Betriebsarten der Pakete, je als "elif modus == ...:".
+    # [P1 Bühne] Anfang
+    # [P1 Bühne] Ende
+    # [P2 Weltlage] Anfang
+    # [P2 Weltlage] Ende
+    # [P3 Telefon] Anfang
+    # [P3 Telefon] Ende
+    # [P4 Büro] Anfang
+    # [P4 Büro] Ende
+    # [P5 Sicht] Anfang
+    # [P5 Sicht] Ende
+    # [P6 Stimme] Anfang
+    # [P6 Stimme] Ende
+    # [P7 Start] Anfang
+    # [P7 Start] Ende
     elif modus in ("hilfe", "--help", "-h", "help"):
         print(__doc__)
     else:

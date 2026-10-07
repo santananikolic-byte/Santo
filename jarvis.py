@@ -29,6 +29,7 @@ Alle Daten bleiben lokal auf diesem Rechner.
 
 import ast
 import base64
+import copy
 import csv
 import email
 import email.header
@@ -363,6 +364,26 @@ AUTOPILOT_MAX_PRO_RUNDE = _ganzzahl("AUTOPILOT_MAX_PRO_RUNDE", 2)
 # Ersteinrichtung abgeschlossen?
 EINRICHTUNG_FERTIG = _wahrheit("EINRICHTUNG_FERTIG", False)
 
+# Einstellungen der Pakete - jedes zwischen seinen Marken. Die Namen müssen
+# projektweit eindeutig sein (siehe oben).
+# [P1 Bühne] Anfang
+# Wie lange die Zentrale eine gezeigte Ansicht hält, bevor sie zur Übersicht
+# zurückkehrt (Sekunden).
+ANZEIGE_DAUER = _ganzzahl("ANZEIGE_DAUER", 180)
+# [P1 Bühne] Ende
+# [P2 Weltlage] Anfang
+# [P2 Weltlage] Ende
+# [P3 Telefon] Anfang
+# [P3 Telefon] Ende
+# [P4 Büro] Anfang
+# [P4 Büro] Ende
+# [P5 Sicht] Anfang
+# [P5 Sicht] Ende
+# [P6 Stimme] Anfang
+# [P6 Stimme] Ende
+# [P7 Start] Anfang
+# [P7 Start] Ende
+
 
 def env_setzen(schluessel: str, wert) -> bool:
     """Schreibt einen Wert nach ``config/.env`` und aktualisiert ihn sofort."""
@@ -432,6 +453,20 @@ def konfig_uebersicht() -> dict:
         "Kalender": bool(CALDAV_URL),
         "Supabase": bool(SUPABASE_URL and SUPABASE_KEY),
         "Telefon": bool(TWILIO_SID and TWILIO_TOKEN and TWILIO_NUMMER),
+        # [P1 Bühne] Anfang
+        # [P1 Bühne] Ende
+        # [P2 Weltlage] Anfang
+        # [P2 Weltlage] Ende
+        # [P3 Telefon] Anfang
+        # [P3 Telefon] Ende
+        # [P4 Büro] Anfang
+        # [P4 Büro] Ende
+        # [P5 Sicht] Anfang
+        # [P5 Sicht] Ende
+        # [P6 Stimme] Anfang
+        # [P6 Stimme] Ende
+        # [P7 Start] Anfang
+        # [P7 Start] Ende
     }
 
 
@@ -1634,6 +1669,607 @@ def sprechtext(text: str) -> str:
 def sprechstuecke(text: str, ziel: int = 170) -> list:
     """Der Text, zum Sprechen vorbereitet und in Atemabschnitte geteilt."""
     return abschnitte(sprechtext(text), ziel)
+
+
+# =========================================================================
+# anzeige  -  Anzeige-Speicher - was die großen Bildschirme gerade zeigen sollen.
+# 
+# Ein einziger Speicher je Prozess (``Werkzeuge.anzeige``). Werkzeuge, Stimme
+# und Telefon schreiben hinein, die Seiten (Zentrale, Gehirn, Hauptseite) holen
+# es per Long-Poll ab: ``GET /api/anzeige?nach=buehne:7,stimme:31&warten=20``
+# kommt zurück, sobald sich einer der genannten Kanäle geändert hat.
+# 
+# **Kanäle.** Jeder Kanal hat eine Versionsnummer, die nur wächst. Der Kanal
+# ``buehne`` sagt, welche Ansicht die Zentrale gerade zeigt (``modus``), die
+# anderen tragen laufende Inhalte: ``stimme`` den Pegel der Sprachausgabe,
+# ``anruf`` das Telefonat, ``sicht`` Handruhe und Erholung, ``untertitel`` den
+# Dolmetscher, ``hochfahren`` den Start.
+# 
+# **Nie im Weg.** Wer schreibt, fängt jede Ausnahme ab - eine kaputte Anzeige
+# darf kein Werkzeug kaputt machen. Ungültiges wird mit ``-1`` abgewiesen und
+# nur auf der Konsole gemeldet.
+# 
+# **Diskret.** Mit ``ANZEIGE_DISKRET`` verschwinden Nummern, Namen und Texte,
+# bevor etwas den Speicher verlässt - damit im Raum niemand mitliest.
+# 
+# **Die Uhr.** Die eingespeiste Uhr (für Prüfungen) gilt nur für ``seit``,
+# ``bis`` und ``start``. Wie lange ``warten`` wartet, misst immer die
+# Monotonuhr - sonst stünde eine angehaltene Prüf-Uhr für immer still.
+# =========================================================================
+
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+
+
+# Die Kanäle der Anzeige. Der Name ist bewusst nicht "KANAELE" - so heißt
+# schon die Liste der Versandwege im Messenger.
+ANZEIGE_KANAELE = ("buehne", "stimme", "anruf", "sicht", "untertitel", "hochfahren")
+
+# Die Ansichten der Bühne (Kanal "buehne", Feld "modus").
+ANZEIGE_MODI = ("uebersicht", "globus", "folge", "maerkte", "kennzahlen", "anruf", "sicht",
+                "untertitel", "hochfahren", "recherche", "inhalte")
+
+# Mehr als 64 KB JSON je Eintrag braucht keine Ansicht - und jeder Long-Poll
+# trägt es zu jeder Seite.
+MAX_NUTZLAST = 65536
+
+
+def anzeige_nach_lesen(text: str) -> dict:
+    """Liest ``"buehne:7,anruf:2"`` als ``{"buehne": 7, "anruf": 2}``.
+
+    Unbekannte Kanäle fallen weg, unlesbare Zahlen werden ``-1`` - dann gilt
+    der Kanal als geändert und kommt sofort zurück.
+    """
+    ergebnis = {}
+    for teil in str(text or "").split(","):
+        name, _, wert = teil.partition(":")
+        name = name.strip()
+        if name not in ANZEIGE_KANAELE:
+            continue
+        try:
+            ergebnis[name] = int(wert.strip())
+        except ValueError:
+            ergebnis[name] = -1
+    return ergebnis
+
+
+def _sicht_leeren(wert, schluessel: str = ""):
+    """Gesundheitswerte im Diskretmodus: Zahlen und Texte weg, nur die Quelle bleibt."""
+    if schluessel == "quelle":
+        return wert
+    if isinstance(wert, dict):
+        return {k: _sicht_leeren(v, k) for k, v in wert.items()}
+    if isinstance(wert, list):
+        return [_sicht_leeren(v) for v in wert]
+    if isinstance(wert, bool) or wert is None:
+        return wert
+    if isinstance(wert, (int, float)):
+        return None
+    if isinstance(wert, str):
+        return ""
+    return wert
+
+
+def diskret_filtern(kanal: str, daten: dict) -> dict:
+    """Entfernt, was im Raum niemand mitlesen soll. Gibt eine Kopie zurück.
+
+    anruf: Nummer und Ziel weg, Mitschrift leer. untertitel: beide Texte leer.
+    sicht: alle Zahlen und Texte leer, nur die Quelle bleibt. hochfahren: keine
+    Begrüßung, Schritte nur mit ihrem Namen. Auf der Bühne verlieren Beiträge
+    (inhalte) ihren Titel. Kennzahlen, Globus und Recherche bleiben - das sind
+    Zahlen oder öffentliche Quellen. Die Stimme wird nie gefiltert, ihr Text
+    wird nirgends angezeigt.
+    """
+    daten = copy.deepcopy(daten) if isinstance(daten, dict) else {}
+    if kanal == "anruf":
+        if "nummer" in daten:
+            daten["nummer"] = ""
+        if "ziel" in daten:
+            daten["ziel"] = "Anruf"
+        for zeile in daten.get("mitschrift") or []:
+            if isinstance(zeile, dict):
+                zeile["text"] = ""
+    elif kanal == "untertitel":
+        for feld in ("original", "uebersetzung"):
+            if feld in daten:
+                daten[feld] = ""
+    elif kanal == "sicht":
+        daten = _sicht_leeren(daten)
+    elif kanal == "hochfahren":
+        if "begruessung" in daten:
+            daten["begruessung"] = ""
+        for schritt in daten.get("schritte") or []:
+            if isinstance(schritt, dict):
+                schritt["text"] = str(schritt.get("name") or "")
+    elif kanal == "buehne":
+        daten = _buehne_diskret(daten)
+    return daten
+
+
+def _buehne_diskret(daten: dict) -> dict:
+    """Bühne im Diskretmodus: Beiträge ohne Titel, auch innerhalb einer Folge."""
+    if daten.get("modus") == "inhalte":
+        for eintrag in daten.get("eintraege") or []:
+            if isinstance(eintrag, dict) and "titel" in eintrag:
+                eintrag["titel"] = "Beitrag"
+    elif daten.get("modus") == "folge":
+        for schritt in daten.get("schritte") or []:
+            if isinstance(schritt, dict) and isinstance(schritt.get("ansicht"), dict):
+                schritt["ansicht"] = _buehne_diskret(schritt["ansicht"])
+    return daten
+
+
+class Anzeige:
+    """Der Speicher hinter den Bildschirmen - threadsicher, mit Warten auf Änderungen."""
+
+    def __init__(self, uhr=None):
+        self._uhr = uhr or time.time
+        self._bed = threading.Condition()
+        self._k = {k: {"version": 0, "daten": {}, "seit": 0.0, "bis": 0.0}
+                   for k in ANZEIGE_KANAELE}
+        self._letzte = {}
+        # Ändert sich beim Neustart - die Seiten setzen dann alle Versionen zurück.
+        self.start = self._uhr()
+
+    # -- Schreiben ----------------------------------------------------------
+
+    @staticmethod
+    def _pruefen(kanal: str, daten) -> tuple:
+        """Gibt ``(roh, fehler)`` zurück: das JSON oder warum es abgewiesen wird."""
+        if kanal not in ANZEIGE_KANAELE:
+            return None, "Den Anzeige-Kanal '%s' gibt es nicht." % kanal
+        if not isinstance(daten, dict):
+            return None, "Die Anzeige-Daten müssen ein Wörterbuch sein."
+        try:
+            # NaN und Unendlich sind kein JSON - der Browser könnte die Antwort nicht lesen.
+            roh = json.dumps(daten, ensure_ascii=False, default=str, allow_nan=False)
+        except (TypeError, ValueError) as fehler:
+            return None, "Die Anzeige-Daten sind kein gültiges JSON (%s)." % fehler
+        if len(roh.encode("utf-8")) > MAX_NUTZLAST:
+            return None, "Die Anzeige-Daten sind zu groß."
+        return roh, ""
+
+    @staticmethod
+    def _dauer(dauer_s) -> float:
+        try:
+            dauer = float(dauer_s or 0)
+        except (TypeError, ValueError):
+            return 0.0
+        return dauer if dauer > 0 and dauer != float("inf") else 0.0
+
+    def _ablegen(self, kanal: str, roh: str, dauer: float, modus: str = "") -> int:
+        """Legt geprüfte Daten ab und weckt alle Wartenden. Gibt die neue Version zurück."""
+        with self._bed:
+            eintrag = self._k[kanal]
+            jetzt = self._uhr()
+            eintrag["version"] += 1
+            eintrag["daten"] = json.loads(roh)
+            eintrag["seit"] = jetzt
+            eintrag["bis"] = jetzt + dauer if dauer > 0 else 0.0
+            if modus:
+                self._letzte[modus] = json.loads(roh)
+            self._bed.notify_all()
+            return eintrag["version"]
+
+    def melden(self, kanal: str, daten: dict, dauer_s: float = 0.0) -> int:
+        """Schreibt einen Kanal. Gibt die neue Version zurück oder ``-1``.
+
+        ``dauer_s`` 0 heißt: gilt, bis etwas Neues kommt.
+        """
+        roh, fehler = self._pruefen(kanal, daten)
+        if roh is None:
+            print("[anzeige] %s" % fehler)
+            return -1
+        return self._ablegen(kanal, roh, self._dauer(dauer_s))
+
+    def zeigen(self, modus: str, daten: dict = None, dauer_s: float = None,
+               quelle: str = "") -> dict:
+        """Schaltet die Bühne auf eine Ansicht.
+
+        ``dauer_s`` ``None`` nimmt ``ANZEIGE_DAUER``, ``0`` hält die Ansicht,
+        bis etwas Neues kommt. Danach kehrt die Zentrale zur Übersicht zurück.
+        """
+        modus = str(modus or "").strip()
+        if modus not in ANZEIGE_MODI:
+            return {"ok": False,
+                    "fehler": "Diese Ansicht gibt es nicht: %s. Möglich sind: %s."
+                              % (modus or "(leer)", ", ".join(ANZEIGE_MODI))}
+        if daten is None:
+            daten = {}
+        if not isinstance(daten, dict):
+            return {"ok": False, "fehler": "Die Anzeige-Daten müssen ein Wörterbuch sein."}
+        nutzlast = dict(daten, modus=modus, quelle=str(quelle or ""))
+        roh, fehler = self._pruefen("buehne", nutzlast)
+        if roh is None:
+            print("[anzeige] %s" % fehler)
+            return {"ok": False, "fehler": fehler}
+        dauer = ANZEIGE_DAUER if dauer_s is None else dauer_s
+        version = self._ablegen("buehne", roh, self._dauer(dauer), modus)
+        return {"ok": True, "modus": modus, "version": version}
+
+    # -- Lesen --------------------------------------------------------------
+
+    def letzte(self, modus: str):
+        """Was zuletzt in dieser Ansicht gezeigt wurde - ``None``, wenn noch nichts."""
+        with self._bed:
+            gespeichert = self._letzte.get(modus)
+            return copy.deepcopy(gespeichert) if gespeichert is not None else None
+
+    def _stand(self, kanal: str) -> dict:
+        """Stand eines Kanals, schon gefiltert. Nur unter der Sperre aufrufen."""
+        eintrag = self._k[kanal]
+        daten = copy.deepcopy(eintrag["daten"])
+        if ANZEIGE_DISKRET and kanal != "stimme":
+            daten = diskret_filtern(kanal, daten)
+        return {"version": eintrag["version"], "daten": daten,
+                "seit": eintrag["seit"], "bis": eintrag["bis"]}
+
+    def stand(self, kanal: str):
+        """``{"version", "daten", "seit", "bis"}`` eines Kanals - ``None``, wenn es ihn
+        nicht gibt."""
+        if kanal not in self._k:
+            return None
+        with self._bed:
+            return self._stand(kanal)
+
+    def warten(self, nach: dict, timeout: float) -> dict:
+        """Wartet, bis einer der Kanäle eine andere Version hat als in ``nach``.
+
+        Gibt ``{kanal: stand}`` der geänderten Kanäle zurück, nach Ablauf
+        ``{}``. Verglichen wird mit ``!=``, nicht ``>``: So fällt auch ein
+        neu gestarteter Server auf, dessen Zähler wieder klein sind.
+        """
+        try:
+            frist = max(0.0, float(timeout or 0))
+        except (TypeError, ValueError):
+            frist = 0.0
+        ende = time.monotonic() + frist
+        gefragt = {k: v for k, v in (nach or {}).items() if k in self._k}
+        with self._bed:
+            while True:
+                geaendert = {k: self._stand(k) for k, v in gefragt.items()
+                             if self._k[k]["version"] != v}
+                rest = ende - time.monotonic()
+                if geaendert or rest <= 0:
+                    return geaendert
+                self._bed.wait(rest)
+
+    def kurz(self) -> dict:
+        """Kurzstand für ``/api/status``: Ansicht, Versionen, Ablauf, Start."""
+        with self._bed:
+            buehne = self._k["buehne"]
+            modus = buehne["daten"].get("modus") or "uebersicht"
+            if buehne["bis"] and self._uhr() >= buehne["bis"]:
+                modus = "uebersicht"
+            return {"modus": modus,
+                    "versionen": {k: e["version"] for k, e in self._k.items()},
+                    "bis": buehne["bis"], "start": self.start}
+
+
+# =========================================================================
+# freigabe  -  Freigaben mit Was, Warum und Wie - lesbar statt rohem JSON.
+# 
+# Vor allem mit Wirkung nach außen fragt Jarvis nach. Damit jemand Ja sagen
+# kann, muss die Frage drei Dinge beantworten:
+# 
+# * **Was** passiert - "eine Mail an kunde@firma.at schicken, Betreff Angebot".
+# * **Warum** - das schreibt Claude selbst ins Feld ``begruendung``. Fehlt es,
+#   steht das sichtbar da, statt still zu fehlen.
+# * **Wie** - über welchen Weg es hinausgeht, und was dabei bekannt wird.
+# 
+# Je Werkzeug gibt es dafür eine kleine Funktion in ``FREIGABE_ANGABEN``
+# (Argumente rein, ``(was, wie)`` raus) - keine Vorlagensprache, die niemand
+# lesen kann. Werkzeuge, die nur Kennungen bekommen (eine Termin-id, eine
+# Message-ID), tragen in ``FREIGABE_AUFLOESEN`` einen Auflöser ein, der daraus
+# Lesbares macht. Scheitert er, zeigt die Freigabe die rohen Argumente.
+# 
+# Die Beschreibung wandert als JSON durch die Freigabewege (Terminal,
+# Telegram, Stimme, Browser). Wege, die nichts davon wissen, bekommen weiter den
+# alten Text - ``freigabe_lesen`` erkennt beides.
+# =========================================================================
+
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+
+
+# Ein Wert in den Argumenten darf so lang sein, bevor er gekürzt wird.
+# Adresse, Pfad und Empfänger bleiben immer ganz - die muss man sehen.
+ARGUMENT_GRENZE = 400
+NIE_KUERZEN = ("adresse", "url", "pfad", "an")
+
+OHNE_BEGRUENDUNG = "(ohne Begründung – Jarvis hat keinen Grund genannt)"
+
+# Diese Aktionen gibt keine Geste frei - nur Klick oder Stimme. Die Gestenprüfung
+# selbst kommt später; die Liste steht schon hier, damit alle sie kennen.
+GESTE_GESPERRT = {"skript_ausfuehren", "bildschirm_bedienen", "browser_auftrag", "browser_schritt",
+                  "datei_schreiben", "ordnen_ausfuehren", "ordnen_rueckgaengig",
+                  "autopilot_schalten"}
+
+
+def argumente_kuerzen(argumente: dict) -> dict:
+    """Kürzt jedes lange Textfeld für sich - Empfänger, Pfad und Adresse nie."""
+    kurz = {}
+    for schluessel, wert in (argumente or {}).items():
+        if isinstance(wert, str) and len(wert) > ARGUMENT_GRENZE and schluessel not in NIE_KUERZEN:
+            kurz[schluessel] = "%s … (%d Zeichen insgesamt)" % (wert[:ARGUMENT_GRENZE], len(wert))
+        else:
+            kurz[schluessel] = wert
+    return kurz
+
+
+def _wert_kurz(wert, grenze: int = 120) -> str:
+    """Ein Wert als eine Zeile, höchstens ``grenze`` Zeichen. Fehlt er: ``?``."""
+    if wert is None or wert == "":
+        return "?"
+    text = " ".join(str(wert).split())
+    return text if len(text) <= grenze else text[:grenze].rstrip() + " …"
+
+
+def lesbarer_name(name: str) -> str:
+    """``mcp__kalender__loeschen`` wird ``kalender, loeschen``, ``mail_senden`` ``mail senden``."""
+    return str(name or "").replace("mcp__", "").replace("__", ", ").replace("_", " ").strip()
+
+
+def _argumente_zeile(argumente: dict, grenze: int = 160) -> str:
+    """Die Argumente als kurze Zeile ``name: wert; name: wert`` - ohne die Begründung."""
+    teile = ["%s: %s" % (k, _wert_kurz(v, 60)) for k, v in (argumente or {}).items()
+             if k != "begruendung"]
+    return _wert_kurz("; ".join(teile), grenze) if teile else ""
+
+
+# -- Was und Wie je Werkzeug ------------------------------------------------
+# Jede Funktion bekommt die Argumente (samt Zusatzfeldern eines Auflösers) und
+# gibt (was, wie) zurück. "was" steht nach "Ich soll ..." - ohne Punkt am Ende.
+# Der erste Satz von "wie" wird im Dienst laut gesagt.
+
+def _angaben_mail_senden(a: dict) -> tuple:
+    k = _wert_kurz
+    return ("eine Mail an %s schicken, Betreff „%s“. Sie beginnt mit: %s"
+            % (k(a.get("an")), k(a.get("betreff")), k(a.get("text"))),
+            "Per SMTP vom eingerichteten Postfach. Der ganze Text steht in den Details.")
+
+
+def _angaben_termin_anlegen(a: dict) -> tuple:
+    k = _wert_kurz
+    ort = " in %s" % k(a.get("ort")) if a.get("ort") else ""
+    return ("den Termin „%s“ am %s (%s Minuten) eintragen%s"
+            % (k(a.get("titel")), k(a.get("beginn")), a.get("dauer_minuten") or 60, ort),
+            "Im Kalender %s über CalDAV."
+            % (CALDAV_KALENDER or "des eingerichteten Kontos"))
+
+
+NACHRICHT_WEGE = {
+    "telegram": "Über den Telegram-Bot.",
+    "mail": "Per SMTP vom eingerichteten Postfach.",
+    "imessage": "Über die Nachrichten-App des Macs mit deiner eigenen Nummer.",
+    "sms": "Über die Nachrichten-App des Macs mit deiner eigenen Nummer.",
+    "whatsapp": "Über den angeschlossenen WhatsApp-Dienst.",
+}
+
+
+def _angaben_nachricht_senden(a: dict) -> tuple:
+    k = _wert_kurz
+    kanal = str(a.get("kanal") or "").strip().lower()
+    an = a.get("an") or ("dich selbst" if kanal == "telegram" else None)
+    art = " als Sprachnachricht" if a.get("als_sprache") else ""
+    return ("per %s an %s%s schreiben: %s" % (k(kanal), k(an), art, k(a.get("text"))),
+            NACHRICHT_WEGE.get(kanal, "Über den Kanal %s." % k(kanal)))
+
+
+def _angaben_anrufen(a: dict) -> tuple:
+    k = _wert_kurz
+    return ("%s anrufen und ansagen: %s" % (k(a.get("nummer")), k(a.get("ansage"))),
+            "Ein Twilio-Anruf von deiner Twilio-Nummer. Die Ansage wird zweimal vorgelesen.")
+
+
+def _angaben_sms_senden(a: dict) -> tuple:
+    k = _wert_kurz
+    twilio = bool(TWILIO_SID and TWILIO_TOKEN and TWILIO_NUMMER)
+    return ("%s eine SMS schicken: %s" % (k(a.get("nummer")), k(a.get("text"))),
+            "Über Twilio von deiner Twilio-Nummer." if twilio
+            else "Über die Nachrichten-App des Macs mit deiner eigenen Nummer.")
+
+
+def _angaben_skript_ausfuehren(a: dict) -> tuple:
+    k = _wert_kurz
+    liste = a.get("argumente") or []
+    zusatz = " mit %s" % k(" ".join(str(x) for x in liste), 80) if liste else ""
+    return ("das Skript %s aus der Werkstatt ausführen%s" % (k(a.get("name")), zusatz),
+            "Mit Python in der Werkstatt. Der Code steht vollständig in der Frage.")
+
+
+def _angaben_bildschirm_bedienen(a: dict) -> tuple:
+    return ("den Bildschirm bedienen: %s" % _wert_kurz(a.get("ziel"), 160),
+            "Schritt für Schritt über Bildschirmfotos. Jeder Schritt wird einzeln bestätigt.")
+
+
+def _angaben_browser_auftrag(a: dict) -> tuple:
+    start = " Er beginnt bei %s." % _wert_kurz(a.get("start")) if a.get("start") else ""
+    return ("im Browser: %s" % _wert_kurz(a.get("ziel"), 160),
+            "Klickt nur Beschriftungen, meldet sich nirgends an und kauft nichts.%s" % start)
+
+
+def _angaben_browser_oeffnen(a: dict) -> tuple:
+    return ("die Adresse %s öffnen" % _wert_kurz(a.get("adresse"), 300),
+            "Im eingebauten Browser. Die Adresse selbst geht dabei ins Netz.")
+
+
+def _angaben_autopilot_schalten(a: dict) -> tuple:
+    if a.get("an"):
+        return ("den Autopiloten einschalten",
+                "Er arbeitet dann im Hintergrund, legt Entwürfe ins Postfach und schickt "
+                "nichts ab.")
+    return ("den Autopiloten ausschalten",
+            "Bis du ihn wieder einschaltest, arbeitet er nicht mehr.")
+
+
+def _angaben_datei_schreiben(a: dict) -> tuple:
+    tun = "ersetzen" if a.get("ueberschreiben") else "neu anlegen"
+    return ("die Datei %s %s, sie beginnt mit: %s"
+            % (_wert_kurz(a.get("pfad"), 300), tun, _wert_kurz(a.get("inhalt"), 80)),
+            "Nur in den freigegebenen Ordnern deines Benutzerordners. Der Inhalt steht in "
+            "den Details.")
+
+
+FREIGABE_ANGABEN = {
+    "mail_senden": _angaben_mail_senden,
+    "termin_anlegen": _angaben_termin_anlegen,
+    "nachricht_senden": _angaben_nachricht_senden,
+    "anrufen": _angaben_anrufen,
+    "sms_senden": _angaben_sms_senden,
+    "skript_ausfuehren": _angaben_skript_ausfuehren,
+    "bildschirm_bedienen": _angaben_bildschirm_bedienen,
+    "browser_auftrag": _angaben_browser_auftrag,
+    "browser_oeffnen": _angaben_browser_oeffnen,
+    "autopilot_schalten": _angaben_autopilot_schalten,
+    "datei_schreiben": _angaben_datei_schreiben,
+}
+
+# Werkzeugname -> funktion(werkzeuge, argumente) -> dict mit Zusatzfeldern, die
+# "was" lesbar machen (etwa der Titel eines Termins statt seiner Kennung).
+# Die Zusatzfelder landen nur in der Angaben-Funktion, nicht in den Argumenten.
+FREIGABE_AUFLOESEN = {}
+
+# Die Pakete tragen ihre Einträge zwischen ihren Marken ein, etwa
+# FREIGABE_ANGABEN["termine_absagen"] = _angaben_termine_absagen.
+# [P1 Bühne] Anfang
+# [P1 Bühne] Ende
+# [P2 Weltlage] Anfang
+# [P2 Weltlage] Ende
+# [P3 Telefon] Anfang
+# [P3 Telefon] Ende
+# [P4 Büro] Anfang
+# [P4 Büro] Ende
+# [P5 Sicht] Anfang
+# [P5 Sicht] Ende
+# [P6 Stimme] Anfang
+# [P6 Stimme] Ende
+# [P7 Start] Anfang
+# [P7 Start] Ende
+
+
+def _angaben_unbekannt(name: str, a: dict) -> tuple:
+    """Für Werkzeuge ohne eigenen Eintrag, auch die von MCP-Diensten."""
+    zeile = _argumente_zeile(a)
+    if str(name).startswith("mcp__"):
+        teile = str(name).split("__")
+        dienst = teile[1] if len(teile) > 1 else "?"
+        werkzeug = "__".join(teile[2:]) or "?"
+        was = "beim Dienst „%s“ das Werkzeug „%s“ ausführen" % (dienst, werkzeug)
+        wie = ("Über den angeschlossenen Dienst „%s“. Was das Werkzeug genau tut, "
+               "bestimmt dieser Dienst." % dienst)
+    else:
+        was = "%s ausführen" % (lesbarer_name(name) or "ein Werkzeug")
+        wie = "Über das Werkzeug %s." % name
+    return (was + (", mit: %s" % zeile if zeile else ""), wie)
+
+
+def freigabe_beschreiben(name: str, argumente: dict, zusatz: dict = None) -> dict:
+    """Was, Warum und Wie einer Freigabe - plus die gekürzten Argumente.
+
+    ``zusatz`` kommt von einem Auflöser (``FREIGABE_AUFLOESEN``) und macht
+    "was" lesbar. Geht beim Beschreiben etwas schief, zeigt die Freigabe die
+    rohen Argumente - eine Frage ganz ohne Inhalt darf es nie geben.
+    """
+    argumente = argumente if isinstance(argumente, dict) else {}
+    felder = dict(argumente)
+    if isinstance(zusatz, dict):
+        felder.update(zusatz)
+    angaben = FREIGABE_ANGABEN.get(name)
+    was, wie = "", ""
+    if angaben is not None:
+        try:
+            was, wie = angaben(felder)
+        except Exception as fehler:
+            print("[freigabe] Beschreibung für %s fehlgeschlagen: %s" % (name, fehler))
+            was, wie = "", ""
+        if not was and zusatz:
+            # Vielleicht lag es an den Zusatzfeldern - dann eben mit den rohen Argumenten.
+            try:
+                was, wie = angaben(dict(argumente))
+            except Exception:
+                was, wie = "", ""
+    if not was:
+        was, wie_unbekannt = _angaben_unbekannt(name, argumente)
+        wie = wie or wie_unbekannt
+    warum = " ".join(str(argumente.get("begruendung") or "").split())
+    sichtbar = {k: v for k, v in argumente_kuerzen(argumente).items() if k != "begruendung"}
+    return {"was": str(was), "warum": warum or OHNE_BEGRUENDUNG, "wie": str(wie or ""),
+            "argumente": sichtbar}
+
+
+# -- Lesen auf der anderen Seite --------------------------------------------
+
+def freigabe_lesen(details) -> dict:
+    """Erkennt eine Beschreibung aus :func:`freigabe_beschreiben`.
+
+    Gibt ``{"was", "warum", "wie", "argumente"}`` zurück - oder ``None`` für
+    alten Freitext (etwa den Code eines Skripts) und alte Argument-JSONs.
+    """
+    if isinstance(details, dict):
+        daten = details
+    else:
+        text = str(details or "").strip()
+        if not text.startswith("{"):
+            return None
+        try:
+            daten = json.loads(text)
+        except ValueError:
+            return None
+    if not isinstance(daten, dict) or not daten.get("was"):
+        return None
+    argumente = daten.get("argumente")
+    return {"was": str(daten.get("was") or ""), "warum": str(daten.get("warum") or ""),
+            "wie": str(daten.get("wie") or ""),
+            "argumente": argumente if isinstance(argumente, dict) else {}}
+
+
+def erster_satz(text: str) -> str:
+    """Der erste Satz eines Textes - mit großem Anfang und Punkt am Ende."""
+    text = " ".join(str(text or "").split())
+    if not text:
+        return ""
+    for ende in (". ", "! ", "? "):
+        stelle = text.find(ende)
+        if stelle >= 0:
+            text = text[:stelle + 1]
+    text = text[0].upper() + text[1:]
+    return text if text[-1] in ".!?" else text + "."
+
+
+def freigabe_text(aktion: str, details) -> str:
+    """Die Freigabe als Klartext für Terminal und Telegram.
+
+    Neue Beschreibungen werden zu "Was / Warum / Wie / Details", alter Text
+    bleibt, wie er ist.
+    """
+    lesbar = freigabe_lesen(details)
+    if lesbar is None:
+        return str(details or "")
+    try:
+        argumente = json.dumps(lesbar["argumente"], ensure_ascii=False, default=str)
+    except (TypeError, ValueError):
+        argumente = str(lesbar["argumente"])
+    return ("Was:     %s\nWarum:   %s\nWie:     %s\nDetails: %s"
+            % (lesbar["was"], lesbar["warum"], lesbar["wie"], argumente))
+
+
+# =========================================================================
+# netzsocket  -  Kleiner WebSocket-Client aus der Standardbibliothek – wird in Paket P3 gebaut.
+# =========================================================================
+
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+
+# =========================================================================
+# stimmanbieter  -  Die Anbieterkette der Sprachausgabe mit Pegel für den Orb – wird in Paket P6 gebaut.
+# =========================================================================
+
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 
 
 # =========================================================================
@@ -3165,9 +3801,10 @@ class Telegram:
         auch bei Timeout, Netzwerkfehler oder unverständlicher Antwort.
         """
         timeout = int(timeout if timeout is not None else FREIGABE_TIMEOUT)
+        # Was, Warum und Wie lesbar statt rohem JSON - alter Text bleibt, wie er ist.
         frage = ("Jarvis fragt um Freigabe.\n\nAktion: %s\n%s\n\n"
                  "Antworte mit JA oder NEIN. Ohne Antwort in %d Sekunden "
-                 "führe ich nichts aus." % (aktion, details or "", timeout))
+                 "führe ich nichts aus." % (aktion, freigabe_text(aktion, details), timeout))
 
         if self.verfuegbar():
             ergebnis = self._freigabe_ueber_telegram(frage, timeout)
@@ -3223,7 +3860,13 @@ class Telegram:
                     "grund": "Kein Freigabekanal verfügbar - deshalb nicht ausgeführt."}
         print("\n--- FREIGABE NÖTIG ---")
         print("Aktion : %s" % aktion)
-        if details:
+        lesbar = freigabe_lesen(details)
+        if lesbar is not None:
+            print("Was    : %s" % lesbar["was"])
+            print("Warum  : %s" % lesbar["warum"])
+            print("Wie    : %s" % lesbar["wie"])
+            print("Details: %s" % json.dumps(lesbar["argumente"], ensure_ascii=False, default=str))
+        elif details:
             print("Details: %s" % details)
         print("Mit ja bestätigen, alles andere bricht ab (%d Sekunden Zeit)." % timeout)
         sys.stdout.write("> ")
@@ -5423,6 +6066,14 @@ class Routines:
 
 
 # =========================================================================
+# vorschlaege  -  Vorschläge, die Jarvis von sich aus macht – wird in Paket P4 gebaut.
+# =========================================================================
+
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+
+# =========================================================================
 # camera  -  Kamera - ein Einzelbild aufnehmen und von Claude beschreiben lassen.
 # 
 # Damit sieht Jarvis den Nutzer, einen vorgehaltenen Beleg oder ein Objekt.
@@ -6302,6 +6953,38 @@ class Welt:
                          "Bildschirmsteuerung - dafür fragst du mich noch einmal und "
                          "bestätigst jeden Schritt."
                          % (von, nach, ergebnis["text"][:2500]))}
+
+
+# =========================================================================
+# nachrichten  -  Weltnachrichten nach Regionen für Lagebild und Globus – wird in Paket P2 gebaut.
+# =========================================================================
+
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+
+# =========================================================================
+# maerkte  -  Börsen- und Rohstoffkurse für die Märkte-Ansicht – wird in Paket P2 gebaut.
+# =========================================================================
+
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+
+# =========================================================================
+# weblesen  -  Eine Webseite lesen, ohne Browser und ohne Schlüssel – wird in Paket P2 gebaut.
+# =========================================================================
+
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+
+# =========================================================================
+# lokale  -  Lokale in der Nähe finden – wird in Paket P3 gebaut.
+# =========================================================================
+
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 
 
 # =========================================================================
@@ -7974,6 +8657,22 @@ statt es zu umgehen.""",
     },
 }
 
+# Die Pakete ergänzen die Rollen hier, etwa ROLLEN["rechercheur"]["werkzeuge"] += [...].
+# [P1 Bühne] Anfang
+# [P1 Bühne] Ende
+# [P2 Weltlage] Anfang
+# [P2 Weltlage] Ende
+# [P3 Telefon] Anfang
+# [P3 Telefon] Ende
+# [P4 Büro] Anfang
+# [P4 Büro] Ende
+# [P5 Sicht] Anfang
+# [P5 Sicht] Ende
+# [P6 Stimme] Anfang
+# [P6 Stimme] Ende
+# [P7 Start] Anfang
+# [P7 Start] Ende
+
 
 class Team:
     """Verteilt Aufträge an Rollen und hält den Gesamtstand."""
@@ -8464,6 +9163,62 @@ class MacZugriff:
             return {"ok": False, "fehler": "Nicht schreibbar: %s" % fehler}
         return {"ok": True, "pfad": str(ziel), "zeichen": len(inhalt),
                 "text": "Gespeichert: %s." % ziel}
+
+
+# =========================================================================
+# hardware  -  Bericht über den Rechner und die angeschlossenen Geräte – wird in Paket P7 gebaut.
+# =========================================================================
+
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+
+# =========================================================================
+# steuerung  -  Den Mac steuern: Kurzbefehle, Fenster, Lautstärke – wird in Paket P7 gebaut.
+# =========================================================================
+
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+
+# =========================================================================
+# inhalte  -  Inhalte planen: Redaktionsplan für Beiträge – wird in Paket P7 gebaut.
+# =========================================================================
+
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+
+# =========================================================================
+# telefonagent  -  Der Telefonagent: Jarvis ruft an und reserviert – wird in Paket P3 gebaut.
+# =========================================================================
+
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+
+# =========================================================================
+# sicht  -  Dateien der Handerkennung und gespeicherte Handruhe-Messungen – wird in Paket P5 gebaut.
+# =========================================================================
+
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+
+# =========================================================================
+# erholung  -  Erholung aus Apple Health, Oura, Whoop oder von Hand – wird in Paket P5 gebaut.
+# =========================================================================
+
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+
+# =========================================================================
+# leistung  -  Zusammenhang zwischen Erholung und Arbeit – wird in Paket P5 gebaut.
+# =========================================================================
+
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 
 
 # =========================================================================
@@ -9065,7 +9820,16 @@ def _anfang(text, n: int = 90) -> str:
 
 
 def freigabe_ansage(aktion: str, details: str = "") -> str:
-    """Was Jarvis vor einer Freigabe laut sagt: wer, was, wohin. Nie der ganze Code."""
+    """Was Jarvis vor einer Freigabe laut sagt: wer, was, wohin. Nie der ganze Code.
+
+    Neue Freigaben kommen mit Was, Warum und Wie: "Ich soll ... Grund: ...", dazu
+    der erste Satz von Wie. Alte Texte und Argument-JSONs gehen den bisherigen Weg.
+    """
+    lesbar = freigabe_lesen(details)
+    if lesbar is not None:
+        return "Ich soll %s. Grund: %s. %s" % (
+            lesbar["was"].strip().rstrip("."), lesbar["warum"].strip().rstrip("."),
+            erster_satz(lesbar["wie"]))
     daten = None
     try:
         daten = json.loads(details) if details and details.lstrip().startswith("{") else None
@@ -9410,6 +10174,14 @@ Für die Trennung vom privaten Mac: einen eigenen Benutzer für Jarvis anlegen (
 
 
 # =========================================================================
+# weltkarte  -  Landmaske der Erde für den Globus der Zentrale – wird in Paket P1 gebaut.
+# =========================================================================
+
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+
+# =========================================================================
 # ansicht  -  Die Anzeige - das zweite Gehirn und die Kommandozentrale.
 # 
 # Zwei Seiten für zwei Bildschirme, nur zum Ansehen, ohne Eingabefeld:
@@ -9718,10 +10490,16 @@ def status_daten(tools, agent=None) -> dict:
         aktionen = tools.memory._lesen("SELECT id,werkzeug,status,zeit FROM aktionen ORDER BY id DESC LIMIT 8")
     except Exception:
         aktionen = []
+    try:
+        # Welche Ansicht die Zentrale zeigt und welche Kanäle sich geändert haben.
+        anzeige = tools.anzeige.kurz() if getattr(tools, "anzeige", None) else {}
+    except Exception:
+        anzeige = {}
     return {"zustand": status.get("zustand", "bereit"), "satz": status.get("satz", ""),
             "seit": status.get("seit", 0), "jetzt": status["jetzt"],
             "aktionen": [{"id": a["id"], "werkzeug": a["werkzeug"], "status": a["status"], "zeit": a["zeit"]}
-                         for a in aktionen]}
+                         for a in aktionen],
+            "anzeige": anzeige}
 
 
 # -- Zentrale --------------------------------------------------------------------------
@@ -10689,7 +11467,7 @@ main:has(~ .tippen.zeigen){padding-bottom:84px}
       // Bei offener Freigabe zählt nur ja oder nein.
       if (freigabe) {
         var entscheid = jaNein(k);
-        if (entscheid !== null) { antworten(entscheid); }
+        if (entscheid !== null) { antworten(entscheid, "sprache"); }
         return;
       }
       if (laeuft || sprichtGerade) { return; }
@@ -10754,23 +11532,27 @@ main:has(~ .tippen.zeigen){padding-bottom:84px}
       }
       freigabe = offen;
       el("fAktion").textContent = offen.aktion;
-      el("fDetails").textContent = offen.details || "(ohne Angaben)";
+      // Was, Warum und Wie lesbar; die Argumente stehen darunter.
+      el("fDetails").textContent = (offen.warum ? "Was: " + offen.was + "\nWarum: " + offen.warum
+        + "\nWie: " + offen.wie + "\n\n" : "") + (offen.details || "(ohne Angaben)");
       el("rest").textContent = offen.rest + " s";
       el("schleier").classList.add("zeigen");
-      sprich("Ich brauche eine Freigabe für " + offen.aktion + ". Ja oder nein?");
+      sprich(offen.was && offen.warum
+        ? "Ich brauche eine Freigabe. Ich soll " + offen.was + ". Grund: " + offen.warum + ". Ja oder nein?"
+        : "Ich brauche eine Freigabe für " + offen.aktion + ". Ja oder nein?");
     }).catch(function () {});
   }
   function schliessen() {
     freigabe = null;
     el("schleier").classList.remove("zeigen");
   }
-  function antworten(ja) {
+  function antworten(ja, kanal) {
     if (!freigabe) { return; }
     var id = freigabe.id;
     schliessen();
     if (window.speechSynthesis) { window.speechSynthesis.cancel(); }
     sprichtGerade = false; hoerenWeiter();
-    holen("/api/freigabe", { id: id, ja: ja }).then(function () { lageHolen(); });
+    holen("/api/freigabe", { id: id, ja: ja, kanal: kanal || "klick" }).then(function () { lageHolen(); });
   }
   el("fJa").addEventListener("click", function () { antworten(true); });
   el("fNein").addEventListener("click", function () { antworten(false); });
@@ -10850,6 +11632,22 @@ main:has(~ .tippen.zeigen){padding-bottom:84px}
 </body>
 </html>
 """
+
+
+# =========================================================================
+# sehen  -  Die Kamera-Seite /sehen – wird in Paket P5 gebaut.
+# =========================================================================
+
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+
+# =========================================================================
+# dolmetscher  -  Der Dolmetscher mit Untertiteln – wird in Paket P6 gebaut.
+# =========================================================================
+
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 
 
 # =========================================================================
@@ -12659,6 +13457,21 @@ fetch("/api/pfad"+ANHANG)
 # -*- coding: utf-8 -*-
 
 
+# Importe der Pakete.
+# [P1 Bühne] Anfang
+# [P1 Bühne] Ende
+# [P2 Weltlage] Anfang
+# [P2 Weltlage] Ende
+# [P3 Telefon] Anfang
+# [P3 Telefon] Ende
+# [P4 Büro] Anfang
+# [P4 Büro] Ende
+# [P5 Sicht] Anfang
+# [P5 Sicht] Ende
+# [P6 Stimme] Anfang
+# [P6 Stimme] Ende
+# [P7 Start] Anfang
+# [P7 Start] Ende
 
 STANDARD_PORT = 8765
 MAX_KOERPER = 512 * 1024
@@ -12672,26 +13485,48 @@ SYMBOL_SVG = (
     '<circle cx="32" cy="32" r="6" fill="#E8622C"/></svg>')
 
 
+# Wie eine Antwort im Browser zustande kam: Klick, gesprochenes Ja/Nein oder Geste.
+FREIGABE_WEGE = ("klick", "sprache", "geste")
+
+
 class WebFreigabe:
     """Freigaben über den Browser statt über Telegram oder das Terminal.
 
     Eine Anfrage wird abgelegt und blockiert den Werkzeugaufruf, bis der Nutzer
     im Browser antwortet oder die Zeit abläuft. **Zeitablauf gilt als Nein** -
     wie überall sonst im Programm.
+
+    Der Browser bekommt Was, Warum und Wie lesbar, dazu die Argumente als
+    eingerücktes JSON. Eine Geste zählt in dieser Stufe nie als Antwort.
     """
 
-    def __init__(self, timeout: int = None):
+    def __init__(self, timeout: int = None, memory=None):
         self.timeout = int(timeout if timeout is not None else FREIGABE_TIMEOUT)
+        self.memory = memory
         self._offen = {}
         self._sperre = threading.Lock()
+        # Warum die letzte Antwort nicht angenommen wurde - für die Rückmeldung im Browser.
+        self.letzter_grund = ""
 
     def anfordern(self, aktion: str, details: str = "") -> dict:
         """Legt eine Freigabefrage ab und wartet auf die Antwort."""
         kennung = uuid.uuid4().hex[:12]
         ereignis = threading.Event()
-        eintrag = {"id": kennung, "aktion": aktion, "details": details,
+        lesbar = freigabe_lesen(details)
+        if lesbar is not None:
+            was, warum, wie = lesbar["was"], lesbar["warum"], lesbar["wie"]
+            try:
+                anzeigen = json.dumps(lesbar["argumente"], ensure_ascii=False, indent=2,
+                                      default=str)
+            except (TypeError, ValueError):
+                anzeigen = str(lesbar["argumente"])
+        else:
+            # Alter Freitext (etwa der Code eines Skripts) bleibt, wie er ist.
+            was, warum, wie, anzeigen = lesbarer_name(aktion), "", "", details
+        eintrag = {"id": kennung, "aktion": aktion, "details": anzeigen,
+                   "was": was, "warum": warum, "wie": wie,
                    "gestellt": zeitstempel(), "ereignis": ereignis,
-                   "antwort": None,
+                   "antwort": None, "weg": "",
                    "laeuft_ab": time.time() + self.timeout}
         with self._sperre:
             self._offen[kennung] = eintrag
@@ -12703,32 +13538,79 @@ class WebFreigabe:
         if not erhalten or eintrag["antwort"] is not True:
             grund = ("abgelehnt" if erhalten
                      else "keine Antwort innerhalb von %d Sekunden" % self.timeout)
-            return {"erlaubt": False, "kanal": "web", "grund": grund}
-        return {"erlaubt": True, "kanal": "web", "grund": "Freigabe erteilt"}
+            return {"erlaubt": False, "kanal": "web", "weg": eintrag["weg"], "grund": grund}
+        return {"erlaubt": True, "kanal": "web", "weg": eintrag["weg"], "grund": "Freigabe erteilt"}
 
     def offene(self) -> list:
         """Alle wartenden Freigabefragen - die holt sich der Browser ab."""
         jetzt = time.time()
         with self._sperre:
-            return [{"id": e["id"], "aktion": e["aktion"], "details": e["details"],
+            return [{"id": e["id"], "aktion": e["aktion"], "was": e["was"],
+                     "warum": e["warum"], "wie": e["wie"], "details": e["details"],
                      "gestellt": e["gestellt"],
-                     "rest": max(0, int(e["laeuft_ab"] - jetzt))}
+                     "rest": max(0, int(e["laeuft_ab"] - jetzt)),
+                     "geste_erlaubt": False}
                     for e in self._offen.values()]
 
-    def beantworten(self, kennung: str, ja: bool) -> bool:
-        """Beantwortet eine Freigabefrage."""
+    def beantworten(self, kennung: str, ja: bool, kanal: str = "klick") -> bool:
+        """Beantwortet eine Freigabefrage. ``kanal``: klick, sprache oder geste.
+
+        Ist die Antwort nicht angenommen, steht der Grund in ``letzter_grund``.
+        """
+        kanal = str(kanal or "klick").strip().lower()
         with self._sperre:
             eintrag = self._offen.get(kennung)
-            if eintrag is None:
-                return False
-            eintrag["antwort"] = bool(ja)
+            if kanal not in FREIGABE_WEGE:
+                grund = "Diesen Freigabeweg kenne ich nicht."
+            elif eintrag is None:
+                grund = "Diese Frage ist nicht mehr offen."
+            elif kanal == "geste":
+                grund = "Gesten-Freigabe ist noch nicht eingebaut."
+            else:
+                grund = ""
+                eintrag["antwort"] = bool(ja)
+                eintrag["weg"] = kanal
+            self.letzter_grund = grund
+        self._protokollieren(eintrag, kanal, ja, grund)
+        if grund:
+            return False
         eintrag["ereignis"].set()
         return True
+
+    def _protokollieren(self, eintrag, kanal: str, ja: bool, grund: str):
+        """Hält fest, auf welchem Weg geantwortet wurde - auch eine abgewiesene Antwort."""
+        if eintrag is None:
+            return
+        text = grund or ("per %s %s" % (kanal, "ja" if ja else "nein"))
+        print("[freigabe] %s: %s" % (eintrag["aktion"], text))
+        if self.memory is None:
+            return
+        try:
+            self.memory.aktion_protokollieren(
+                "freigabe", {"aktion": eintrag["aktion"], "kanal": kanal, "ja": bool(ja)},
+                text, "abgelehnt" if grund else "ok")
+        except Exception:
+            pass
 
 
 # Was die Anzeige im Dienst braucht - nur ansehen, nichts auslösen.
 ANZEIGE_PFADE = {"/gehirn", "/zentrale", "/api/gehirn", "/api/zentrale", "/api/status",
-                 "/api/lichter", "/favicon.ico", "/symbol.svg"}
+                 "/api/lichter", "/favicon.ico", "/symbol.svg", "/api/anzeige"}
+# Die Pakete ergänzen hier, etwa ANZEIGE_PFADE |= {"/api/weltkarte"}.
+# [P1 Bühne] Anfang
+# [P1 Bühne] Ende
+# [P2 Weltlage] Anfang
+# [P2 Weltlage] Ende
+# [P3 Telefon] Anfang
+# [P3 Telefon] Ende
+# [P4 Büro] Anfang
+# [P4 Büro] Ende
+# [P5 Sicht] Anfang
+# [P5 Sicht] Ende
+# [P6 Stimme] Anfang
+# [P6 Stimme] Ende
+# [P7 Start] Anfang
+# [P7 Start] Ende
 
 
 class JarvisWeb:
@@ -12746,7 +13628,7 @@ class JarvisWeb:
         self.port = int(port or STANDARD_PORT)
         # Im WLAN ist ein Schlüssel Pflicht - dieser Server darf zu viel.
         self.token = token or (secrets.token_urlsafe(18) if self.offen else "")
-        self.freigabe = WebFreigabe()
+        self.freigabe = WebFreigabe(memory=getattr(agent, "memory", None))
         # Was Jarvis von sich aus sagt - Briefings, Routinen, Zeitplan. Der
         # Browser holt es ab, liest es vor und zeigt es im Gespraech.
         self.meldungen = []
@@ -12755,6 +13637,20 @@ class JarvisWeb:
         self._denkt = threading.Lock()
         if not self.nur_anzeige:
             agent.tools.freigabe_kanal_setzen(self.freigabe)
+        # [P1 Bühne] Anfang
+        # [P1 Bühne] Ende
+        # [P2 Weltlage] Anfang
+        # [P2 Weltlage] Ende
+        # [P3 Telefon] Anfang
+        # [P3 Telefon] Ende
+        # [P4 Büro] Anfang
+        # [P4 Büro] Ende
+        # [P5 Sicht] Anfang
+        # [P5 Sicht] Ende
+        # [P6 Stimme] Anfang
+        # [P6 Stimme] Ende
+        # [P7 Start] Anfang
+        # [P7 Start] Ende
 
     def melden(self, text: str):
         """Nimmt eine Meldung des Zeitplans auf.
@@ -12915,6 +13811,7 @@ class JarvisWeb:
 
     def _get(self, behandler, pfad: str):
         werkzeuge = self.agent.tools
+        frage = parse_qs(urlparse(behandler.path).query)
 
         if pfad == "/":
             return self._html(behandler, SEITE_HTML.replace(
@@ -12936,6 +13833,17 @@ class JarvisWeb:
             return self._antworten(behandler, 200, status_daten(werkzeuge, self.agent))
         if pfad == "/api/lichter":
             return self._antworten(behandler, 200, {"ok": True, "lichter": lichter_liste()})
+        if pfad == "/api/anzeige":
+            # Long-Poll: kommt zurück, sobald sich einer der genannten Kanäle ändert.
+            try:
+                warten = min(25.0, max(0.0, float(frage.get("warten", ["20"])[0])))
+            except ValueError:
+                warten = 20.0
+            kanaele = werkzeuge.anzeige.warten(anzeige_nach_lesen(frage.get("nach", [""])[0]),
+                                               warten)
+            return self._antworten(behandler, 200, {
+                "ok": True, "jetzt": time.time(), "start": werkzeuge.anzeige.start,
+                "kanaele": kanaele})
         if pfad == "/autopilot":
             return self._html(behandler, SEITE_AUTOPILOT.replace(
                 "{{SCHLUESSEL}}", self.token))
@@ -12986,6 +13894,20 @@ class JarvisWeb:
             datei = DASHBOARD_VERZEICHNIS / (
                 "dashboard.html" if pfad == "/dashboard" else "sales.html")
             return self._datei(behandler, str(datei))
+        # [P1 Bühne] Anfang
+        # [P1 Bühne] Ende
+        # [P2 Weltlage] Anfang
+        # [P2 Weltlage] Ende
+        # [P3 Telefon] Anfang
+        # [P3 Telefon] Ende
+        # [P4 Büro] Anfang
+        # [P4 Büro] Ende
+        # [P5 Sicht] Anfang
+        # [P5 Sicht] Ende
+        # [P6 Stimme] Anfang
+        # [P6 Stimme] Ende
+        # [P7 Start] Anfang
+        # [P7 Start] Ende
         return self._antworten(behandler, 404, {"fehler": "Diese Seite gibt es nicht."})
 
     def _post(self, behandler, pfad: str):
@@ -13033,11 +13955,23 @@ class JarvisWeb:
         if pfad == "/api/freigabe":
             kennung = str(daten.get("id") or "")
             ja = bool(daten.get("ja"))
-            erledigt = self.freigabe.beantworten(kennung, ja)
+            # klick, sprache oder geste - eine Geste gibt in dieser Stufe nichts frei.
+            kanal = str(daten.get("kanal") or "klick")
+            erledigt = self.freigabe.beantworten(kennung, ja, kanal)
             return self._antworten(behandler, 200, {
                 "ok": erledigt,
                 "text": ("Freigabe erteilt." if ja else "Abgelehnt.") if erledigt
-                        else "Diese Frage ist nicht mehr offen."})
+                        else (self.freigabe.letzter_grund or "Diese Frage ist nicht mehr offen.")})
+
+        if pfad == "/api/anzeige/satz":
+            # Der Satz, den der Browser gerade vorliest - für den Pegel der Anzeige.
+            text = str(daten.get("text") or "").strip()[:400]
+            if not text:
+                return self._antworten(behandler, 400,
+                                       {"ok": False, "fehler": "Es kam kein Text an."})
+            werkzeuge.melden("stimme", {"art": "satz", "text": text,
+                                        "start_ms": time.time() * 1000, "quelle": "browser"})
+            return self._antworten(behandler, 200, {"ok": True})
 
         if pfad == "/api/werkzeug":
             name = str(daten.get("name") or "")
@@ -13052,6 +13986,20 @@ class JarvisWeb:
             return self._antworten(behandler, 200,
                                    {"ok": True, "text": "Neues Gespräch."})
 
+        # [P1 Bühne] Anfang
+        # [P1 Bühne] Ende
+        # [P2 Weltlage] Anfang
+        # [P2 Weltlage] Ende
+        # [P3 Telefon] Anfang
+        # [P3 Telefon] Ende
+        # [P4 Büro] Anfang
+        # [P4 Büro] Ende
+        # [P5 Sicht] Anfang
+        # [P5 Sicht] Ende
+        # [P6 Stimme] Anfang
+        # [P6 Stimme] Ende
+        # [P7 Start] Anfang
+        # [P7 Start] Ende
         return self._antworten(behandler, 404, {"fehler": "Das gibt es nicht."})
 
     # -- Antworten ----------------------------------------------------------
@@ -13071,27 +14019,36 @@ class JarvisWeb:
             return {}
 
     @staticmethod
-    def _kopf_setzen(behandler, code: int, typ: str, laenge: int):
+    def _kopf_setzen(behandler, code: int, typ: str, laenge: int, zusatz: dict = None):
+        """Setzt die Antwortköpfe. ``zusatz`` ersetzt Cache-Control oder fügt Köpfe
+        hinzu - etwa eine eigene Content-Security-Policy für eine Seite."""
+        zusatz = dict(zusatz or {})
+        cache = "no-store"
+        for name in list(zusatz):
+            if name.lower() == "cache-control":
+                cache = zusatz.pop(name)
         behandler.send_response(code)
         behandler.send_header("Content-Type", typ)
         behandler.send_header("Content-Length", str(laenge))
-        behandler.send_header("Cache-Control", "no-store")
+        behandler.send_header("Cache-Control", cache)
         behandler.send_header("X-Content-Type-Options", "nosniff")
         behandler.send_header("Referrer-Policy", "no-referrer")
+        for name, wert in zusatz.items():
+            behandler.send_header(name, wert)
         behandler.end_headers()
 
-    def _antworten(self, behandler, code: int, nutzlast: dict):
+    def _antworten(self, behandler, code: int, nutzlast: dict, zusatz: dict = None):
         """Schickt eine JSON-Antwort."""
         try:
             roh = json.dumps(nutzlast, ensure_ascii=False, default=str).encode("utf-8")
         except (TypeError, ValueError):
             roh = json.dumps({"fehler": "Antwort nicht darstellbar"}).encode("utf-8")
-        self._kopf_setzen(behandler, code, "application/json; charset=utf-8", len(roh))
+        self._kopf_setzen(behandler, code, "application/json; charset=utf-8", len(roh), zusatz)
         behandler.wfile.write(roh)
 
-    def _html(self, behandler, text: str):
+    def _html(self, behandler, text: str, zusatz: dict = None):
         roh = text.encode("utf-8")
-        self._kopf_setzen(behandler, 200, "text/html; charset=utf-8", len(roh))
+        self._kopf_setzen(behandler, 200, "text/html; charset=utf-8", len(roh), zusatz)
         behandler.wfile.write(roh)
 
     def _datei(self, behandler, pfad: str):
@@ -13593,6 +14550,20 @@ class Einrichtung:
         ("gemini", "Gemini (Google)", "GEMINI_API_KEY", "https://aistudio.google.com/apikey"),
         ("stimme", "ElevenLabs (Stimme)", "ELEVENLABS_API_KEY", "https://elevenlabs.io/app/settings/api-keys"),
         ("ohren", "OpenAI (Spracherkennung)", "OPENAI_API_KEY", "https://platform.openai.com/api-keys"),
+        # [P1 Bühne] Anfang
+        # [P1 Bühne] Ende
+        # [P2 Weltlage] Anfang
+        # [P2 Weltlage] Ende
+        # [P3 Telefon] Anfang
+        # [P3 Telefon] Ende
+        # [P4 Büro] Anfang
+        # [P4 Büro] Ende
+        # [P5 Sicht] Anfang
+        # [P5 Sicht] Ende
+        # [P6 Stimme] Anfang
+        # [P6 Stimme] Ende
+        # [P7 Start] Anfang
+        # [P7 Start] Ende
     )
 
     MAIL_WOERTER = ("mail", "gmail", "email", "e-mail", "post", "postfach")
@@ -14261,6 +15232,21 @@ def download_zip_bauen(ziel_zip, symbol_icns=None) -> dict:
 # -*- coding: utf-8 -*-
 
 
+# Importe der Pakete.
+# [P1 Bühne] Anfang
+# [P1 Bühne] Ende
+# [P2 Weltlage] Anfang
+# [P2 Weltlage] Ende
+# [P3 Telefon] Anfang
+# [P3 Telefon] Ende
+# [P4 Büro] Anfang
+# [P4 Büro] Ende
+# [P5 Sicht] Anfang
+# [P5 Sicht] Ende
+# [P6 Stimme] Anfang
+# [P6 Stimme] Ende
+# [P7 Start] Anfang
+# [P7 Start] Ende
 
 # Zeichen, die in eingesetzten Parametern nichts zu suchen haben. Weil überall
 # ``shell=False`` gilt, wären sie ohnehin harmlos - abgelehnt werden sie
@@ -14307,6 +15293,22 @@ FREMDE_INHALTE = {"datei_lesen", "mails_lesen", "mails_suchen", "browser_lesen",
                   "browser_oeffnen", "recherche", "lagebericht", "dateien_suchen",
                   "termine_lesen"}
 
+# Die Pakete ergänzen die drei Mengen hier, etwa FREIGABE_PFLICHTIG |= {"termine_absagen"}.
+# [P1 Bühne] Anfang
+# [P1 Bühne] Ende
+# [P2 Weltlage] Anfang
+# [P2 Weltlage] Ende
+# [P3 Telefon] Anfang
+# [P3 Telefon] Ende
+# [P4 Büro] Anfang
+# [P4 Büro] Ende
+# [P5 Sicht] Anfang
+# [P5 Sicht] Ende
+# [P6 Stimme] Anfang
+# [P6 Stimme] Ende
+# [P7 Start] Anfang
+# [P7 Start] Ende
+
 
 def parameter_pruefen(wert: str):
     """Prüft einen eingesetzten Parameter. Gibt ``(ok, meldung)`` zurück."""
@@ -14331,6 +15333,7 @@ class Werkzeuge:
     def __init__(self, agent=None, db_pfad: str = None):
         self.agent = agent
         self.memory = Memory(db_pfad)
+        self.anzeige = Anzeige()  # der eine Anzeige-Speicher für alle Bildschirme
         self.recall = Recall(self.memory)
         self.bookkeeping = Bookkeeping(self.memory)
         self.call_analysis = CallAnalysis(self.memory)
@@ -14362,6 +15365,20 @@ class Werkzeuge:
         self.stimme = None
         # Ein anderer Weg, Freigaben einzuholen - die Web-App setzt sich hier ein.
         self.freigabe_kanal = None
+        # [P1 Bühne] Anfang
+        # [P1 Bühne] Ende
+        # [P2 Weltlage] Anfang
+        # [P2 Weltlage] Ende
+        # [P3 Telefon] Anfang
+        # [P3 Telefon] Ende
+        # [P4 Büro] Anfang
+        # [P4 Büro] Ende
+        # [P5 Sicht] Anfang
+        # [P5 Sicht] Ende
+        # [P6 Stimme] Anfang
+        # [P6 Stimme] Ende
+        # [P7 Start] Anfang
+        # [P7 Start] Ende
 
     def freigabe_kanal_setzen(self, kanal):
         """Setzt einen anderen Freigabeweg, etwa den Browser.
@@ -14395,6 +15412,49 @@ class Werkzeuge:
         self.bildschirm.agent = agent
         self.browser.agent = agent
         self.team.agent = agent
+        # [P1 Bühne] Anfang
+        # [P1 Bühne] Ende
+        # [P2 Weltlage] Anfang
+        # [P2 Weltlage] Ende
+        # [P3 Telefon] Anfang
+        # [P3 Telefon] Ende
+        # [P4 Büro] Anfang
+        # [P4 Büro] Ende
+        # [P5 Sicht] Anfang
+        # [P5 Sicht] Ende
+        # [P6 Stimme] Anfang
+        # [P6 Stimme] Ende
+        # [P7 Start] Anfang
+        # [P7 Start] Ende
+
+    # -- Anzeige ------------------------------------------------------------
+
+    def zeigen(self, modus: str, daten: dict = None, dauer_s: float = None, quelle: str = ""):
+        """Schaltet die Zentrale auf eine Ansicht - der einzige Weg der Werkzeuge dorthin.
+
+        Im Hintergrund (Autopilot, Fachkräfte) passiert nichts: Niemand sitzt
+        davor, und die Zentrale soll nicht minutenlang umspringen. Jeder Fehler
+        wird geschluckt - die Anzeige darf kein Werkzeug kaputt machen.
+        Gibt das Ergebnis des Speichers zurück, sonst ``None``.
+        """
+        if self.im_hintergrund():
+            return None
+        try:
+            return self.anzeige.zeigen(modus, daten, dauer_s, quelle)
+        except Exception as fehler:
+            print("[anzeige] %s" % fehler)
+            return None
+
+    def melden(self, kanal: str, daten: dict, dauer_s: float = 0):
+        """Schreibt einen Anzeige-Kanal (anruf, sicht, ...). Wie :meth:`zeigen`:
+        im Hintergrund nichts, nie eine Ausnahme. Gibt die Version zurück, sonst ``None``."""
+        if self.im_hintergrund():
+            return None
+        try:
+            return self.anzeige.melden(kanal, daten, dauer_s)
+        except Exception as fehler:
+            print("[anzeige] %s" % fehler)
+            return None
 
     # -- Katalog für Claude -------------------------------------------------
 
@@ -14410,6 +15470,10 @@ class Werkzeuge:
         zahl = {"type": "number"}
         ganz = {"type": "integer"}
         wahr = {"type": "boolean"}
+        # Pflicht bei allem, was eine Freigabe braucht - steht in der Frage als "Warum".
+        begruendung = {"type": "string",
+                       "description": "Warum das nötig ist, in einem Satz – steht in der "
+                                      "Freigabefrage."}
 
         eigene = [
             # -- Gedächtnis --
@@ -14594,7 +15658,8 @@ class Werkzeuge:
                      {"id": ganz}),
             werkzeug("autopilot_schalten",
                      "Schaltet den Autopiloten ein oder aus. Er arbeitet im "
-                     "Hintergrund und schickt nichts ab.", {"an": wahr}, ["an"]),
+                     "Hintergrund und schickt nichts ab.",
+                     {"an": wahr, "begruendung": begruendung}, ["an", "begruendung"]),
             werkzeug("lagebericht",
                      "Der vollständige aktuelle Stand des Betriebs: Kasse, "
                      "Aufträge, Cashflow, Termine, Post, Offenes.", {}),
@@ -14627,16 +15692,18 @@ class Werkzeuge:
             werkzeug("datei_schreiben",
                      "Legt eine neue Textdatei im Benutzerordner an. Fragt vorher "
                      "um Freigabe. Ersetzt nichts, außer ueberschreiben ist gesetzt.",
-                     {"pfad": text, "inhalt": text, "ueberschreiben": wahr},
-                     ["pfad", "inhalt"]),
+                     {"pfad": text, "inhalt": text, "ueberschreiben": wahr,
+                      "begruendung": begruendung},
+                     ["pfad", "inhalt", "begruendung"]),
             werkzeug("skript_zeigen", "Zeigt den Code eines abgelegten Skripts.",
                      {"name": text}, ["name"]),
             werkzeug("skript_ausfuehren",
                      "Führt ein Skript aus der Werkstatt aus. Braucht eine "
                      "Freigabe, und der Code wird dabei vollständig angezeigt.",
                      {"name": text, "argumente": {"type": "array",
-                                                  "items": {"type": "string"}}},
-                     ["name"]),
+                                                  "items": {"type": "string"}},
+                      "begruendung": begruendung},
+                     ["name", "begruendung"]),
             werkzeug("werkstatt_liste", "Zeigt alle abgelegten Skripte.", {}),
 
             # -- Kommunikation --
@@ -14649,16 +15716,17 @@ class Werkzeuge:
                      {"begriff": text, "tage": ganz, "limit": ganz}, ["begriff"]),
             werkzeug("mail_senden",
                      "Verschickt eine E-Mail. Braucht eine Freigabe.",
-                     {"an": text, "betreff": text, "text": text},
-                     ["an", "betreff", "text"]),
+                     {"an": text, "betreff": text, "text": text, "begruendung": begruendung},
+                     ["an", "betreff", "text", "begruendung"]),
             werkzeug("nachricht_senden",
                      "Verschickt eine Nachricht über telegram, mail, imessage, sms oder "
                      "whatsapp. imessage und sms gehen über die Nachrichten-App des Macs "
                      "mit der eigenen Handynummer. Braucht eine Freigabe.",
                      {"kanal": {"type": "string",
                                 "enum": ["telegram", "mail", "imessage", "sms", "whatsapp"]},
-                      "an": text, "text": text, "als_sprache": wahr, "betreff": text},
-                     ["kanal", "text"]),
+                      "an": text, "text": text, "als_sprache": wahr, "betreff": text,
+                      "begruendung": begruendung},
+                     ["kanal", "text", "begruendung"]),
 
             # -- Kalender --
             werkzeug("termine_lesen",
@@ -14666,7 +15734,8 @@ class Werkzeuge:
             werkzeug("termin_anlegen",
                      "Trägt einen Termin ein. Braucht eine Freigabe.",
                      {"titel": text, "beginn": text, "dauer_minuten": ganz,
-                      "ort": text, "beschreibung": text}, ["titel", "beginn"]),
+                      "ort": text, "beschreibung": text, "begruendung": begruendung},
+                     ["titel", "beginn", "begruendung"]),
 
             # -- Welt --
             werkzeug("wetter", "Aktuelles Wetter und Vorhersage für einen Ort.",
@@ -14685,7 +15754,8 @@ class Werkzeuge:
                      "Öffnet eine Webseite im Browser und liest, was darauf steht - "
                      "samt aller Knöpfe und Felder mit ihren Nummern. Braucht eine "
                      "Freigabe, weil die Adresse selbst schon etwas mitteilt.",
-                     {"adresse": text}, ["adresse"]),
+                     {"adresse": text, "begruendung": begruendung},
+                     ["adresse", "begruendung"]),
             werkzeug("browser_lesen",
                      "Liest die gerade offene Seite noch einmal.", {}),
             werkzeug("browser_auftrag",
@@ -14693,19 +15763,22 @@ class Werkzeuge:
                      "sich durch. Klickt auf Beschriftungen, nicht auf Bildpunkte. "
                      "Meldet sich nirgends an und schließt keinen Kauf ab. Braucht "
                      "eine Freigabe.",
-                     {"ziel": text, "start": text, "schritte_max": ganz}, ["ziel"]),
+                     {"ziel": text, "start": text, "schritte_max": ganz,
+                      "begruendung": begruendung}, ["ziel", "begruendung"]),
             werkzeug("browser_schliessen", "Macht den Browser zu.", {}),
 
             # -- Telefon --
             werkzeug("anrufen",
                      "Ruft eine Nummer an und sagt dort einen Satz an - zum Beispiel "
                      "eine Terminbestätigung oder einen Rückruf. Braucht eine Freigabe.",
-                     {"nummer": text, "ansage": text}, ["nummer", "ansage"]),
+                     {"nummer": text, "ansage": text, "begruendung": begruendung},
+                     ["nummer", "ansage", "begruendung"]),
             werkzeug("sms_senden",
                      "Schickt eine SMS an eine Nummer - über Twilio, wenn eingerichtet, "
                      "sonst über die Nachrichten-App des Macs mit der eigenen Nummer. "
                      "Braucht eine Freigabe.",
-                     {"nummer": text, "text": text}, ["nummer", "text"]),
+                     {"nummer": text, "text": text, "begruendung": begruendung},
+                     ["nummer", "text", "begruendung"]),
             werkzeug("anrufliste",
                      "Zeigt die letzten Anrufe und SMS mit Nummer, Zeitpunkt und Status.",
                      {"limit": ganz}),
@@ -14714,7 +15787,7 @@ class Werkzeuge:
             werkzeug("bildschirm_bedienen",
                      "Bedient den Mac über Screenshots, Schritt für Schritt. Braucht "
                      "eine Freigabe und bestätigt jeden Schritt einzeln.",
-                     {"ziel": text}, ["ziel"]),
+                     {"ziel": text, "begruendung": begruendung}, ["ziel", "begruendung"]),
 
             # -- System --
             werkzeug("systeminfo",
@@ -14727,6 +15800,20 @@ class Werkzeuge:
             werkzeug("programm_oeffnen", "Startet ein Programm auf dem Mac.",
                      {"programm": text}, ["programm"]),
             werkzeug("dashboard_bauen", "Baut das Command Center neu.", {}),
+            # [P1 Bühne] Anfang
+            # [P1 Bühne] Ende
+            # [P2 Weltlage] Anfang
+            # [P2 Weltlage] Ende
+            # [P3 Telefon] Anfang
+            # [P3 Telefon] Ende
+            # [P4 Büro] Anfang
+            # [P4 Büro] Ende
+            # [P5 Sicht] Anfang
+            # [P5 Sicht] Ende
+            # [P6 Stimme] Anfang
+            # [P6 Stimme] Ende
+            # [P7 Start] Anfang
+            # [P7 Start] Ende
         ]
         return eigene + self.mcp.alle_werkzeuge()
 
@@ -14765,12 +15852,7 @@ class Werkzeuge:
         Gekürzt wird jedes Feld für sich, nicht der ganze Text: so bleiben
         Empfänger, Pfad und Adresse immer lesbar, auch wenn der Inhalt lang ist.
         """
-        kurz = {}
-        for schluessel, wert in (argumente or {}).items():
-            if isinstance(wert, str) and len(wert) > 400 and schluessel not in ("adresse", "url", "pfad", "an"):
-                kurz[schluessel] = "%s … (%d Zeichen insgesamt)" % (wert[:400], len(wert))
-            else:
-                kurz[schluessel] = wert
+        kurz = argumente_kuerzen(argumente)
         try:
             return json.dumps(kurz, ensure_ascii=False, default=str)
         except (TypeError, ValueError):
@@ -14783,7 +15865,18 @@ class Werkzeuge:
             # Über einen blossen Dateinamen kann niemand entscheiden.
             details = self.werkstatt.freigabetext(argumente.get("name", ""))
         else:
-            details = self.freigabe_details(argumente)
+            # Was, Warum und Wie statt rohem JSON. Kennungen (Termin-id, Message-ID)
+            # macht ein Auflöser lesbar; scheitert er, stehen die rohen Argumente da.
+            zusatz = None
+            aufloeser = FREIGABE_AUFLOESEN.get(name)
+            if aufloeser is not None:
+                try:
+                    zusatz = aufloeser(self, argumente)
+                except Exception as fehler:
+                    print("[freigabe] %s ließ sich nicht auflösen: %s" % (name, fehler))
+                    zusatz = None
+            details = json.dumps(freigabe_beschreiben(name, argumente, zusatz),
+                                 ensure_ascii=False, default=str)
         kanal = self._kanal()
         if kanal is not None:
             return kanal.anfordern(name, details)
@@ -15163,7 +16256,38 @@ class Werkzeuge:
         if name == "dashboard_bauen":
             return self.dashboard.bauen(mit_netz=True)
 
+        # [P1 Bühne] Anfang
+        # [P1 Bühne] Ende
+        # [P2 Weltlage] Anfang
+        # [P2 Weltlage] Ende
+        # [P3 Telefon] Anfang
+        # [P3 Telefon] Ende
+        # [P4 Büro] Anfang
+        # [P4 Büro] Ende
+        # [P5 Sicht] Anfang
+        # [P5 Sicht] Ende
+        # [P6 Stimme] Anfang
+        # [P6 Stimme] Ende
+        # [P7 Start] Anfang
+        # [P7 Start] Ende
+
         return {"ok": False, "fehler": "Für '%s' fehlt die Umsetzung." % name}
+
+    # -- Methoden der Pakete -----------------------------------------------
+    # [P1 Bühne] Anfang
+    # [P1 Bühne] Ende
+    # [P2 Weltlage] Anfang
+    # [P2 Weltlage] Ende
+    # [P3 Telefon] Anfang
+    # [P3 Telefon] Ende
+    # [P4 Büro] Anfang
+    # [P4 Büro] Ende
+    # [P5 Sicht] Anfang
+    # [P5 Sicht] Ende
+    # [P6 Stimme] Anfang
+    # [P6 Stimme] Ende
+    # [P7 Start] Anfang
+    # [P7 Start] Ende
 
     # -- Die Allowlist ------------------------------------------------------
 
@@ -15384,13 +16508,45 @@ So arbeitest du:
   anzukündigen. Sag nie "laut meinem Gedächtnis".
 - Ging etwas schief, sagst du es. Du erfindest keine Ergebnisse.
 - Steht vor seiner Nachricht ein Abschnitt <erinnerung>, sind das Treffer aus
-  deinem Gedächtnis zu dieser Frage. Er hat sie nicht gesagt - nutze sie still.
+  deinem Gedächtnis zu dieser Frage. Er hat sie nicht gesagt - nutze sie still.{zusatz}
 
 Die Buchhaltung führst du vor — die fachliche Prüfung macht sein Steuerberater.
 
 Heute ist {wochentag}, der {datum}.
 
 {gedaechtnis}"""
+
+# Weitere Regeln für den Systemprompt - jede wird dort zu einer eigenen Zeile "- ...",
+# direkt nach den Regeln unter "So arbeitest du". Jedes Paket schreibt zwischen seine
+# Marken, jede Regel mit Komma am Ende (sonst klebt Python sie an die nächste). Der
+# Text bleibt von Frage zu Frage gleich, der Zwischenspeicher hält.
+ZUSATZREGELN = (
+    # [P1 Bühne] Anfang
+    # [P1 Bühne] Ende
+    # [P2 Weltlage] Anfang
+    # [P2 Weltlage] Ende
+    # [P3 Telefon] Anfang
+    # [P3 Telefon] Ende
+    # [P4 Büro] Anfang
+    "Bei allem, was eine Freigabe braucht, schreibst du in begruendung in einem Satz, "
+    "warum. Die Freigabe zeigt Was, Warum und Wie.",
+    "Steht vor deiner letzten Antwort ein Hinweis, dass du etwas von dir aus gesagt hast, "
+    "und er antwortet mit ja, dann meint er diesen Vorschlag. Die nötigen Werkzeuge "
+    "fragen trotzdem einzeln nach Freigabe.",
+    # [P4 Büro] Ende
+    # [P5 Sicht] Anfang
+    # [P5 Sicht] Ende
+    # [P6 Stimme] Anfang
+    # [P6 Stimme] Ende
+    # [P7 Start] Anfang
+    # [P7 Start] Ende
+)
+
+# Was Jarvis von sich aus gesagt hat (Vorschlag, Briefing), kommt so ins Gespräch.
+HINWEIS_VON_SICH_AUS = ('<hinweis quelle="%s">Das Folgende hat Jarvis gerade von sich aus '
+                        'gesagt. Es ist keine Frage von %s.</hinweis>')
+# Mehr wartende Meldungen behält er nicht - die ältesten fallen weg.
+MAX_MELDUNGEN = 5
 
 
 def datum_deutsch(zeitpunkt: datetime = None) -> tuple:
@@ -15443,6 +16599,10 @@ class JarvisAgent:
         self.letztes_gehirn = ""
         # Was Jarvis gerade tut - die Anzeige (Gehirn, Zentrale) liest das mit.
         self.status = {"zustand": "bereit", "seit": time.time(), "satz": ""}
+        # Was er von sich aus gesagt hat und beim nächsten Gedanken ins Gespräch gehört.
+        # Eigene kleine Sperre - nie die Denk-Sperre, damit niemand darauf wartet.
+        self._meldungen = []
+        self._meldesperre = threading.Lock()
 
     # -- Grundlagen ---------------------------------------------------------
 
@@ -15474,9 +16634,11 @@ class JarvisAgent:
         if JARVIS_STIL:
             persoenlich += "So möchte %s, dass du klingst: %s\n" % (
                 NUTZER_NAME, JARVIS_STIL)
+        zusatz = "".join("\n- %s" % regel for regel in ZUSATZREGELN if regel)
         return SYSTEMPROMPT.format(
             name=NUTZER_NAME, branche=BRANCHE, wochentag=wochentag,
-            datum=datum, gedaechtnis=(persoenlich + "\n" if persoenlich else "") + gedaechtnis)
+            datum=datum, gedaechtnis=(persoenlich + "\n" if persoenlich else "") + gedaechtnis,
+            zusatz=zusatz)
 
     # -- Schnittstelle ------------------------------------------------------
 
@@ -15733,6 +16895,9 @@ class JarvisAgent:
                     "Einrichtung, dann kann ich dir antworten.")
         # Ein neuer Gedankengang: Fremdes ist noch nicht gelesen worden.
         self.tools.lauf_beginnen(hintergrund=False)
+        # Was er inzwischen von sich aus gesagt hat, steht vor der neuen Frage im
+        # Gespräch - nie zwischen einem Werkzeugaufruf und seinem Ergebnis.
+        self._meldungen_einbringen()
 
         # Der Systemprompt bleibt von Frage zu Frage gleich - dann liest der
         # Zwischenspeicher ihn samt Gespräch. Was zur Frage passt, kommt in die
@@ -16031,6 +17196,21 @@ class JarvisAgent:
             muster = self.tools.call_analysis.verkaufsmuster(30)
             teile.append("Vertrieb: %s" % muster.get("text", ""))
 
+        # [P1 Bühne] Anfang
+        # [P1 Bühne] Ende
+        # [P2 Weltlage] Anfang
+        # [P2 Weltlage] Ende
+        # [P3 Telefon] Anfang
+        # [P3 Telefon] Ende
+        # [P4 Büro] Anfang
+        # [P4 Büro] Ende
+        # [P5 Sicht] Anfang
+        # [P5 Sicht] Ende
+        # [P6 Stimme] Anfang
+        # [P6 Stimme] Ende
+        # [P7 Start] Anfang
+        # [P7 Start] Ende
+
         return "\n".join(teile)
 
     @staticmethod
@@ -16041,6 +17221,91 @@ class JarvisAgent:
                 "Feierabend. Ohne Anthropic-Schlüssel kann ich nur die nackten Zahlen "
                 "vorlesen.")
         return "%s\n%s" % (kopf, bausteine)
+
+    # -- Meldungen ins Gespräch ---------------------------------------------
+
+    def meldung_vormerken(self, text: str, quelle: str = "zeitplan") -> bool:
+        """Merkt sich, was Jarvis von sich aus gesagt hat - für den nächsten Gedanken.
+
+        Ein Vorschlag wie "Soll ich morgen zwei Termine streichen?" muss im
+        Gespräch stehen, sonst weiß Claude bei "ja" nicht, was gemeint ist.
+        Eingefügt wird erst am Anfang der nächsten Frage (:meth:`_denken`), nie
+        mittendrin: Zwischen einem Werkzeugaufruf und seinem Ergebnis darf
+        nichts stehen, sonst weist die Schnittstelle jede weitere Anfrage ab.
+
+        Nimmt nur die eigene kleine Sperre, wartet also nie auf einen laufenden
+        Gedanken. Höchstens fünf Meldungen warten, doppelte fallen weg.
+        Werkzeuge rufen das nie auf - sie geben einen Vorschlag als Text zurück.
+        """
+        text = str(text or "").strip()
+        if not text:
+            return False
+        quelle = re.sub(r"[^\w-]", "", str(quelle or ""))[:30] or "zeitplan"
+        with self._meldesperre:
+            if any(m["text"] == text for m in self._meldungen):
+                return False
+            self._meldungen.append({"text": text, "quelle": quelle})
+            del self._meldungen[:-MAX_MELDUNGEN]
+        return True
+
+    def _letzte_antwort(self) -> str:
+        """Der Text der letzten Antwort im Verlauf - leer, wenn noch keine."""
+        for nachricht in reversed(self.verlauf):
+            if nachricht.get("role") != "assistant":
+                continue
+            inhalt = nachricht.get("content")
+            if isinstance(inhalt, str):
+                return inhalt.strip()
+            return " ".join(b.get("text", "") for b in inhalt or []
+                            if isinstance(b, dict) and b.get("type") == "text").strip()
+        return ""
+
+    def _meldungen_einbringen(self) -> int:
+        """Hängt die vorgemerkten Meldungen als Paar an den Verlauf. Gibt die Zahl zurück.
+
+        Je Meldung ein Hinweis (Nutzerrolle) und die Meldung selbst (Jarvis).
+        Steht der Text schon als letzte Antwort im Verlauf, fällt er weg. Endet
+        der Verlauf mit einem Werkzeugaufruf ohne Ergebnis, bleibt alles liegen.
+        """
+        with self._meldesperre:
+            offen, self._meldungen = self._meldungen, []
+        if not offen:
+            return 0
+        letzte = self.verlauf[-1] if self.verlauf else {}
+        if letzte.get("role") == "assistant" and isinstance(letzte.get("content"), list) and any(
+                isinstance(b, dict) and b.get("type") == "tool_use" for b in letzte["content"]):
+            with self._meldesperre:
+                self._meldungen = (offen + self._meldungen)[-MAX_MELDUNGEN:]
+            return 0
+        angehaengt = 0
+        for meldung in offen:
+            text = meldung["text"]
+            zuletzt = self._letzte_antwort()
+            if zuletzt and zuletzt in (text, text[:4000]):
+                continue
+            self.verlauf.append({"role": "user", "content": HINWEIS_VON_SICH_AUS
+                                 % (meldung["quelle"], NUTZER_NAME)})
+            self.verlauf.append({"role": "assistant",
+                                 "content": [{"type": "text", "text": text[:4000]}]})
+            angehaengt += 1
+        return angehaengt
+
+    # -- Methoden der Pakete -----------------------------------------------
+
+    # [P1 Bühne] Anfang
+    # [P1 Bühne] Ende
+    # [P2 Weltlage] Anfang
+    # [P2 Weltlage] Ende
+    # [P3 Telefon] Anfang
+    # [P3 Telefon] Ende
+    # [P4 Büro] Anfang
+    # [P4 Büro] Ende
+    # [P5 Sicht] Anfang
+    # [P5 Sicht] Ende
+    # [P6 Stimme] Anfang
+    # [P6 Stimme] Ende
+    # [P7 Start] Anfang
+    # [P7 Start] Ende
 
     # -- Übersicht ----------------------------------------------------------
 
@@ -16220,6 +17485,23 @@ def dauerbetrieb(dienst: bool = False):
         agent.tools.autopilot.ausgabe = ansager.leise
         agent.tools.autopilot.start()
         print("[autopilot] %s" % ("an" if AUTOPILOT_AN else "aus (python3 jarvis.py autopilot an)"))
+
+    # Agent, Stimme und Ausgabewege stehen - hier verdrahten die Pakete (etwa Ausgaben),
+    # bevor die Hauptschleife läuft.
+    # [P1 Bühne] Anfang
+    # [P1 Bühne] Ende
+    # [P2 Weltlage] Anfang
+    # [P2 Weltlage] Ende
+    # [P3 Telefon] Anfang
+    # [P3 Telefon] Ende
+    # [P4 Büro] Anfang
+    # [P4 Büro] Ende
+    # [P5 Sicht] Anfang
+    # [P5 Sicht] Ende
+    # [P6 Stimme] Anfang
+    # [P6 Stimme] Ende
+    # [P7 Start] Anfang
+    # [P7 Start] Ende
 
     if not stimme.mikrofon_bereit() and not dienst:
         print("\n[!] Kein Mikrofonzugriff. Ich wechsle in den Tippbetrieb.")
@@ -16555,6 +17837,23 @@ def webbetrieb(argumente=None):
     autopilot.start()
     print("  Autopilot: %s" % ("an, arbeitet im Hintergrund" if AUTOPILOT_AN
                                else "aus (einschalten auf der Seite Autopilot)"))
+
+    # Agent, Server und Ausgabewege stehen - hier verdrahten die Pakete (etwa Ausgaben),
+    # bevor der Browser aufgeht und die Hauptschleife läuft.
+    # [P1 Bühne] Anfang
+    # [P1 Bühne] Ende
+    # [P2 Weltlage] Anfang
+    # [P2 Weltlage] Ende
+    # [P3 Telefon] Anfang
+    # [P3 Telefon] Ende
+    # [P4 Büro] Anfang
+    # [P4 Büro] Ende
+    # [P5 Sicht] Anfang
+    # [P5 Sicht] Ende
+    # [P6 Stimme] Anfang
+    # [P6 Stimme] Ende
+    # [P7 Start] Anfang
+    # [P7 Start] Ende
 
     adresse = web.adresse()
     print("  Jarvis läuft jetzt im Browser:")
@@ -17028,6 +18327,21 @@ def hauptprogramm(argumente=None) -> int:
         return autopilot_zeigen(argumente[1:])
     elif modus in ("zugang", "schluessel", "schlüssel"):
         return 0 if zugang_eintragen(argumente[1] if len(argumente) > 1 else "") else 1
+    # Neue Betriebsarten der Pakete, je als "elif modus == ...:".
+    # [P1 Bühne] Anfang
+    # [P1 Bühne] Ende
+    # [P2 Weltlage] Anfang
+    # [P2 Weltlage] Ende
+    # [P3 Telefon] Anfang
+    # [P3 Telefon] Ende
+    # [P4 Büro] Anfang
+    # [P4 Büro] Ende
+    # [P5 Sicht] Anfang
+    # [P5 Sicht] Ende
+    # [P6 Stimme] Anfang
+    # [P6 Stimme] Ende
+    # [P7 Start] Anfang
+    # [P7 Start] Ende
     elif modus in ("hilfe", "--help", "-h", "help"):
         print(__doc__)
     else:

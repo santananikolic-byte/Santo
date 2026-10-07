@@ -238,6 +238,26 @@ AUTOPILOT_MAX_PRO_RUNDE = _ganzzahl("AUTOPILOT_MAX_PRO_RUNDE", 2)
 # Ersteinrichtung abgeschlossen?
 EINRICHTUNG_FERTIG = _wahrheit("EINRICHTUNG_FERTIG", False)
 
+# Einstellungen der Pakete - jedes zwischen seinen Marken. Die Namen müssen
+# projektweit eindeutig sein (siehe oben).
+# [P1 Bühne] Anfang
+# Wie lange die Zentrale eine gezeigte Ansicht hält, bevor sie zur Übersicht
+# zurückkehrt (Sekunden).
+ANZEIGE_DAUER = _ganzzahl("ANZEIGE_DAUER", 180)
+# [P1 Bühne] Ende
+# [P2 Weltlage] Anfang
+# [P2 Weltlage] Ende
+# [P3 Telefon] Anfang
+# [P3 Telefon] Ende
+# [P4 Büro] Anfang
+# [P4 Büro] Ende
+# [P5 Sicht] Anfang
+# [P5 Sicht] Ende
+# [P6 Stimme] Anfang
+# [P6 Stimme] Ende
+# [P7 Start] Anfang
+# [P7 Start] Ende
+
 
 def env_setzen(schluessel: str, wert) -> bool:
     """Schreibt einen Wert nach ``config/.env`` und aktualisiert ihn sofort."""
@@ -307,6 +327,20 @@ def konfig_uebersicht() -> dict:
         "Kalender": bool(CALDAV_URL),
         "Supabase": bool(SUPABASE_URL and SUPABASE_KEY),
         "Telefon": bool(TWILIO_SID and TWILIO_TOKEN and TWILIO_NUMMER),
+        # [P1 Bühne] Anfang
+        # [P1 Bühne] Ende
+        # [P2 Weltlage] Anfang
+        # [P2 Weltlage] Ende
+        # [P3 Telefon] Anfang
+        # [P3 Telefon] Ende
+        # [P4 Büro] Anfang
+        # [P4 Büro] Ende
+        # [P5 Sicht] Anfang
+        # [P5 Sicht] Ende
+        # [P6 Stimme] Anfang
+        # [P6 Stimme] Ende
+        # [P7 Start] Anfang
+        # [P7 Start] Ende
     }
 
 

@@ -25,6 +25,7 @@ import threading
 
 import config
 from modules.akquise import Akquise, SONDERLEISTUNGEN, STUFEN
+from modules.anzeige import Anzeige
 from modules.bookkeeping import Bookkeeping, KATEGORIEN
 from modules.browser import Browser
 from modules.calendar_mod import Kalender
@@ -32,6 +33,7 @@ from modules.call_analysis import CallAnalysis
 from modules.camera import Kamera
 from modules.computer_use import Bildschirm
 from modules.dashboard import Dashboard
+from modules.freigabe import FREIGABE_AUFLOESEN, argumente_kuerzen, freigabe_beschreiben
 from modules.mail import Mail
 from modules.mcp_client import MCPClient
 from modules.memory import Memory, heute_datum
@@ -46,6 +48,21 @@ from modules.telefon import Telefon, nummer_pruefen
 from modules.telegram_mod import Telegram
 from modules.werkstatt import Werkstatt
 from modules.world import Welt
+# Importe der Pakete.
+# [P1 Bühne] Anfang
+# [P1 Bühne] Ende
+# [P2 Weltlage] Anfang
+# [P2 Weltlage] Ende
+# [P3 Telefon] Anfang
+# [P3 Telefon] Ende
+# [P4 Büro] Anfang
+# [P4 Büro] Ende
+# [P5 Sicht] Anfang
+# [P5 Sicht] Ende
+# [P6 Stimme] Anfang
+# [P6 Stimme] Ende
+# [P7 Start] Anfang
+# [P7 Start] Ende
 
 # Zeichen, die in eingesetzten Parametern nichts zu suchen haben. Weil überall
 # ``shell=False`` gilt, wären sie ohnehin harmlos - abgelehnt werden sie
@@ -92,6 +109,22 @@ FREMDE_INHALTE = {"datei_lesen", "mails_lesen", "mails_suchen", "browser_lesen",
                   "browser_oeffnen", "recherche", "lagebericht", "dateien_suchen",
                   "termine_lesen"}
 
+# Die Pakete ergänzen die drei Mengen hier, etwa FREIGABE_PFLICHTIG |= {"termine_absagen"}.
+# [P1 Bühne] Anfang
+# [P1 Bühne] Ende
+# [P2 Weltlage] Anfang
+# [P2 Weltlage] Ende
+# [P3 Telefon] Anfang
+# [P3 Telefon] Ende
+# [P4 Büro] Anfang
+# [P4 Büro] Ende
+# [P5 Sicht] Anfang
+# [P5 Sicht] Ende
+# [P6 Stimme] Anfang
+# [P6 Stimme] Ende
+# [P7 Start] Anfang
+# [P7 Start] Ende
+
 
 def parameter_pruefen(wert: str):
     """Prüft einen eingesetzten Parameter. Gibt ``(ok, meldung)`` zurück."""
@@ -116,6 +149,7 @@ class Werkzeuge:
     def __init__(self, agent=None, db_pfad: str = None):
         self.agent = agent
         self.memory = Memory(db_pfad)
+        self.anzeige = Anzeige()  # der eine Anzeige-Speicher für alle Bildschirme
         self.recall = Recall(self.memory)
         self.bookkeeping = Bookkeeping(self.memory)
         self.call_analysis = CallAnalysis(self.memory)
@@ -147,6 +181,20 @@ class Werkzeuge:
         self.stimme = None
         # Ein anderer Weg, Freigaben einzuholen - die Web-App setzt sich hier ein.
         self.freigabe_kanal = None
+        # [P1 Bühne] Anfang
+        # [P1 Bühne] Ende
+        # [P2 Weltlage] Anfang
+        # [P2 Weltlage] Ende
+        # [P3 Telefon] Anfang
+        # [P3 Telefon] Ende
+        # [P4 Büro] Anfang
+        # [P4 Büro] Ende
+        # [P5 Sicht] Anfang
+        # [P5 Sicht] Ende
+        # [P6 Stimme] Anfang
+        # [P6 Stimme] Ende
+        # [P7 Start] Anfang
+        # [P7 Start] Ende
 
     def freigabe_kanal_setzen(self, kanal):
         """Setzt einen anderen Freigabeweg, etwa den Browser.
@@ -180,6 +228,49 @@ class Werkzeuge:
         self.bildschirm.agent = agent
         self.browser.agent = agent
         self.team.agent = agent
+        # [P1 Bühne] Anfang
+        # [P1 Bühne] Ende
+        # [P2 Weltlage] Anfang
+        # [P2 Weltlage] Ende
+        # [P3 Telefon] Anfang
+        # [P3 Telefon] Ende
+        # [P4 Büro] Anfang
+        # [P4 Büro] Ende
+        # [P5 Sicht] Anfang
+        # [P5 Sicht] Ende
+        # [P6 Stimme] Anfang
+        # [P6 Stimme] Ende
+        # [P7 Start] Anfang
+        # [P7 Start] Ende
+
+    # -- Anzeige ------------------------------------------------------------
+
+    def zeigen(self, modus: str, daten: dict = None, dauer_s: float = None, quelle: str = ""):
+        """Schaltet die Zentrale auf eine Ansicht - der einzige Weg der Werkzeuge dorthin.
+
+        Im Hintergrund (Autopilot, Fachkräfte) passiert nichts: Niemand sitzt
+        davor, und die Zentrale soll nicht minutenlang umspringen. Jeder Fehler
+        wird geschluckt - die Anzeige darf kein Werkzeug kaputt machen.
+        Gibt das Ergebnis des Speichers zurück, sonst ``None``.
+        """
+        if self.im_hintergrund():
+            return None
+        try:
+            return self.anzeige.zeigen(modus, daten, dauer_s, quelle)
+        except Exception as fehler:
+            print("[anzeige] %s" % fehler)
+            return None
+
+    def melden(self, kanal: str, daten: dict, dauer_s: float = 0):
+        """Schreibt einen Anzeige-Kanal (anruf, sicht, ...). Wie :meth:`zeigen`:
+        im Hintergrund nichts, nie eine Ausnahme. Gibt die Version zurück, sonst ``None``."""
+        if self.im_hintergrund():
+            return None
+        try:
+            return self.anzeige.melden(kanal, daten, dauer_s)
+        except Exception as fehler:
+            print("[anzeige] %s" % fehler)
+            return None
 
     # -- Katalog für Claude -------------------------------------------------
 
@@ -195,6 +286,10 @@ class Werkzeuge:
         zahl = {"type": "number"}
         ganz = {"type": "integer"}
         wahr = {"type": "boolean"}
+        # Pflicht bei allem, was eine Freigabe braucht - steht in der Frage als "Warum".
+        begruendung = {"type": "string",
+                       "description": "Warum das nötig ist, in einem Satz – steht in der "
+                                      "Freigabefrage."}
 
         eigene = [
             # -- Gedächtnis --
@@ -379,7 +474,8 @@ class Werkzeuge:
                      {"id": ganz}),
             werkzeug("autopilot_schalten",
                      "Schaltet den Autopiloten ein oder aus. Er arbeitet im "
-                     "Hintergrund und schickt nichts ab.", {"an": wahr}, ["an"]),
+                     "Hintergrund und schickt nichts ab.",
+                     {"an": wahr, "begruendung": begruendung}, ["an", "begruendung"]),
             werkzeug("lagebericht",
                      "Der vollständige aktuelle Stand des Betriebs: Kasse, "
                      "Aufträge, Cashflow, Termine, Post, Offenes.", {}),
@@ -412,16 +508,18 @@ class Werkzeuge:
             werkzeug("datei_schreiben",
                      "Legt eine neue Textdatei im Benutzerordner an. Fragt vorher "
                      "um Freigabe. Ersetzt nichts, außer ueberschreiben ist gesetzt.",
-                     {"pfad": text, "inhalt": text, "ueberschreiben": wahr},
-                     ["pfad", "inhalt"]),
+                     {"pfad": text, "inhalt": text, "ueberschreiben": wahr,
+                      "begruendung": begruendung},
+                     ["pfad", "inhalt", "begruendung"]),
             werkzeug("skript_zeigen", "Zeigt den Code eines abgelegten Skripts.",
                      {"name": text}, ["name"]),
             werkzeug("skript_ausfuehren",
                      "Führt ein Skript aus der Werkstatt aus. Braucht eine "
                      "Freigabe, und der Code wird dabei vollständig angezeigt.",
                      {"name": text, "argumente": {"type": "array",
-                                                  "items": {"type": "string"}}},
-                     ["name"]),
+                                                  "items": {"type": "string"}},
+                      "begruendung": begruendung},
+                     ["name", "begruendung"]),
             werkzeug("werkstatt_liste", "Zeigt alle abgelegten Skripte.", {}),
 
             # -- Kommunikation --
@@ -434,16 +532,17 @@ class Werkzeuge:
                      {"begriff": text, "tage": ganz, "limit": ganz}, ["begriff"]),
             werkzeug("mail_senden",
                      "Verschickt eine E-Mail. Braucht eine Freigabe.",
-                     {"an": text, "betreff": text, "text": text},
-                     ["an", "betreff", "text"]),
+                     {"an": text, "betreff": text, "text": text, "begruendung": begruendung},
+                     ["an", "betreff", "text", "begruendung"]),
             werkzeug("nachricht_senden",
                      "Verschickt eine Nachricht über telegram, mail, imessage, sms oder "
                      "whatsapp. imessage und sms gehen über die Nachrichten-App des Macs "
                      "mit der eigenen Handynummer. Braucht eine Freigabe.",
                      {"kanal": {"type": "string",
                                 "enum": ["telegram", "mail", "imessage", "sms", "whatsapp"]},
-                      "an": text, "text": text, "als_sprache": wahr, "betreff": text},
-                     ["kanal", "text"]),
+                      "an": text, "text": text, "als_sprache": wahr, "betreff": text,
+                      "begruendung": begruendung},
+                     ["kanal", "text", "begruendung"]),
 
             # -- Kalender --
             werkzeug("termine_lesen",
@@ -451,7 +550,8 @@ class Werkzeuge:
             werkzeug("termin_anlegen",
                      "Trägt einen Termin ein. Braucht eine Freigabe.",
                      {"titel": text, "beginn": text, "dauer_minuten": ganz,
-                      "ort": text, "beschreibung": text}, ["titel", "beginn"]),
+                      "ort": text, "beschreibung": text, "begruendung": begruendung},
+                     ["titel", "beginn", "begruendung"]),
 
             # -- Welt --
             werkzeug("wetter", "Aktuelles Wetter und Vorhersage für einen Ort.",
@@ -470,7 +570,8 @@ class Werkzeuge:
                      "Öffnet eine Webseite im Browser und liest, was darauf steht - "
                      "samt aller Knöpfe und Felder mit ihren Nummern. Braucht eine "
                      "Freigabe, weil die Adresse selbst schon etwas mitteilt.",
-                     {"adresse": text}, ["adresse"]),
+                     {"adresse": text, "begruendung": begruendung},
+                     ["adresse", "begruendung"]),
             werkzeug("browser_lesen",
                      "Liest die gerade offene Seite noch einmal.", {}),
             werkzeug("browser_auftrag",
@@ -478,19 +579,22 @@ class Werkzeuge:
                      "sich durch. Klickt auf Beschriftungen, nicht auf Bildpunkte. "
                      "Meldet sich nirgends an und schließt keinen Kauf ab. Braucht "
                      "eine Freigabe.",
-                     {"ziel": text, "start": text, "schritte_max": ganz}, ["ziel"]),
+                     {"ziel": text, "start": text, "schritte_max": ganz,
+                      "begruendung": begruendung}, ["ziel", "begruendung"]),
             werkzeug("browser_schliessen", "Macht den Browser zu.", {}),
 
             # -- Telefon --
             werkzeug("anrufen",
                      "Ruft eine Nummer an und sagt dort einen Satz an - zum Beispiel "
                      "eine Terminbestätigung oder einen Rückruf. Braucht eine Freigabe.",
-                     {"nummer": text, "ansage": text}, ["nummer", "ansage"]),
+                     {"nummer": text, "ansage": text, "begruendung": begruendung},
+                     ["nummer", "ansage", "begruendung"]),
             werkzeug("sms_senden",
                      "Schickt eine SMS an eine Nummer - über Twilio, wenn eingerichtet, "
                      "sonst über die Nachrichten-App des Macs mit der eigenen Nummer. "
                      "Braucht eine Freigabe.",
-                     {"nummer": text, "text": text}, ["nummer", "text"]),
+                     {"nummer": text, "text": text, "begruendung": begruendung},
+                     ["nummer", "text", "begruendung"]),
             werkzeug("anrufliste",
                      "Zeigt die letzten Anrufe und SMS mit Nummer, Zeitpunkt und Status.",
                      {"limit": ganz}),
@@ -499,7 +603,7 @@ class Werkzeuge:
             werkzeug("bildschirm_bedienen",
                      "Bedient den Mac über Screenshots, Schritt für Schritt. Braucht "
                      "eine Freigabe und bestätigt jeden Schritt einzeln.",
-                     {"ziel": text}, ["ziel"]),
+                     {"ziel": text, "begruendung": begruendung}, ["ziel", "begruendung"]),
 
             # -- System --
             werkzeug("systeminfo",
@@ -512,6 +616,20 @@ class Werkzeuge:
             werkzeug("programm_oeffnen", "Startet ein Programm auf dem Mac.",
                      {"programm": text}, ["programm"]),
             werkzeug("dashboard_bauen", "Baut das Command Center neu.", {}),
+            # [P1 Bühne] Anfang
+            # [P1 Bühne] Ende
+            # [P2 Weltlage] Anfang
+            # [P2 Weltlage] Ende
+            # [P3 Telefon] Anfang
+            # [P3 Telefon] Ende
+            # [P4 Büro] Anfang
+            # [P4 Büro] Ende
+            # [P5 Sicht] Anfang
+            # [P5 Sicht] Ende
+            # [P6 Stimme] Anfang
+            # [P6 Stimme] Ende
+            # [P7 Start] Anfang
+            # [P7 Start] Ende
         ]
         return eigene + self.mcp.alle_werkzeuge()
 
@@ -550,12 +668,7 @@ class Werkzeuge:
         Gekürzt wird jedes Feld für sich, nicht der ganze Text: so bleiben
         Empfänger, Pfad und Adresse immer lesbar, auch wenn der Inhalt lang ist.
         """
-        kurz = {}
-        for schluessel, wert in (argumente or {}).items():
-            if isinstance(wert, str) and len(wert) > 400 and schluessel not in ("adresse", "url", "pfad", "an"):
-                kurz[schluessel] = "%s … (%d Zeichen insgesamt)" % (wert[:400], len(wert))
-            else:
-                kurz[schluessel] = wert
+        kurz = argumente_kuerzen(argumente)
         try:
             return json.dumps(kurz, ensure_ascii=False, default=str)
         except (TypeError, ValueError):
@@ -568,7 +681,18 @@ class Werkzeuge:
             # Über einen blossen Dateinamen kann niemand entscheiden.
             details = self.werkstatt.freigabetext(argumente.get("name", ""))
         else:
-            details = self.freigabe_details(argumente)
+            # Was, Warum und Wie statt rohem JSON. Kennungen (Termin-id, Message-ID)
+            # macht ein Auflöser lesbar; scheitert er, stehen die rohen Argumente da.
+            zusatz = None
+            aufloeser = FREIGABE_AUFLOESEN.get(name)
+            if aufloeser is not None:
+                try:
+                    zusatz = aufloeser(self, argumente)
+                except Exception as fehler:
+                    print("[freigabe] %s ließ sich nicht auflösen: %s" % (name, fehler))
+                    zusatz = None
+            details = json.dumps(freigabe_beschreiben(name, argumente, zusatz),
+                                 ensure_ascii=False, default=str)
         kanal = self._kanal()
         if kanal is not None:
             return kanal.anfordern(name, details)
@@ -948,7 +1072,38 @@ class Werkzeuge:
         if name == "dashboard_bauen":
             return self.dashboard.bauen(mit_netz=True)
 
+        # [P1 Bühne] Anfang
+        # [P1 Bühne] Ende
+        # [P2 Weltlage] Anfang
+        # [P2 Weltlage] Ende
+        # [P3 Telefon] Anfang
+        # [P3 Telefon] Ende
+        # [P4 Büro] Anfang
+        # [P4 Büro] Ende
+        # [P5 Sicht] Anfang
+        # [P5 Sicht] Ende
+        # [P6 Stimme] Anfang
+        # [P6 Stimme] Ende
+        # [P7 Start] Anfang
+        # [P7 Start] Ende
+
         return {"ok": False, "fehler": "Für '%s' fehlt die Umsetzung." % name}
+
+    # -- Methoden der Pakete -----------------------------------------------
+    # [P1 Bühne] Anfang
+    # [P1 Bühne] Ende
+    # [P2 Weltlage] Anfang
+    # [P2 Weltlage] Ende
+    # [P3 Telefon] Anfang
+    # [P3 Telefon] Ende
+    # [P4 Büro] Anfang
+    # [P4 Büro] Ende
+    # [P5 Sicht] Anfang
+    # [P5 Sicht] Ende
+    # [P6 Stimme] Anfang
+    # [P6 Stimme] Ende
+    # [P7 Start] Anfang
+    # [P7 Start] Ende
 
     # -- Die Allowlist ------------------------------------------------------
 
