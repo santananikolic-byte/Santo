@@ -52,6 +52,21 @@ from modules.telegram_mod import TelegramFreigabe
 from modules.voice import Stimme, weckwort_pruefen
 from modules.macapp import app_bauen
 from modules.webapp import JarvisWeb, STANDARD_PORT
+# Importe der Pakete.
+# [P1 Bühne] Anfang
+# [P1 Bühne] Ende
+# [P2 Weltlage] Anfang
+# [P2 Weltlage] Ende
+# [P3 Telefon] Anfang
+# [P3 Telefon] Ende
+# [P4 Büro] Anfang
+# [P4 Büro] Ende
+# [P5 Sicht] Anfang
+# [P5 Sicht] Ende
+# [P6 Stimme] Anfang
+# [P6 Stimme] Ende
+# [P7 Start] Anfang
+# [P7 Start] Ende
 
 # Die Anzeige des Dienstes hat ihren eigenen Anschluss - so kann die Web-App per
 # Doppelklick trotzdem starten, während der Dienst läuft.

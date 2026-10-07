@@ -556,10 +556,12 @@ class Werkzeuge:
             # -- Welt --
             werkzeug("wetter", "Aktuelles Wetter und Vorhersage für einen Ort.",
                      {"ort": text}),
-            werkzeug("recherche", "Sucht etwas im Internet.", {"frage": text}, ["frage"]),
+            werkzeug("recherche", "Sucht etwas im Internet.",
+                     {"frage": text, "begruendung": begruendung}, ["frage"]),
             werkzeug("flug_suchen",
                      "Sucht Flugverbindungen und nennt sie. Bucht nichts.",
-                     {"von": text, "nach": text, "wann": text}, ["von", "nach"]),
+                     {"von": text, "nach": text, "wann": text, "begruendung": begruendung},
+                     ["von", "nach"]),
             werkzeug("umschauen",
                      "Nimmt ein Einzelbild der Kamera auf und beschreibt, was zu sehen "
                      "ist. Kein Dauervideo.",
@@ -573,7 +575,8 @@ class Werkzeuge:
                      {"adresse": text, "begruendung": begruendung},
                      ["adresse", "begruendung"]),
             werkzeug("browser_lesen",
-                     "Liest die gerade offene Seite noch einmal.", {}),
+                     "Liest die gerade offene Seite noch einmal.",
+                     {"begruendung": begruendung}),
             werkzeug("browser_auftrag",
                      "Erledigt etwas im Browser: sucht, füllt Formulare aus, klickt "
                      "sich durch. Klickt auf Beschriftungen, nicht auf Bildpunkte. "
@@ -680,6 +683,13 @@ class Werkzeuge:
             # Beim Ausführen von Code muss der Code selbst in der Frage stehen.
             # Über einen blossen Dateinamen kann niemand entscheiden.
             details = self.werkstatt.freigabetext(argumente.get("name", ""))
+            # Auch die Argumente und der Grund gehören in die Frage - sonst sagt man Ja zu
+            # einem Aufruf, den man nicht ganz gesehen hat.
+            liste = argumente.get("argumente") or []
+            if liste:
+                details += "\n\nArgumente: %s" % " ".join(str(x) for x in liste)[:500]
+            if argumente.get("begruendung"):
+                details += "\nGrund: %s" % " ".join(str(argumente["begruendung"]).split())[:300]
         else:
             # Was, Warum und Wie statt rohem JSON. Kennungen (Termin-id, Message-ID)
             # macht ein Auflöser lesbar; scheitert er, stehen die rohen Argumente da.

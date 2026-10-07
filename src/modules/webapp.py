@@ -138,15 +138,28 @@ class WebFreigabe:
     def beantworten(self, kennung: str, ja: bool, kanal: str = "klick") -> bool:
         """Beantwortet eine Freigabefrage. ``kanal``: klick, sprache oder geste.
 
-        Ist die Antwort nicht angenommen, steht der Grund in ``letzter_grund``.
+        Ist die Antwort nicht angenommen, steht der Grund in ``letzter_grund``
+        (für mehrere gleichzeitige Anfragen: :meth:`beantworten_mit_grund`).
+        """
+        return self.beantworten_mit_grund(kennung, ja, kanal)[0]
+
+    def beantworten_mit_grund(self, kennung: str, ja: bool, kanal: str = "klick") -> tuple:
+        """Wie :meth:`beantworten`, gibt aber ``(angenommen, grund)`` zurück.
+
+        Eine schon beantwortete Frage bleibt beantwortet - ein zweiter Klick
+        dreht ein Nein nicht in ein Ja.
         """
         kanal = str(kanal or "klick").strip().lower()
+        if kanal not in FREIGABE_WEGE:
+            kanal = "unbekannt"
         with self._sperre:
             eintrag = self._offen.get(kennung)
-            if kanal not in FREIGABE_WEGE:
+            if kanal == "unbekannt":
                 grund = "Diesen Freigabeweg kenne ich nicht."
             elif eintrag is None:
                 grund = "Diese Frage ist nicht mehr offen."
+            elif eintrag["antwort"] is not None:
+                grund = "Diese Frage ist schon beantwortet."
             elif kanal == "geste":
                 grund = "Gesten-Freigabe ist noch nicht eingebaut."
             else:
@@ -156,9 +169,9 @@ class WebFreigabe:
             self.letzter_grund = grund
         self._protokollieren(eintrag, kanal, ja, grund)
         if grund:
-            return False
+            return False, grund
         eintrag["ereignis"].set()
-        return True
+        return True, ""
 
     def _protokollieren(self, eintrag, kanal: str, ja: bool, grund: str):
         """Hält fest, auf welchem Weg geantwortet wurde - auch eine abgewiesene Antwort."""
@@ -537,14 +550,15 @@ class JarvisWeb:
 
         if pfad == "/api/freigabe":
             kennung = str(daten.get("id") or "")
-            ja = bool(daten.get("ja"))
+            # Nur ein echtes true ist ein Ja - "false", "nein" oder 1 sind es nicht.
+            ja = daten.get("ja") is True
             # klick, sprache oder geste - eine Geste gibt in dieser Stufe nichts frei.
-            kanal = str(daten.get("kanal") or "klick")
-            erledigt = self.freigabe.beantworten(kennung, ja, kanal)
+            kanal = str(daten.get("kanal") or "klick")[:20]
+            erledigt, grund = self.freigabe.beantworten_mit_grund(kennung, ja, kanal)
             return self._antworten(behandler, 200, {
                 "ok": erledigt,
                 "text": ("Freigabe erteilt." if ja else "Abgelehnt.") if erledigt
-                        else (self.freigabe.letzter_grund or "Diese Frage ist nicht mehr offen.")})
+                        else (grund or "Diese Frage ist nicht mehr offen.")})
 
         if pfad == "/api/anzeige/satz":
             # Der Satz, den der Browser gerade vorliest - für den Pegel der Anzeige.

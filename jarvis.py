@@ -1770,6 +1770,14 @@ def diskret_filtern(kanal: str, daten: dict) -> dict:
         for zeile in daten.get("mitschrift") or []:
             if isinstance(zeile, dict):
                 zeile["text"] = ""
+        # Das Ergebnis nennt Namen und Wünsche - im Raum bleibt nur, ob es geklappt hat.
+        ergebnis = daten.get("ergebnis")
+        if isinstance(ergebnis, dict):
+            daten["ergebnis"] = {k: v for k, v in ergebnis.items()
+                                 if k in ("reserviert", "datum", "uhrzeit", "personen")}
+        for feld in ("hinweise", "gegenvorschlag", "grund_ende", "auftrag"):
+            if feld in daten:
+                daten[feld] = ""
     elif kanal == "untertitel":
         for feld in ("original", "uebersetzung"):
             if feld in daten:
@@ -1787,8 +1795,17 @@ def diskret_filtern(kanal: str, daten: dict) -> dict:
     return daten
 
 
+# Auf diesen Ansichten können Titel und Standzeile Namen tragen (Anruf bei ...,
+# Erholung von ...). Globus, Märkte, Kennzahlen und Recherche sind öffentlich oder Zahlen.
+BUEHNE_PRIVAT = ("anruf", "sicht", "untertitel", "inhalte", "hochfahren")
+
+
 def _buehne_diskret(daten: dict) -> dict:
-    """Bühne im Diskretmodus: Beiträge ohne Titel, auch innerhalb einer Folge."""
+    """Bühne im Diskretmodus: Beiträge ohne Titel, private Ansichten ohne Titelzeile."""
+    if daten.get("modus") in BUEHNE_PRIVAT:
+        for feld in ("titel", "stand"):
+            if feld in daten:
+                daten[feld] = ""
     if daten.get("modus") == "inhalte":
         for eintrag in daten.get("eintraege") or []:
             if isinstance(eintrag, dict) and "titel" in eintrag:
@@ -1823,8 +1840,9 @@ class Anzeige:
             return None, "Die Anzeige-Daten müssen ein Wörterbuch sein."
         try:
             # NaN und Unendlich sind kein JSON - der Browser könnte die Antwort nicht lesen.
-            roh = json.dumps(daten, ensure_ascii=False, default=str, allow_nan=False)
-        except (TypeError, ValueError) as fehler:
+            # Ohne default=str: Datum, Menge oder Bytes sind kein Anzeige-Inhalt.
+            roh = json.dumps(daten, ensure_ascii=False, allow_nan=False)
+        except (TypeError, ValueError, RecursionError) as fehler:
             return None, "Die Anzeige-Daten sind kein gültiges JSON (%s)." % fehler
         if len(roh.encode("utf-8")) > MAX_NUTZLAST:
             return None, "Die Anzeige-Daten sind zu groß."
@@ -1891,7 +1909,11 @@ class Anzeige:
     # -- Lesen --------------------------------------------------------------
 
     def letzte(self, modus: str):
-        """Was zuletzt in dieser Ansicht gezeigt wurde - ``None``, wenn noch nichts."""
+        """Was zuletzt in dieser Ansicht gezeigt wurde - ``None``, wenn noch nichts.
+
+        Nur für den Programmcode (zum erneuten Zeigen über :meth:`zeigen`): ungefiltert,
+        nie direkt an eine Seite geben.
+        """
         with self._bed:
             gespeichert = self._letzte.get(modus)
             return copy.deepcopy(gespeichert) if gespeichert is not None else None
@@ -1921,8 +1943,10 @@ class Anzeige:
         neu gestarteter Server auf, dessen Zähler wieder klein sind.
         """
         try:
-            frist = max(0.0, float(timeout or 0))
+            frist = min(3600.0, max(0.0, float(timeout or 0)))
         except (TypeError, ValueError):
+            frist = 0.0
+        if frist != frist:  # NaN
             frist = 0.0
         ende = time.monotonic() + frist
         gefragt = {k: v for k, v in (nach or {}).items() if k in self._k}
@@ -1977,7 +2001,9 @@ class Anzeige:
 # Ein Wert in den Argumenten darf so lang sein, bevor er gekürzt wird.
 # Adresse, Pfad und Empfänger bleiben immer ganz - die muss man sehen.
 ARGUMENT_GRENZE = 400
-NIE_KUERZEN = ("adresse", "url", "pfad", "an")
+NIE_KUERZEN = ("adresse", "url", "pfad", "an", "nummer")
+# Die Begründung schreibt Claude - sie darf die eigentlichen Angaben nie verdrängen.
+BEGRUENDUNG_GRENZE = 300
 
 OHNE_BEGRUENDUNG = "(ohne Begründung – Jarvis hat keinen Grund genannt)"
 
@@ -2007,6 +2033,13 @@ def _wert_kurz(wert, grenze: int = 120) -> str:
     return text if len(text) <= grenze else text[:grenze].rstrip() + " …"
 
 
+def _voll(wert) -> str:
+    """Ein Wert als eine Zeile, nie gekürzt - für Empfänger, Nummern, Adressen und Pfade."""
+    if wert is None or wert == "":
+        return "?"
+    return " ".join(str(wert).split())
+
+
 def lesbarer_name(name: str) -> str:
     """``mcp__kalender__loeschen`` wird ``kalender, loeschen``, ``mail_senden`` ``mail senden``."""
     return str(name or "").replace("mcp__", "").replace("__", ", ").replace("_", " ").strip()
@@ -2027,7 +2060,7 @@ def _argumente_zeile(argumente: dict, grenze: int = 160) -> str:
 def _angaben_mail_senden(a: dict) -> tuple:
     k = _wert_kurz
     return ("eine Mail an %s schicken, Betreff „%s“. Sie beginnt mit: %s"
-            % (k(a.get("an")), k(a.get("betreff")), k(a.get("text"))),
+            % (_voll(a.get("an")), k(a.get("betreff")), k(a.get("text"))),
             "Per SMTP vom eingerichteten Postfach. Der ganze Text steht in den Details.")
 
 
@@ -2054,20 +2087,20 @@ def _angaben_nachricht_senden(a: dict) -> tuple:
     kanal = str(a.get("kanal") or "").strip().lower()
     an = a.get("an") or ("dich selbst" if kanal == "telegram" else None)
     art = " als Sprachnachricht" if a.get("als_sprache") else ""
-    return ("per %s an %s%s schreiben: %s" % (k(kanal), k(an), art, k(a.get("text"))),
+    return ("per %s an %s%s schreiben: %s" % (k(kanal), _voll(an), art, k(a.get("text"))),
             NACHRICHT_WEGE.get(kanal, "Über den Kanal %s." % k(kanal)))
 
 
 def _angaben_anrufen(a: dict) -> tuple:
     k = _wert_kurz
-    return ("%s anrufen und ansagen: %s" % (k(a.get("nummer")), k(a.get("ansage"))),
+    return ("%s anrufen und ansagen: %s" % (_voll(a.get("nummer")), k(a.get("ansage"))),
             "Ein Twilio-Anruf von deiner Twilio-Nummer. Die Ansage wird zweimal vorgelesen.")
 
 
 def _angaben_sms_senden(a: dict) -> tuple:
     k = _wert_kurz
     twilio = bool(TWILIO_SID and TWILIO_TOKEN and TWILIO_NUMMER)
-    return ("%s eine SMS schicken: %s" % (k(a.get("nummer")), k(a.get("text"))),
+    return ("%s eine SMS schicken: %s" % (_voll(a.get("nummer")), k(a.get("text"))),
             "Über Twilio von deiner Twilio-Nummer." if twilio
             else "Über die Nachrichten-App des Macs mit deiner eigenen Nummer.")
 
@@ -2092,7 +2125,7 @@ def _angaben_browser_auftrag(a: dict) -> tuple:
 
 
 def _angaben_browser_oeffnen(a: dict) -> tuple:
-    return ("die Adresse %s öffnen" % _wert_kurz(a.get("adresse"), 300),
+    return ("die Adresse %s öffnen" % _voll(a.get("adresse")),
             "Im eingebauten Browser. Die Adresse selbst geht dabei ins Netz.")
 
 
@@ -2108,7 +2141,7 @@ def _angaben_autopilot_schalten(a: dict) -> tuple:
 def _angaben_datei_schreiben(a: dict) -> tuple:
     tun = "ersetzen" if a.get("ueberschreiben") else "neu anlegen"
     return ("die Datei %s %s, sie beginnt mit: %s"
-            % (_wert_kurz(a.get("pfad"), 300), tun, _wert_kurz(a.get("inhalt"), 80)),
+            % (_voll(a.get("pfad")), tun, _wert_kurz(a.get("inhalt"), 80)),
             "Nur in den freigegebenen Ordnern deines Benutzerordners. Der Inhalt steht in "
             "den Details.")
 
@@ -2130,6 +2163,9 @@ FREIGABE_ANGABEN = {
 # Werkzeugname -> funktion(werkzeuge, argumente) -> dict mit Zusatzfeldern, die
 # "was" lesbar machen (etwa der Titel eines Termins statt seiner Kennung).
 # Die Zusatzfelder landen nur in der Angaben-Funktion, nicht in den Argumenten.
+# Sie tragen eigene Namen (termin_titel, nicht titel): Ein Zusatzfeld kann ein
+# echtes Argument nie überschreiben - sonst könnte die Frage einen anderen
+# Empfänger nennen, als hinterher wirklich bekommt.
 FREIGABE_AUFLOESEN = {}
 
 # Die Pakete tragen ihre Einträge zwischen ihren Marken ein, etwa
@@ -2174,9 +2210,8 @@ def freigabe_beschreiben(name: str, argumente: dict, zusatz: dict = None) -> dic
     rohen Argumente - eine Frage ganz ohne Inhalt darf es nie geben.
     """
     argumente = argumente if isinstance(argumente, dict) else {}
-    felder = dict(argumente)
-    if isinstance(zusatz, dict):
-        felder.update(zusatz)
+    felder = dict(zusatz) if isinstance(zusatz, dict) else {}
+    felder.update(argumente)  # die echten Argumente gewinnen immer
     angaben = FREIGABE_ANGABEN.get(name)
     was, wie = "", ""
     if angaben is not None:
@@ -2194,8 +2229,11 @@ def freigabe_beschreiben(name: str, argumente: dict, zusatz: dict = None) -> dic
     if not was:
         was, wie_unbekannt = _angaben_unbekannt(name, argumente)
         wie = wie or wie_unbekannt
-    warum = " ".join(str(argumente.get("begruendung") or "").split())
-    sichtbar = {k: v for k, v in argumente_kuerzen(argumente).items() if k != "begruendung"}
+    warum = _wert_kurz(argumente.get("begruendung"), BEGRUENDUNG_GRENZE) \
+        if argumente.get("begruendung") else ""
+    # Bei fremden Diensten ist "begruendung" vielleicht ein echtes Argument - dann bleibt es sichtbar.
+    sichtbar = {k: v for k, v in argumente_kuerzen(argumente).items()
+                if k != "begruendung" or str(name).startswith("mcp__")}
     return {"was": str(was), "warum": warum or OHNE_BEGRUENDUNG, "wie": str(wie or ""),
             "argumente": sichtbar}
 
@@ -2252,8 +2290,9 @@ def freigabe_text(aktion: str, details) -> str:
         argumente = json.dumps(lesbar["argumente"], ensure_ascii=False, default=str)
     except (TypeError, ValueError):
         argumente = str(lesbar["argumente"])
-    return ("Was:     %s\nWarum:   %s\nWie:     %s\nDetails: %s"
-            % (lesbar["was"], lesbar["warum"], lesbar["wie"], argumente))
+    # Details vor Warum: Werden lange Nachrichten gekürzt, fehlt eher die Begründung als ein Empfänger.
+    return ("Was:     %s\nWie:     %s\nDetails: %s\nWarum:   %s"
+            % (lesbar["was"], lesbar["wie"], argumente, lesbar["warum"]))
 
 
 # =========================================================================
@@ -13555,15 +13594,28 @@ class WebFreigabe:
     def beantworten(self, kennung: str, ja: bool, kanal: str = "klick") -> bool:
         """Beantwortet eine Freigabefrage. ``kanal``: klick, sprache oder geste.
 
-        Ist die Antwort nicht angenommen, steht der Grund in ``letzter_grund``.
+        Ist die Antwort nicht angenommen, steht der Grund in ``letzter_grund``
+        (für mehrere gleichzeitige Anfragen: :meth:`beantworten_mit_grund`).
+        """
+        return self.beantworten_mit_grund(kennung, ja, kanal)[0]
+
+    def beantworten_mit_grund(self, kennung: str, ja: bool, kanal: str = "klick") -> tuple:
+        """Wie :meth:`beantworten`, gibt aber ``(angenommen, grund)`` zurück.
+
+        Eine schon beantwortete Frage bleibt beantwortet - ein zweiter Klick
+        dreht ein Nein nicht in ein Ja.
         """
         kanal = str(kanal or "klick").strip().lower()
+        if kanal not in FREIGABE_WEGE:
+            kanal = "unbekannt"
         with self._sperre:
             eintrag = self._offen.get(kennung)
-            if kanal not in FREIGABE_WEGE:
+            if kanal == "unbekannt":
                 grund = "Diesen Freigabeweg kenne ich nicht."
             elif eintrag is None:
                 grund = "Diese Frage ist nicht mehr offen."
+            elif eintrag["antwort"] is not None:
+                grund = "Diese Frage ist schon beantwortet."
             elif kanal == "geste":
                 grund = "Gesten-Freigabe ist noch nicht eingebaut."
             else:
@@ -13573,9 +13625,9 @@ class WebFreigabe:
             self.letzter_grund = grund
         self._protokollieren(eintrag, kanal, ja, grund)
         if grund:
-            return False
+            return False, grund
         eintrag["ereignis"].set()
-        return True
+        return True, ""
 
     def _protokollieren(self, eintrag, kanal: str, ja: bool, grund: str):
         """Hält fest, auf welchem Weg geantwortet wurde - auch eine abgewiesene Antwort."""
@@ -13954,14 +14006,15 @@ class JarvisWeb:
 
         if pfad == "/api/freigabe":
             kennung = str(daten.get("id") or "")
-            ja = bool(daten.get("ja"))
+            # Nur ein echtes true ist ein Ja - "false", "nein" oder 1 sind es nicht.
+            ja = daten.get("ja") is True
             # klick, sprache oder geste - eine Geste gibt in dieser Stufe nichts frei.
-            kanal = str(daten.get("kanal") or "klick")
-            erledigt = self.freigabe.beantworten(kennung, ja, kanal)
+            kanal = str(daten.get("kanal") or "klick")[:20]
+            erledigt, grund = self.freigabe.beantworten_mit_grund(kennung, ja, kanal)
             return self._antworten(behandler, 200, {
                 "ok": erledigt,
                 "text": ("Freigabe erteilt." if ja else "Abgelehnt.") if erledigt
-                        else (self.freigabe.letzter_grund or "Diese Frage ist nicht mehr offen.")})
+                        else (grund or "Diese Frage ist nicht mehr offen.")})
 
         if pfad == "/api/anzeige/satz":
             # Der Satz, den der Browser gerade vorliest - für den Pegel der Anzeige.
@@ -15740,10 +15793,12 @@ class Werkzeuge:
             # -- Welt --
             werkzeug("wetter", "Aktuelles Wetter und Vorhersage für einen Ort.",
                      {"ort": text}),
-            werkzeug("recherche", "Sucht etwas im Internet.", {"frage": text}, ["frage"]),
+            werkzeug("recherche", "Sucht etwas im Internet.",
+                     {"frage": text, "begruendung": begruendung}, ["frage"]),
             werkzeug("flug_suchen",
                      "Sucht Flugverbindungen und nennt sie. Bucht nichts.",
-                     {"von": text, "nach": text, "wann": text}, ["von", "nach"]),
+                     {"von": text, "nach": text, "wann": text, "begruendung": begruendung},
+                     ["von", "nach"]),
             werkzeug("umschauen",
                      "Nimmt ein Einzelbild der Kamera auf und beschreibt, was zu sehen "
                      "ist. Kein Dauervideo.",
@@ -15757,7 +15812,8 @@ class Werkzeuge:
                      {"adresse": text, "begruendung": begruendung},
                      ["adresse", "begruendung"]),
             werkzeug("browser_lesen",
-                     "Liest die gerade offene Seite noch einmal.", {}),
+                     "Liest die gerade offene Seite noch einmal.",
+                     {"begruendung": begruendung}),
             werkzeug("browser_auftrag",
                      "Erledigt etwas im Browser: sucht, füllt Formulare aus, klickt "
                      "sich durch. Klickt auf Beschriftungen, nicht auf Bildpunkte. "
@@ -15864,6 +15920,13 @@ class Werkzeuge:
             # Beim Ausführen von Code muss der Code selbst in der Frage stehen.
             # Über einen blossen Dateinamen kann niemand entscheiden.
             details = self.werkstatt.freigabetext(argumente.get("name", ""))
+            # Auch die Argumente und der Grund gehören in die Frage - sonst sagt man Ja zu
+            # einem Aufruf, den man nicht ganz gesehen hat.
+            liste = argumente.get("argumente") or []
+            if liste:
+                details += "\n\nArgumente: %s" % " ".join(str(x) for x in liste)[:500]
+            if argumente.get("begruendung"):
+                details += "\nGrund: %s" % " ".join(str(argumente["begruendung"]).split())[:300]
         else:
             # Was, Warum und Wie statt rohem JSON. Kennungen (Termin-id, Message-ID)
             # macht ein Auflöser lesbar; scheitert er, stehen die rohen Argumente da.
@@ -16374,6 +16437,21 @@ class Werkzeuge:
 # -*- coding: utf-8 -*-
 
 
+# Importe der Pakete.
+# [P1 Bühne] Anfang
+# [P1 Bühne] Ende
+# [P2 Weltlage] Anfang
+# [P2 Weltlage] Ende
+# [P3 Telefon] Anfang
+# [P3 Telefon] Ende
+# [P4 Büro] Anfang
+# [P4 Büro] Ende
+# [P5 Sicht] Anfang
+# [P5 Sicht] Ende
+# [P6 Stimme] Anfang
+# [P6 Stimme] Ende
+# [P7 Start] Anfang
+# [P7 Start] Ende
 
 API_URL = "https://api.anthropic.com/v1/messages"
 API_VERSION = "2023-06-01"
@@ -17275,7 +17353,11 @@ class JarvisAgent:
         if letzte.get("role") == "assistant" and isinstance(letzte.get("content"), list) and any(
                 isinstance(b, dict) and b.get("type") == "tool_use" for b in letzte["content"]):
             with self._meldesperre:
-                self._meldungen = (offen + self._meldungen)[-MAX_MELDUNGEN:]
+                zusammen = []
+                for meldung in offen + self._meldungen:
+                    if all(m["text"] != meldung["text"] for m in zusammen):
+                        zusammen.append(meldung)
+                self._meldungen = zusammen[-MAX_MELDUNGEN:]
             return 0
         angehaengt = 0
         for meldung in offen:
@@ -17351,6 +17433,21 @@ class JarvisAgent:
 # -*- coding: utf-8 -*-
 
 
+# Importe der Pakete.
+# [P1 Bühne] Anfang
+# [P1 Bühne] Ende
+# [P2 Weltlage] Anfang
+# [P2 Weltlage] Ende
+# [P3 Telefon] Anfang
+# [P3 Telefon] Ende
+# [P4 Büro] Anfang
+# [P4 Büro] Ende
+# [P5 Sicht] Anfang
+# [P5 Sicht] Ende
+# [P6 Stimme] Anfang
+# [P6 Stimme] Ende
+# [P7 Start] Anfang
+# [P7 Start] Ende
 
 # Die Anzeige des Dienstes hat ihren eigenen Anschluss - so kann die Web-App per
 # Doppelklick trotzdem starten, während der Dienst läuft.

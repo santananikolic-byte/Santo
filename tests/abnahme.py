@@ -3070,11 +3070,28 @@ def pruefung_kern(agent):
         w.freigabe_kanal = echt_kanal
     erst = freigabe_lesen(gefragt[0][1]) if len(gefragt) > 0 else None
     zweit = freigabe_lesen(gefragt[1][1]) if len(gefragt) > 1 else None
-    pruefen("Freigabe im Werkzeug: ein Auflöser macht Was lesbar, scheitert er, die rohen Argumente",
-            len(gefragt) == 3 and erst and "Huber <h@b.at>" in erst["was"] and erst["warum"] == "Weil."
-            and erst["argumente"]["an"] == "h@b.at" and zweit and "h@b.at" in zweit["was"]
-            and "Huber" not in zweit["was"] and freigabe_lesen(gefragt[2][1]) is None,
-            "Skript bleibt beim alten Text")
+    pruefen("Freigabe im Werkzeug: ein Auflöser überschreibt nie echte Argumente, scheitert er, die rohen",
+            len(gefragt) == 3 and erst and "h@b.at" in erst["was"] and "Huber" not in erst["was"]
+            and erst["warum"] == "Weil." and erst["argumente"]["an"] == "h@b.at" and zweit
+            and "h@b.at" in zweit["was"] and "Huber" not in zweit["was"]
+            and freigabe_lesen(gefragt[2][1]) is None and "Grund: Probe" in gefragt[2][1],
+            "Skript bleibt beim alten Text, mit Grund")
+    FREIGABE_ANGABEN["kern_probe"] = lambda a: ("den Termin „%s“ absagen" % a.get("termin_titel"),
+                                                "Über CalDAV.")
+    try:
+        aufgeloest = freigabe_beschreiben("kern_probe", {"id": "a1b2c3d4", "begruendung": "x" * 900},
+                                          {"termin_titel": "Zahnarzt", "id": "falsch"})
+    finally:
+        FREIGABE_ANGABEN.pop("kern_probe", None)
+    lang = freigabe_beschreiben("mail_senden", {"an": ", ".join("k%d@firma.at" % i for i in range(9))
+                                                + ", boese@angreifer.example", "betreff": "A",
+                                                "text": "B", "begruendung": "Weil. " * 800})
+    pruefen("Freigabe: Zusatzfelder machen Kennungen lesbar, lange Begründung verdrängt keinen Empfänger",
+            "Zahnarzt" in aufgeloest["was"] and aufgeloest["argumente"]["id"] == "a1b2c3d4"
+            and len(aufgeloest["warum"]) <= 302 and "boese@angreifer.example" in lang["was"]
+            and len(lang["warum"]) <= 302
+            and freigabe_text("mail_senden", json.dumps(lang)).index("Details:")
+            < freigabe_text("mail_senden", json.dumps(lang)).index("Warum:"), "")
 
     bruecke = WebFreigabe(timeout=8)
     ergebnis = {}
@@ -3281,12 +3298,45 @@ def pruefung_kern(agent):
             reihe == erwartet and not warnungen and not __import__("ast").parse(zerlegt["rumpf"]).body
             and not zerlegt["namen"] and zerlegt["doku"].startswith("Leer") and gebaut == 0,
             "%d Module" % len(bau.BAULISTE))
+    # Ein Nein bleibt ein Nein - auch wenn danach noch jemand auf Ja klickt.
+    zweifach = WebFreigabe(timeout=5)
+    ausgang = {}
+    faden = threading.Thread(target=lambda: ausgang.update(zweifach.anfordern("mail_senden", "{}")),
+                             daemon=True)
+    faden.start()
+    for _ in range(50):
+        if zweifach.offene():
+            break
+        time.sleep(0.02)
+    kennung = zweifach.offene()[0]["id"] if zweifach.offene() else ""
+    erstes = zweifach.beantworten_mit_grund(kennung, False, "sprache")
+    zweites = zweifach.beantworten_mit_grund(kennung, True, "klick")
+    faden.join(3)
+    pruefen("Freigabe: eine beantwortete Frage lässt sich nicht umdrehen",
+            erstes == (True, "") and zweites[0] is False and "schon beantwortet" in zweites[1]
+            and ausgang.get("erlaubt") is False, zweites[1][:40])
+    try:
+        # Eine abweichende Version kehrt sofort zurück - es geht nur darum, dass inf nicht wirft.
+        w.anzeige.warten({"buehne": -5}, float("inf"))
+        riesig = w.anzeige.melden("buehne", {"modus": "globus", "x": {1, 2}})
+        tief = {}
+        knoten = tief
+        for _ in range(3000):
+            knoten["a"] = {}
+            knoten = knoten["a"]
+        sehr_tief = w.anzeige.melden("buehne", tief)
+        haelt = True
+    except Exception as fehler:
+        haelt, riesig, sehr_tief = False, None, str(fehler)
+    pruefen("Anzeige: unendliche Wartezeit, Mengen und tiefe Daten werfen nicht",
+            haelt and riesig == -1 and sehr_tief == -1, str(sehr_tief)[:40])
+
     pakete = ["P1 Bühne", "P2 Weltlage", "P3 Telefon", "P4 Büro", "P5 Sicht", "P6 Stimme", "P7 Start"]
     folge = []
     for paket in pakete:
         folge += ["# [%s] Anfang" % paket, "# [%s] Ende" % paket]
     stellen = {"src/modules/tools.py": 7, "src/modules/webapp.py": 5, "src/config.py": 2,
-               "config/.env.beispiel": 1, "src/agent.py": 3, "src/run.py": 3, "src/modules/team.py": 1,
+               "config/.env.beispiel": 1, "src/agent.py": 4, "src/run.py": 4, "src/modules/team.py": 1,
                "src/modules/setup_wizard.py": 1, "src/modules/freigabe.py": 1, "tests/abnahme.py": 2}
     schief = []
     for datei, anzahl in stellen.items():
@@ -3296,6 +3346,18 @@ def pruefung_kern(agent):
             schief.append(datei)
     pruefen("Marken: je Stelle ein Paar je Paket, in der Reihenfolge P1 bis P7",
             not schief, ", ".join(schief) or "%d Stellen in %d Dateien" % (sum(stellen.values()), len(stellen)))
+    # Ein fehlendes Komma verbindet zwei Regeln verschiedener Pakete still zu einer.
+    import ast
+    with open(os.path.join(WURZEL, "src/agent.py"), encoding="utf-8") as quelle:
+        agent_quelle = quelle.read()
+    marken_zeilen = [i for i, z in enumerate(agent_quelle.splitlines(), 1)
+                     if re.match(r"\s*# \[P\d [^\]]+\] (Anfang|Ende)\s*$", z)]
+    regeln = next(k for k in ast.parse(agent_quelle).body if isinstance(k, ast.Assign)
+                  and getattr(k.targets[0], "id", "") == "ZUSATZREGELN")
+    quer = [e.lineno for e in regeln.value.elts
+            if any(e.lineno < m < e.end_lineno for m in marken_zeilen)]
+    pruefen("ZUSATZREGELN: keine Regel reicht über eine Paketmarke (fehlendes Komma)",
+            not quer, str(quer or "ok"))
 
 
 # ---------------------------------------------------------------------------
@@ -3344,6 +3406,18 @@ def pruefung_einzeldatei():
     pruefen("jarvis.py ist aktuell (alles aus src/ ist darin)", not veraltet,
             "veraltet - neu bauen: %s" % ", ".join(veraltet[:3]) if veraltet
             else "gebaut aus dem jetzigen src/")
+    # Strenger: Byte für Byte gleich einem frischen Bau. Ein still zusammengeführtes
+    # jarvis.py (zwei Pakete, je eine eigene Fassung) fällt so sofort auf.
+    import contextlib
+    import io
+    sys.path.insert(0, WURZEL)
+    import build_single as bau_frisch
+    frisch = pathlib.Path(ARBEITSVERZEICHNIS) / "jarvis_frisch.py"
+    with contextlib.redirect_stdout(io.StringIO()):
+        bau_frisch.bauen(frisch)
+    gleich = frisch.exists() and frisch.read_bytes() == pathlib.Path(pfad).read_bytes()
+    pruefen("jarvis.py ist Byte für Byte ein frischer Bau", gleich,
+            "gleich" if gleich else "abweichend - python3 build_single.py ausführen")
     # Wortgrenze: "class Telegram" darf "class TelegramFreigabe" nicht mitzählen.
     fehlend = [k for k in klassen if len(re.findall(r"\nclass %s\b" % re.escape(k), inhalt)) != 1]
     pruefen("Einzeldatei enthält alle Klassen genau einmal", not fehlend,

@@ -100,6 +100,14 @@ def diskret_filtern(kanal: str, daten: dict) -> dict:
         for zeile in daten.get("mitschrift") or []:
             if isinstance(zeile, dict):
                 zeile["text"] = ""
+        # Das Ergebnis nennt Namen und Wünsche - im Raum bleibt nur, ob es geklappt hat.
+        ergebnis = daten.get("ergebnis")
+        if isinstance(ergebnis, dict):
+            daten["ergebnis"] = {k: v for k, v in ergebnis.items()
+                                 if k in ("reserviert", "datum", "uhrzeit", "personen")}
+        for feld in ("hinweise", "gegenvorschlag", "grund_ende", "auftrag"):
+            if feld in daten:
+                daten[feld] = ""
     elif kanal == "untertitel":
         for feld in ("original", "uebersetzung"):
             if feld in daten:
@@ -117,8 +125,17 @@ def diskret_filtern(kanal: str, daten: dict) -> dict:
     return daten
 
 
+# Auf diesen Ansichten können Titel und Standzeile Namen tragen (Anruf bei ...,
+# Erholung von ...). Globus, Märkte, Kennzahlen und Recherche sind öffentlich oder Zahlen.
+BUEHNE_PRIVAT = ("anruf", "sicht", "untertitel", "inhalte", "hochfahren")
+
+
 def _buehne_diskret(daten: dict) -> dict:
-    """Bühne im Diskretmodus: Beiträge ohne Titel, auch innerhalb einer Folge."""
+    """Bühne im Diskretmodus: Beiträge ohne Titel, private Ansichten ohne Titelzeile."""
+    if daten.get("modus") in BUEHNE_PRIVAT:
+        for feld in ("titel", "stand"):
+            if feld in daten:
+                daten[feld] = ""
     if daten.get("modus") == "inhalte":
         for eintrag in daten.get("eintraege") or []:
             if isinstance(eintrag, dict) and "titel" in eintrag:
@@ -153,8 +170,9 @@ class Anzeige:
             return None, "Die Anzeige-Daten müssen ein Wörterbuch sein."
         try:
             # NaN und Unendlich sind kein JSON - der Browser könnte die Antwort nicht lesen.
-            roh = json.dumps(daten, ensure_ascii=False, default=str, allow_nan=False)
-        except (TypeError, ValueError) as fehler:
+            # Ohne default=str: Datum, Menge oder Bytes sind kein Anzeige-Inhalt.
+            roh = json.dumps(daten, ensure_ascii=False, allow_nan=False)
+        except (TypeError, ValueError, RecursionError) as fehler:
             return None, "Die Anzeige-Daten sind kein gültiges JSON (%s)." % fehler
         if len(roh.encode("utf-8")) > MAX_NUTZLAST:
             return None, "Die Anzeige-Daten sind zu groß."
@@ -221,7 +239,11 @@ class Anzeige:
     # -- Lesen --------------------------------------------------------------
 
     def letzte(self, modus: str):
-        """Was zuletzt in dieser Ansicht gezeigt wurde - ``None``, wenn noch nichts."""
+        """Was zuletzt in dieser Ansicht gezeigt wurde - ``None``, wenn noch nichts.
+
+        Nur für den Programmcode (zum erneuten Zeigen über :meth:`zeigen`): ungefiltert,
+        nie direkt an eine Seite geben.
+        """
         with self._bed:
             gespeichert = self._letzte.get(modus)
             return copy.deepcopy(gespeichert) if gespeichert is not None else None
@@ -251,8 +273,10 @@ class Anzeige:
         neu gestarteter Server auf, dessen Zähler wieder klein sind.
         """
         try:
-            frist = max(0.0, float(timeout or 0))
+            frist = min(3600.0, max(0.0, float(timeout or 0)))
         except (TypeError, ValueError):
+            frist = 0.0
+        if frist != frist:  # NaN
             frist = 0.0
         ende = time.monotonic() + frist
         gefragt = {k: v for k, v in (nach or {}).items() if k in self._k}

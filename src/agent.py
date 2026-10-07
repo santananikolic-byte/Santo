@@ -26,6 +26,21 @@ from modules.recall import Recall
 from modules.router import (Gedankenlog, claude_kosten, gehirn_waehlen,
                             gemini_fragen)
 from modules.tools import Werkzeuge
+# Importe der Pakete.
+# [P1 Bühne] Anfang
+# [P1 Bühne] Ende
+# [P2 Weltlage] Anfang
+# [P2 Weltlage] Ende
+# [P3 Telefon] Anfang
+# [P3 Telefon] Ende
+# [P4 Büro] Anfang
+# [P4 Büro] Ende
+# [P5 Sicht] Anfang
+# [P5 Sicht] Ende
+# [P6 Stimme] Anfang
+# [P6 Stimme] Ende
+# [P7 Start] Anfang
+# [P7 Start] Ende
 
 API_URL = "https://api.anthropic.com/v1/messages"
 API_VERSION = "2023-06-01"
@@ -927,7 +942,11 @@ class JarvisAgent:
         if letzte.get("role") == "assistant" and isinstance(letzte.get("content"), list) and any(
                 isinstance(b, dict) and b.get("type") == "tool_use" for b in letzte["content"]):
             with self._meldesperre:
-                self._meldungen = (offen + self._meldungen)[-MAX_MELDUNGEN:]
+                zusammen = []
+                for meldung in offen + self._meldungen:
+                    if all(m["text"] != meldung["text"] for m in zusammen):
+                        zusammen.append(meldung)
+                self._meldungen = zusammen[-MAX_MELDUNGEN:]
             return 0
         angehaengt = 0
         for meldung in offen:

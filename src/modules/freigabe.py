@@ -28,7 +28,9 @@ import config
 # Ein Wert in den Argumenten darf so lang sein, bevor er gekürzt wird.
 # Adresse, Pfad und Empfänger bleiben immer ganz - die muss man sehen.
 ARGUMENT_GRENZE = 400
-NIE_KUERZEN = ("adresse", "url", "pfad", "an")
+NIE_KUERZEN = ("adresse", "url", "pfad", "an", "nummer")
+# Die Begründung schreibt Claude - sie darf die eigentlichen Angaben nie verdrängen.
+BEGRUENDUNG_GRENZE = 300
 
 OHNE_BEGRUENDUNG = "(ohne Begründung – Jarvis hat keinen Grund genannt)"
 
@@ -58,6 +60,13 @@ def _wert_kurz(wert, grenze: int = 120) -> str:
     return text if len(text) <= grenze else text[:grenze].rstrip() + " …"
 
 
+def _voll(wert) -> str:
+    """Ein Wert als eine Zeile, nie gekürzt - für Empfänger, Nummern, Adressen und Pfade."""
+    if wert is None or wert == "":
+        return "?"
+    return " ".join(str(wert).split())
+
+
 def lesbarer_name(name: str) -> str:
     """``mcp__kalender__loeschen`` wird ``kalender, loeschen``, ``mail_senden`` ``mail senden``."""
     return str(name or "").replace("mcp__", "").replace("__", ", ").replace("_", " ").strip()
@@ -78,7 +87,7 @@ def _argumente_zeile(argumente: dict, grenze: int = 160) -> str:
 def _angaben_mail_senden(a: dict) -> tuple:
     k = _wert_kurz
     return ("eine Mail an %s schicken, Betreff „%s“. Sie beginnt mit: %s"
-            % (k(a.get("an")), k(a.get("betreff")), k(a.get("text"))),
+            % (_voll(a.get("an")), k(a.get("betreff")), k(a.get("text"))),
             "Per SMTP vom eingerichteten Postfach. Der ganze Text steht in den Details.")
 
 
@@ -105,20 +114,20 @@ def _angaben_nachricht_senden(a: dict) -> tuple:
     kanal = str(a.get("kanal") or "").strip().lower()
     an = a.get("an") or ("dich selbst" if kanal == "telegram" else None)
     art = " als Sprachnachricht" if a.get("als_sprache") else ""
-    return ("per %s an %s%s schreiben: %s" % (k(kanal), k(an), art, k(a.get("text"))),
+    return ("per %s an %s%s schreiben: %s" % (k(kanal), _voll(an), art, k(a.get("text"))),
             NACHRICHT_WEGE.get(kanal, "Über den Kanal %s." % k(kanal)))
 
 
 def _angaben_anrufen(a: dict) -> tuple:
     k = _wert_kurz
-    return ("%s anrufen und ansagen: %s" % (k(a.get("nummer")), k(a.get("ansage"))),
+    return ("%s anrufen und ansagen: %s" % (_voll(a.get("nummer")), k(a.get("ansage"))),
             "Ein Twilio-Anruf von deiner Twilio-Nummer. Die Ansage wird zweimal vorgelesen.")
 
 
 def _angaben_sms_senden(a: dict) -> tuple:
     k = _wert_kurz
     twilio = bool(config.TWILIO_SID and config.TWILIO_TOKEN and config.TWILIO_NUMMER)
-    return ("%s eine SMS schicken: %s" % (k(a.get("nummer")), k(a.get("text"))),
+    return ("%s eine SMS schicken: %s" % (_voll(a.get("nummer")), k(a.get("text"))),
             "Über Twilio von deiner Twilio-Nummer." if twilio
             else "Über die Nachrichten-App des Macs mit deiner eigenen Nummer.")
 
@@ -143,7 +152,7 @@ def _angaben_browser_auftrag(a: dict) -> tuple:
 
 
 def _angaben_browser_oeffnen(a: dict) -> tuple:
-    return ("die Adresse %s öffnen" % _wert_kurz(a.get("adresse"), 300),
+    return ("die Adresse %s öffnen" % _voll(a.get("adresse")),
             "Im eingebauten Browser. Die Adresse selbst geht dabei ins Netz.")
 
 
@@ -159,7 +168,7 @@ def _angaben_autopilot_schalten(a: dict) -> tuple:
 def _angaben_datei_schreiben(a: dict) -> tuple:
     tun = "ersetzen" if a.get("ueberschreiben") else "neu anlegen"
     return ("die Datei %s %s, sie beginnt mit: %s"
-            % (_wert_kurz(a.get("pfad"), 300), tun, _wert_kurz(a.get("inhalt"), 80)),
+            % (_voll(a.get("pfad")), tun, _wert_kurz(a.get("inhalt"), 80)),
             "Nur in den freigegebenen Ordnern deines Benutzerordners. Der Inhalt steht in "
             "den Details.")
 
@@ -181,6 +190,9 @@ FREIGABE_ANGABEN = {
 # Werkzeugname -> funktion(werkzeuge, argumente) -> dict mit Zusatzfeldern, die
 # "was" lesbar machen (etwa der Titel eines Termins statt seiner Kennung).
 # Die Zusatzfelder landen nur in der Angaben-Funktion, nicht in den Argumenten.
+# Sie tragen eigene Namen (termin_titel, nicht titel): Ein Zusatzfeld kann ein
+# echtes Argument nie überschreiben - sonst könnte die Frage einen anderen
+# Empfänger nennen, als hinterher wirklich bekommt.
 FREIGABE_AUFLOESEN = {}
 
 # Die Pakete tragen ihre Einträge zwischen ihren Marken ein, etwa
@@ -225,9 +237,8 @@ def freigabe_beschreiben(name: str, argumente: dict, zusatz: dict = None) -> dic
     rohen Argumente - eine Frage ganz ohne Inhalt darf es nie geben.
     """
     argumente = argumente if isinstance(argumente, dict) else {}
-    felder = dict(argumente)
-    if isinstance(zusatz, dict):
-        felder.update(zusatz)
+    felder = dict(zusatz) if isinstance(zusatz, dict) else {}
+    felder.update(argumente)  # die echten Argumente gewinnen immer
     angaben = FREIGABE_ANGABEN.get(name)
     was, wie = "", ""
     if angaben is not None:
@@ -245,8 +256,11 @@ def freigabe_beschreiben(name: str, argumente: dict, zusatz: dict = None) -> dic
     if not was:
         was, wie_unbekannt = _angaben_unbekannt(name, argumente)
         wie = wie or wie_unbekannt
-    warum = " ".join(str(argumente.get("begruendung") or "").split())
-    sichtbar = {k: v for k, v in argumente_kuerzen(argumente).items() if k != "begruendung"}
+    warum = _wert_kurz(argumente.get("begruendung"), BEGRUENDUNG_GRENZE) \
+        if argumente.get("begruendung") else ""
+    # Bei fremden Diensten ist "begruendung" vielleicht ein echtes Argument - dann bleibt es sichtbar.
+    sichtbar = {k: v for k, v in argumente_kuerzen(argumente).items()
+                if k != "begruendung" or str(name).startswith("mcp__")}
     return {"was": str(was), "warum": warum or OHNE_BEGRUENDUNG, "wie": str(wie or ""),
             "argumente": sichtbar}
 
@@ -303,5 +317,6 @@ def freigabe_text(aktion: str, details) -> str:
         argumente = json.dumps(lesbar["argumente"], ensure_ascii=False, default=str)
     except (TypeError, ValueError):
         argumente = str(lesbar["argumente"])
-    return ("Was:     %s\nWarum:   %s\nWie:     %s\nDetails: %s"
-            % (lesbar["was"], lesbar["warum"], lesbar["wie"], argumente))
+    # Details vor Warum: Werden lange Nachrichten gekürzt, fehlt eher die Begründung als ein Empfänger.
+    return ("Was:     %s\nWie:     %s\nDetails: %s\nWarum:   %s"
+            % (lesbar["was"], lesbar["wie"], argumente, lesbar["warum"]))
