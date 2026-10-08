@@ -171,27 +171,39 @@ class Recall:
                 zeilen.append(satz)
             teile.append("\n".join(zeilen))
 
-        if frage:
-            treffer = self.nachschlagen(frage)
-            zeilen = []
-            for notiz in treffer["notizen"]:
-                zeilen.append("- Notiz vom %s: %s" % (notiz["angelegt"][:10], notiz["text"]))
-            for kontakt in treffer["kontakte"]:
-                beschreibung = ", ".join(
-                    [t for t in (kontakt["firma"], kontakt["telefon"], kontakt["email"],
-                                 kontakt["notiz"]) if t])
-                zeilen.append("- Kontakt %s: %s" % (kontakt["name"], beschreibung or "keine Details"))
-            for bericht in treffer["berichte"]:
-                zeilen.append("- Tagesbericht %s: %s" % (bericht["datum"],
-                                                         bericht["zusammenfassung"]))
-            for zeile in treffer["aeusserungen"]:
-                zeilen.append("- Er sagte am %s: %s" % (zeile["zeit"][:10], zeile["text"][:200]))
-            if zeilen:
-                teile.append("Passend zur aktuellen Frage:\n" + "\n".join(zeilen[:14]))
+        treffer = self.treffer_block(frage) if frage else ""
+        if treffer:
+            teile.append(treffer)
 
         if not teile:
             return ""
         return "Das weißt du aus früheren Tagen:\n\n" + "\n\n".join(teile)
+
+    def treffer_block(self, frage: str) -> str:
+        """Was das Gedächtnis zu genau dieser Frage weiß - leer, wenn nichts passt.
+
+        Gehört in die Nachricht, nicht in den Systemprompt: Der bleibt so von
+        Frage zu Frage gleich, und der Zwischenspeicher kann ihn lesen.
+        """
+        if not frage:
+            return ""
+        treffer = self.nachschlagen(frage)
+        zeilen = []
+        for notiz in treffer["notizen"]:
+            zeilen.append("- Notiz vom %s: %s" % (notiz["angelegt"][:10], notiz["text"]))
+        for kontakt in treffer["kontakte"]:
+            beschreibung = ", ".join(
+                [t for t in (kontakt["firma"], kontakt["telefon"], kontakt["email"],
+                             kontakt["notiz"]) if t])
+            zeilen.append("- Kontakt %s: %s" % (kontakt["name"], beschreibung or "keine Details"))
+        for bericht in treffer["berichte"]:
+            zeilen.append("- Tagesbericht %s: %s" % (bericht["datum"],
+                                                     bericht["zusammenfassung"]))
+        for zeile in treffer["aeusserungen"]:
+            zeilen.append("- Er sagte am %s: %s" % (zeile["zeit"][:10], zeile["text"][:200]))
+        if not zeilen:
+            return ""
+        return "Passend zur aktuellen Frage:\n" + "\n".join(zeilen[:14])
 
     # -- Tag zusammenfassen -------------------------------------------------
 

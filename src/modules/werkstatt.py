@@ -41,6 +41,12 @@ CREATE TABLE IF NOT EXISTS skripte (
 """
 
 MAX_ZEICHEN = 20000
+MAX_PROJEKTDATEI = 60000
+PROJEKT_ENDUNGEN = ("html", "css", "js", "json", "md", "txt", "svg")
+# Schlüssel gehören nie in eine Seite oder ein Skript, das jemand außerhalb sieht.
+GEHEIMNIS_MUSTER = re.compile(
+    r"sk-[A-Za-z0-9_-]{20,}|AIza[0-9A-Za-z_-]{30,}|AQ\.[A-Za-z0-9_-]{30,}"
+    r"|xox[bap]-[A-Za-z0-9-]{10,}|ghp_[A-Za-z0-9]{30,}|\b\d{8,10}:[A-Za-z0-9_-]{30,}\b")
 LAUFZEIT_GRENZE = 60
 
 # Module, deren Verwendung in der Freigabefrage genannt wird. Das ist eine
@@ -76,6 +82,28 @@ def name_saeubern(name: str) -> str:
     return (roh or "skript")[:60] + ".py"
 
 
+def projekt_saeubern(name: str) -> str:
+    """Ordnername eines Projekts: nur Buchstaben, Ziffern, Strich und Unterstrich."""
+    roh = (name or "").strip().lower()
+    for alt, neu in (("ä", "ae"), ("ö", "oe"), ("ü", "ue"), ("ß", "ss")):
+        roh = roh.replace(alt, neu)
+    return (re.sub(r"[^a-z0-9_-]+", "_", roh).strip("_-") or "projekt")[:50]
+
+
+def projektdatei_saeubern(name: str) -> str:
+    """Dateiname im Projekt - nur ein Name, nie ein Pfad. Leer, wenn nicht erlaubt."""
+    roh = (name or "").strip().lower()
+    for alt, neu in (("ä", "ae"), ("ö", "oe"), ("ü", "ue"), ("ß", "ss")):
+        roh = roh.replace(alt, neu)
+    if "/" in roh or "\\" in roh or roh.startswith("."):
+        return ""
+    stamm, punkt, endung = roh.rpartition(".")
+    if not punkt or endung not in PROJEKT_ENDUNGEN:
+        return ""
+    stamm = re.sub(r"[^a-z0-9_-]+", "_", stamm).strip("_-")[:50]
+    return "%s.%s" % (stamm, endung) if stamm else ""
+
+
 class Werkstatt:
     """Legt Skripte ab, zeigt sie und führt sie nach Freigabe aus."""
 
@@ -101,6 +129,80 @@ class Werkstatt:
         if wurzel not in datei.parents and datei != wurzel:
             return None
         return datei
+
+    # -- Projekte (Webseiten, Chatbots, Texte) ---------------------------------
+
+    def _projektpfad(self, projekt: str, datei: str = ""):
+        """Pfad innerhalb von ``werkstatt/projekte`` - garantiert nicht daraus heraus."""
+        wurzel = (self.verzeichnis / "projekte").resolve()
+        ziel = wurzel / projekt_saeubern(projekt)
+        if datei:
+            ziel = ziel / datei
+        ziel = ziel.resolve()
+        if wurzel not in ziel.parents and ziel != wurzel:
+            return None
+        return ziel
+
+    def projekt_datei_schreiben(self, projekt: str, datei: str, inhalt: str,
+                                zweck: str = "") -> dict:
+        """Legt eine Datei in einem Projekt ab (Seite, Bot-Anweisung, Kampagnentext).
+
+        Es wird nur geschrieben. Ausgeführt wird nie etwas: HTML öffnet der
+        Nutzer selbst im Browser. Erlaubt sind nur Text- und Webdateien, und
+        nichts, was nach einem Schlüssel aussieht.
+        """
+        name = projektdatei_saeubern(datei)
+        if not name:
+            return {"ok": False,
+                    "fehler": "Der Dateiname '%s' ist nicht zulässig. Erlaubt sind Namen "
+                              "ohne Ordner mit der Endung %s." % (datei, ", ".join(PROJEKT_ENDUNGEN))}
+        inhalt = inhalt or ""
+        if not inhalt.strip():
+            return {"ok": False, "fehler": "Die Datei ist leer."}
+        if len(inhalt) > MAX_PROJEKTDATEI:
+            return {"ok": False, "fehler": "Die Datei ist zu lang (%d Zeichen, erlaubt sind %d)."
+                                           % (len(inhalt), MAX_PROJEKTDATEI)}
+        if GEHEIMNIS_MUSTER.search(inhalt):
+            return {"ok": False,
+                    "fehler": "In der Datei steht etwas, das wie ein Schlüssel oder Token "
+                              "aussieht. Das gehört nie in eine Seite oder ein Skript, das "
+                              "andere sehen. Für so etwas braucht es einen Server dazwischen."}
+        ziel = self._projektpfad(projekt, name)
+        if ziel is None:
+            return {"ok": False, "fehler": "Das Projekt '%s' ist nicht zulässig." % projekt}
+        try:
+            ziel.parent.mkdir(parents=True, exist_ok=True)
+            ziel.write_text(inhalt, encoding="utf-8")
+        except OSError as fehler:
+            return {"ok": False, "fehler": "Nicht schreibbar: %s" % fehler}
+        ordner = projekt_saeubern(projekt)
+        return {"ok": True, "projekt": ordner, "datei": name, "zeichen": len(inhalt),
+                "pfad": str(ziel),
+                "text": "%s ist im Projekt %s abgelegt. Öffnen: Datei in %s doppelklicken. "
+                        "Ausgeführt wurde nichts." % (name, ordner, ordner)}
+
+    def projekt_zeigen(self, projekt: str = "", datei: str = "") -> dict:
+        """Ohne Namen: alle Projekte. Mit Projekt: seine Dateien. Mit Datei: der Inhalt."""
+        wurzel = self._projektpfad("")
+        basis = (self.verzeichnis / "projekte")
+        if not projekt:
+            namen = sorted(p.name for p in basis.glob("*") if p.is_dir()) if basis.exists() else []
+            return {"ok": True, "projekte": namen,
+                    "text": ("Projekte: %s." % ", ".join(namen)) if namen else "Es gibt noch kein Projekt."}
+        ordner = self._projektpfad(projekt)
+        if ordner is None or not ordner.is_dir():
+            return {"ok": False, "fehler": "Das Projekt '%s' gibt es nicht." % projekt}
+        if not datei:
+            dateien = sorted(p.name for p in ordner.iterdir() if p.is_file())
+            return {"ok": True, "projekt": ordner.name, "dateien": dateien,
+                    "text": "%s enthält: %s." % (ordner.name, ", ".join(dateien) or "nichts")}
+        name = projektdatei_saeubern(datei)
+        pfad = self._projektpfad(projekt, name) if name else None
+        if pfad is None or not pfad.is_file():
+            return {"ok": False, "fehler": "Die Datei '%s' gibt es nicht." % datei}
+        text = pfad.read_text(encoding="utf-8", errors="replace")
+        return {"ok": True, "projekt": ordner.name, "datei": name, "inhalt": text[:8000],
+                "gekuerzt": len(text) > 8000}
 
     # -- Schreiben ----------------------------------------------------------
 

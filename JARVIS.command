@@ -154,6 +154,12 @@ if [ "$BRAUCHT_EINRICHTUNG" = "ja" ]; then
     exit 0
 fi
 
+# Einmalig: Jarvis als Programm mit Symbol (Dock, Programme, Schreibtisch).
+if [ "$(uname)" = "Darwin" ] && [ ! -d "/Applications/Jarvis.app" ] && [ ! -d "$HOME/Applications/Jarvis.app" ]; then
+    "$PYTHON" "$PROJEKT/jarvis.py" macapp >/dev/null 2>&1 \
+        && echo "  Jarvis liegt jetzt auch als Programm im Dock - das Gehirn-Symbol."
+fi
+
 echo "  Ich starte und oeffne mich im Browser. Abbrechen mit Strg und C."
 echo ""
 "$PYTHON" "$PROJEKT/jarvis.py" "$@"

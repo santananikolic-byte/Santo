@@ -31,6 +31,7 @@ DASHBOARD_VERZEICHNIS = BASIS / "dashboard"
 BELEGE_VERZEICHNIS = BASIS / "belege"
 PROFIL_VERZEICHNIS = BASIS / "profil"
 EXPORT_VERZEICHNIS = BASIS / "export"
+LOG_VERZEICHNIS = BASIS / "logs"
 DB_PFAD = str(BASIS / "jarvis_memory.db")
 
 # ---------------------------------------------------------------------------
@@ -99,12 +100,48 @@ env_neu_laden()
 
 # Claude
 ANTHROPIC_API_KEY = _text("ANTHROPIC_API_KEY")
-CLAUDE_MODEL = _text("CLAUDE_MODEL", "claude-sonnet-4-6")
-CLAUDE_MAX_TOKENS = _ganzzahl("CLAUDE_MAX_TOKENS", 2000)
+# Das stärkste allgemeine Modell. Günstiger: CLAUDE_MODEL=claude-sonnet-5-5 (halber Preis;
+# dann auch CLAUDE_PREIS_EIN=2 und CLAUDE_PREIS_AUS=10 eintragen).
+CLAUDE_MODEL = _text("CLAUDE_MODEL", "claude-opus-5-5")
+# Das Modell denkt immer mit - das Denken zählt zu den Tokens. 2000 schnitten Antworten ab.
+CLAUDE_MAX_TOKENS = _ganzzahl("CLAUDE_MAX_TOKENS", 16000)
+# Wie gründlich es denkt: low, medium, high, xhigh, max. "high" für Arbeit mit Werkzeugen;
+# xhigh und max brauchen mehr als 16000 Tokens und sind ohne Streaming zu langsam.
+# Nur aus config/.env (oder JARVIS_EFFORT) - Claude Code setzt CLAUDE_EFFORT für sich selbst.
+CLAUDE_EFFORT = (_ROHWERTE.get("CLAUDE_EFFORT") or os.environ.get("JARVIS_EFFORT")
+                 or "high").strip().lower()
+
+# Gemini: das schnelle, billige Gehirn für Smalltalk und einfache Fragen.
+# Ohne Schlüssel antwortet immer Claude. Das Modell steht hier, damit es sich
+# ohne Codeänderung auf ein neueres umstellen lässt.
+GEMINI_API_KEY = _text("GEMINI_API_KEY")
+GEMINI_MODELL = _text("GEMINI_MODELL", "gemini-flash-latest")
+GEMINI_MAX_TOKENS = _ganzzahl("GEMINI_MAX_TOKENS", 600)
+# Wie lang eine Frage höchstens sein darf, um noch an Gemini zu gehen.
+# Gemini bekommt nur kurzen Smalltalk bis zu so vielen Wörtern - alles andere Claude.
+ROUTER_MAX_WOERTER = _ganzzahl("ROUTER_MAX_WOERTER", 8)
+
+# Kosten: Preise je eine Million Tokens in US-Dollar. Das sind Schätzwerte
+# für das Gedankenlog - maßgeblich ist immer die Rechnung der Anbieter.
+# Dollar je Million Tokens (Claude Opus 5.5). In den Zwischenspeicher schreiben: 1,25-fach.
+CLAUDE_PREIS_EIN = _zahl("CLAUDE_PREIS_EIN", 4.0)
+CLAUDE_PREIS_AUS = _zahl("CLAUDE_PREIS_AUS", 20.0)
+# Aus dem Zwischenspeicher gelesen (Opus 5.5 und Sonnet 5.5: 0,20 Dollar).
+CLAUDE_PREIS_GELESEN = _zahl("CLAUDE_PREIS_GELESEN", 0.20)
+DOLLAR_IN_EURO = _zahl("DOLLAR_IN_EURO", 0.92)
+# Ist das Monatslimit für Claude erreicht, antwortet Claude nicht mehr, bis
+# der Monat wechselt oder das Limit angehoben wird. 0 schaltet es ab.
+MONATSLIMIT_EURO = _zahl("MONATSLIMIT_EURO", 15.0)
 
 # Nutzer
 NUTZER_NAME = _text("NUTZER_NAME", "Chef")
+# Persönliches: was Jarvis über dich wissen soll und wie er klingen soll.
+# Beides landet in jedem Gespräch im Systemprompt - bei Claude und bei Gemini.
+JARVIS_PROFIL = _text("JARVIS_PROFIL")
+JARVIS_STIL = _text("JARVIS_STIL")
 FIRMA = _text("FIRMA", "Gebäudereinigung")
+# Die Branche, in der Jarvis mitarbeitet. Sie steht in jedem Auftrag an die Fachkräfte.
+BRANCHE = _text("BRANCHE", "Gebäudereinigung")
 
 # Sprachausgabe
 ELEVENLABS_API_KEY = _text("ELEVENLABS_API_KEY")
@@ -176,8 +213,131 @@ WETTER_ORT = _text("WETTER_ORT", "Wien")
 SUPABASE_URL = _text("SUPABASE_URL")
 SUPABASE_KEY = _text("SUPABASE_KEY")
 
+# Weitere Ordner (relativ zum Benutzerordner, mit Komma getrennt), in die Jarvis
+# nach Freigabe Dateien schreiben darf. Dokumente, Schreibtisch und Downloads sind immer erlaubt.
+MAC_SCHREIBORDNER = _text("MAC_SCHREIBORDNER", "")
+
+# Im Dienst läuft die Anzeige (Gehirn und Zentrale) nur auf diesem Rechner mit.
+DIENST_ANZEIGE = _wahrheit("DIENST_ANZEIGE", True)
+
+# Anzeige: ohne Namen und Texte, damit im Raum niemand mitliest.
+ANZEIGE_DISKRET = _wahrheit("ANZEIGE_DISKRET", False)
+
+# Im Dienst hört Jarvis auch auf Telegram (Text und Sprachnachrichten vom Handy).
+DIENST_TELEGRAM = _wahrheit("DIENST_TELEGRAM", True)
+
+# Autopilot: Jarvis arbeitet im Hintergrund weiter. Standardmäßig aus.
+# Er bereitet nur vor (Entwürfe im Postfach) und schickt nie etwas ab.
+AUTOPILOT_AN = _wahrheit("AUTOPILOT_AN", False)
+AUTOPILOT_ABSTAND_MIN = _ganzzahl("AUTOPILOT_ABSTAND_MIN", 15)
+AUTOPILOT_VON = _text("AUTOPILOT_VON", "07:00")
+AUTOPILOT_BIS = _text("AUTOPILOT_BIS", "21:00")
+AUTOPILOT_MAX_PRO_STUNDE = _ganzzahl("AUTOPILOT_MAX_PRO_STUNDE", 6)
+AUTOPILOT_MAX_PRO_RUNDE = _ganzzahl("AUTOPILOT_MAX_PRO_RUNDE", 2)
+
 # Ersteinrichtung abgeschlossen?
 EINRICHTUNG_FERTIG = _wahrheit("EINRICHTUNG_FERTIG", False)
+
+# Einstellungen der Pakete - jedes zwischen seinen Marken. Die Namen müssen
+# projektweit eindeutig sein (siehe oben).
+# [P1 Bühne] Anfang
+# Wie lange die Zentrale eine gezeigte Ansicht hält, bevor sie zur Übersicht
+# zurückkehrt (Sekunden).
+ANZEIGE_DAUER = _ganzzahl("ANZEIGE_DAUER", 180)
+# [P1 Bühne] Ende
+# [P2 Weltlage] Anfang
+# Nachrichtenquellen für Weltlage und Lagebild (tagesschau, google, dw - kommagetrennt).
+NACHRICHTEN_QUELLEN = _text("NACHRICHTEN_QUELLEN", "tagesschau,google,dw")
+# Was "die Märkte" ohne Auswahl heißt: dax, atx, eurostoxx, sp500, nasdaq, nasdaq100,
+# vix, brent, wti, gold, eurusd, bitcoin, ethereum.
+MARKT_BEOBACHTUNG = _text("MARKT_BEOBACHTUNG", "dax,sp500,nasdaq,eurostoxx,brent,gold,eurusd,bitcoin")
+# Freiwilliger, kostenloser Demo-Schlüssel von CoinGecko (Krypto-Ersatzquelle).
+COINGECKO_SCHLUESSEL = _text("COINGECKO_SCHLUESSEL")
+# Schlagzeilen und Kurse im Morgenbriefing.
+BRIEFING_WELTLAGE = _wahrheit("BRIEFING_WELTLAGE", False)
+BRIEFING_MAERKTE = _wahrheit("BRIEFING_MAERKTE", False)
+# [P2 Weltlage] Ende
+# [P3 Telefon] Anfang
+# Telefonassistent: ein KI-Assistent ruft ein Restaurant an und reserviert (Vapi, optional Retell).
+# Der Schlüssel (Private Key) steht unter dashboard.vapi.ai -> API Keys. Angerufen wird von einer in
+# Vapi importierten Nummer (VAPI_TELEFON_ID) - Twilio-Zugangsdaten gehen nie an Vapi.
+VAPI_SCHLUESSEL = _text("VAPI_SCHLUESSEL")
+# Konto in der EU-Region: https://api.eu.vapi.ai (Schlüssel und Adresse müssen zusammenpassen).
+VAPI_BASIS = _text("VAPI_BASIS", "https://api.vapi.ai")
+VAPI_TELEFON_ID = _text("VAPI_TELEFON_ID")
+VAPI_MODELL = _text("VAPI_MODELL", "claude-haiku-4-5-20251001")
+# Azure-Stimme; für Österreich zum Beispiel de-AT-IngridNeural oder de-AT-JonasNeural.
+VAPI_STIMME = _text("VAPI_STIMME", "de-DE-KatjaNeural")
+TELEFONAGENT_ANBIETER = _text("TELEFONAGENT_ANBIETER", "vapi")
+TELEFONAGENT_MAX_MINUTEN = _ganzzahl("TELEFONAGENT_MAX_MINUTEN", 4)
+# Die Nummer, die der Assistent auf Nachfrage nennt. Leer: Er sagt, dass du dich selbst meldest.
+TELEFONAGENT_RUECKRUF = _text("TELEFONAGENT_RUECKRUF")
+RETELL_SCHLUESSEL = _text("RETELL_SCHLUESSEL")
+RETELL_AGENT_ID = _text("RETELL_AGENT_ID")
+RETELL_NUMMER = _text("RETELL_NUMMER")
+# [P3 Telefon] Ende
+# [P4 Büro] Anfang
+# Gesten als zweiter Weg für ein Ja (nur in der Web-App, nur bei genau einer offenen Frage).
+GESTEN_FREIGABE = _wahrheit("GESTEN_FREIGABE", False)
+# Jarvis darf von sich aus etwas vorschlagen (nie ausführen).
+VORSCHLAEGE_AN = _wahrheit("VORSCHLAEGE_AN", True)
+# Zeitzone des Kalenders (Namen der Zeitzonen-Datenbank, etwa Europe/Vienna).
+CALDAV_ZEITZONE = _text("CALDAV_ZEITZONE", "Europe/Vienna")
+# [P4 Büro] Ende
+# [P5 Sicht] Anfang
+# Wo geladene Modelle liegen (die Handerkennung, etwa 31 MB). Der Ordner ist nicht im Repository.
+MODELL_VERZEICHNIS = BASIS / "modelle"
+# Live-Kamera auf der Seite Sicht (/sehen). Voreingestellt aus; das Bild bleibt im Browser.
+SICHT_AN = _wahrheit("SICHT_AN", False)
+# Länge von Handgelenk bis Mittelfingerwurzel in Millimetern - Grundlage der Handruhe-Schätzung.
+HANDLAENGE_MM = _zahl("HANDLAENGE_MM", 95)
+# Erholung aus Oura oder Whoop. Beide verlangen eine eigene App (OAuth): Client-ID und Client-Secret trägt
+# `python3 jarvis.py zugang oura` (oder whoop) ein; den Refresh-Token schreibt Jarvis selbst nach config/.env
+# und erneuert ihn bei jedem Abruf (er gilt nur einmal).
+OURA_CLIENT_ID = _text("OURA_CLIENT_ID")
+OURA_CLIENT_SECRET = _text("OURA_CLIENT_SECRET")
+OURA_REFRESH_TOKEN = _text("OURA_REFRESH_TOKEN")
+WHOOP_CLIENT_ID = _text("WHOOP_CLIENT_ID")
+WHOOP_CLIENT_SECRET = _text("WHOOP_CLIENT_SECRET")
+WHOOP_REFRESH_TOKEN = _text("WHOOP_REFRESH_TOKEN")
+# Woran Jarvis im Kalender einen Verkaufstermin erkennt (Stichwörter im Titel, kommagetrennt).
+VERKAUFS_STICHWOERTER = _text("VERKAUFS_STICHWOERTER", "besichtigung,angebot,erstgespräch,beratung,vor ort,akquise,objektbegehung")
+# Belastungsprüfung am Abend: Liegt die Erholung unter der Schwelle und stehen morgen mindestens so viele Termine an,
+# macht Jarvis (bei genug Zahlen) einen Vorschlag - ändern tut er nichts. Die Uhrzeit "aus" schaltet sie ab.
+BELASTUNG_SCHWELLE = _ganzzahl("BELASTUNG_SCHWELLE", 34)
+BELASTUNG_MIN_TERMINE = _ganzzahl("BELASTUNG_MIN_TERMINE", 4)
+BELASTUNG_PRUEFEN_UM = _text("BELASTUNG_PRUEFEN_UM", "18:25")
+# [P5 Sicht] Ende
+# [P6 Stimme] Anfang
+# Welche Stimme spricht: auto (Fish Audio nur mit Schlüssel UND Stimmen-ID, sonst ElevenLabs,
+# sonst die Mac-Stimme), fish, elevenlabs oder mac.
+STIMME_ANBIETER = _text("STIMME_ANBIETER", "auto")
+FISH_API_KEY = _text("FISH_API_KEY")
+# Die Kennung der Fish-Stimme (fish.audio -> Stimme öffnen -> Adresse oder "Copy ID").
+FISH_STIMME_ID = _text("FISH_STIMME_ID")
+FISH_MODELL = _text("FISH_MODELL", "s2.1-pro")
+# normal (beste Qualität), balanced (weniger Wartezeit) oder low (am schnellsten).
+FISH_LATENZ = _text("FISH_LATENZ", "balanced")
+# Die Web-App spricht mit der Serverstimme (Fish/ElevenLabs) statt mit der Browserstimme.
+# Standardmäßig aus: das kostet bei jedem Satz Guthaben beim Stimmen-Anbieter.
+STIMME_IM_BROWSER = _wahrheit("STIMME_IM_BROWSER", False)
+# So viele Millisekunden vergehen vom Anzeigen des Pegels bis der Ton wirklich zu hören ist.
+STIMME_VORLAUF_MS = _ganzzahl("STIMME_VORLAUF_MS", 60)
+# Dolmetscher: welches Gehirn übersetzt (auto = Gemini wenn vorhanden, sonst Claude; gemini; claude).
+DOLMETSCHER_GEHIRN = _text("DOLMETSCHER_GEHIRN", "auto")
+# Welche Gastsprachen der Dolmetscher anbietet (Kürzel, kommagetrennt).
+DOLMETSCHER_SPRACHEN = _text("DOLMETSCHER_SPRACHEN", "tr,hr,sr,bs,sq,pl,ro,hu,en,uk,ru,ar")
+# [P6 Stimme] Ende
+# [P7 Start] Anfang
+# Für welche Plattformen die Inhalte-Planung Beiträge schreibt.
+INHALTE_PLATTFORMEN = _text("INHALTE_PLATTFORMEN", "instagram,facebook,google")
+# Beim Hochfahren begrüßt Jarvis mit dem Tag (Termine, Post, Wetter, Offenes) - einmal je Tag.
+BEGRUESSUNG_AN = _wahrheit("BEGRUESSUNG_AN", True)
+# Der Ordner der Kurzbefehle-App, aus dem Jarvis Kurzbefehle ausführt (Licht, Szenen, Fokus).
+KURZBEFEHL_ORDNER = _text("KURZBEFEHL_ORDNER", "Jarvis")
+# Auf welchem Bildschirm die Zentrale steht (0 = Hauptbildschirm, 1 = der zweite).
+ANZEIGE_BILDSCHIRM = _ganzzahl("ANZEIGE_BILDSCHIRM", 1)
+# [P7 Start] Ende
 
 
 def env_setzen(schluessel: str, wert) -> bool:
@@ -228,7 +388,7 @@ def env_schreiben() -> bool:
 def verzeichnisse_anlegen():
     """Legt alle Arbeitsverzeichnisse an, falls sie fehlen."""
     for pfad in (CONFIG_VERZEICHNIS, DASHBOARD_VERZEICHNIS, BELEGE_VERZEICHNIS,
-                 PROFIL_VERZEICHNIS, EXPORT_VERZEICHNIS):
+                 PROFIL_VERZEICHNIS, EXPORT_VERZEICHNIS, LOG_VERZEICHNIS):
         try:
             pfad.mkdir(parents=True, exist_ok=True)
         except OSError as fehler:
@@ -239,6 +399,7 @@ def konfig_uebersicht() -> dict:
     """Zeigt an, welche Dienste eingerichtet sind - ohne Geheimnisse preiszugeben."""
     return {
         "Claude": bool(ANTHROPIC_API_KEY),
+        "Gemini": bool(GEMINI_API_KEY),
         "ElevenLabs": bool(ELEVENLABS_API_KEY),
         "Whisper-API": bool(OPENAI_API_KEY),
         "Telegram": bool(TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID),
@@ -247,6 +408,23 @@ def konfig_uebersicht() -> dict:
         "Kalender": bool(CALDAV_URL),
         "Supabase": bool(SUPABASE_URL and SUPABASE_KEY),
         "Telefon": bool(TWILIO_SID and TWILIO_TOKEN and TWILIO_NUMMER),
+        # [P1 Bühne] Anfang
+        # [P1 Bühne] Ende
+        # [P2 Weltlage] Anfang
+        # [P2 Weltlage] Ende
+        # [P3 Telefon] Anfang
+        "Telefonassistent": bool(VAPI_SCHLUESSEL or RETELL_SCHLUESSEL),
+        # [P3 Telefon] Ende
+        # [P4 Büro] Anfang
+        # [P4 Büro] Ende
+        # [P5 Sicht] Anfang
+        "Wearable": bool(OURA_REFRESH_TOKEN or WHOOP_REFRESH_TOKEN),
+        # [P5 Sicht] Ende
+        # [P6 Stimme] Anfang
+        "Fish Audio": bool(FISH_API_KEY),
+        # [P6 Stimme] Ende
+        # [P7 Start] Anfang
+        # [P7 Start] Ende
     }
 
 

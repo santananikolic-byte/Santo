@@ -463,16 +463,46 @@ class Akquise:
             return {"ok": False, "fehler": "In welchem Ort soll ich suchen?"}
         if welt is None:
             return {"ok": False, "fehler": "Die Suche ist nicht verfügbar."}
+
+        # Zuerst die Karte: echte Betriebe mit Adresse, ohne Schlüssel und ohne Raten.
+        # Stehen alle Treffer schon in der Liste, ein zweiter Blick weiter hinaus.
+        anzahl = max(1, int(anzahl or 8))
+        karten_grund, alles_bekannt = "", None
+        if hasattr(welt, "betriebe_suchen"):
+            for weiter in (False, True):
+                karte = (welt.betriebe_suchen(ort, branche, anzahl * 4, radius=7000) if weiter
+                         else welt.betriebe_suchen(ort, branche, anzahl))
+                if not (karte.get("ok") and karte.get("betriebe")):
+                    if not weiter:
+                        karten_grund = karte.get("fehler") or (
+                            "Auf der Karte finde ich in %s keine passenden Betriebe." % ort)
+                    break
+                ergebnis = self._betriebe_aufnehmen(karte["betriebe"], ort,
+                                                    "Karte (OpenStreetMap)", hoechstens=anzahl)
+                if ergebnis.get("neu"):
+                    return ergebnis
+                alles_bekannt = dict(ergebnis, text=(
+                    "Auf der Karte stehen in %s %d passende Betriebe - alle hast du schon in "
+                    "der Liste. Nimm einen Nachbarort oder eine andere Branche."
+                    % (ort, ergebnis.get("gefunden", 0))))
+
         if agent is None or not getattr(agent, "einsatzbereit", lambda: False)():
+            if alles_bekannt:
+                return alles_bekannt
             return {"ok": False,
-                    "fehler": "Ohne Anthropic-Schlüssel kann ich die Treffer nicht "
-                              "auswerten."}
+                    "fehler": karten_grund or "Ohne Anthropic-Schlüssel kann ich die "
+                                              "Treffer nicht auswerten."}
 
         branchen = branche.strip() if branche else \
             "Arztpraxen, Steuerberater, Kanzleien, Autohäuser, Fitnessstudios"
         anfrage = ("%s in %s mit Adresse und Telefonnummer" % (branchen, ort))
         gefunden = welt.recherche(anfrage)
         if not gefunden.get("ok"):
+            # Ohne Such-Dienst zählt, was die Karte gesagt hat - nicht der Brave-Hinweis.
+            if alles_bekannt:
+                return alles_bekannt
+            if karten_grund:
+                return {"ok": False, "fehler": karten_grund}
             return {"ok": False,
                     "fehler": "Für die Suche fehlt der Such-Dienst. In "
                               "config/mcp_servers.json den Eintrag 'suche' auf "
@@ -496,16 +526,28 @@ class Akquise:
                               % antwort.get("fehler", "")}
 
         betriebe = (antwort["daten"] or {}).get("betriebe") or []
+        return self._betriebe_aufnehmen(betriebe[:anzahl], ort, "Recherche")
+
+    def _betriebe_aufnehmen(self, betriebe: list, ort: str, quelle: str,
+                            hoechstens: int = 0) -> dict:
+        """Nimmt gefundene Betriebe als Interessenten auf - Wert null, nächster Schritt: anrufen.
+
+        Mit ``hoechstens`` ist nach so vielen neuen Schluss; bekannte zählen nicht.
+        """
         neu, bekannt = [], []
-        for eintrag in betriebe[:int(anzahl or 8)]:
+        for eintrag in betriebe:
+            if hoechstens and len(neu) >= hoechstens:
+                break
             firma = str(eintrag.get("firma") or "").strip()
             if not firma:
                 continue
             ergebnis = self.lead_anlegen(
                 firma, telefon=str(eintrag.get("telefon") or ""),
                 adresse=str(eintrag.get("adresse") or ""),
-                quelle="Recherche %s" % ort,
-                notiz=str(eintrag.get("branche") or ""),
+                quelle="%s %s" % (quelle, ort),
+                notiz=" · ".join(x for x in (str(eintrag.get("branche") or ""),
+                                              str(eintrag.get("web") or ""),
+                                              str(eintrag.get("mail") or "")) if x),
                 naechster_schritt="anrufen und fragen, wer die Reinigung macht")
             if ergebnis.get("ok"):
                 neu.append(firma)

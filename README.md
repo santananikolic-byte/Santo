@@ -14,10 +14,17 @@ die Anleitung führt in drei Schritten von Claude Code zum laufenden Jarvis.
 
 ## Loslegen
 
-Der kürzeste Weg — eine Zeile ins Terminal, sonst nichts:
+**Als App:** [Jarvis-App.zip herunterladen](https://github.com/santananikolic-byte/Santo/raw/claude/new-session-o54yqu/download/Jarvis-App.zip),
+öffnen, **Jarvis** (das Gehirn-Symbol) in den Programme-Ordner ziehen und starten.
+Beim ersten Start richtet sich Jarvis im Terminal ein und liest dabei alles vor; danach
+liegt er im Dock und öffnet sich mit einem Klick in seinem eigenen Fenster. Weil die App
+nicht bei Apple registriert ist, fragt macOS beim allerersten Öffnen nach: Rechtsklick →
+Öffnen, oder Systemeinstellungen → Datenschutz & Sicherheit → „Trotzdem öffnen“.
+
+Oder der kürzeste Weg — eine Zeile ins Terminal, sonst nichts:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/santananikolic-byte/Santo/claude/jarvis-voice-assistant-70695g/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/santananikolic-byte/Santo/claude/new-session-o54yqu/install.sh | bash
 ```
 
 Das lädt Jarvis nach `~/Jarvis`, holt was fehlt, legt eine Verknüpfung auf den
@@ -71,6 +78,130 @@ nur auf diesen Rechner.
 Braucht Safari oder Chrome; Firefox kann keine deutsche Spracherkennung und
 bekommt deshalb keinen Mikrofonknopf, sondern einen Hinweis.
 
+## Aufbau: Erinnern und Umsetzen
+
+**Das Gehirn dahinter ist Claude Opus 5.5**, das stärkste allgemeine Modell von
+Anthropic. Es denkt vor jeder Antwort mit und bedient die Werkzeuge: rechnet
+Angebote, legt Kunden an, schreibt Mails, baut Webseiten und Chatbots. Nur reiner
+Smalltalk („Hallo“, „Danke“) geht an das schnelle Gemini. Eine Frage kostet je nach
+Umfang etwa 2 bis 20 Cent; das Monatslimit (`MONATSLIMIT_EURO`, anfangs 15 Euro)
+bremst, bevor es teuer wird. Halb so teuer: `CLAUDE_MODEL=claude-sonnet-5-5`.
+
+Jarvis hat zwei Bereiche, so wie ein Mensch im Betrieb.
+
+**Erinnern.** Das Gedächtnis liegt lokal in einer Datenbank: Notizen, Kunden,
+Gespräche, Zahlen, Tagesberichte, offene Punkte. Vor jeder Antwort holt er sich
+heraus, was zur Frage passt, und nutzt es beiläufig. Er merkt sich von selbst,
+was wichtig klingt, und vergisst nichts, was du ihm sagst.
+
+**Umsetzen.** Hier arbeiten die Fachkräfte, im Gespräch oder im Hintergrund
+über den Autopiloten:
+
+| Fachkraft | Macht |
+|---|---|
+| der zweite Chef | Lage des Betriebs, Prioritäten, Entscheidungen vorbereiten, Aufträge verteilen |
+| der Verkäufer | Pipeline, Nachfassen, Angebote kalkulieren und schreiben |
+| der Buchhalter, Controller | Buchungen, Belege, Kasse, Cashflow |
+| der Postbearbeiter, Terminplaner | Posteingang, Antwortentwürfe, Kalender |
+| der Webdesigner | fertige Webseiten und Landingpages als HTML-Datei |
+| der Chatbot-Bauer | Bot-Anweisung, häufige Fragen, Gesprächsablauf, Einbindung |
+| der Marketingmann | Beiträge, Anschreiben, Kampagnen mit Erfolgskennzahl |
+| der Programmierer | kleine Programme und Auswertungen |
+| der Rechercheur, Kundenberater, Privatsekretär | Recherche, Gesprächsbewertung, private Fixkosten |
+
+Was die Webdesigner-, Chatbot- und Marketing-Fachkräfte bauen, liegt unter
+`werkstatt/projekte/<Projekt>/`. Es wird **nur geschrieben, nie ausgeführt**,
+und Dateien mit Schlüsseln oder Tokens werden abgelehnt.
+
+Die Branche stellst du in der Einrichtung ein (`BRANCHE`). Sie steht in jedem
+Auftrag. Die Kalkulation über Leistungswerte ist auf Reinigung zugeschnitten,
+der Rest arbeitet in jeder Branche.
+
+## Sprechen wie ein Mensch
+
+Was Jarvis sagt, wird erst ins Gesprochene übersetzt: Beträge, Daten, Uhrzeiten
+und Einheiten werden ausgeschrieben ("eintausendneunundsechzig Euro sechzig",
+"am sechsten Oktober um vierzehn Uhr dreißig"), Markdown, Links und Code fallen
+weg, Telefonnummern bleiben Ziffern. Danach wird der Text in kurze Atemabschnitte
+geteilt, und doppelte Sätze oder Wortschleifen werden einmal gesprochen.
+
+Mit ElevenLabs wird der nächste Abschnitt schon geholt, während der vorige läuft,
+und jeder Abschnitt kennt den Satz davor und danach, damit die Betonung
+durchläuft. Fällt ElevenLabs aus, spricht die Systemstimme nur den Rest. Im
+Browser wird Abschnitt für Abschnitt gesprochen, mit der besten deutschen
+Stimme, die der Browser hat. Am natürlichsten klingt ElevenLabs
+(`python3 jarvis.py zugang stimme`).
+
+## Zweites Gehirn und Zentrale
+
+Zwei Seiten für zwei Bildschirme, nur zum Ansehen, ohne Eingabefeld:
+
+- **`/gehirn`**: Jarvis' Gedächtnis als leuchtendes Gehirn. Jede Notiz, jeder Kontakt,
+  jeder Interessent, jede Aufgabe, jedes Gespräch und jedes Ergebnis des Autopiloten
+  ist ein Knoten, verwandte sind verbunden. Es pulsiert schneller, wenn Jarvis zuhört,
+  denkt oder spricht, und blitzt in der passenden Region auf, wenn er etwas tut.
+- **`/zentrale`**: der Stand des Betriebs auf einen Blick: Kasse, Belege, Chancen, Verlauf,
+  Pipeline, Denken (Gemini gegen Claude, Kosten gegen Limit), Nachfassen, was Jarvis zuletzt
+  getan hat, ein Globus mit dem Betrieb und den Orten der Kunden, und das Briefing.
+
+Beim Doppelklick auf **JARVIS** ist alles auf einer Seite: das Gehirn leuchtet mitten
+im Gespräch und zeigt, ob Jarvis zuhört, denkt oder spricht. Für zwei Bildschirme:
+`python3 jarvis.py anzeige` (Zentrale und Gehirn je ein Fenster, dann Vollbild). Im
+Dienst läuft die Anzeige von selbst mit (`DIENST_ANZEIGE`), nur zum Ansehen - bedient
+wird dort mit der Stimme oder per Telegram.
+
+Es wird nur gezeigt, was wirklich in der Datenbank steht. Mit `ANZEIGE_DISKRET=ja` fallen
+alle Texte und Namen weg, damit im Raum niemand mitliest. Die Weltkarte ist **gezeichnet,
+nicht vermessen**: grobe Umrisse als Punktraster, gut genug zu sehen, wo etwa etwas liegt,
+und nicht zum Navigieren.
+
+## Dauerbetrieb auf dem iMac
+
+Jarvis kann als Dienst dauerhaft auf einem iMac laufen: ohne Fenster, nur mit
+Stimme. Er startet bei der Anmeldung, hält den Mac wach, hört zu, antwortet laut,
+arbeitet im Hintergrund weiter und startet nach einem Absturz oder Stillstand neu.
+Freigaben holt er per Stimme ("Soll ich?"). Nur ein kurzes, klares Ja gilt.
+
+```
+python3 jarvis.py daemon                 # im Vordergrund testen
+python3 jarvis.py dienst installieren    # dauerhaft einrichten
+python3 jarvis.py dienst status
+```
+
+Auf dem Mac kann er Dateien suchen und lesen (Schlüssel, Anmeldungen, Verläufe und
+`.env` sind gesperrt) und mit Freigabe neue Textdateien in Dokumente, Schreibtisch
+oder Downloads anlegen. Er durchsucht dein **Gmail**-Postfach und schickt SMS
+mit deiner eigenen Nummer über das iPhone - verschickt wird nur nach deinem Ja:
+
+```
+python3 jarvis.py zugang mail     # Gmail mit App-Passwort verbinden
+```
+
+Alles Weitere, auch zum Thema eigener Benutzer oder virtuelle Maschine statt
+eines eigenen Betriebssystems, steht in `docs/IMAC.md`.
+
+## Autopilot
+
+Jarvis kann auch arbeiten, wenn niemand fragt. Der Autopilot nimmt Aufträge
+aus der Warteschlange ("Schreib im Hintergrund das Angebot für Müller") und
+sucht von selbst nach Arbeit: fälliges Nachfassen, ungelesene Post, fehlende
+Belege, anstehende Termine. Die Fachkräfte aus dem Team bereiten vor und legen
+das Ergebnis ins **Postfach**.
+
+**Er schickt nie etwas ab.** Im Hintergrund hat keine Fachkraft ein Werkzeug,
+das eine Freigabe braucht: keine Mail, kein Anruf, kein Termin, kein Skript.
+Was herauskommt, sind Entwürfe. Ob etwas rausgeht, entscheidest du mit der
+normalen Freigabe.
+
+Er ist **standardmäßig aus** und hat Bremsen: Ruhezeit (`AUTOPILOT_VON`,
+`AUTOPILOT_BIS`), höchstens `AUTOPILOT_MAX_PRO_STUNDE` Aufträge pro Stunde und
+das Monatslimit für Claude (`MONATSLIMIT_EURO`). Jeder Lauf steht im
+Gedankenlog.
+
+- Einschalten und Postfach lesen: Seite **Autopilot** in der Web-App, oder
+  `python3 jarvis.py autopilot an` und `python3 jarvis.py autopilot`.
+- Per Sprache: "Jarvis, erledige im Hintergrund …" und "Was liegt im Postfach?"
+
 ## So redet man mit ihm
 
 > „Hey Jarvis, wie sieht mein Tag aus?“
@@ -110,10 +241,11 @@ gutes Gespräch, und das sagt er auch. Über viele Gespräche hinweg erkennt er
 Muster: Kommt derselbe Einwand dreimal, ist das kein Zufall, sondern eine Lücke
 im Angebot.
 
-**Ein Team statt eines Alleskönners.** Neun Fachkräfte mit eigenem Auftrag und
+**Ein Team statt eines Alleskönners.** Dreizehn Fachkräfte mit eigenem Auftrag und
 **eigenem Werkzeugsatz**: Buchhalter, Verkäufer, Terminplaner, Postbearbeiter,
-Kundenberater, Rechercheur, Controller, Programmierer, Privatsekretär. Die
-Trennung ist echt — der Verkäufer sieht 11 von 58 Werkzeugen und kann weder buchen noch mailen, der
+Kundenberater, Rechercheur, Controller, Programmierer, Privatsekretär, der zweite
+Chef, Webdesigner, Chatbot-Bauer und Marketing. Die Trennung ist echt — der
+Verkäufer sieht 17 von 75 Werkzeugen und kann weder buchen noch mailen, der
 Rechercheur kann gar nichts eintragen. Wer alles darf, macht irgendwann alles,
 auch das Falsche.
 
@@ -130,9 +262,10 @@ Nachfassliste, die sagt wer heute dran ist, und eine Angebotskalkulation, die
 über **Leistungswerte** rechnet statt einen Quadratmeterpreis zu raten: Fläche
 geteilt durch m² pro Stunde ergibt Stunden, mal Stundensatz ergibt den Preis.
 Die Cashflow-Vorschau trennt Gesichertes von Erhofftem — ein Angebot ist kein
-Geld und wird gewichtet, nicht voll angesetzt. Mit eingeschaltetem Such-Dienst
-findet er auch neue Betriebe in einem Ort und nimmt sie auf — mit Wert null,
-bis jemand angerufen hat.
+Geld und wird gewichtet, nicht voll angesetzt. **Neue Kunden findet er auf der
+Karte** (OpenStreetMap, ohne Schlüssel): „Finde Steuerberater und Arztpraxen in
+Graz“ — echte Betriebe mit Adresse und, wo eingetragen, Telefon und Webseite. Er
+nimmt sie auf, mit Wert null, bis jemand angerufen hat.
 
 **Werkstatt.** Der Programmierer schreibt kleine Python-Skripte und legt sie ab.
 Ausgeführt wird nur nach Freigabe, und die Freigabefrage zeigt vorher den
@@ -142,10 +275,11 @@ vollständigen Code samt Hinweis, ob er ins Netz will oder Dateien anfasst.
 per Telegram schicken. Jeden Tag um 18 Uhr.“ Danach genügt „Mach den
 Tagesbericht“. Routinen mit Uhrzeit laufen von selbst.
 
-**E-Mail, Kalender, Wetter, Kamera, Bildschirm.** Post lesen und vorsortieren,
-Termine samt Überschneidungen, echtes Wetter, ein Blick durch die Kamera, und
-auf Wunsch Bedienung des Bildschirms — Schritt für Schritt, jeder einzeln
-bestätigt.
+**E-Mail, SMS, Kalender, Wetter, Kamera, Bildschirm.** Post lesen,
+vorsortieren und durchsuchen (Gmail und andere), SMS mit der eigenen Nummer
+verschicken, Termine samt Überschneidungen, echtes Wetter, ein Blick durch die
+Kamera, und auf Wunsch Bedienung des Bildschirms — Schritt für Schritt, jeder
+einzeln bestätigt.
 
 **Command Center.** `dashboard/dashboard.html` zeigt Monatszahlen mit
 30-Tage-Verlauf, die Belegquote als Ring, Ausgaben je Kategorie, Termine,
@@ -178,6 +312,13 @@ senden, Bildschirm bedienen und jedes nicht ausdrücklich freigegebene
 MCP-Werkzeug fragen vorher nach — per Telegram, sonst im Terminal.
 **Timeout, Netzwerkfehler oder ausbleibende Antwort gelten als Ablehnung.**
 Nie als Zustimmung. Wer sich nicht meldet, hat nicht zugestimmt.
+
+**Fremder Text ist keine Anweisung.** Mails, Dateien und Webseiten
+können Sätze enthalten, die sich an Jarvis richten. Hat er in einem Gespräch
+so etwas gelesen, fragt er danach auch vor jeder Suche im Netz und jeder
+geöffneten Webseite nach — damit nichts unbemerkt hinausgetragen wird. Im
+Hintergrund gibt es solche Werkzeuge gar nicht, und eine Fachkraft kann nur
+die Werkzeuge ihrer Rolle benutzen, auch wenn sie ein anderes aufruft.
 
 Jede Aktion landet im Protokoll und erscheint im Dashboard.
 
@@ -229,7 +370,8 @@ Der **Selbsttest** geht jeden Baustein durch:
 | Klicks landen daneben | Sollte nicht vorkommen — der Retina-Faktor wird gemessen. Selbsttest zeigt ihn an |
 | Er redet englisch oder klingt falsch | `EXTRAS.command` → 9, deutsche Stimme installieren lassen |
 | Kamera geht nicht | `brew install imagesnap`, dann Kamera-Recht erteilen |
-| Mail geht nicht | Bei Gmail, iCloud und Outlook braucht es ein **App-Passwort**, nicht das normale |
+| Mail geht nicht | Bei Gmail, iCloud und Outlook braucht es ein **App-Passwort**, nicht das normale: `python3 jarvis.py zugang mail` |
+| SMS gehen nicht raus | Am iPhone: Einstellungen → Nachrichten → SMS-Weiterleitung → diesen Mac einschalten |
 | Irgendetwas anderes | `EXTRAS.command` → 1 (Selbsttest) |
 
 ---

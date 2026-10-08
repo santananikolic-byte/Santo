@@ -482,7 +482,11 @@ class Browser:
         if seite.get("letzter_fehler"):
             anfrage += ("\n\nDer letzte Schritt ist fehlgeschlagen: %s"
                         % seite["letzter_fehler"])
-        plan = self.agent.json_anfrage(STEUER_PROMPT, anfrage)
+        antwort = self.agent.json_anfrage(STEUER_PROMPT + "\n\n" + anfrage)
+        if isinstance(antwort, dict) and not antwort.get("ok") and antwort.get("fehler") \
+                and "JSON" not in antwort["fehler"]:
+            return {"ok": False, "fehler": antwort["fehler"]}  # Limit, Netz, Schlüssel
+        plan = antwort.get("daten") if isinstance(antwort, dict) and antwort.get("ok") else None
         if not isinstance(plan, dict) or not plan.get("aktion"):
             return {"ok": False,
                     "fehler": "Ich bekomme keinen brauchbaren nächsten Schritt zurück."}

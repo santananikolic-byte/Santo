@@ -210,7 +210,11 @@ class Routines:
         auftrag = ("Führe jetzt die gespeicherte Routine '%s' aus. Das ist die Anweisung:\n\n%s\n\n"
                    "Nutze dafür deine Werkzeuge und melde am Ende kurz, was du getan hast."
                    % (treffer["name"], treffer["anweisung"]))
-        antwort = agent.denken(auftrag, protokollieren=False)
+        # Eine eigene Arbeitsschleife: Läuft die Routine als Werkzeug mitten in einer
+        # Frage, darf sie den Gesprächsverlauf nicht anfassen - sonst steht ein
+        # Werkzeugaufruf ohne Ergebnis darin, und jede weitere Anfrage scheitert.
+        antwort = agent.arbeiten(agent.systemprompt(auftrag), auftrag, max_runden=8,
+                                 grund="Routine %s" % treffer["name"])
         return {"ok": True, "name": treffer["name"], "text": antwort}
 
     def statistik(self) -> dict:

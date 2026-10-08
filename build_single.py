@@ -41,7 +41,13 @@ ZIEL = WURZEL / "jarvis.py"
 BAULISTE = [
     "config",
     "modules/memory",
+    "modules/router",
     "modules/recall",
+    "modules/sprechtext",
+    "modules/anzeige",
+    "modules/freigabe",
+    "modules/netzsocket",
+    "modules/stimmanbieter",
     "modules/voice",
     "modules/speaker",
     "modules/mail",
@@ -53,21 +59,42 @@ BAULISTE = [
     "modules/akquise",
     "modules/privat",
     "modules/routines",
+    "modules/vorschlaege",
     "modules/camera",
     "modules/mcp_client",
     "modules/world",
+    "modules/nachrichten",
+    "modules/maerkte",
+    "modules/weblesen",
+    "modules/lokale",
     "modules/browser",
     "modules/messenger",
     "modules/computer_use",
     "modules/werkstatt",
     "modules/team",
+    "modules/mac",
+    "modules/hardware",
+    "modules/steuerung",
+    "modules/inhalte",
+    "modules/telefonagent",
+    "modules/sicht",
+    "modules/erholung",
+    "modules/leistung",
+    "modules/autopilot",
+    "modules/dienst",
+    "modules/weltkarte",
+    "modules/ansicht",
     "modules/webseite",
+    "modules/sehen",
+    "modules/dolmetscher",
     "modules/dashboard_teile",
     "modules/dashboard",
     "modules/sales_view",
     "modules/scheduler",
+    "modules/lernpfad",
     "modules/webapp",
     "modules/setup_wizard",
+    "modules/macapp",
     "modules/tools",
     "agent",
     "run",
@@ -99,8 +126,13 @@ Betriebsarten:
     python3 jarvis.py export      Buchhaltung als CSV
     python3 jarvis.py stimme      Stimmprofil einlernen
     python3 jarvis.py stimmen     ElevenLabs-Stimme aussuchen
+    python3 jarvis.py sicht       Kamera-Seite: laden (Handerkennung holen), an oder aus
     python3 jarvis.py test        Selbsttest
+    python3 jarvis.py sprechprobe Stimmkette prüfen und einen Probesatz sprechen
     python3 jarvis.py einrichten  geführte Ersteinrichtung
+    python3 jarvis.py hardware    den Mac prüfen: Last, Speicher, Platte, Netz, Wärme
+    python3 jarvis.py gesundheit  Apple-Health-Export einlesen (Datei) oder alle Gesundheitswerte vergessen
+    python3 jarvis.py zugang oura Oura Ring verbinden (ebenso: zugang whoop) für den Erholungswert
 
 Alle Daten bleiben lokal auf diesem Rechner.
 """

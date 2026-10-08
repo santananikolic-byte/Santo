@@ -12,6 +12,7 @@ Der Nutzer ist kein Entwickler. Er soll nichts nachschlagen müssen. Deshalb:
   geöffnet. Wer schon alles erlaubt hat, soll nicht drei Fenster wegklicken.
 """
 
+import getpass
 import imaplib
 import json
 import os
@@ -28,6 +29,7 @@ import config
 from modules.camera import Kamera
 from modules.mcp_client import vorlage_schreiben
 from modules.memory import Memory
+from modules.router import gemini_testen
 from modules.routines import Routines
 from modules.speaker import Sprecherprofil
 from modules.telefon import nummer_pruefen
@@ -116,6 +118,20 @@ class Einrichtung:
             return ""
 
     @staticmethod
+    def fragen_geheim(frage: str) -> str:
+        """Liest einen Schlüssel - unsichtbar, wenn ein echtes Terminal da ist.
+
+        Was man nicht sieht, kann man nicht versehentlich fotografieren oder
+        in einen Chat kopieren. Eingefügt wird trotzdem ganz normal.
+        """
+        try:
+            if sys.stdin.isatty():
+                return getpass.getpass("%s (die Eingabe bleibt unsichtbar) " % frage).strip()
+            return input("%s " % frage).strip()
+        except (EOFError, KeyboardInterrupt):
+            return ""
+
+    @staticmethod
     def oeffnen(ziel: str) -> bool:
         """Öffnet eine Seite oder eine Systemeinstellung."""
         if not shutil.which("open"):
@@ -167,10 +183,11 @@ class Einrichtung:
 
     def schluessel_testen(self, schluessel: str) -> dict:
         """Prüft einen Schlüssel mit einem echten, winzigen Aufruf."""
-        koerper = json.dumps({
-            "model": config.CLAUDE_MODEL, "max_tokens": 8,
-            "messages": [{"role": "user", "content": "Sag nur: ok"}],
-        }).encode("utf-8")
+        probe = {"model": config.CLAUDE_MODEL, "max_tokens": 64,
+                 "messages": [{"role": "user", "content": "Sag nur: ok"}]}
+        if not config.CLAUDE_MODEL.startswith(("claude-haiku", "claude-sonnet-4-5", "claude-3")):
+            probe["output_config"] = {"effort": "low"}  # schnell: nur prüfen, ob der Schlüssel geht
+        koerper = json.dumps(probe).encode("utf-8")
         anfrage = urllib.request.Request(
             "https://api.anthropic.com/v1/messages", data=koerper, method="POST",
             headers={"x-api-key": schluessel, "anthropic-version": "2023-06-01",
@@ -227,7 +244,7 @@ class Einrichtung:
         self.oeffnen(ANTHROPIC_SEITE)
 
         for versuch in range(1, 5):
-            schluessel = self.fragen("Schlüssel hier einfügen und Enter drücken:")
+            schluessel = self.fragen_geheim("Schlüssel hier einfügen und Enter drücken:")
             if not schluessel:
                 self.sagen("Ich habe nichts bekommen. Versuch %d von 4." % versuch)
                 continue
@@ -403,6 +420,10 @@ class Einrichtung:
         firma = self.fragen("Wie heißt deine Firma? (Enter zum Überspringen)")
         if firma:
             config.env_setzen("FIRMA", firma)
+        branche = self.fragen("In welcher Branche arbeitest du? Zum Beispiel Gebäudereinigung, "
+                              "Gastronomie, Handwerk (Enter für '%s')" % config.BRANCHE)
+        if branche:
+            config.env_setzen("BRANCHE", " ".join(branche.split())[:80])
         ort = self.fragen("In welchem Ort arbeitest du? (Enter für '%s')"
                           % config.WETTER_ORT)
         if ort:
@@ -414,22 +435,170 @@ class Einrichtung:
                 config.env_setzen("STANDARD_MWST", float(mwst.replace(",", ".")))
             except ValueError:
                 print("Das war keine Zahl - ich bleibe bei %g." % config.STANDARD_MWST)
+        profil = self.fragen("Was soll Jarvis über dich und deinen Alltag wissen? "
+                             "Ein, zwei Sätze (Enter zum Überspringen):")
+        if profil:
+            config.env_setzen("JARVIS_PROFIL", " ".join(profil.split()))
+        stil = self.fragen("Wie soll er mit dir reden? Zum Beispiel: knapp und direkt, "
+                           "mit etwas Humor (Enter für den Standard):")
+        if stil:
+            config.env_setzen("JARVIS_STIL", " ".join(stil.split()))
         self.ergebnisse["person"] = config.NUTZER_NAME
+
+    # -- Gemini (freiwillig) -------------------------------------------------
+
+    def schritt_gemini(self) -> bool:
+        """Gemini ist das schnelle, gratis Gehirn. Ohne bleibt Claude allein."""
+        if config.GEMINI_API_KEY:
+            probe = gemini_testen(config.GEMINI_API_KEY)
+            if probe.get("ok"):
+                self.ergebnisse["gemini"] = "vorhanden und geprüft"
+                return True
+            self.sagen(probe["text"])
+        antwort = self.fragen("Möchtest du Gemini dazunehmen? Das ist das schnelle, "
+                              "kostenlose Gehirn für einfache Fragen. (j/N)").lower()
+        if antwort not in ("j", "ja", "y", "yes"):
+            self.ergebnisse["gemini"] = "übersprungen"
+            return False
+        self.sagen("Ich öffne Google AI Studio. Melde dich an, wähle Create API Key, "
+                   "kopiere den Schlüssel und füge ihn hier ein.")
+        self.oeffnen("https://aistudio.google.com/apikey")
+        for versuch in range(1, 4):
+            schluessel = self.fragen_geheim("Gemini-Schlüssel einfügen und Enter drücken:")
+            if not schluessel:
+                self.sagen("Ich habe nichts bekommen. Versuch %d von 3." % versuch)
+                continue
+            probe = gemini_testen(schluessel)
+            self.sagen(probe["text"])
+            if probe.get("ok") or probe.get("limit"):
+                config.env_setzen("GEMINI_API_KEY", schluessel)
+                self.ergebnisse["gemini"] = "geprüft" if probe.get("ok") else "gespeichert"
+                return True
+        self.ergebnisse["gemini"] = "fehlgeschlagen"
+        self.sagen("Gemini lasse ich weg. Später: python3 jarvis.py zugang")
+        return False
+
+    # -- Autopilot (freiwillig) ---------------------------------------------
+
+    def schritt_autopilot(self):
+        """Fragt, ob Jarvis im Hintergrund selbst arbeiten soll."""
+        self.sagen("Soll ich im Hintergrund von selbst arbeiten? Ich bereite dann "
+                   "Nachfassnachrichten, Antwortentwürfe und Angebote vor und lege "
+                   "sie in ein Postfach. Ich schicke nie etwas ab, ohne dass du Ja sagst.")
+        antwort = self.fragen("Autopilot einschalten? (j/N)").lower()
+        if antwort in ("j", "ja", "y", "yes"):
+            config.env_setzen("AUTOPILOT_AN", "ja")
+            self.ergebnisse["autopilot"] = "an"
+        else:
+            self.ergebnisse["autopilot"] = "aus (später auf der Seite Autopilot)"
+
+    # -- Einzelner Zugang nachtragen ---------------------------------------
+
+    ZUGAENGE = (
+        ("claude", "Claude (Anthropic)", "ANTHROPIC_API_KEY", "https://console.anthropic.com/settings/keys"),
+        ("gemini", "Gemini (Google)", "GEMINI_API_KEY", "https://aistudio.google.com/apikey"),
+        ("stimme", "ElevenLabs (Stimme)", "ELEVENLABS_API_KEY", "https://elevenlabs.io/app/settings/api-keys"),
+        ("ohren", "OpenAI (Spracherkennung)", "OPENAI_API_KEY", "https://platform.openai.com/api-keys"),
+        # [P1 Bühne] Anfang
+        # [P1 Bühne] Ende
+        # [P2 Weltlage] Anfang
+        # [P2 Weltlage] Ende
+        # [P3 Telefon] Anfang
+        ("telefonassistent", "Vapi (Telefonassistent)", "VAPI_SCHLUESSEL", "https://dashboard.vapi.ai/"),
+        # [P3 Telefon] Ende
+        # [P4 Büro] Anfang
+        # [P4 Büro] Ende
+        # [P5 Sicht] Anfang
+        # Beide verbinden sich über eine eigene App (OAuth): hier nur das Client-Secret, alles Weitere macht
+        # `python3 jarvis.py zugang oura` bzw. `zugang whoop` (fragt auch die Client-ID und meldet an).
+        ("oura", "Oura Ring, Client-Secret (danach: zugang oura)", "OURA_CLIENT_SECRET", "https://cloud.ouraring.com/oauth/applications"),
+        ("whoop", "Whoop, Client-Secret (danach: zugang whoop)", "WHOOP_CLIENT_SECRET", "https://developer-dashboard.whoop.com/"),
+        # [P5 Sicht] Ende
+        # [P6 Stimme] Anfang
+        ("fish", "Fish Audio (Stimme)", "FISH_API_KEY", "https://fish.audio/app/api-keys/"),
+        # [P6 Stimme] Ende
+        # [P7 Start] Anfang
+        # [P7 Start] Ende
+    )
+
+    MAIL_WOERTER = ("mail", "gmail", "email", "e-mail", "post", "postfach")
+    TELEGRAM_WOERTER = ("telegram", "handy", "unterwegs")
+    MAIL_TITEL = "E-Mail (Gmail, GMX, Outlook ...) lesen, suchen und senden"
+
+    def mail_nachtragen(self) -> bool:
+        """Postfach verbinden: ``python3 jarvis.py zugang mail``."""
+        self.schritt_mail(nachfragen=False)
+        return self.ergebnisse.get("email") == "eingerichtet"
+
+    def zugang_nachtragen(self, welcher: str = "") -> bool:
+        """Trägt genau einen Zugang ein oder ersetzt ihn - ohne die ganze Einrichtung."""
+        welcher = (welcher or "").strip().lower()
+        if welcher in self.MAIL_WOERTER:
+            return self.mail_nachtragen()
+        if welcher in self.TELEGRAM_WOERTER:
+            self.schritt_telegram(nachfragen=False)
+            return self.ergebnisse.get("telegram") == "eingerichtet"
+        wahl = [z for z in self.ZUGAENGE if welcher in (z[0], z[2].lower())]
+        if not wahl:
+            print("Welchen Zugang möchtest du eintragen?")
+            vorhanden = {"ANTHROPIC_API_KEY": config.ANTHROPIC_API_KEY,
+                         "GEMINI_API_KEY": config.GEMINI_API_KEY,
+                         "ELEVENLABS_API_KEY": config.ELEVENLABS_API_KEY,
+                         "OPENAI_API_KEY": config.OPENAI_API_KEY}
+            for nummer, z in enumerate(self.ZUGAENGE, start=1):
+                print("  %d  %s%s" % (nummer, z[1],
+                                       "   (schon eingetragen)" if vorhanden.get(z[2]) else ""))
+            print("  %d  %s%s" % (len(self.ZUGAENGE) + 1, self.MAIL_TITEL,
+                                   "   (schon eingetragen)" if config.IMAP_USER else ""))
+            eingabe = self.fragen("Nummer:")
+            if not eingabe.isdigit() or not 1 <= int(eingabe) <= len(self.ZUGAENGE) + 1:
+                print("Das war keine gültige Nummer.")
+                return False
+            if int(eingabe) == len(self.ZUGAENGE) + 1:
+                return self.mail_nachtragen()
+            wahl = [self.ZUGAENGE[int(eingabe) - 1]]
+        kennung, titel, variable, seite = wahl[0]
+        print("Ich öffne die Seite für %s. Dort erzeugst du den Schlüssel." % titel)
+        self.oeffnen(seite)
+        schluessel = self.fragen_geheim("Schlüssel für %s einfügen und Enter drücken:" % titel)
+        if not schluessel:
+            print("Ich habe nichts bekommen. Es wurde nichts geändert.")
+            return False
+        if kennung == "claude":
+            if not schluessel.startswith("sk-"):
+                print("Das sieht nicht nach einem Anthropic-Schlüssel aus (sie beginnen "
+                      "mit sk-). Es wurde nichts geändert.")
+                return False
+            probe = self.schluessel_testen(schluessel)
+            if not probe.get("ok") and probe.get("grund") != "guthaben":
+                print(probe["text"] + " Es wurde nichts geändert.")
+                return False
+            print(probe["text"] if not probe.get("ok") else "Der Schlüssel funktioniert.")
+        elif kennung == "gemini":
+            probe = gemini_testen(schluessel)
+            print(probe["text"])
+            if not probe.get("ok") and not probe.get("limit"):
+                print("Es wurde nichts geändert.")
+                return False
+        config.env_setzen(variable, schluessel)
+        print("%s ist eingetragen. Starte Jarvis neu, damit er ihn nutzt." % titel)
+        return True
 
     # -- Schritt 5: Telegram ------------------------------------------------
 
-    def schritt_telegram(self):
-        """Richtet Telegram ein - der Weg für Freigaben unterwegs."""
-        self.sagen("Telegram ist der Weg, über den ich dich um Freigaben bitte, wenn du "
-                   "nicht am Rechner sitzt. Das ist freiwillig. Ohne Telegram frage ich "
-                   "im Terminal.")
-        antwort = self.fragen("Telegram jetzt einrichten? (ja/nein)").lower()
-        if antwort not in ("ja", "j", "yes", "y"):
-            self.ergebnisse["telegram"] = "übersprungen"
-            return
+    def schritt_telegram(self, nachfragen: bool = True):
+        """Richtet Telegram ein - der Weg vom Handy zu Jarvis, auch für Freigaben unterwegs."""
+        if nachfragen:
+            self.sagen("Telegram ist der Weg, über den du mir unterwegs schreibst oder "
+                       "Sprachnachrichten schickst, und über den ich dich um Freigaben bitte. "
+                       "Das ist freiwillig. Ohne Telegram frage ich im Terminal.")
+            antwort = self.fragen("Telegram jetzt einrichten? (ja/nein)").lower()
+            if antwort not in ("ja", "j", "yes", "y"):
+                self.ergebnisse["telegram"] = "übersprungen"
+                return
         self.sagen("Öffne Telegram, suche den BotFather, schicke ihm slash newbot und "
                    "folge den Anweisungen. Am Ende bekommst du einen Token.")
-        token = self.fragen("Bot-Token hier einfügen:")
+        token = self.fragen_geheim("Bot-Token hier einfügen:")
         if not token:
             self.ergebnisse["telegram"] = "kein Token"
             return
@@ -547,14 +716,15 @@ class Einrichtung:
             return {"ok": False, "grund": "netz",
                     "text": "Der Server %s ist nicht erreichbar: %s" % (host, fehler)}
 
-    def schritt_mail(self):
+    def schritt_mail(self, nachfragen: bool = True):
         """Richtet Posteingang und Versand ein - mit Servererkennung aus der Adresse."""
-        self.sagen("Jetzt dein Postfach. Damit lese ich morgens deine Mails und "
-                   "sortiere sie vor. Das ist freiwillig.")
-        antwort = self.fragen("E-Mail jetzt einrichten? (ja/nein)").lower()
-        if antwort not in ("ja", "j", "yes", "y"):
-            self.ergebnisse["email"] = "übersprungen"
-            return
+        if nachfragen:
+            self.sagen("Jetzt dein Postfach. Damit lese ich morgens deine Mails und "
+                       "sortiere sie vor. Das ist freiwillig.")
+            antwort = self.fragen("E-Mail jetzt einrichten? (ja/nein)").lower()
+            if antwort not in ("ja", "j", "yes", "y"):
+                self.ergebnisse["email"] = "übersprungen"
+                return
 
         for versuch in range(1, 4):
             adresse = self.fragen("Deine E-Mail-Adresse:")
@@ -590,7 +760,10 @@ class Einrichtung:
                               "me.com": "https://account.apple.com/account/manage",
                               }.get(domain, "https://account.live.com/proofs/manage"))
 
-            passwort = self.fragen("Passwort (oder App-Passwort):")
+            passwort = self.fragen_geheim("Passwort (oder App-Passwort):")
+            if app_passwort:
+                # Google und Apple zeigen das App-Passwort in Vierergruppen an.
+                passwort = passwort.replace(" ", "")
             if not passwort:
                 self.sagen("Ohne Passwort geht es nicht.")
                 continue
@@ -672,6 +845,8 @@ class Einrichtung:
         self.schritt_stimme()
         self.schritt_person()
         self.schritt_schluessel()
+        self.schritt_gemini()
+        self.schritt_autopilot()
         self.schritt_rechte()
         self.schritt_telegram()
         self.schritt_telefon()
@@ -693,6 +868,11 @@ class Einrichtung:
                    "erteilten Rechte nicht. Danach startest du mich einfach wieder über "
                    "JARVIS Punkt command. Dann sag: Hey Jarvis, wie sieht mein Tag aus.")
         return self.ergebnisse
+
+
+def zugang_eintragen(welcher: str = "") -> bool:
+    """Trägt einen einzelnen Zugang ein: ``python3 jarvis.py zugang gemini``."""
+    return Einrichtung().zugang_nachtragen(welcher)
 
 
 def einrichtung_starten(stimme=None) -> dict:

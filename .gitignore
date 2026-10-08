@@ -14,6 +14,7 @@ dashboard/sales.html
 belege/
 profil/
 export/
+logs/
 sprachnachrichten/
 config/mcp_servers.json
 werkstatt/
@@ -21,3 +22,6 @@ werkstatt/
 # Browserprofil - bleibt lokal, enthaelt Anmeldungen
 browserprofil/
 browser_aufnahme.png
+
+# Modelle der Handerkennung (etwa 20 MB) - werden geladen, nicht eingecheckt
+modelle/

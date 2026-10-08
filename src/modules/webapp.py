@@ -32,7 +32,38 @@ from urllib.parse import parse_qs, urlparse
 
 import config
 from modules.memory import zeitstempel
+from modules.sprechtext import sprechstuecke
+from modules.anzeige import anzeige_nach_lesen
+from modules.freigabe import freigabe_lesen, lesbarer_name
+from modules.ansicht import (SEITE_GEHIRN, SEITE_ZENTRALE, gehirn_daten, lichter_liste,
+                             status_daten, zentrale_daten)
+from modules.autopilot import SEITE_AUTOPILOT
+from modules.lernpfad import SEITE_PFAD, lernpfad_stand
 from modules.webseite import SEITE_HTML
+# Importe der Pakete.
+# [P1 Bühne] Anfang
+from modules.weltkarte import LANDMASKE_BREITE, LANDMASKE_HOEHE, LANDMASKE_QUELLE, LANDMASKE_RLE
+# [P1 Bühne] Ende
+# [P2 Weltlage] Anfang
+# [P2 Weltlage] Ende
+# [P3 Telefon] Anfang
+# [P3 Telefon] Ende
+# [P4 Büro] Anfang
+from modules.freigabe import GESTE_GESPERRT
+# [P4 Büro] Ende
+# [P5 Sicht] Anfang
+from modules.sicht import (SICHT_DATEIEN_PRAEFIX, messung_pruefen, sicht_ausliefern, sicht_pfad_oeffentlich,
+                           sicht_stand_bauen, vorschlag_per_geste)
+from modules.sehen import SEITE_SEHEN, SEHEN_CSP, SEHEN_ERLAUBNIS, SEHEN_ERLAUBNIS_AUS
+# [P5 Sicht] Ende
+# [P6 Stimme] Anfang
+from modules.dolmetscher import (SEITE_DOLMETSCHER, SPRACHEN, sprachen_aktiv, uebersetzen,
+                                 untertitel_veroeffentlichen)
+from modules.stimmanbieter import anbieter_reihenfolge, sprachaudio
+# [P6 Stimme] Ende
+# [P7 Start] Anfang
+from modules.hardware import hochfahren
+# [P7 Start] Ende
 
 STANDARD_PORT = 8765
 MAX_KOERPER = 512 * 1024
@@ -46,27 +77,77 @@ SYMBOL_SVG = (
     '<circle cx="32" cy="32" r="6" fill="#E8622C"/></svg>')
 
 
+# Wie eine Antwort im Browser zustande kam: Klick, gesprochenes Ja/Nein oder Geste.
+FREIGABE_WEGE = ("klick", "sprache", "geste")
+
+
 class WebFreigabe:
     """Freigaben über den Browser statt über Telegram oder das Terminal.
 
     Eine Anfrage wird abgelegt und blockiert den Werkzeugaufruf, bis der Nutzer
     im Browser antwortet oder die Zeit abläuft. **Zeitablauf gilt als Nein** -
     wie überall sonst im Programm.
+
+    Der Browser bekommt Was, Warum und Wie lesbar, dazu die Argumente als
+    eingerücktes JSON.
+
+    **Gesten.** Ein Klick und ein gesprochenes Ja zählen immer. Eine Geste (Daumen
+    hoch vor der Kamera) ist unschärfer und zählt nur, wenn alles zusammenpasst:
+
+    * ``GESTEN_FREIGABE`` ist eingeschaltet (voreingestellt aus),
+    * es ist genau eine Frage offen - sonst weiß niemand, welche gemeint ist,
+    * die Aktion steht nicht in ``GESTE_GESPERRT`` (Skripte, Bildschirm, Dateien …),
+    * die Frage ist mindestens zwei Sekunden alt: Wer sie gerade erst vor sich hat,
+      hat sie noch nicht gelesen, und ein noch erhobener Daumen soll nichts
+      Neues freigeben.
+
+    Jede Antwort wird mit dem Weg protokolliert, auch eine abgewiesene.
+    ``uhr`` liefert die Zeit in Sekunden (für Prüfungen austauschbar).
     """
 
-    def __init__(self, timeout: int = None):
+    # So alt muss eine Frage sein, bevor eine Geste sie beantworten darf.
+    GESTE_MINDESTALTER = 2.0
+    # Wie der Weg im Protokoll heißt.
+    WEG_NAMEN = {"klick": "Klick", "sprache": "Sprache", "geste": "Geste"}
+
+    def __init__(self, timeout: int = None, uhr=None, memory=None):
         self.timeout = int(timeout if timeout is not None else config.FREIGABE_TIMEOUT)
+        self._uhr = uhr or time.time
+        self.memory = memory
         self._offen = {}
         self._sperre = threading.Lock()
+        # Warum die letzte Antwort nicht angenommen wurde - für die Rückmeldung im Browser.
+        self.letzter_grund = ""
+
+    @staticmethod
+    def _gesten_an() -> bool:
+        """Ist die Gesten-Freigabe eingeschaltet? Fehlt der Schlüssel: nein."""
+        try:
+            return bool(config.GESTEN_FREIGABE)
+        except (AttributeError, NameError):
+            return False
 
     def anfordern(self, aktion: str, details: str = "") -> dict:
         """Legt eine Freigabefrage ab und wartet auf die Antwort."""
         kennung = uuid.uuid4().hex[:12]
         ereignis = threading.Event()
-        eintrag = {"id": kennung, "aktion": aktion, "details": details,
-                   "gestellt": zeitstempel(), "ereignis": ereignis,
-                   "antwort": None,
-                   "laeuft_ab": time.time() + self.timeout}
+        lesbar = freigabe_lesen(details)
+        if lesbar is not None:
+            was, warum, wie = lesbar["was"], lesbar["warum"], lesbar["wie"]
+            try:
+                anzeigen = json.dumps(lesbar["argumente"], ensure_ascii=False, indent=2,
+                                      default=str)
+            except (TypeError, ValueError):
+                anzeigen = str(lesbar["argumente"])
+        else:
+            # Alter Freitext (etwa der Code eines Skripts) bleibt, wie er ist.
+            was, warum, wie, anzeigen = lesbarer_name(aktion), "", "", details
+        jetzt = self._uhr()
+        eintrag = {"id": kennung, "aktion": aktion, "details": anzeigen,
+                   "was": was, "warum": warum, "wie": wie,
+                   "gestellt": zeitstempel(), "gestellt_epoch": jetzt,
+                   "ereignis": ereignis, "antwort": None, "weg": "",
+                   "laeuft_ab": jetzt + self.timeout}
         with self._sperre:
             self._offen[kennung] = eintrag
 
@@ -77,48 +158,196 @@ class WebFreigabe:
         if not erhalten or eintrag["antwort"] is not True:
             grund = ("abgelehnt" if erhalten
                      else "keine Antwort innerhalb von %d Sekunden" % self.timeout)
-            return {"erlaubt": False, "kanal": "web", "grund": grund}
-        return {"erlaubt": True, "kanal": "web", "grund": "Freigabe erteilt"}
+            return {"erlaubt": False, "kanal": "web", "weg": eintrag["weg"], "grund": grund}
+        return {"erlaubt": True, "kanal": "web", "weg": eintrag["weg"], "grund": "Freigabe erteilt"}
+
+    def _unbeantwortete(self) -> list:
+        """Die Fragen, auf die noch niemand geantwortet hat. Nur mit der Sperre aufrufen."""
+        return [e for e in self._offen.values() if e["antwort"] is None]
 
     def offene(self) -> list:
-        """Alle wartenden Freigabefragen - die holt sich der Browser ab."""
-        jetzt = time.time()
-        with self._sperre:
-            return [{"id": e["id"], "aktion": e["aktion"], "details": e["details"],
-                     "gestellt": e["gestellt"],
-                     "rest": max(0, int(e["laeuft_ab"] - jetzt))}
-                    for e in self._offen.values()]
+        """Alle wartenden Freigabefragen - die holt sich der Browser ab.
 
-    def beantworten(self, kennung: str, ja: bool) -> bool:
-        """Beantwortet eine Freigabefrage."""
+        ``geste_erlaubt`` sagt dem Browser, ob eine Geste diese Frage überhaupt
+        beantworten dürfte (ob sie alt genug ist, prüft erst die Antwort).
+        """
+        jetzt = self._uhr()
+        gesten = self._gesten_an()
+        with self._sperre:
+            offen = self._unbeantwortete()
+            einzige = len(offen) == 1
+            return [{"id": e["id"], "aktion": e["aktion"], "was": e["was"],
+                     "warum": e["warum"], "wie": e["wie"], "details": e["details"],
+                     "gestellt": e["gestellt"],
+                     "rest": max(0, int(e["laeuft_ab"] - jetzt)),
+                     "geste_erlaubt": bool(gesten and einzige
+                                           and e["aktion"] not in GESTE_GESPERRT)}
+                    for e in offen]
+
+    def beantworten(self, kennung: str, ja: bool, kanal: str = "klick") -> bool:
+        """Beantwortet eine Freigabefrage. ``kanal``: klick, sprache oder geste.
+
+        Ist die Antwort nicht angenommen, steht der Grund in ``letzter_grund``
+        (für mehrere gleichzeitige Anfragen: :meth:`beantworten_mit_grund`).
+        """
+        return self.beantworten_mit_grund(kennung, ja, kanal)[0]
+
+    def _geste_grund(self, eintrag: dict) -> str:
+        """Warum eine Geste diese Frage nicht beantworten darf - leer, wenn sie darf.
+
+        Nur mit der Sperre aufrufen. Die Reihenfolge ist die der Regeln oben.
+        """
+        vorn = "Die Geste zählt hier nicht: "
+        if not self._gesten_an():
+            return vorn + "Gesten-Freigabe ist ausgeschaltet."
+        if len(self._unbeantwortete()) != 1:
+            return vorn + "mehrere Fragen offen."
+        if eintrag["aktion"] in GESTE_GESPERRT:
+            return vorn + "diese Aktion gibt nur ein Klick oder die Stimme frei."
+        if self._uhr() - eintrag["gestellt_epoch"] < self.GESTE_MINDESTALTER:
+            return vorn + ("die Frage ist erst gerade gestellt. Lies sie in Ruhe und "
+                           "zeige die Geste dann noch einmal.")
+        return ""
+
+    def beantworten_mit_grund(self, kennung: str, ja: bool, kanal: str = "klick") -> tuple:
+        """Wie :meth:`beantworten`, gibt aber ``(angenommen, grund)`` zurück.
+
+        Eine schon beantwortete Frage bleibt beantwortet - ein zweiter Klick
+        dreht ein Nein nicht in ein Ja.
+        """
+        kanal = str(kanal or "klick").strip().lower()
+        if kanal not in FREIGABE_WEGE:
+            kanal = "unbekannt"
         with self._sperre:
             eintrag = self._offen.get(kennung)
-            if eintrag is None:
-                return False
-            eintrag["antwort"] = bool(ja)
+            if kanal == "unbekannt":
+                grund = "Diesen Freigabeweg kenne ich nicht."
+            elif eintrag is None:
+                grund = "Diese Frage ist nicht mehr offen."
+            elif eintrag["antwort"] is not None:
+                grund = "Diese Frage ist schon beantwortet."
+            elif kanal == "geste":
+                grund = self._geste_grund(eintrag)
+            else:
+                grund = ""
+            if not grund and eintrag is not None:
+                eintrag["antwort"] = bool(ja)
+                eintrag["weg"] = kanal
+            self.letzter_grund = grund
+        self._protokollieren(eintrag, kanal, ja, grund)
+        if grund:
+            return False, grund
         eintrag["ereignis"].set()
+        return True, ""
+
+    def _protokollieren(self, eintrag, kanal: str, ja: bool, grund: str):
+        """Hält fest, auf welchem Weg geantwortet wurde - auch eine abgewiesene Antwort."""
+        if eintrag is None:
+            return
+        text = grund or ("per %s %s" % (self.WEG_NAMEN.get(kanal, kanal), "ja" if ja else "nein"))
+        print("[freigabe] %s: %s" % (eintrag["aktion"], text))
+        if self.memory is None:
+            return
+        try:
+            self.memory.aktion_protokollieren(
+                "freigabe", {"aktion": eintrag["aktion"], "kanal": kanal, "ja": bool(ja)},
+                text, "abgelehnt" if grund else "ok")
+        except Exception:
+            pass
+
+
+# Was die Anzeige im Dienst braucht - nur ansehen, nichts auslösen.
+ANZEIGE_PFADE = {"/gehirn", "/zentrale", "/api/gehirn", "/api/zentrale", "/api/status",
+                 "/api/lichter", "/favicon.ico", "/symbol.svg", "/api/anzeige"}
+# Die Pakete ergänzen hier, etwa ANZEIGE_PFADE |= {"/api/weltkarte"}.
+# [P1 Bühne] Anfang
+# Die Küsten des Globus - nur Lesen, ändert sich nie.
+ANZEIGE_PFADE |= {"/api/weltkarte"}
+# [P1 Bühne] Ende
+# [P2 Weltlage] Anfang
+# [P2 Weltlage] Ende
+# [P3 Telefon] Anfang
+# [P3 Telefon] Ende
+# [P4 Büro] Anfang
+# [P4 Büro] Ende
+# [P5 Sicht] Anfang
+# Die Seite Sicht und was sie liest - nur ansehen. Speichern und Gesten gehen nur in der Web-App.
+ANZEIGE_PFADE |= {"/sehen", "/api/sicht/stand", "/api/sicht/verlauf"}
+# Die Dateien der Handerkennung (die Version steht im Pfad): alles, was so anfängt, ist erlaubt;
+# ausgeliefert werden trotzdem nur die weißgelisteten Namen.
+ANZEIGE_PRAEFIXE = (SICHT_DATEIEN_PRAEFIX,)
+# Wohin Oura und Whoop nach der Anmeldung den Browser zurückschicken. Dort steht kein Jarvis-Schlüssel
+# in der Adresse; geschützt ist der Rückruf durch den einmaligen, befristeten Anmelde-Code (state).
+WEARABLE_RUECKRUF = {"/oura/rueckruf": "oura", "/whoop/rueckruf": "whoop"}
+# [P5 Sicht] Ende
+# [P6 Stimme] Anfang
+# Wie oft die Serverstimme und der Übersetzer gefragt werden dürfen: höchstens 60 Anfragen
+# in 60 Sekunden. Beides kostet Geld; eine Schleife in einer Seite soll nicht das Guthaben leeren.
+SPRACHE_MAX_ANFRAGEN = 60
+SPRACHE_FENSTER_S = 60
+
+
+def sprachrate_erlaubt(zeiten: list, sperre, jetzt: float = None,
+                       maximum: int = SPRACHE_MAX_ANFRAGEN, fenster: float = SPRACHE_FENSTER_S) -> bool:
+    """Gleitendes Fenster: darf jetzt noch eine Anfrage durch? Zählt die Anfrage, wenn ja."""
+    jetzt = time.time() if jetzt is None else jetzt
+    with sperre:
+        zeiten[:] = [t for t in zeiten if jetzt - t < fenster]
+        if len(zeiten) >= maximum:
+            return False
+        zeiten.append(jetzt)
         return True
+# [P6 Stimme] Ende
+# [P7 Start] Anfang
+# [P7 Start] Ende
 
 
 class JarvisWeb:
     """Der Webserver. Startet den Agenten im Browser."""
 
     def __init__(self, agent, host: str = "127.0.0.1", port: int = STANDARD_PORT,
-                 offen: bool = False, token: str = ""):
+                 offen: bool = False, token: str = "", nur_anzeige: bool = False):
         self.agent = agent
+        # Im Dienst läuft nur die Anzeige mit. Reden, Werkzeuge, Freigaben und der
+        # Autopilot gehen dort ausschließlich über die Stimme - mit Weckwort und
+        # Stimmprüfung -, nicht über einen offenen Port auf dem Rechner.
+        self.nur_anzeige = bool(nur_anzeige)
         self.offen = bool(offen)
         self.host = "0.0.0.0" if self.offen else (host or "127.0.0.1")
         self.port = int(port or STANDARD_PORT)
         # Im WLAN ist ein Schlüssel Pflicht - dieser Server darf zu viel.
         self.token = token or (secrets.token_urlsafe(18) if self.offen else "")
-        self.freigabe = WebFreigabe()
+        self.freigabe = WebFreigabe(memory=getattr(agent, "memory", None))
         # Was Jarvis von sich aus sagt - Briefings, Routinen, Zeitplan. Der
         # Browser holt es ab, liest es vor und zeigt es im Gespraech.
         self.meldungen = []
         self._meldesperre = threading.Lock()
         self.server = None
         self._denkt = threading.Lock()
-        agent.tools.freigabe_kanal_setzen(self.freigabe)
+        if not self.nur_anzeige:
+            agent.tools.freigabe_kanal_setzen(self.freigabe)
+        # [P1 Bühne] Anfang
+        # [P1 Bühne] Ende
+        # [P2 Weltlage] Anfang
+        # [P2 Weltlage] Ende
+        # [P3 Telefon] Anfang
+        # [P3 Telefon] Ende
+        # [P4 Büro] Anfang
+        # [P4 Büro] Ende
+        # [P5 Sicht] Anfang
+        # [P5 Sicht] Ende
+        # [P6 Stimme] Anfang
+        # Gleitende Fenster für /api/sprache und /api/uebersetzen (60 Anfragen je 60 Sekunden).
+        self._sprache_zeiten = []
+        self._uebersetzen_zeiten = []
+        self._sprache_sperre = threading.Lock()
+        # Der Dolmetscher gibt es nur hier, nicht in der Anzeige des Dienstes: das Werkzeug
+        # dolmetscher_starten fragt die Web-App, ob sie läuft.
+        if not self.nur_anzeige:
+            agent.tools.web_app = self
+        # [P6 Stimme] Ende
+        # [P7 Start] Anfang
+        # [P7 Start] Ende
 
     def melden(self, text: str):
         """Nimmt eine Meldung des Zeitplans auf.
@@ -136,7 +365,8 @@ class JarvisWeb:
         except Exception:
             pass
         with self._meldesperre:
-            self.meldungen.append({"text": text, "zeit": zeitstempel()})
+            self.meldungen.append({"text": text, "sprechstuecke": sprechstuecke(text),
+                                   "zeit": zeitstempel()})
             # Mehr als zwanzig ungelesene Meldungen sind ohnehin unlesbar.
             del self.meldungen[:-20]
 
@@ -233,9 +463,33 @@ class JarvisWeb:
             return False
         if not self.token:
             return True
+        # P5 Sicht: Die Dateien der Handerkennung sind öffentliche Bibliotheken, und MediaPipe
+        # holt sie selbst - dabei lässt sich kein Schlüssel anhängen. Nur die weißgelisteten Namen.
+        if sicht_pfad_oeffentlich(urlparse(behandler.path).path):
+            return True
+        if urlparse(behandler.path).path.rstrip("/") in WEARABLE_RUECKRUF:
+            return True
         gefragt = parse_qs(urlparse(behandler.path).query).get("schluessel", [""])[0]
         kopfschluessel = behandler.headers.get("X-Jarvis-Schluessel", "")
         return secrets.compare_digest(gefragt or kopfschluessel, self.token)
+
+    @staticmethod
+    def _herkunft_ok(behandler) -> bool:
+        """Schreibende Anfragen müssen von dieser Seite selbst kommen.
+
+        Der Browser setzt bei jeder seitenübergreifenden POST-Anfrage den
+        Herkunftskopf. Passt er nicht zum Host, hat eine fremde Webseite den
+        Browser dazu gebracht, hier etwas auszulösen - ohne Schlüssel würde
+        das sonst durchgehen.
+        """
+        herkunft = behandler.headers.get("Origin")
+        if not herkunft:
+            return True
+        host = (behandler.headers.get("Host") or "").lower()
+        try:
+            return urlparse(herkunft).netloc.lower() == host
+        except ValueError:
+            return False
 
     def _behandeln(self, behandler, methode: str):
         """Verteilt eine Anfrage auf die passende Antwort."""
@@ -244,6 +498,13 @@ class JarvisWeb:
             return self._antworten(behandler, 403,
                                    {"fehler": "Kein Zugang. Der Schlüssel fehlt "
                                               "oder stimmt nicht."})
+        if self.nur_anzeige and (methode != "GET" or not (
+                pfad in ANZEIGE_PFADE or pfad.startswith(ANZEIGE_PRAEFIXE))):
+            return self._antworten(behandler, 404,
+                                   {"fehler": "Hier läuft nur die Anzeige. Sprich mit Jarvis."})
+        if methode == "POST" and not self._herkunft_ok(behandler):
+            return self._antworten(behandler, 403,
+                                   {"fehler": "Anfrage von einer fremden Seite abgelehnt."})
         try:
             if methode == "GET":
                 return self._get(behandler, pfad)
@@ -254,10 +515,44 @@ class JarvisWeb:
 
     def _get(self, behandler, pfad: str):
         werkzeuge = self.agent.tools
+        frage = parse_qs(urlparse(behandler.path).query)
 
         if pfad == "/":
             return self._html(behandler, SEITE_HTML.replace(
                 "{{SCHLUESSEL}}", self.token))
+        if pfad == "/pfad":
+            return self._html(behandler, SEITE_PFAD.replace(
+                "{{SCHLUESSEL}}", self.token))
+        if pfad == "/api/pfad":
+            return self._antworten(behandler, 200, lernpfad_stand(werkzeuge))
+        if pfad == "/gehirn":
+            return self._html(behandler, SEITE_GEHIRN.replace("{{SCHLUESSEL}}", self.token))
+        if pfad == "/zentrale":
+            return self._html(behandler, SEITE_ZENTRALE.replace("{{SCHLUESSEL}}", self.token))
+        if pfad == "/api/gehirn":
+            return self._antworten(behandler, 200, gehirn_daten(werkzeuge, self.agent))
+        if pfad == "/api/zentrale":
+            return self._antworten(behandler, 200, zentrale_daten(werkzeuge, self.agent))
+        if pfad == "/api/status":
+            return self._antworten(behandler, 200, status_daten(werkzeuge, self.agent))
+        if pfad == "/api/lichter":
+            return self._antworten(behandler, 200, {"ok": True, "lichter": lichter_liste()})
+        if pfad == "/api/anzeige":
+            # Long-Poll: kommt zurück, sobald sich einer der genannten Kanäle ändert.
+            try:
+                warten = min(25.0, max(0.0, float(frage.get("warten", ["20"])[0])))
+            except ValueError:
+                warten = 20.0
+            kanaele = werkzeuge.anzeige.warten(anzeige_nach_lesen(frage.get("nach", [""])[0]),
+                                               warten)
+            return self._antworten(behandler, 200, {
+                "ok": True, "jetzt": time.time(), "start": werkzeuge.anzeige.start,
+                "kanaele": kanaele})
+        if pfad == "/autopilot":
+            return self._html(behandler, SEITE_AUTOPILOT.replace(
+                "{{SCHLUESSEL}}", self.token))
+        if pfad == "/api/autopilot":
+            return self._antworten(behandler, 200, werkzeuge.autopilot.zustand())
         if pfad == "/api/lage":
             return self._antworten(behandler, 200,
                                    werkzeuge.team.lagebericht(werkzeuge))
@@ -269,6 +564,9 @@ class JarvisWeb:
                 "modell": config.CLAUDE_MODEL,
                 "werkzeuge": len(werkzeuge.namen()),
                 "rollen": [r["rolle"] for r in werkzeuge.team.rollen_liste()],
+                "stimme_im_browser": bool(config.STIMME_IM_BROWSER and anbieter_reihenfolge()),
+                "stimme_anbieter": (anbieter_reihenfolge() or [""])[0],
+                "dolmetscher_sprachen": sprachen_aktiv(),
                 "dienste": config.konfig_uebersicht()})
         if pfad == "/api/meldungen":
             return self._antworten(behandler, 200,
@@ -303,6 +601,71 @@ class JarvisWeb:
             datei = config.DASHBOARD_VERZEICHNIS / (
                 "dashboard.html" if pfad == "/dashboard" else "sales.html")
             return self._datei(behandler, str(datei))
+        # [P1 Bühne] Anfang
+        if pfad == "/api/weltkarte":
+            # Die Landmaske für die Küsten des Globus. Sie ändert sich nur mit
+            # einer neuen Fassung - einen Tag lang darf der Browser sie behalten.
+            return self._antworten(behandler, 200, {
+                "ok": True, "breite": LANDMASKE_BREITE, "hoehe": LANDMASKE_HOEHE,
+                "quelle": LANDMASKE_QUELLE, "rle": LANDMASKE_RLE},
+                {"Cache-Control": "max-age=86400"})
+        # [P1 Bühne] Ende
+        # [P2 Weltlage] Anfang
+        # [P2 Weltlage] Ende
+        # [P3 Telefon] Anfang
+        # [P3 Telefon] Ende
+        # [P4 Büro] Anfang
+        # [P4 Büro] Ende
+        # [P5 Sicht] Anfang
+        if pfad == "/sehen":
+            # Die Kamera nur für die Seite selbst - und gar nicht, solange SICHT_AN aus ist.
+            return self._html(behandler, SEITE_SEHEN.replace("{{SCHLUESSEL}}", self.token), {
+                "Content-Security-Policy": SEHEN_CSP,
+                "Permissions-Policy": SEHEN_ERLAUBNIS if config.SICHT_AN else SEHEN_ERLAUBNIS_AUS})
+        if pfad.startswith(SICHT_DATEIEN_PRAEFIX):
+            code, inhalt, typ = sicht_ausliefern(pfad)
+            if code != 200:
+                return self._antworten(behandler, code, {"fehler": typ})
+            # Die Version steht im Pfad - der Browser darf die Datei ein Jahr behalten.
+            self._kopf_setzen(behandler, 200, typ, len(inhalt),
+                              {"Cache-Control": "public, max-age=31536000, immutable"})
+            return behandler.wfile.write(inhalt)
+        if pfad in ("/api/sicht/stand", "/api/sicht/verlauf"):
+            # Auf der Anzeige des Dienstes gibt es im Diskretmodus keine Gesundheitswerte.
+            diskret = bool(self.nur_anzeige and config.ANZEIGE_DISKRET)
+            if pfad == "/api/sicht/stand":
+                return self._antworten(behandler, 200, sicht_stand_bauen(
+                    werkzeuge, schreiben=not self.nur_anzeige, diskret=diskret))
+            if diskret:
+                return self._antworten(behandler, 200, {"ok": True, "tage": 0, "messungen": [],
+                                                        "tageswerte": [], "diskret": True})
+            return self._antworten(behandler, 200,
+                                   werkzeuge.handruhe.verlauf(frage.get("tage", ["14"])[0]))
+        if pfad in WEARABLE_RUECKRUF:
+            # Rückkehr von Oura/Whoop: Code und state gehen an die Erholung, die beides prüft.
+            from html import escape as seite_maskieren
+            if (frage.get("error") or [""])[0]:
+                ergebnis = {"ok": False, "fehler": "Die Anmeldung wurde abgebrochen oder abgelehnt."}
+            else:
+                ergebnis = werkzeuge.erholung.oauth_abschluss(
+                    WEARABLE_RUECKRUF[pfad], (frage.get("code") or [""])[0],
+                    (frage.get("state") or [""])[0])
+            text = ergebnis.get("text") if ergebnis.get("ok") else ergebnis.get("fehler")
+            return self._html(behandler, (
+                "<!doctype html><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>"
+                "<title>Jarvis Anmeldung</title>"
+                "<body style='font:16px system-ui;background:#0b0d12;color:#e8e6e3;max-width:36em;margin:3em auto;padding:0 1em'>"
+                "<h2>%s</h2><p>%s</p><p>Du kannst dieses Fenster schließen.</p></body>") % (
+                    "Angemeldet" if ergebnis.get("ok") else "Anmeldung nicht abgeschlossen",
+                    seite_maskieren(str(text or ""))))
+        # [P5 Sicht] Ende
+        # [P6 Stimme] Anfang
+        if pfad == "/dolmetscher":
+            # Nur in der Web-App: nicht in ANZEIGE_PFADE, also gibt es die Seite im Dienst nicht.
+            return self._html(behandler, SEITE_DOLMETSCHER.replace("{{SCHLUESSEL}}", self.token))
+        # [P6 Stimme] Ende
+        # [P7 Start] Anfang
+        # [P7 Start] Ende
         return self._antworten(behandler, 404, {"fehler": "Diese Seite gibt es nicht."})
 
     def _post(self, behandler, pfad: str):
@@ -325,16 +688,49 @@ class JarvisWeb:
                 antwort = self.agent.denken(text)
             return self._antworten(behandler, 200,
                                    {"ok": True, "antwort": antwort,
+                                    "sprechstuecke": sprechstuecke(antwort),
                                     "zeit": zeitstempel()})
+
+        if pfad == "/api/autopilot":
+            ap = werkzeuge.autopilot
+            aktion = str(daten.get("aktion") or "")
+            if aktion == "schalten":
+                return self._antworten(behandler, 200, ap.schalten(bool(daten.get("an"))))
+            if aktion == "auftrag":
+                return self._antworten(behandler, 200, ap.auftrag_anlegen(
+                    str(daten.get("titel") or ""), str(daten.get("auftrag") or ""),
+                    str(daten.get("rolle") or ""), daten.get("prioritaet") or 2))
+            if aktion == "gesehen":
+                return self._antworten(behandler, 200, ap.gesehen_setzen(daten.get("id")))
+            if aktion == "jetzt":
+                if ap.gesperrt():
+                    return self._antworten(behandler, 200, {
+                        "ok": False, "fehler": "Gerade nicht möglich: %s." % ap.gesperrt()})
+                threading.Thread(target=ap.tick, daemon=True, name="autopilot-jetzt").start()
+                return self._antworten(behandler, 200, {"ok": True, "text": "Läuft."})
+            return self._antworten(behandler, 400, {"fehler": "Diese Aktion kenne ich nicht."})
 
         if pfad == "/api/freigabe":
             kennung = str(daten.get("id") or "")
-            ja = bool(daten.get("ja"))
-            erledigt = self.freigabe.beantworten(kennung, ja)
+            # Nur ein echtes true ist ein Ja - "false", "nein" oder 1 sind es nicht.
+            ja = daten.get("ja") is True
+            # klick, sprache oder geste - eine Geste gibt in dieser Stufe nichts frei.
+            kanal = str(daten.get("kanal") or "klick")[:20]
+            erledigt, grund = self.freigabe.beantworten_mit_grund(kennung, ja, kanal)
             return self._antworten(behandler, 200, {
                 "ok": erledigt,
                 "text": ("Freigabe erteilt." if ja else "Abgelehnt.") if erledigt
-                        else "Diese Frage ist nicht mehr offen."})
+                        else (grund or "Diese Frage ist nicht mehr offen.")})
+
+        if pfad == "/api/anzeige/satz":
+            # Der Satz, den der Browser gerade vorliest - für den Pegel der Anzeige.
+            text = str(daten.get("text") or "").strip()[:400]
+            if not text:
+                return self._antworten(behandler, 400,
+                                       {"ok": False, "fehler": "Es kam kein Text an."})
+            werkzeuge.melden("stimme", {"art": "satz", "text": text,
+                                        "start_ms": time.time() * 1000, "quelle": "browser"})
+            return self._antworten(behandler, 200, {"ok": True})
 
         if pfad == "/api/werkzeug":
             name = str(daten.get("name") or "")
@@ -349,6 +745,71 @@ class JarvisWeb:
             return self._antworten(behandler, 200,
                                    {"ok": True, "text": "Neues Gespräch."})
 
+        # [P1 Bühne] Anfang
+        # [P1 Bühne] Ende
+        # [P2 Weltlage] Anfang
+        # [P2 Weltlage] Ende
+        # [P3 Telefon] Anfang
+        # [P3 Telefon] Ende
+        # [P4 Büro] Anfang
+        # [P4 Büro] Ende
+        # [P5 Sicht] Anfang
+        if pfad == "/api/sicht/messung":
+            # Nur Zahlen, klein und streng geprüft. Ein Bild kommt hier nie an.
+            try:
+                laenge = int(behandler.headers.get("Content-Length") or 0)
+            except (TypeError, ValueError):
+                laenge = 0
+            if laenge > 2048:
+                return self._antworten(behandler, 400, {"fehler": "Zu viele Daten."},
+                                       {"Connection": "close"})
+            messung, fehler = messung_pruefen(daten)
+            if messung is None:
+                return self._antworten(behandler, 400, {"fehler": fehler})
+            ergebnis = werkzeuge.handruhe.speichern(messung)
+            return self._antworten(behandler, 200 if ergebnis.get("ok") else 400, ergebnis)
+        if pfad == "/api/vorschlag/geste":
+            code, antwort = vorschlag_per_geste(self, daten)
+            return self._antworten(behandler, code, antwort)
+        # [P5 Sicht] Ende
+        # [P6 Stimme] Anfang
+        if pfad == "/api/sprache":
+            # Die Serverstimme für den Browser: Text rein, Sprachdatei (MP3) raus.
+            text = str(daten.get("text") or "")[:600].strip()
+            sprache = str(daten.get("sprache") or "de").strip().lower()
+            if not text:
+                return self._antworten(behandler, 400, {"fehler": "Es kam kein Text an."})
+            if sprache not in SPRACHEN:
+                return self._antworten(behandler, 400, {"fehler": "Diese Sprache kenne ich nicht."})
+            if not sprachrate_erlaubt(self._sprache_zeiten, self._sprache_sperre):
+                return self._antworten(behandler, 429,
+                                       {"fehler": "Zu viele Sprachanfragen in kurzer Zeit."})
+            ergebnis = sprachaudio(text, "mp3", sprache)
+            if ergebnis.get("ok") and ergebnis.get("daten"):
+                self._kopf_setzen(behandler, 200, ergebnis["typ"], len(ergebnis["daten"]))
+                return behandler.wfile.write(ergebnis["daten"])
+            return self._antworten(behandler, 503, {
+                "fehler": ergebnis.get("fehler") or "Keine Sprachausgabe eingerichtet."})
+
+        if pfad == "/api/uebersetzen":
+            # Der Dolmetscher: eine Äußerung rein, Übersetzung raus (und als Untertitel auf die Zentrale).
+            if not sprachrate_erlaubt(self._uebersetzen_zeiten, self._sprache_sperre):
+                return self._antworten(behandler, 429,
+                                       {"ok": False, "fehler": "Zu viele Übersetzungen in kurzer Zeit."})
+            text = str(daten.get("text") or "")
+            ergebnis = uebersetzen(text, daten.get("von"), daten.get("nach"),
+                                   verlauf=daten.get("verlauf"), agent=self.agent)
+            if ergebnis.get("ok"):
+                untertitel_veroeffentlichen(werkzeuge, text, ergebnis,
+                                            str(daten.get("sprecher") or "gast"),
+                                            str(daten.get("von") or ""), str(daten.get("nach") or ""))
+            return self._antworten(behandler, 200, ergebnis)
+        # [P6 Stimme] Ende
+        # [P7 Start] Anfang
+        if pfad == "/api/hochfahren":
+            # Die Seite ruft das beim Laden: Mac prüfen, einmal je Tag mit dem Tag begrüßen.
+            return self._antworten(behandler, 200, hochfahren(self.agent))
+        # [P7 Start] Ende
         return self._antworten(behandler, 404, {"fehler": "Das gibt es nicht."})
 
     # -- Antworten ----------------------------------------------------------
@@ -368,27 +829,36 @@ class JarvisWeb:
             return {}
 
     @staticmethod
-    def _kopf_setzen(behandler, code: int, typ: str, laenge: int):
+    def _kopf_setzen(behandler, code: int, typ: str, laenge: int, zusatz: dict = None):
+        """Setzt die Antwortköpfe. ``zusatz`` ersetzt Cache-Control oder fügt Köpfe
+        hinzu - etwa eine eigene Content-Security-Policy für eine Seite."""
+        zusatz = dict(zusatz or {})
+        cache = "no-store"
+        for name in list(zusatz):
+            if name.lower() == "cache-control":
+                cache = zusatz.pop(name)
         behandler.send_response(code)
         behandler.send_header("Content-Type", typ)
         behandler.send_header("Content-Length", str(laenge))
-        behandler.send_header("Cache-Control", "no-store")
+        behandler.send_header("Cache-Control", cache)
         behandler.send_header("X-Content-Type-Options", "nosniff")
         behandler.send_header("Referrer-Policy", "no-referrer")
+        for name, wert in zusatz.items():
+            behandler.send_header(name, wert)
         behandler.end_headers()
 
-    def _antworten(self, behandler, code: int, nutzlast: dict):
+    def _antworten(self, behandler, code: int, nutzlast: dict, zusatz: dict = None):
         """Schickt eine JSON-Antwort."""
         try:
             roh = json.dumps(nutzlast, ensure_ascii=False, default=str).encode("utf-8")
         except (TypeError, ValueError):
             roh = json.dumps({"fehler": "Antwort nicht darstellbar"}).encode("utf-8")
-        self._kopf_setzen(behandler, code, "application/json; charset=utf-8", len(roh))
+        self._kopf_setzen(behandler, code, "application/json; charset=utf-8", len(roh), zusatz)
         behandler.wfile.write(roh)
 
-    def _html(self, behandler, text: str):
+    def _html(self, behandler, text: str, zusatz: dict = None):
         roh = text.encode("utf-8")
-        self._kopf_setzen(behandler, 200, "text/html; charset=utf-8", len(roh))
+        self._kopf_setzen(behandler, 200, "text/html; charset=utf-8", len(roh), zusatz)
         behandler.wfile.write(roh)
 
     def _datei(self, behandler, pfad: str):

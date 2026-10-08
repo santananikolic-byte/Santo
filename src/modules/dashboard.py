@@ -24,6 +24,7 @@ from modules.dashboard_teile import (FARBE_AKZENT, FARBE_GRAU, FARBE_GUT,
                                      ampelfarbe, balken, euro, euro_kurz, prozent,
                                      ring, saeulen, seite_bauen, sicher, sparkline)
 from modules.memory import heute_datum
+from modules.router import Gedankenlog
 from modules.sales_view import Verkaufsansicht
 
 
@@ -76,6 +77,11 @@ class Dashboard:
                 daten["monate"] = self.bookkeeping.monatsverlauf(6)
             except Exception as fehler:
                 daten["monat_fehler"] = str(fehler)
+
+        try:
+            daten["gehirne"] = Gedankenlog().monatsbilanz()
+        except Exception as fehler:
+            daten["gehirne_fehler"] = str(fehler)
 
         if self.call_analysis is not None:
             try:
@@ -365,6 +371,27 @@ class Dashboard:
         return self._panel("Steht an", self._liste(zeilen, ""), "",
                            "%d Termine" % anstehend["anzahl"])
 
+    def _panel_gehirne(self, daten: dict) -> str:
+        """Was Jarvis' Denken diesen Monat gekostet hat - und wer geantwortet hat."""
+        bilanz = daten.get("gehirne")
+        if not bilanz or not bilanz.get("anfragen"):
+            return ""
+        groesster = max(bilanz["gemini"], bilanz["claude"], 1)
+        inhalt = balken("Gemini (schnell, gratis)", bilanz["gemini"], groesster,
+                        "%d Anfragen" % bilanz["gemini"], FARBE_GUT)
+        inhalt += balken("Claude (gründlich)", bilanz["claude"], groesster,
+                         "%d Anfragen" % bilanz["claude"], FARBE_AKZENT)
+        limit = config.MONATSLIMIT_EURO
+        if limit > 0:
+            inhalt += balken("Claude-Kosten (geschätzt) von %s Limit" % euro(limit),
+                             bilanz["kosten"], limit, euro(bilanz["kosten"]),
+                             ampelfarbe(100 - prozent(bilanz["kosten"], limit)))
+        if bilanz["ausgewichen"]:
+            inhalt += ('<p class="leer">%d Mal musste Claude für Gemini einspringen.</p>'
+                       % bilanz["ausgewichen"])
+        return self._panel("Denken diesen Monat", inhalt, "",
+                           "%d Anfragen" % bilanz["anfragen"])
+
     def _panel_fixkosten(self, daten: dict) -> str:
         """Die laufenden Verpflichtungen, größte zuerst."""
         kosten = daten.get("fixkosten")
@@ -652,6 +679,7 @@ class Dashboard:
             self._panel_belege(daten),
             self._panel_kategorien(daten),
             self._panel_fixkosten(daten),
+            self._panel_gehirne(daten),
             self._panel_mail(daten),
             self._panel_notizen(daten),
             self._panel_protokoll(daten),

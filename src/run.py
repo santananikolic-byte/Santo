@@ -18,13 +18,27 @@ Terminal spricht, nimmt ``hoeren``.
     python3 jarvis.py export      Buchhaltung als CSV
     python3 jarvis.py stimme      Stimmprofil einlernen
     python3 jarvis.py stimmen     ElevenLabs-Stimme aussuchen
+    python3 jarvis.py sicht       Kamera-Seite: laden (Handerkennung holen), an oder aus
     python3 jarvis.py test        Selbsttest
+    python3 jarvis.py sprechprobe Stimmkette prüfen und einen Probesatz sprechen
     python3 jarvis.py einrichten  geführte Ersteinrichtung
+    python3 jarvis.py hardware    den Mac prüfen: Last, Speicher, Platte, Netz, Wärme
+    python3 jarvis.py zugang      einen Schlüssel eintragen oder ersetzen
+    python3 jarvis.py zugang mail Gmail oder ein anderes Postfach verbinden
+    python3 jarvis.py zugang telegram  Handy verbinden: schreiben und sprechen von unterwegs
+    python3 jarvis.py macapp      Jarvis als Programm: Symbol im Dock und im Programme-Ordner
+    python3 jarvis.py autopilot   Postfach des Autopiloten (an / aus zum Schalten)
+    python3 jarvis.py gesundheit  Apple-Health-Export einlesen (Datei) oder alle Gesundheitswerte vergessen
+    python3 jarvis.py zugang oura Oura Ring verbinden (ebenso: zugang whoop) für den Erholungswert
+    python3 jarvis.py daemon      dauerhaft, nur Stimme, ohne Fenster (der iMac als Kopf)
+    python3 jarvis.py dienst      installieren | entfernen | status | neustart | hinweise
+    python3 jarvis.py anzeige     Zentrale und Gehirn auf den Bildschirmen öffnen
 """
 
 import json
 import os
 import sys
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -35,10 +49,37 @@ from modules.bookkeeping import mwst_aus_brutto
 from modules.memory import Memory
 from modules.mcp_client import MCPClient, MCPServer, vorlage_schreiben
 from modules.scheduler import Scheduler, ist_faellig
-from modules.setup_wizard import einrichtung_starten
+from modules.dienst import (Ansager, HINWEISE, Herzschlag, SprachFreigabe, dienst_status,
+                            entfernen, installieren, logdatei_drehen, neustarten)
+from modules.setup_wizard import einrichtung_starten, zugang_eintragen
 from modules.speaker import Sprecherprofil
+from modules.telegram_mod import TelegramFreigabe
 from modules.voice import Stimme, weckwort_pruefen
+from modules.macapp import app_bauen
 from modules.webapp import JarvisWeb, STANDARD_PORT
+# Importe der Pakete.
+# [P1 Bühne] Anfang
+# [P1 Bühne] Ende
+# [P2 Weltlage] Anfang
+# [P2 Weltlage] Ende
+# [P3 Telefon] Anfang
+# [P3 Telefon] Ende
+# [P4 Büro] Anfang
+# [P4 Büro] Ende
+# [P5 Sicht] Anfang
+from modules.sicht import sicht_befehl
+from modules.erholung import gesundheit_im_terminal, wearable_zugang_im_terminal
+# [P5 Sicht] Ende
+# [P6 Stimme] Anfang
+from modules.voice import sprechprobe
+# [P6 Stimme] Ende
+# [P7 Start] Anfang
+from modules.hardware import hardware_bericht, hardware_text, hochfahren
+# [P7 Start] Ende
+
+# Die Anzeige des Dienstes hat ihren eigenen Anschluss - so kann die Web-App per
+# Doppelklick trotzdem starten, während der Dienst läuft.
+ANZEIGE_PORT = STANDARD_PORT + 1
 
 BANNER = r"""
    _   _   ___  _   _ ___ ___
@@ -66,21 +107,133 @@ def agent_aufbauen(mit_stimme: bool = True):
 # Dauerbetrieb
 # ---------------------------------------------------------------------------
 
-def dauerbetrieb():
-    """Hört auf das Weckwort und meldet sich zu den eingestellten Zeiten."""
+BEENDEN_SAETZE = ("schalte dich ab", "schalt dich ab", "beende dich", "feierabend jarvis",
+                  "mach dich aus", "fahr dich runter")
+
+
+def telegram_lauschen(agent, stimme, sperre, halt, warten: float = 10.0):
+    """Nimmt im Dienst Nachrichten vom Handy an - Text oder Sprachnachricht.
+
+    Nur der eingerichtete Chat zählt (das prüft ``nachrichten_holen``). Rückfragen
+    zur Freigabe gehen per Telegram ans Handy, nicht laut in den leeren Raum. Wer
+    per Sprachnachricht fragt, bekommt die Antwort auch als Sprachnachricht.
+    """
+    telegram = agent.tools.telegram
+    kanal = TelegramFreigabe(telegram)
+    while not halt.is_set():
+        try:
+            nachrichten = telegram.nachrichten_holen(timeout=25)
+        except Exception as fehler:
+            print("[telegram] %s" % fehler)
+            halt.wait(warten)
+            continue
+        for nachricht in nachrichten:
+            text = (nachricht.get("text") or "").strip()
+            gesprochen = False
+            if not text and nachricht.get("sprachdatei"):
+                gesprochen = True
+                try:
+                    text = stimme.transkribieren(nachricht["sprachdatei"]) or ""
+                finally:
+                    try:
+                        os.remove(nachricht["sprachdatei"])
+                    except OSError:
+                        pass
+            if not text:
+                continue
+            erkannt, befehl = weckwort_pruefen(text)
+            befehl = befehl if erkannt and befehl else text
+            print("Du (Telegram): %s" % befehl)
+            with sperre:
+                agent.tools.anfrage_kanal_setzen(kanal)
+                try:
+                    antwort = agent.denken(befehl)
+                except Exception as fehler:
+                    antwort = "Da ist etwas schiefgegangen: %s" % fehler
+                finally:
+                    agent.tools.anfrage_kanal_setzen(None)
+            if gesprochen and hasattr(stimme, "sprachdatei_erzeugen"):
+                pfad = stimme.sprachdatei_erzeugen(antwort)
+                if pfad:
+                    telegram.datei_senden(pfad, "sendVoice", "voice", "")
+                    try:
+                        os.remove(pfad)
+                    except OSError:
+                        pass
+            telegram.senden(antwort)
+
+
+def dauerbetrieb(dienst: bool = False):
+    """Hört auf das Weckwort und meldet sich zu den eingestellten Zeiten.
+
+    Als ``dienst`` läuft das ohne Fenster und ohne Tippen: Freigaben per Stimme,
+    Meldungen über den Ansager, Lebenszeichen für den Neustart bei Stillstand,
+    und fehlt das Mikrofon, wird weiter versucht statt zu tippen.
+    """
     print(BANNER)
+    herz = None
+    if dienst:
+        logdatei_drehen(config.LOG_VERZEICHNIS / "dienst.log")
+        herz = Herzschlag()
+        herz.start()
     agent, stimme = agent_aufbauen()
     profil = Sprecherprofil()
+    ansager = Ansager(stimme) if dienst else None
+    if dienst:
+        agent.tools.freigabe_kanal_setzen(SprachFreigabe(stimme, profil))
 
     zeitplan = Scheduler(agent=agent, routines=agent.tools.routines,
-                         ausgabe=stimme.sprich)
+                         ausgabe=ansager.sagen if dienst else stimme.sprich)
     zeitplan.start()
     print("[zeitplan] Morgens %s, abends %s." % (config.BRIEFING_MORGENS,
                                                  config.BRIEFING_ABENDS))
     for eintrag in zeitplan.uebersicht():
         print("           %s  %s" % (eintrag["uhrzeit"], eintrag["beschreibung"]))
 
-    if not stimme.mikrofon_bereit():
+    web = None
+    if dienst and config.DIENST_ANZEIGE:
+        # Die Anzeige für die Bildschirme: nur zum Ansehen, nur auf diesem Rechner.
+        try:
+            web = JarvisWeb(agent, port=ANZEIGE_PORT, nur_anzeige=True)
+            web.starten(blockierend=False)
+            print("[anzeige] Zentrale:  %s/zentrale\n[anzeige] Gehirn:    %s/gehirn"
+                  % (web.adresse().split("?")[0].rstrip("/"), web.adresse().split("?")[0].rstrip("/")))
+        except OSError as fehler:
+            web = None
+            print("[anzeige] Die Anzeige startet nicht (%s). Läuft Jarvis schon einmal?" % fehler)
+        finally:
+            # JarvisWeb setzt sich als Freigabeweg ein. Im Dienst bleibt es die Stimme -
+            # auch wenn die Anzeige nicht startet, sonst wartet jede Freigabe ins Leere.
+            agent.tools.freigabe_kanal_setzen(SprachFreigabe(stimme, profil))
+
+    if dienst:
+        agent.tools.autopilot.ausgabe = ansager.leise
+        agent.tools.autopilot.start()
+        print("[autopilot] %s" % ("an" if config.AUTOPILOT_AN else "aus (python3 jarvis.py autopilot an)"))
+
+    # Agent, Stimme und Ausgabewege stehen - hier verdrahten die Pakete (etwa Ausgaben),
+    # bevor die Hauptschleife läuft.
+    # [P1 Bühne] Anfang
+    # [P1 Bühne] Ende
+    # [P2 Weltlage] Anfang
+    # [P2 Weltlage] Ende
+    # [P3 Telefon] Anfang
+    # Das Ende eines Telefonats wird gesagt; der Kalendervorschlag steht dann auch im Gespräch
+    # (der Telefonagent merkt ihn über agent.meldung_vormerken vor).
+    agent.tools.telefonagent.ausgabe = ansager.sagen if dienst else stimme.sprich
+    # [P3 Telefon] Ende
+    # [P4 Büro] Anfang
+    # [P4 Büro] Ende
+    # [P5 Sicht] Anfang
+    # Ein langer Gesundheitsimport läuft im Hintergrund und meldet sich, wenn er fertig ist.
+    agent.tools.erholung.ausgabe = ansager.sagen if dienst else stimme.sprich
+    # [P5 Sicht] Ende
+    # [P6 Stimme] Anfang
+    # [P6 Stimme] Ende
+    # [P7 Start] Anfang
+    # [P7 Start] Ende
+
+    if not stimme.mikrofon_bereit() and not dienst:
         print("\n[!] Kein Mikrofonzugriff. Ich wechsle in den Tippbetrieb.")
         stimme.sprich("Ich komme nicht an das Mikrofon. Wir tippen erst einmal.")
         zeitplan.stop()
@@ -91,14 +244,65 @@ def dauerbetrieb():
                       "die Einrichtung.")
         print("Starte die Einrichtung mit: python3 jarvis.py einrichten")
 
-    stimme.sprich("Ich bin da. Sag Hey Jarvis, wenn du etwas brauchst.")
+    # Ein Gedanke zur Zeit: Stimme am iMac und Telegram vom Handy teilen sich den Verlauf.
+    denk_sperre = threading.Lock()
+    telegram_halt = threading.Event()
+    if dienst and config.DIENST_TELEGRAM and agent.tools.telegram.verfuegbar():
+        threading.Thread(target=telegram_lauschen, args=(agent, stimme, denk_sperre, telegram_halt),
+                         daemon=True, name="jarvis-telegram").start()
+        print("[telegram] Ich höre auch auf Nachrichten vom Handy.")
+
+    # Beim Hochfahren: den Mac prüfen und mit dem Tag begrüßen (einmal je Tag, sonst "wieder da").
+    try:
+        gruss = hochfahren(agent, stimme).get("begruessung") or "Ich bin da."
+    except Exception as fehler:
+        print("[hochfahren] %s" % fehler)
+        gruss = "Ich bin da."
+    stimme.sprich(gruss + " Sag Hey Jarvis, wenn du etwas brauchst.")
     print("\nIch höre zu. Abbrechen mit Strg und C.\n")
+    mikro_gemeldet = 0.0
+    mikro_seit = 0.0
+
+    def zustand_wenn_frei(zustand):
+        # Denkt gerade Telegram (hält die Sperre), gehört die Anzeige ihm.
+        if denk_sperre.acquire(blocking=False):
+            try:
+                agent.zustand_setzen(zustand)
+            finally:
+                denk_sperre.release()
 
     try:
         while True:
+            if herz is not None:
+                herz.schlagen()
+            if ansager is not None and ansager.wartend():
+                zustand_wenn_frei("spricht")
+                try:
+                    ansager.ausliefern()
+                finally:
+                    zustand_wenn_frei("bereit")
+            zustand_wenn_frei("hoert")
             pfad = stimme.aufnehmen_bis_pause(still_signal=True)
+            zustand_wenn_frei("bereit")
             if not pfad:
+                if dienst and getattr(stimme, "mikro_fehler", ""):
+                    # Kein Tippen im Dienst: weiter versuchen, einmal pro Stunde Bescheid sagen,
+                    # und nach zehn Minuten ohne Mikrofon neu starten (launchd holt ihn zurück).
+                    if not mikro_seit:
+                        mikro_seit = time.time()
+                    if time.time() - mikro_gemeldet > 3600:
+                        mikro_gemeldet = time.time()
+                        print("[dienst] Kein Mikrofon. %s" % stimme.mikro_fehler)
+                        stimme.sprich("Ich komme gerade nicht an das Mikrofon. "
+                                      "Bitte gib es in den Systemeinstellungen frei.")
+                    if time.time() - mikro_seit > 600:
+                        print("[dienst] Seit zehn Minuten kein Mikrofon - Neustart.")
+                        return 4
+                    time.sleep(30)
+                else:
+                    mikro_seit = 0.0
                 continue
+            mikro_seit = 0.0
             try:
                 text = stimme.transkribieren(pfad)
                 if not text:
@@ -120,24 +324,109 @@ def dauerbetrieb():
             stimme.signal("verstanden")
             if not befehl:
                 stimme.sprich("Ja?")
-                nachtrag = stimme.zuhoeren()
+                zustand_wenn_frei("hoert")
+                try:
+                    nachtrag = stimme.zuhoeren()
+                finally:
+                    zustand_wenn_frei("bereit")
                 if not nachtrag:
                     continue
                 befehl = nachtrag
 
             print("Du: %s" % befehl)
+            if dienst and any(satz in befehl.lower() for satz in BEENDEN_SAETZE):
+                stimme.sprich("Alles klar, ich schalte mich ab. Bis später.")
+                return 0  # Exit 0: der Dienst startet erst bei der nächsten Anmeldung neu.
             try:
-                agent.antworten(befehl)
+                with denk_sperre:
+                    agent.antworten(befehl)
             except Exception as fehler:
                 stimme.signal("fehler")
                 print("[fehler] %s" % fehler)
                 stimme.sprich("Da ist etwas schiefgegangen: %s" % fehler)
+            if herz is not None:
+                herz.schlagen()
     except KeyboardInterrupt:
         print("\nBis später.")
         stimme.sprich("Bis später.")
     finally:
+        telegram_halt.set()
         zeitplan.stop()
+        if dienst:
+            agent.tools.autopilot.stop()
+            herz.stop()
+            if web is not None:
+                web.stoppen()
         agent.tools.mcp.stoppen()
+
+
+def _port_belegt(port: int) -> bool:
+    import socket
+    try:
+        with socket.create_connection(("127.0.0.1", int(port)), timeout=0.5):
+            return True
+    except OSError:
+        return False
+
+
+def macapp_anlegen(argumente=None) -> int:
+    """``python3 jarvis.py macapp``: Jarvis als Programm mit Symbol, im Dock und auf dem Schreibtisch."""
+    argumente = argumente or []
+    if sys.platform != "darwin" and "--ziel" not in argumente:
+        print("Die App gibt es nur auf dem Mac.")
+        return 1
+    ziel = argumente[argumente.index("--ziel") + 1] if "--ziel" in argumente[:-1] else None
+    ergebnis = app_bauen(ziel_ordner=ziel, dock="--ohne-dock" not in argumente)
+    print(ergebnis.get("text") or ergebnis.get("fehler"))
+    if ergebnis.get("ok"):
+        print("Starten: Klick auf das Gehirn im Dock, im Programme-Ordner oder auf dem Schreibtisch.")
+    return 0 if ergebnis.get("ok") else 1
+
+
+def anzeige_oeffnen(argumente=None) -> int:
+    """Öffnet Gehirn und Zentrale im Browser - je ein Fenster, zum Verschieben auf die Bildschirme."""
+    import shutil as _shutil
+    import subprocess as _subprocess
+    # Läuft der Dienst, zeigt seine Anzeige; sonst die Web-App per Doppelklick.
+    if _port_belegt(ANZEIGE_PORT):
+        port = ANZEIGE_PORT
+    elif _port_belegt(STANDARD_PORT):
+        port = STANDARD_PORT
+    else:
+        print("Die Anzeige läuft gerade nicht. Sie läuft im Dienst mit "
+              "(python3 jarvis.py dienst status, sonst dienst installieren; DIENST_ANZEIGE=ja) "
+              "oder nach Doppelklick auf JARVIS.")
+        return 1
+    adressen = ["http://127.0.0.1:%d/zentrale" % port, "http://127.0.0.1:%d/gehirn" % port]
+    if not _shutil.which("open"):
+        print("Öffne diese Adressen im Browser:\n  " + "\n  ".join(adressen))
+        return 0
+    for adresse in adressen:
+        _subprocess.run(["open", adresse], shell=False, timeout=15,
+                        stdout=_subprocess.DEVNULL, stderr=_subprocess.DEVNULL)
+    print("Beide Seiten sind offen. Zentrale auf den großen Bildschirm, Gehirn auf den zweiten, "
+          "dann in der Seite mit Strg+Cmd+F auf Vollbild.")
+    return 0
+
+
+def dienst_verwalten(argumente=None) -> int:
+    """``python3 jarvis.py dienst installieren | entfernen | status | neustart | hinweise``."""
+    argumente = [a.lower() for a in (argumente or [])]
+    aktion = argumente[0] if argumente else "status"
+    trocken = "--trocken" in argumente
+    if aktion in ("installieren", "einrichten", "an"):
+        ergebnis = installieren(trocken)
+    elif aktion in ("entfernen", "aus"):
+        ergebnis = entfernen(trocken)
+    elif aktion in ("neustart", "neu"):
+        ergebnis = neustarten()
+    elif aktion in ("hinweise", "hilfe"):
+        print(HINWEISE)
+        return 0
+    else:
+        ergebnis = dienst_status()
+    print(ergebnis.get("text") or ergebnis.get("fehler", ""))
+    return 0 if ergebnis.get("ok") else 1
 
 
 # ---------------------------------------------------------------------------
@@ -251,6 +540,8 @@ def webbetrieb(argumente=None):
     """Startet Jarvis als Web-App im Browser."""
     argumente = argumente or []
     offen = "--offen" in argumente or "offen" in argumente
+    # Die Mac-App öffnet ihr eigenes Fenster - dann hier keinen Browser-Tab dazu.
+    ohne_browser = "--ohne-browser" in argumente
     port = STANDARD_PORT
     for teil in argumente:
         if teil.isdigit():
@@ -260,6 +551,15 @@ def webbetrieb(argumente=None):
     agent, stimme = agent_aufbauen(mit_stimme=False)
     del stimme
     web = JarvisWeb(agent, port=port, offen=offen)
+    # Erst den Anschluss belegen, dann den Browser öffnen - sonst landet er bei einem
+    # anderen Programm auf demselben Anschluss, und hier folgt ein Absturz.
+    try:
+        web.starten(blockierend=False)
+    except OSError as fehler:
+        print("  Der Anschluss %d ist belegt (%s). Läuft Jarvis schon in einem anderen "
+              "Fenster? Dann dort weiterreden - oder dieses schließen und neu starten." % (port, fehler))
+        agent.tools.mcp.stoppen()
+        return 1
 
     # Der Zeitplan meldet in die Web-App, nicht ins Terminal - dort schaut
     # um 6:45 niemand hin.
@@ -268,6 +568,31 @@ def webbetrieb(argumente=None):
     zeitplan.start()
     print("  Briefings: morgens %s, abends %s"
           % (config.BRIEFING_MORGENS, config.BRIEFING_ABENDS))
+    autopilot = agent.tools.autopilot
+    autopilot.ausgabe = web.melden
+    autopilot.start()
+    print("  Autopilot: %s" % ("an, arbeitet im Hintergrund" if config.AUTOPILOT_AN
+                               else "aus (einschalten auf der Seite Autopilot)"))
+
+    # Agent, Server und Ausgabewege stehen - hier verdrahten die Pakete (etwa Ausgaben),
+    # bevor der Browser aufgeht und die Hauptschleife läuft.
+    # [P1 Bühne] Anfang
+    # [P1 Bühne] Ende
+    # [P2 Weltlage] Anfang
+    # [P2 Weltlage] Ende
+    # [P3 Telefon] Anfang
+    # Das Ende eines Telefonats landet wie ein Briefing in der Web-App.
+    agent.tools.telefonagent.ausgabe = web.melden
+    # [P3 Telefon] Ende
+    # [P4 Büro] Anfang
+    # [P4 Büro] Ende
+    # [P5 Sicht] Anfang
+    agent.tools.erholung.ausgabe = web.melden
+    # [P5 Sicht] Ende
+    # [P6 Stimme] Anfang
+    # [P6 Stimme] Ende
+    # [P7 Start] Anfang
+    # [P7 Start] Ende
 
     adresse = web.adresse()
     print("  Jarvis läuft jetzt im Browser:")
@@ -282,7 +607,8 @@ def webbetrieb(argumente=None):
 
     import shutil as _shutil
     import subprocess as _subprocess
-    if _shutil.which("open"):
+    # Eine Seite für alles: das Gehirn sitzt mitten in der Gesprächsseite.
+    if _shutil.which("open") and not ohne_browser:
         try:
             _subprocess.run(["open", adresse], shell=False, timeout=15,
                             stdout=_subprocess.DEVNULL, stderr=_subprocess.DEVNULL)
@@ -290,14 +616,35 @@ def webbetrieb(argumente=None):
             pass
 
     try:
-        web.starten(blockierend=True)
+        while True:
+            time.sleep(1)
     except KeyboardInterrupt:
         pass
     finally:
         zeitplan.stop()
+        autopilot.stop()
         web.stoppen()
         agent.tools.mcp.stoppen()
     print("\nBeendet.")
+    return 0
+
+
+def autopilot_zeigen(argumente=None):
+    """Zeigt das Postfach des Autopiloten - oder schaltet ihn ein und aus."""
+    argumente = argumente or []
+    agent, stimme = agent_aufbauen(mit_stimme=False)
+    del stimme
+    ap = agent.tools.autopilot
+    if argumente and argumente[0].lower() in ("an", "ein", "aus"):
+        print(ap.schalten(argumente[0].lower() != "aus")["text"])
+        return 0
+    zustand = ap.zustand()
+    print("Autopilot: %s%s" % ("an" if zustand["an"] else "aus",
+                               " (pausiert: %s)" % zustand["gesperrt"]
+                               if zustand["an"] and zustand["gesperrt"] else ""))
+    print("Wartet: %d, Postfach: %d" % (len(zustand["warteschlange"]), len(zustand["postfach"])))
+    for eintrag in zustand["postfach"]:
+        print("\n[%d] %s\n%s" % (eintrag["id"], eintrag["titel"], eintrag["ergebnis"]))
     return 0
 
 
@@ -369,6 +716,16 @@ def stimme_aussuchen():
     if not stimmen:
         print("Es sind keine Stimmen hinterlegt.")
         return
+
+    def deutsch(eintrag):
+        marken = " ".join(str(v) for v in (eintrag.get("labels") or {}).values()).lower()
+        return any(w in marken for w in ("german", "deutsch", "austrian", "österreich"))
+    # Eine deutsche Muttersprachlerstimme klingt am menschlichsten - die kommen zuerst.
+    stimmen.sort(key=lambda e: (not deutsch(e), e.get("name", "")))
+    if not any(deutsch(e) for e in stimmen):
+        print("In deinem Konto ist noch keine deutsche Stimme. Am natürlichsten klingt eine "
+              "deutsche Stimme aus der Voice Library von ElevenLabs (elevenlabs.io/app/voice-library, "
+              "Sprache Deutsch). Dort \"Add to my voices\" und danach hier noch einmal wählen.\n")
     for nummer, eintrag in enumerate(stimmen, 1):
         marken = eintrag.get("labels") or {}
         print("%2d. %-22s %s" % (nummer, eintrag.get("name", "?"),
@@ -617,6 +974,9 @@ def selbsttest() -> int:
                ("eigene Nummer %s" % telefon["eigene_nummer"])
                if telefon["eingerichtet"]
                else "fuer Anrufe und SMS: TWILIO_SID, TWILIO_TOKEN, TWILIO_NUMMER")
+        ta = agent.tools.telefonagent.zustand()
+        melden("Telefonassistent (Restaurant anrufen)", "ok" if ta["gespraech_moeglich"] else "fehlt",
+               ta["hinweis"][:70])
         browser = agent.tools.browser.zustand()
         melden("Browser-Steuerung", "ok" if browser["verfuegbar"] else "fehlt",
                browser["hinweis"])
@@ -694,6 +1054,49 @@ def hauptprogramm(argumente=None) -> int:
         return selbsttest()
     elif modus in ("einrichten", "setup"):
         einrichtung_starten()
+    elif modus in ("daemon", "dienstbetrieb"):
+        if not config.EINRICHTUNG_FERTIG and not config.ANTHROPIC_API_KEY:
+            print("Jarvis ist noch nicht eingerichtet. Starte: python3 jarvis.py einrichten")
+            return 1
+        return dauerbetrieb(dienst=True) or 0
+    elif modus == "dienst":
+        return dienst_verwalten(argumente[1:])
+    elif modus == "anzeige":
+        return anzeige_oeffnen(argumente[1:])
+    elif modus in ("macapp", "mac-app", "programm"):
+        return macapp_anlegen(argumente[1:])
+    elif modus == "autopilot":
+        return autopilot_zeigen(argumente[1:])
+    elif modus in ("zugang", "schluessel", "schlüssel") \
+            and (argumente[1].strip().lower() if len(argumente) > 1 else "") not in ("oura", "whoop"):
+        return 0 if zugang_eintragen(argumente[1] if len(argumente) > 1 else "") else 1
+    # Neue Betriebsarten der Pakete, je als "elif modus == ...:".
+    # [P1 Bühne] Anfang
+    # [P1 Bühne] Ende
+    # [P2 Weltlage] Anfang
+    # [P2 Weltlage] Ende
+    # [P3 Telefon] Anfang
+    # [P3 Telefon] Ende
+    # [P4 Büro] Anfang
+    # [P4 Büro] Ende
+    # [P5 Sicht] Anfang
+    elif modus == "sicht":
+        return sicht_befehl(argumente[1:])
+    elif modus in ("zugang", "schluessel", "schlüssel"):
+        # nur oura und whoop kommen hier an (siehe die Bedingung der ersten Zeile von "zugang")
+        return wearable_zugang_im_terminal(argumente[1].strip().lower())
+    elif modus in ("gesundheit", "erholung"):
+        return gesundheit_im_terminal(argumente[1:])
+    # [P5 Sicht] Ende
+    # [P6 Stimme] Anfang
+    elif modus == "sprechprobe":
+        return sprechprobe(argumente[1:])
+    # [P6 Stimme] Ende
+    # [P7 Start] Anfang
+    elif modus == "hardware":
+        print(hardware_text(hardware_bericht(stimme=Stimme(), tools=JarvisAgent().tools)))
+        return 0
+    # [P7 Start] Ende
     elif modus in ("hilfe", "--help", "-h", "help"):
         print(__doc__)
     else:

@@ -61,6 +61,11 @@ main{flex:1;display:flex;flex-direction:column;align-items:center;
 
 .kugel{position:relative;width:min(46vmin,260px);height:min(46vmin,260px);
        flex:none;display:grid;place-items:center;cursor:pointer}
+/* Das Gehirn ist das Gesicht von Jarvis: es atmet, hört, denkt und spricht mit. */
+.kugel.hirn{width:min(70vmin,560px);height:min(52vmin,440px)}
+.kugel.hirn iframe{position:absolute;inset:0;width:100%;height:100%;border:0;
+                   pointer-events:none;background:transparent;color-scheme:normal}
+.kugel.hirn .ring,.kugel.hirn .kern,.kugel.hirn .welle{display:none}
 .kugel .ring{position:absolute;inset:0;border-radius:50%;
              border:1px solid var(--rand-hell);transition:border-color .4s}
 .kugel .ring2{inset:9%;opacity:.6}
@@ -128,6 +133,7 @@ body[data-zustand="wach"] .zustandstext{color:var(--akzent)}
 .tippen{position:fixed;left:50%;transform:translateX(-50%);bottom:88px;
         width:min(92vw,620px);display:none;gap:9px}
 .tippen.zeigen{display:flex}
+main:has(~ .tippen.zeigen){padding-bottom:84px}
 .tippen input{flex:1;background:var(--panel);border:1px solid var(--rand-hell);
               border-radius:11px;padding:12px 15px;color:var(--text);
               font-family:inherit;font-size:15px}
@@ -174,14 +180,19 @@ body[data-zustand="wach"] .zustandstext{color:var(--akzent)}
   <span id="lage">Stand wird geholt …</span>
   <span class="rechts">
     <button class="mini" id="tippenAn" title="Notweg, falls das Mikrofon streikt">Tippen</button>
+    <a href="/zentrale" id="zentraleLink" target="_blank" rel="noopener">Zentrale</a>
+    <a href="/gehirn" id="gehirnLink" target="_blank" rel="noopener">Gehirn</a>
+    <a href="/autopilot" id="autopilotLink">Autopilot</a>
+    <a href="/pfad" id="pfadLink">Pfad</a>
     <a href="/dashboard" target="_blank" rel="noopener">Cockpit</a>
     <a href="/sales" target="_blank" rel="noopener">Sales</a>
   </span>
 </div>
 
 <main>
-  <div class="kugel" id="kugel" role="button" tabindex="0"
+  <div class="kugel hirn" id="kugel" role="button" tabindex="0"
        title="Antippen weckt Jarvis auch ohne Weckwort">
+    <iframe id="hirn" title="Das Gedächtnis von Jarvis als leuchtendes Gehirn" tabindex="-1"></iframe>
     <span class="ring"></span><span class="ring ring2"></span><span class="ring ring3"></span>
     <span class="welle"></span><span class="welle w2"></span><span class="welle w3"></span>
     <span class="kern"></span>
@@ -231,18 +242,44 @@ body[data-zustand="wach"] .zustandstext{color:var(--akzent)}
   var WECKWOERTER = ["hey jarvis","hey javis","hey dscharvis","hey charvis",
                      "hey travis","hey jervis","hey service","hey chavis",
                      "jarvis","javis"];
-  var JA = ["ja","jo","jup","okay","ok","passt","mach","machen","los","sicher",
-            "einverstanden","erlaubt","freigabe","yes"];
-  var NEIN = ["nein","ne","nee","no","stop","stopp","abbrechen","abbruch",
-              "lass","nicht","niemals","nope"];
+  // Dieselben Wörter wie bei der Sprachfreigabe am iMac (dienst.py): Ein Ja zählt
+  // nur als kurze, eindeutige Antwort, die mit Ja beginnt - nie ein "ja" mitten im Satz.
+  var JA = ["ja","jo","jawohl","jep","klar","okay","ok","einverstanden","freigegeben",
+            "genehmigt","mach","machs"];
+  var FUELL = ["ja","bitte","gerne","gern","mach","machs","das","es","so","los","danke",
+               "genau","klar","okay","ok","jarvis"];
+  var NEIN = ["nein","nee","ne","nö","noe","nicht","nichts","nix","stopp","stop",
+              "abbrechen","lass","lassen","kein","keine","keinen","keinem","keiner",
+              "keinesfalls","niemals","nie","halt","warte","falsch","bloß","bloss",
+              "moment","ohne","vergiss","aber","sondern","statt","anders","später",
+              "spaeter","gar","nochmal","warum","wieso"];
+  var MAX_ANTWORT = 4;
+  function jaNein(k) {
+    var w = (k || "").split(" ").filter(function (x) { return x; });
+    if (!w.length) { return null; }
+    for (var i = 0; i < w.length; i++) { if (NEIN.indexOf(w[i]) >= 0) { return false; } }
+    if (w.length > MAX_ANTWORT) { return null; }
+    if (JA.indexOf(w[0]) < 0) { return null; }
+    for (var j = 1; j < w.length; j++) {
+      if (FUELL.indexOf(w[j]) < 0 && JA.indexOf(w[j]) < 0) { return null; }
+    }
+    return true;
+  }
 
   var el = function (id) { return document.getElementById(id); };
   var zustand = "aus", wachBis = 0, laeuft = false;
   var freigabe = null, sprichtGerade = false;
 
+  var HIRN_ZUSTAND = {aus: "bereit", schlaeft: "bereit", wach: "hoert",
+                      denkt: "denkt", spricht: "spricht"};
   function setzeZustand(neu, text) {
     zustand = neu;
     document.body.dataset.zustand = neu;
+    var hirn = el("hirn");
+    if (hirn && hirn.contentWindow) {
+      try { hirn.contentWindow.postMessage({zustand: HIRN_ZUSTAND[neu] || "bereit"},
+                                           location.origin); } catch (e) {}
+    }
     el("zustandstext").textContent = text || {
       aus: "Mikrofon aus", schlaeft: "Sag Hey Jarvis",
       wach: "Ich höre", denkt: "Ich arbeite", spricht: "…"
@@ -254,6 +291,12 @@ body[data-zustand="wach"] .zustandstext{color:var(--akzent)}
     return p + (SCHLUESSEL ? (p.indexOf("?") < 0 ? "?" : "&") +
       "schluessel=" + encodeURIComponent(SCHLUESSEL) : "");
   }
+  // Die Verknüpfungen im Kopf brauchen im Handy-Modus den Schlüssel.
+  Array.prototype.forEach.call(document.querySelectorAll(".ticker a[href^='/']"),
+    function (a) { a.href = url(a.getAttribute("href")); });
+  // Das Gehirn in der Mitte: ohne eigene Beschriftung, mit dem Zustand dieser Seite.
+  el("hirn").src = url("/gehirn?eingebettet=1");
+  el("hirn").addEventListener("load", function () { setzeZustand(zustand); });
   function holen(p, k) {
     var o = { headers: { "Content-Type": "application/json" } };
     if (k !== undefined) { o.method = "POST"; o.body = JSON.stringify(k); }
@@ -274,29 +317,60 @@ body[data-zustand="wach"] .zustandstext{color:var(--akzent)}
     stimmenLaden();
     window.speechSynthesis.onvoiceschanged = stimmenLaden;
   }
+  // Die natürlichste deutsche Stimme, die der Browser hat: erst die
+  // hochwertigen (Premium, Enhanced, Natural, Neural), dann Google, dann die
+  // übrigen bekannten, zuletzt irgendeine deutsche.
+  function besteStimme() {
+    var de = stimmen.filter(function (s) { return /^de/i.test(s.lang); });
+    var stufen = [/premium|enhanced|natural|neural|online/i, /google/i,
+                  /markus|yannick|petra|anna|viktor|hedda|katja|conrad/i];
+    for (var i = 0; i < stufen.length; i++) {
+      var treffer = de.filter(function (s) { return stufen[i].test(s.name); });
+      if (treffer.length) { return treffer[0]; }
+    }
+    return de.length ? de[0] : null;
+  }
+  // Lange Texte in einem Stück bleiben in vielen Browsern nach etwa fünfzehn
+  // Sekunden stehen oder fangen von vorn an. Deshalb in kurzen Stücken.
+  function stuecke(text) {
+    if (Array.isArray(text)) { return text.filter(Boolean); }
+    var teile = String(text || "").replace(/\s+/g, " ").match(/[^.!?]+[.!?]*/g) || [];
+    return teile.map(function (t) { return t.trim(); }).filter(Boolean);
+  }
   function sprich(text, danach) {
-    if (!window.speechSynthesis || !text) { if (danach) { danach(); } return; }
+    var liste = stuecke(text);
+    if (!window.speechSynthesis || !liste.length) { if (danach) { danach(); } return; }
     // Erkennung anhalten, sonst hört Jarvis sich selbst zu.
     hoerenPause();
     sprichtGerade = true;
     setzeZustand("spricht");
     window.speechSynthesis.cancel();
-    var satz = new SpeechSynthesisUtterance(text);
-    satz.lang = "de-DE"; satz.rate = 1.06;
-    var de = stimmen.filter(function (s) { return /^de/i.test(s.lang); });
-    var gut = de.filter(function (s) {
-      return /markus|yannick|petra|anna|viktor|google/i.test(s.name); });
-    if (gut.length) { satz.voice = gut[0]; } else if (de.length) { satz.voice = de[0]; }
-    satz.onend = satz.onerror = function () {
+    var stimme = besteStimme(), nummer = 0, fertig = false;
+    function ende() {
+      if (fertig) { return; }
+      fertig = true;
       sprichtGerade = false;
       hoerenWeiter();
       if (danach) { danach(); }
-    };
-    window.speechSynthesis.speak(satz);
+    }
+    function weiter() {
+      if (fertig) { return; }
+      if (nummer >= liste.length) { ende(); return; }
+      var satz = new SpeechSynthesisUtterance(liste[nummer++]);
+      satz.lang = "de-DE"; satz.rate = 1.0; satz.pitch = 1.0;
+      if (stimme) { satz.voice = stimme; }
+      satz.onend = weiter;
+      satz.onerror = function (e) {
+        // Wurde absichtlich abgebrochen, nicht weitermachen.
+        if (e && (e.error === "canceled" || e.error === "interrupted")) { ende(); } else { weiter(); }
+      };
+      window.speechSynthesis.speak(satz);
+    }
+    weiter();
     // Sicherheitsnetz: manche Browser feuern onend nicht.
-    setTimeout(function () {
-      if (sprichtGerade) { sprichtGerade = false; hoerenWeiter(); }
-    }, Math.min(45000, 2500 + text.length * 90));
+    var gesamt = liste.join(" ").length;
+    setTimeout(function () { if (!fertig) { window.speechSynthesis.cancel(); ende(); } },
+               Math.min(120000, 4000 + gesamt * 90));
   }
 
   /* ---------- Reden ---------- */
@@ -314,7 +388,7 @@ body[data-zustand="wach"] .zustandstext{color:var(--akzent)}
       el("antwort").textContent = antwort;
       el("antwort").className = "antwort" + (a.ok ? "" : " fehler");
       laeuft = false;
-      sprich(antwort, function () { setzeZustand("schlaeft"); });
+      sprich(a.sprechstuecke || antwort, function () { setzeZustand("schlaeft"); });
       lageHolen(); zahlenHolen();
     }).catch(function (f) {
       el("antwort").textContent = "Ich erreiche den Server nicht: " + f.message;
@@ -407,9 +481,8 @@ body[data-zustand="wach"] .zustandstext{color:var(--akzent)}
 
       // Bei offener Freigabe zählt nur ja oder nein.
       if (freigabe) {
-        var wort = k.split(" ").filter(function (w) {
-          return JA.indexOf(w) >= 0 || NEIN.indexOf(w) >= 0; })[0];
-        if (wort) { antworten(JA.indexOf(wort) >= 0); }
+        var entscheid = jaNein(k);
+        if (entscheid !== null) { antworten(entscheid, "sprache"); }
         return;
       }
       if (laeuft || sprichtGerade) { return; }
@@ -474,23 +547,27 @@ body[data-zustand="wach"] .zustandstext{color:var(--akzent)}
       }
       freigabe = offen;
       el("fAktion").textContent = offen.aktion;
-      el("fDetails").textContent = offen.details || "(ohne Angaben)";
+      // Was, Warum und Wie lesbar; die Argumente stehen darunter.
+      el("fDetails").textContent = (offen.warum ? "Was: " + offen.was + "\nWarum: " + offen.warum
+        + "\nWie: " + offen.wie + "\n\n" : "") + (offen.details || "(ohne Angaben)");
       el("rest").textContent = offen.rest + " s";
       el("schleier").classList.add("zeigen");
-      sprich("Ich brauche eine Freigabe für " + offen.aktion + ". Ja oder nein?");
+      sprich(offen.was && offen.warum
+        ? "Ich brauche eine Freigabe. Ich soll " + offen.was + ". Grund: " + offen.warum + ". Ja oder nein?"
+        : "Ich brauche eine Freigabe für " + offen.aktion + ". Ja oder nein?");
     }).catch(function () {});
   }
   function schliessen() {
     freigabe = null;
     el("schleier").classList.remove("zeigen");
   }
-  function antworten(ja) {
+  function antworten(ja, kanal) {
     if (!freigabe) { return; }
     var id = freigabe.id;
     schliessen();
     if (window.speechSynthesis) { window.speechSynthesis.cancel(); }
     sprichtGerade = false; hoerenWeiter();
-    holen("/api/freigabe", { id: id, ja: ja }).then(function () { lageHolen(); });
+    holen("/api/freigabe", { id: id, ja: ja, kanal: kanal || "klick" }).then(function () { lageHolen(); });
   }
   el("fJa").addEventListener("click", function () { antworten(true); });
   el("fNein").addEventListener("click", function () { antworten(false); });
@@ -502,13 +579,16 @@ body[data-zustand="wach"] .zustandstext{color:var(--akzent)}
   function meldungenHolen() {
     if (laeuft || sprichtGerade || freigabe) { return; }
     holen("/api/meldungen").then(function (a) {
-      var m = (a.meldungen || [])[0];
-      if (!m) { return; }
+      var liste = a.meldungen || [];
+      if (!liste.length) { return; }
+      // Alle Meldungen zeigen und sprechen, nicht nur die erste.
+      var teile = [];
+      liste.forEach(function (m) { teile = teile.concat(stuecke(m.sprechstuecke || m.text)); });
       el("gesagt").textContent = "";
-      el("antwort").textContent = m.text;
+      el("antwort").textContent = liste.map(function (m) { return m.text; }).join("\n\n");
       el("antwort").className = "antwort";
       el("hinweis").style.display = "none";
-      sprich(m.text, function () { setzeZustand("schlaeft"); });
+      sprich(teile, function () { setzeZustand("schlaeft"); });
       lageHolen(); zahlenHolen();
     }).catch(function () {});
   }

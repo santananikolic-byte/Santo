@@ -4,7 +4,8 @@
 
     telegram   Text oder Sprachnachricht
     mail       über SMTP
-    imessage   Nachrichten-App per AppleScript (auch SMS)
+    imessage   Nachrichten-App per AppleScript, mit deiner eigenen Nummer
+    sms        dasselbe, aber zuerst als SMS (iPhone-Weiterleitung an den Mac)
     whatsapp   über einen MCP-Server
 
 Beim AppleScript werden Nummer und Text **als Argumente übergeben**, nicht in
@@ -21,26 +22,66 @@ import subprocess
 
 import config
 
-# Nummer und Text kommen über argv herein, nicht über Textersetzung.
+# Nummer, Text und gewünschter Weg kommen über argv herein, nicht über Textersetzung.
+# Seit macOS 12 heißen die Begriffe "account" und "participant", davor "service"
+# und "buddy". Ein Skript mit unbekannten Begriffen lässt sich gar nicht erst
+# übersetzen - deshalb zwei Skripte, das neue zuerst.
+# SMS gehen nur, wenn auf dem iPhone die SMS-Weiterleitung an den Mac an ist.
 IMESSAGE_SKRIPT = """on run argv
     set zielAdresse to item 1 of argv
     set nachrichtText to item 2 of argv
+    set wunsch to item 3 of argv
     tell application "Messages"
-        try
-            set zielDienst to 1st service whose service type = iMessage
-            set zielPerson to buddy zielAdresse of zielDienst
-            send nachrichtText to zielPerson
-            return "iMessage"
-        on error
-            set smsDienst to 1st service whose service type = SMS
-            set smsPerson to buddy zielAdresse of smsDienst
-            send nachrichtText to smsPerson
-            return "SMS"
-        end try
+        if wunsch is "SMS" then
+            set reihenfolge to {SMS, iMessage}
+        else
+            set reihenfolge to {iMessage, SMS}
+        end if
+        repeat with dienstArt in reihenfolge
+            set gefunden to false
+            try
+                set konto to 1st account whose service type = (contents of dienstArt)
+                set person to participant zielAdresse of konto
+                set gefunden to true
+            end try
+            if gefunden then
+                send nachrichtText to person
+                if (contents of dienstArt) is SMS then return "SMS"
+                return "iMessage"
+            end if
+        end repeat
     end tell
+    error "Kein Konto in der Nachrichten-App kann an diese Adresse schicken."
 end run"""
 
-KANAELE = ("telegram", "mail", "imessage", "whatsapp")
+IMESSAGE_SKRIPT_ALT = """on run argv
+    set zielAdresse to item 1 of argv
+    set nachrichtText to item 2 of argv
+    set wunsch to item 3 of argv
+    tell application "Messages"
+        if wunsch is "SMS" then
+            set reihenfolge to {SMS, iMessage}
+        else
+            set reihenfolge to {iMessage, SMS}
+        end if
+        repeat with dienstArt in reihenfolge
+            set gefunden to false
+            try
+                set konto to 1st service whose service type = (contents of dienstArt)
+                set person to buddy zielAdresse of konto
+                set gefunden to true
+            end try
+            if gefunden then
+                send nachrichtText to person
+                if (contents of dienstArt) is SMS then return "SMS"
+                return "iMessage"
+            end if
+        end repeat
+    end tell
+    error "Kein Konto in der Nachrichten-App kann an diese Adresse schicken."
+end run"""
+
+KANAELE = ("telegram", "mail", "imessage", "sms", "whatsapp")
 
 
 class Messenger:
@@ -70,7 +111,9 @@ class Messenger:
         text = (text or "").strip()
         if not text:
             return {"ok": False, "fehler": "Die Nachricht ist leer."}
+        wunsch = "iMessage"
         if kanal in ("sms", "nachrichten"):
+            wunsch = "SMS" if kanal == "sms" else wunsch
             kanal = "imessage"
         if kanal in ("email", "e-mail"):
             kanal = "mail"
@@ -84,7 +127,7 @@ class Messenger:
         if kanal == "mail":
             return self._mail(an, betreff, text)
         if kanal == "imessage":
-            return self._imessage(an, text)
+            return self._imessage(an, text, wunsch)
         return self._whatsapp(an, text)
 
     # -- Die einzelnen Wege -------------------------------------------------
@@ -124,33 +167,43 @@ class Messenger:
             ergebnis["kanal"] = "mail"
         return ergebnis
 
-    def _imessage(self, an: str, text: str) -> dict:
-        """iMessage oder SMS über die Nachrichten-App."""
+    def _imessage(self, an: str, text: str, wunsch: str = "iMessage") -> dict:
+        """iMessage oder SMS über die Nachrichten-App - mit deiner eigenen Nummer."""
         if not shutil.which("osascript"):
             return {"ok": False,
-                    "fehler": "iMessage gibt es nur auf einem Mac mit der Nachrichten-App."}
+                    "fehler": "iMessage und SMS über den Mac gibt es nur auf einem Mac "
+                              "mit der Nachrichten-App."}
         if not an:
             return {"ok": False,
                     "fehler": "Ich brauche eine Telefonnummer oder Apple-ID."}
-        try:
-            # Das Skript kommt über stdin, Nummer und Text als eigene Argumente.
-            ergebnis = subprocess.run(
-                ["osascript", "-", str(an), str(text)],
-                input=IMESSAGE_SKRIPT, capture_output=True, text=True,
-                timeout=45, shell=False)
-        except (OSError, subprocess.SubprocessError) as fehler:
-            return {"ok": False, "fehler": "Die Nachrichten-App antwortet nicht: %s" % fehler}
-        if ergebnis.returncode != 0:
+        meldung = ""
+        for skript in (IMESSAGE_SKRIPT, IMESSAGE_SKRIPT_ALT):
+            try:
+                # Das Skript kommt über stdin, Nummer, Text und Weg als eigene Argumente.
+                ergebnis = subprocess.run(
+                    ["osascript", "-", str(an), str(text), wunsch],
+                    input=skript, capture_output=True, text=True,
+                    timeout=45, shell=False)
+            except (OSError, subprocess.SubprocessError) as fehler:
+                return {"ok": False, "fehler": "Die Nachrichten-App antwortet nicht: %s" % fehler}
+            if ergebnis.returncode == 0:
+                weg = (ergebnis.stdout or "iMessage").strip() or "iMessage"
+                return {"ok": True, "kanal": "imessage", "weg": weg,
+                        "text": "Nachricht an %s über %s ist raus." % (an, weg)}
             meldung = (ergebnis.stderr or "").strip()[:300]
             if "not allowed" in meldung.lower() or "1743" in meldung:
                 return {"ok": False,
                         "fehler": "Die Nachrichten-App verweigert den Zugriff. In den "
                                   "Systemeinstellungen unter Datenschutz, Automation dem "
                                   "Terminal die Steuerung von Nachrichten erlauben."}
-            return {"ok": False, "fehler": "Die Nachricht ging nicht raus: %s" % meldung}
-        weg = (ergebnis.stdout or "iMessage").strip() or "iMessage"
-        return {"ok": True, "kanal": "imessage",
-                "text": "Nachricht an %s über %s ist raus." % (an, weg)}
+            # Nur wenn das Skript gar nicht übersetzt werden konnte (ältere Begriffe),
+            # wird das zweite versucht - sonst könnte eine Nachricht doppelt rausgehen.
+            if "-2741" not in meldung and "-2740" not in meldung:
+                break
+        if "Kein Konto" in meldung and wunsch == "SMS":
+            meldung = ("Für SMS muss auf dem iPhone unter Einstellungen, Nachrichten, "
+                       "SMS-Weiterleitung dieser Mac eingeschaltet sein.")
+        return {"ok": False, "fehler": "Die Nachricht ging nicht raus: %s" % meldung}
 
     def _whatsapp_werkzeug(self) -> str:
         """Sucht ein Sende-Werkzeug beim WhatsApp-MCP-Server."""
