@@ -155,7 +155,7 @@ def _angaben_restaurant_anrufen(a):
               k(a.get("telefon_uhrzeit") or a.get("uhrzeit")), k(a.get("name") or auftraggeber()),
               k(spielraum)))
     if a.get("hinweise"):
-        was += "; Wunsch an das Restaurant: %s" % k(a.get("hinweise"), 160)
+        was += "; Wunsch an das Restaurant: %s" % k(a.get("hinweise"), 300)
     retell = str(config.TELEFONAGENT_ANBIETER or "").strip().lower() == "retell"
     wie = ("Ein KI-Telefonassistent (%s) ruft von der dort eingetragenen Nummer an, sagt im ersten "
            "Satz, dass er eine KI ist und in deinem Auftrag anruft, und dass das Gespräch "
