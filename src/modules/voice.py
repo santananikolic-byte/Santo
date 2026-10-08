@@ -194,6 +194,8 @@ class Stimme:
         self._whisper_modell = None
         self._temp = tempfile.mkdtemp(prefix="jarvis_audio_")
         self.letzter_fehler = ""
+        # Wer zuletzt einen Abschnitt gesprochen hat: fish, elevenlabs oder say.
+        self.letzter_anbieter = ""
         self._stopp = threading.Event()
         self._abspiel_prozess = None
         # Nur die Aufnahme setzt das: Mikrofon fehlt oder lässt sich nicht öffnen.
@@ -321,13 +323,17 @@ class Stimme:
         setzt ElevenLabs Tonfall und Tempo nahtlos fort - die Antwort klingt wie
         in einem Atemzug gesprochen statt wie aneinandergereihte Ansagen.
         Das Format (mp3 oder wav) steht in ``audioformat``; bei wav kommen rohe
-        Töne vom Dienst und werden hier zur WAV-Datei verpackt.
+        Töne vom Dienst und werden hier zur WAV-Datei verpackt. Lehnt der Dienst das
+        Format ab, wird einmal als MP3 gefragt: lieber ohne Pegelkurve sprechen als gar nicht.
         """
         self._anfrage_id = None
         wav = self._format_jetzt() == "wav"
+        sprache = getattr(self._lokal, "sprache", "") or ""
         daten, kennung, fehler = elevenlabs_holen(
-            text, "pcm" if wav else "mp3", vorher, nachher, vorige,
-            sprache=getattr(self._lokal, "sprache", "") or "")
+            text, "pcm" if wav else "mp3", vorher, nachher, vorige, sprache=sprache)
+        if daten is None and wav and "meldet Fehler" in fehler:
+            wav = False
+            daten, kennung, fehler = elevenlabs_holen(text, "mp3", vorher, nachher, vorige, sprache=sprache)
         self._anfrage_id = kennung
         if daten is None:
             self.letzter_fehler = fehler
@@ -344,6 +350,8 @@ class Stimme:
         del vorher, nachher, vorige
         wav = self._format_jetzt() == "wav"
         daten, fehler = fish_holen(text, "wav" if wav else "mp3", PEGEL_ABTASTRATE)
+        if daten is None and wav and "meldet Fehler" in fehler:
+            daten, fehler = fish_holen(text, "mp3", PEGEL_ABTASTRATE)
         if daten is None:
             self.letzter_fehler = fehler
             print("[stimme] %s" % fehler)
@@ -506,6 +514,7 @@ class Stimme:
                 if not erfolg:
                     break
                 gesprochen += 1
+                self.letzter_anbieter = anbieter
         finally:
             ende.set()
         return gesprochen
@@ -822,3 +831,41 @@ class Stimme:
         if text:
             print("Du: %s" % text)
         return text
+
+
+def sprechprobe(argumente=None) -> int:
+    """``python3 jarvis.py sprechprobe [Satz]``: zeigt, wer spricht, und spricht einen Probesatz.
+
+    Sagt ehrlich, was eingerichtet ist und was fehlt (etwa Fish ohne Stimmen-ID), spricht
+    den Satz über die Kette und nennt, wer ihn gesprochen hat und wie lange es gedauert hat.
+    Die Probe kostet bei Fish und ElevenLabs ein paar Zeichen Guthaben.
+    """
+    satz = " ".join(argumente or []).strip() or "Guten Tag, hier ist Jarvis. Das ist die Probe meiner Stimme."
+    wahl = (config.STIMME_ANBIETER or "auto").strip().lower()
+    print("Stimme: Modus %s" % wahl)
+    if config.FISH_API_KEY:
+        if wahl == "auto" and not config.FISH_STIMME_ID:
+            print("  Fish Audio: Schlüssel da, aber FISH_STIMME_ID fehlt – im Modus auto spricht Fish deshalb nicht.")
+        else:
+            print("  Fish Audio: eingerichtet (Modell %s, Latenz %s)" % (config.FISH_MODELL, config.FISH_LATENZ))
+    else:
+        print("  Fish Audio: nicht eingerichtet (python3 jarvis.py zugang fish)")
+    print("  ElevenLabs: %s" % ("eingerichtet" if config.ELEVENLABS_API_KEY else "nicht eingerichtet"))
+    stimme = Stimme()
+    kette = anbieter_reihenfolge()
+    print("  Reihenfolge: %s" % (", ".join(stimme.ANBIETER_NAMEN[a] for a in kette + ["say"])
+                                 if kette else "nur die Mac-Stimme"))
+    if not stimme.ist_macos() and not kette:
+        print("Hier ist weder ein Stimmen-Dienst eingerichtet noch läuft das auf einem Mac – es gibt nichts zu sprechen.")
+        return 1
+    beginn = time.time()
+    ok = stimme.sprich(satz)
+    dauer = time.time() - beginn
+    if ok and stimme.letzter_anbieter:
+        print("Gesprochen hat: %s (%.1f Sekunden)." % (stimme.ANBIETER_NAMEN.get(
+            stimme.letzter_anbieter, stimme.letzter_anbieter), dauer))
+    else:
+        print("Es hat nichts gesprochen.%s" % (" " + stimme.letzter_fehler if stimme.letzter_fehler else ""))
+    if stimme.letzter_fehler:
+        print("Letzte Fehlermeldung: %s" % stimme.letzter_fehler)
+    return 0 if ok else 1

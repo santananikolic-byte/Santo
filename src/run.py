@@ -19,6 +19,7 @@ Terminal spricht, nimmt ``hoeren``.
     python3 jarvis.py stimme      Stimmprofil einlernen
     python3 jarvis.py stimmen     ElevenLabs-Stimme aussuchen
     python3 jarvis.py test        Selbsttest
+    python3 jarvis.py sprechprobe Stimmkette prüfen und einen Probesatz sprechen
     python3 jarvis.py einrichten  geführte Ersteinrichtung
     python3 jarvis.py hardware    den Mac prüfen: Last, Speicher, Platte, Netz, Wärme
     python3 jarvis.py zugang      einen Schlüssel eintragen oder ersetzen
@@ -65,6 +66,7 @@ from modules.webapp import JarvisWeb, STANDARD_PORT
 # [P5 Sicht] Anfang
 # [P5 Sicht] Ende
 # [P6 Stimme] Anfang
+from modules.voice import sprechprobe
 # [P6 Stimme] Ende
 # [P7 Start] Anfang
 from modules.hardware import hardware_bericht, hardware_text, hochfahren
@@ -1068,6 +1070,8 @@ def hauptprogramm(argumente=None) -> int:
     # [P5 Sicht] Anfang
     # [P5 Sicht] Ende
     # [P6 Stimme] Anfang
+    elif modus == "sprechprobe":
+        return sprechprobe(argumente[1:])
     # [P6 Stimme] Ende
     # [P7 Start] Anfang
     elif modus == "hardware":

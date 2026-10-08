@@ -168,17 +168,20 @@ def uebersetzen(text: str, von: str, nach: str, verlauf=None, agent=None) -> dic
     antwort = ""
     benutzt = ""
     for gehirn in gehirne:
-        if gehirn == "gemini":
-            hinweis = ("\n\nLetzte Äußerungen (nur zum Verständnis des Zusammenhangs, nicht "
-                       "übersetzen):\n%s" % kontext) if kontext else ""
-            ergebnis = gemini_fragen(text, system + hinweis, verlauf=[],
-                                     max_tokens=UEBERSETZEN_MAX_TOKENS)
-        else:
-            auftrag = system
-            if kontext:
-                auftrag += "\n\nLetzte Äußerungen:\n%s" % kontext
-            auftrag += "\n\nZu übersetzen:\n%s" % text
-            ergebnis = agent.text_anfrage(auftrag, effort="low", max_tokens=2000)
+        try:
+            if gehirn == "gemini":
+                hinweis = ("\n\nLetzte Äußerungen (nur zum Verständnis des Zusammenhangs, nicht "
+                           "übersetzen):\n%s" % kontext) if kontext else ""
+                ergebnis = gemini_fragen(text, system + hinweis, verlauf=[],
+                                         max_tokens=UEBERSETZEN_MAX_TOKENS)
+            else:
+                auftrag = system
+                if kontext:
+                    auftrag += "\n\nLetzte Äußerungen:\n%s" % kontext
+                auftrag += "\n\nZu übersetzen:\n%s" % text
+                ergebnis = agent.text_anfrage(auftrag, effort="low", max_tokens=2000)
+        except Exception as ausnahme:
+            ergebnis = {"ok": False, "fehler": str(ausnahme)}
         if isinstance(ergebnis, dict) and ergebnis.get("ok") and str(ergebnis.get("text") or "").strip():
             antwort = _bereinigen(ergebnis["text"])
             benutzt = gehirn

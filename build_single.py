@@ -127,6 +127,7 @@ Betriebsarten:
     python3 jarvis.py stimme      Stimmprofil einlernen
     python3 jarvis.py stimmen     ElevenLabs-Stimme aussuchen
     python3 jarvis.py test        Selbsttest
+    python3 jarvis.py sprechprobe Stimmkette prüfen und einen Probesatz sprechen
     python3 jarvis.py einrichten  geführte Ersteinrichtung
     python3 jarvis.py hardware    den Mac prüfen: Last, Speicher, Platte, Netz, Wärme
 

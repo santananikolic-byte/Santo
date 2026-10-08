@@ -5785,6 +5785,42 @@ def pruefung_stimme(agent):
         probe_stimme = voice_modul.Stimme()
         werkzeuge.stimme_setzen(probe_stimme)
         pruefen("Werkzeuge.stimme_setzen reicht den Anzeige-Speicher an die Stimme", probe_stimme.anzeige is werkzeuge.anzeige, "")
+
+        # -- Der Befehl sprechprobe ---------------------------------------------------------------------------
+        with open(os.path.join(WURZEL, "src", "run.py"), encoding="utf-8") as quelle:
+            run_quelle = quelle.read()
+        with open(os.path.join(WURZEL, "build_single.py"), encoding="utf-8") as quelle:
+            bau_quelle = quelle.read()
+        test_zeile = "    python3 jarvis.py test        Selbsttest\n"
+        probe_zeile = "    python3 jarvis.py sprechprobe Stimmkette prüfen und einen Probesatz sprechen\n"
+        pruefen("Die Hilfezeile sprechprobe steht in run.py und in KOPF direkt nach test",
+                test_zeile + probe_zeile in run_quelle and test_zeile + probe_zeile in bau_quelle
+                and 'elif modus == "sprechprobe":' in run_quelle, "")
+
+        class SprechprobeStimme:
+            ANBIETER_NAMEN = voice_modul.Stimme.ANBIETER_NAMEN
+            letzter_anbieter, letzter_fehler = "", ""
+            def ist_macos(self): return False
+            def sprich(self, text):
+                gesagt.append(text)
+                self.letzter_anbieter = "fish"
+                return True
+        gesagt = []
+        echt_stimme_klasse = voice_modul.Stimme
+        voice_modul.Stimme = SprechprobeStimme
+        config.FISH_API_KEY, config.FISH_STIMME_ID, config.ELEVENLABS_API_KEY, config.STIMME_ANBIETER = "f", "", "e", "auto"
+        ausgabe_puffer = io.StringIO()
+        try:
+            import contextlib
+            with contextlib.redirect_stdout(ausgabe_puffer):
+                ergebnis_probe = voice_modul.sprechprobe(["Ein", "Probesatz."])
+        finally:
+            voice_modul.Stimme = echt_stimme_klasse
+        text_probe = ausgabe_puffer.getvalue()
+        pruefen("sprechprobe: sagt ehrlich, dass Fish ohne Stimmen-ID nicht spricht, und wer gesprochen hat",
+                ergebnis_probe == 0 and gesagt == ["Ein Probesatz."] and "FISH_STIMME_ID fehlt" in text_probe
+                and "Reihenfolge: ElevenLabs, Systemstimme" in text_probe and "Gesprochen hat: Fish Audio" in text_probe,
+                text_probe.strip().splitlines()[-1][:55])
     finally:
         for n, wert in echt_config.items():
             setattr(config, n, wert)
