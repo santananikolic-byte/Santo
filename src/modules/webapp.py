@@ -48,6 +48,7 @@ from modules.webseite import SEITE_HTML
 # [P3 Telefon] Anfang
 # [P3 Telefon] Ende
 # [P4 Büro] Anfang
+from modules.freigabe import GESTE_GESPERRT
 # [P4 Büro] Ende
 # [P5 Sicht] Anfang
 # [P5 Sicht] Ende
@@ -80,16 +81,43 @@ class WebFreigabe:
     wie überall sonst im Programm.
 
     Der Browser bekommt Was, Warum und Wie lesbar, dazu die Argumente als
-    eingerücktes JSON. Eine Geste zählt in dieser Stufe nie als Antwort.
+    eingerücktes JSON.
+
+    **Gesten.** Ein Klick und ein gesprochenes Ja zählen immer. Eine Geste (Daumen
+    hoch vor der Kamera) ist unschärfer und zählt nur, wenn alles zusammenpasst:
+
+    * ``GESTEN_FREIGABE`` ist eingeschaltet (voreingestellt aus),
+    * es ist genau eine Frage offen - sonst weiß niemand, welche gemeint ist,
+    * die Aktion steht nicht in ``GESTE_GESPERRT`` (Skripte, Bildschirm, Dateien …),
+    * die Frage ist mindestens zwei Sekunden alt: Wer sie gerade erst vor sich hat,
+      hat sie noch nicht gelesen, und ein noch erhobener Daumen soll nichts
+      Neues freigeben.
+
+    Jede Antwort wird mit dem Weg protokolliert, auch eine abgewiesene.
+    ``uhr`` liefert die Zeit in Sekunden (für Prüfungen austauschbar).
     """
 
-    def __init__(self, timeout: int = None, memory=None):
+    # So alt muss eine Frage sein, bevor eine Geste sie beantworten darf.
+    GESTE_MINDESTALTER = 2.0
+    # Wie der Weg im Protokoll heißt.
+    WEG_NAMEN = {"klick": "Klick", "sprache": "Sprache", "geste": "Geste"}
+
+    def __init__(self, timeout: int = None, uhr=None, memory=None):
         self.timeout = int(timeout if timeout is not None else config.FREIGABE_TIMEOUT)
+        self._uhr = uhr or time.time
         self.memory = memory
         self._offen = {}
         self._sperre = threading.Lock()
         # Warum die letzte Antwort nicht angenommen wurde - für die Rückmeldung im Browser.
         self.letzter_grund = ""
+
+    @staticmethod
+    def _gesten_an() -> bool:
+        """Ist die Gesten-Freigabe eingeschaltet? Fehlt der Schlüssel: nein."""
+        try:
+            return bool(config.GESTEN_FREIGABE)
+        except (AttributeError, NameError):
+            return False
 
     def anfordern(self, aktion: str, details: str = "") -> dict:
         """Legt eine Freigabefrage ab und wartet auf die Antwort."""
@@ -106,11 +134,12 @@ class WebFreigabe:
         else:
             # Alter Freitext (etwa der Code eines Skripts) bleibt, wie er ist.
             was, warum, wie, anzeigen = lesbarer_name(aktion), "", "", details
+        jetzt = self._uhr()
         eintrag = {"id": kennung, "aktion": aktion, "details": anzeigen,
                    "was": was, "warum": warum, "wie": wie,
-                   "gestellt": zeitstempel(), "ereignis": ereignis,
-                   "antwort": None, "weg": "",
-                   "laeuft_ab": time.time() + self.timeout}
+                   "gestellt": zeitstempel(), "gestellt_epoch": jetzt,
+                   "ereignis": ereignis, "antwort": None, "weg": "",
+                   "laeuft_ab": jetzt + self.timeout}
         with self._sperre:
             self._offen[kennung] = eintrag
 
@@ -124,16 +153,28 @@ class WebFreigabe:
             return {"erlaubt": False, "kanal": "web", "weg": eintrag["weg"], "grund": grund}
         return {"erlaubt": True, "kanal": "web", "weg": eintrag["weg"], "grund": "Freigabe erteilt"}
 
+    def _unbeantwortete(self) -> list:
+        """Die Fragen, auf die noch niemand geantwortet hat. Nur mit der Sperre aufrufen."""
+        return [e for e in self._offen.values() if e["antwort"] is None]
+
     def offene(self) -> list:
-        """Alle wartenden Freigabefragen - die holt sich der Browser ab."""
-        jetzt = time.time()
+        """Alle wartenden Freigabefragen - die holt sich der Browser ab.
+
+        ``geste_erlaubt`` sagt dem Browser, ob eine Geste diese Frage überhaupt
+        beantworten dürfte (ob sie alt genug ist, prüft erst die Antwort).
+        """
+        jetzt = self._uhr()
+        gesten = self._gesten_an()
         with self._sperre:
+            offen = self._unbeantwortete()
+            einzige = len(offen) == 1
             return [{"id": e["id"], "aktion": e["aktion"], "was": e["was"],
                      "warum": e["warum"], "wie": e["wie"], "details": e["details"],
                      "gestellt": e["gestellt"],
                      "rest": max(0, int(e["laeuft_ab"] - jetzt)),
-                     "geste_erlaubt": False}
-                    for e in self._offen.values()]
+                     "geste_erlaubt": bool(gesten and einzige
+                                           and e["aktion"] not in GESTE_GESPERRT)}
+                    for e in offen]
 
     def beantworten(self, kennung: str, ja: bool, kanal: str = "klick") -> bool:
         """Beantwortet eine Freigabefrage. ``kanal``: klick, sprache oder geste.
@@ -142,6 +183,23 @@ class WebFreigabe:
         (für mehrere gleichzeitige Anfragen: :meth:`beantworten_mit_grund`).
         """
         return self.beantworten_mit_grund(kennung, ja, kanal)[0]
+
+    def _geste_grund(self, eintrag: dict) -> str:
+        """Warum eine Geste diese Frage nicht beantworten darf - leer, wenn sie darf.
+
+        Nur mit der Sperre aufrufen. Die Reihenfolge ist die der Regeln oben.
+        """
+        vorn = "Die Geste zählt hier nicht: "
+        if not self._gesten_an():
+            return vorn + "Gesten-Freigabe ist ausgeschaltet."
+        if len(self._unbeantwortete()) != 1:
+            return vorn + "mehrere Fragen offen."
+        if eintrag["aktion"] in GESTE_GESPERRT:
+            return vorn + "diese Aktion gibt nur ein Klick oder die Stimme frei."
+        if self._uhr() - eintrag["gestellt_epoch"] < self.GESTE_MINDESTALTER:
+            return vorn + ("die Frage ist erst gerade gestellt. Lies sie in Ruhe und "
+                           "zeige die Geste dann noch einmal.")
+        return ""
 
     def beantworten_mit_grund(self, kennung: str, ja: bool, kanal: str = "klick") -> tuple:
         """Wie :meth:`beantworten`, gibt aber ``(angenommen, grund)`` zurück.
@@ -161,9 +219,10 @@ class WebFreigabe:
             elif eintrag["antwort"] is not None:
                 grund = "Diese Frage ist schon beantwortet."
             elif kanal == "geste":
-                grund = "Gesten-Freigabe ist noch nicht eingebaut."
+                grund = self._geste_grund(eintrag)
             else:
                 grund = ""
+            if not grund and eintrag is not None:
                 eintrag["antwort"] = bool(ja)
                 eintrag["weg"] = kanal
             self.letzter_grund = grund
@@ -177,7 +236,7 @@ class WebFreigabe:
         """Hält fest, auf welchem Weg geantwortet wurde - auch eine abgewiesene Antwort."""
         if eintrag is None:
             return
-        text = grund or ("per %s %s" % (kanal, "ja" if ja else "nein"))
+        text = grund or ("per %s %s" % (self.WEG_NAMEN.get(kanal, kanal), "ja" if ja else "nein"))
         print("[freigabe] %s: %s" % (eintrag["aktion"], text))
         if self.memory is None:
             return
