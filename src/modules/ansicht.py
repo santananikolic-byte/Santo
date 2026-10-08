@@ -750,6 +750,7 @@ main[data-modus]:not([data-modus="uebersicht"]) .spalte{opacity:0;pointer-events
 .lnotiz{font:500 .78em/1.5 var(--mono);color:var(--leise);letter-spacing:.06em}
 /* Märkte */
 .mk-gitter{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));grid-auto-rows:minmax(9em,15em);gap:.9em;align-content:start;flex:1;min-height:0;overflow:hidden}
+.mk-gitter .lleer{grid-column:1/-1;padding:3em 0}
 .mk-karte{border:1px solid var(--linie);border-radius:4px;padding:.8em 1em;display:flex;flex-direction:column;gap:.25em;min-width:0;
  background:linear-gradient(180deg,rgba(255,106,31,.07),rgba(255,106,31,0) 70%)}
 .mk-name{font:600 .75em var(--mono);letter-spacing:.2em;color:var(--leise);text-transform:uppercase;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -1069,7 +1070,7 @@ function punktMengeBauen(maske,breite,hoehe,schritt){
    var kueste=!blk[i*bb+(j+1)%bb]||!blk[i*bb+(j+bb-1)%bb]||(i>0&&!blk[(i-1)*bb+j])||(i<bh-1&&!blk[(i+1)*bb+j]);
    (kueste?ak:al).push(sb,cb,lonGrad*Math.PI/180)}
   rl[i+1]=al.length/3;rk[i+1]=ak.length/3}
- return{schritt:schritt,zeilen:bh,lat0:90-dz/2,dz:dz,faktor:schritt,minD:1.2,anzahl:(al.length+ak.length)/3,
+ return{schritt:schritt,zeilen:bh,lat0:90-dz/2,dz:dz,faktor:schritt*0.55,minD:1.2,anzahl:(al.length+ak.length)/3,
   land:{pts:new Float32Array(al),start:rl},kueste:{pts:new Float32Array(ak),start:rk}}}
 // </rechnen-zentrale>
 // --- Globus: echte Küsten aus /api/weltkarte, Umrisse als Ersatz
@@ -1129,7 +1130,7 @@ fetch("/api/weltkarte"+ANHANG).then(r=>r.json()).then(k=>{
  if(m){MASKE=m;MBREITE=k.breite;MHOEHE=k.hoehe;MASKE_ZUSTAND="da";mengeFuer(4);setTimeout(()=>mengeFuer(2),400);setTimeout(()=>mengeFuer(1),1400)}
  else MASKE_ZUSTAND="fehlt"}).catch(()=>{MASKE_ZUSTAND="fehlt"});
 // --- Kamera: Flug zum Fokus (1,8 s), ohne Bewegung springt sie
-const PUNKTDICHTE=0.55;const KAM={lat:24,lon:15,zoom:1};let FLUG=null,KAM_ART="";
+const KAM={lat:24,lon:15,zoom:1};let FLUG=null,KAM_ART="";
 let GMODUS="uebersicht",FOKUS=null,FOKUSNR=0,MARKER=[],BOEGEN=[],LISTE_BREITE=0,HUD=0,CXV=0,BM="uebersicht";
 function uebersichtsZiel(sek){
  // Der Blick liegt auf dem Betrieb, so nah, dass seine Kunden sichtbar werden; ohne Orte dreht sich die Erde.
@@ -1268,7 +1269,7 @@ function weltZeichnen(K){
  // Land: nur die Zeilen, die ins Bild reichen
  const stufe=KAM.zoom<1.6?4:KAM.zoom<3?2:1,m=mengeFuer(stufe)||mengeFuer(4)||mengeFuer(2)||mengeFuer(1);
  if(m){const w=Math.min(90,Math.asin(Math.min(1,Math.hypot(GW+2*Math.abs(CXV),GH)/(2*R)))/rad+3);
-  const d=klemme(R/300*m.faktor*PUNKTDICHTE,m.minD,3.6);
+  const d=klemme(R/300*m.faktor,m.minD,3.6);
   PUNKTZAHL=punkteZeichnen(m,m.land,KAM.lat,w,K,d,"rgba(135,175,215,.7)")+punkteZeichnen(m,m.kueste,KAM.lat,w,K,d*1.05,"rgba(190,228,255,.95)")}
  gg.globalCompositeOperation="lighter";
  for(const c of LICHTER){const q=proj(c[0],c[1],R,cx,cy,KAM.lon,t);if(q[2]>0.05){const r=Math.max(5,Math.min(R*0.016,15))*(0.5+q[2]*.5);const w=gg.createRadialGradient(q[0],q[1],0,q[0],q[1],r);
@@ -1313,7 +1314,7 @@ function sparkSvg(werte,farbe){
 function markKarte(k){
  const dez=k.schluessel==="eurusd"?4:(Math.abs(k.wert)>=1000?0:2);
  const a=k.aenderung_prozent,hat=istZahl(a);
- const verl=(k.verlauf||[]).filter(istZahl);
+ const verl=(Array.isArray(k.verlauf)?k.verlauf:[]).filter(istZahl);
  const steigt=hat?a>=0:(verl.length>1?verl[verl.length-1]>=verl[0]:true);
  const farbe=hat?(steigt?"#7fd6a0":"#ff5a4d"):"#9a8678";
  return h("div",{class:"mk-karte"},h("div",{class:"mk-name"},k.name||k.symbol||""),
@@ -1408,7 +1409,7 @@ function anrufZeichnen(){
 const BAND={gruen:"#7fd6a0",gelb:"#ffd36b",rot:"#ff5a4d"},STUFE={gruen:"Grün",gelb:"Gelb",rot:"Rot"};
 function keineDaten(){return h("div",{class:"lleer"},"Noch keine Daten")}
 function sichtZeichnen(){
- const d=KAN.sicht||{},e=d.erholung,hr=d.handruhe,z=d.zusammenhang;
+ const d=KAN.sicht||{},obj=x=>x&&typeof x==="object"&&!Array.isArray(x)?x:null,e=obj(d.erholung),hr=obj(d.handruhe),z=obj(d.zusammenhang);
  $("#si-titel").textContent=(BUEHNE_DATEN.modus==="sicht"&&BUEHNE_DATEN.titel)||"Sicht · Erholung";
  const be=$("#si-erholung");
  if(e&&istZahl(e.wert)){be.replaceChildren(h("div",{class:"si-ring"},ringSvg(klemme(e.wert/100,0,1),BAND[e.band]||"#ff9a52"),h("b",{},Math.round(e.wert))),
@@ -1420,7 +1421,7 @@ function sichtZeichnen(){
   bh.replaceChildren(h("div",{class:"si-gross"},zahl(hr.mm,1),h("small",{},"mm")),hr.vergleich?h("div",{class:"lnotiz"},String(hr.vergleich)):"",
    klein.length?h("div",{class:"lnotiz"},klein.join(" · ")):"",hr.tag?h("div",{class:"lnotiz"},String(hr.tag)):"")}
  else bh.replaceChildren(keineDaten());
- const bz=$("#si-zusammenhang"),tab=z&&Array.isArray(z.tabelle)?z.tabelle:[];
+ const bz=$("#si-zusammenhang"),tab=z&&Array.isArray(z.tabelle)?z.tabelle.filter(r=>r&&typeof r==="object"):[];
  if(z&&tab.length){const q=x=>istZahl(x)?Math.round(x<=1?x*100:x)+" %":"–",n=x=>istZahl(x)?zahl(x,Number.isInteger(x)?0:1):"–";
   bz.replaceChildren(h("table",{class:"si-tabelle"},h("thead",{},h("tr",{},["Stufe","Tage","Termine","Abschluss"].map(t=>h("th",{},t)))),
    h("tbody",{},tab.slice(0,5).map(r=>h("tr",{},h("td",{},h("span",{class:"si-punkt "+(STUFE[r.stufe]?r.stufe:"")}),STUFE[r.stufe]||String(r.stufe||"")),
