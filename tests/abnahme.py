@@ -3418,6 +3418,726 @@ def pruefung_kern(agent):
 # [P6 Stimme] Anfang
 # [P6 Stimme] Ende
 # [P7 Start] Anfang
+def _start_mac_fake():
+    """Ein Mac, der nur in Antworten besteht: ``(ausfuehren, aufrufe, ersetzen)`` - nichts läuft wirklich."""
+    vm = ("Mach Virtual Memory Statistics: (page size of 16384 bytes)\n"
+          "Pages free:                               12345.\n"
+          "Pages active:                            200000.\n"
+          "Pages inactive:                          150000.\n"
+          "Pages wired down:                         80000.\n"
+          "Pages occupied by compressor:             20000.\n")
+    liste = ("Hardware Port: Ethernet\nDevice: en0\nEthernet Address: aa:bb\n\n"
+             "Hardware Port: Wi-Fi\nDevice: en1\nEthernet Address: cc:dd\n")
+    profiler = ("Wi-Fi:\n\n      Interfaces:\n        en1:\n          Card Type: Wi-Fi\n"
+                "          Status: Connected\n          Current Network Information:\n"
+                "            MeinNetz:\n              PHY Mode: 802.11ax\n"
+                "        awdl0:\n          Status: Inactive\n")
+    geraete = {"SPCameraDataType": [{"_name": "FaceTime-Kamera"}],
+               "SPAudioDataType": [{"_items": [{"_name": "Mikrofon", "coreaudio_device_input": 1},
+                                               {"_name": "Lautsprecher", "coreaudio_device_output": 2}]}],
+               "SPDisplaysDataType": [{"spdisplays_ndrvs": [{"_name": "A"}, {"_name": "B"}]}]}
+    antworten = {
+        "sysctl -n hw.model": (0, "iMac20,1\n"),
+        "sysctl -n machdep.cpu.brand_string": (0, "Intel(R) Core(TM) i7\n"),
+        "sysctl -n hw.memsize": (0, str(16 * 1024 ** 3) + "\n"),
+        "vm_stat": (0, vm),
+        "memory_pressure": (0, "The system has 17179869184 (1048576 pages)\nSystem-wide memory free percentage: 61%\n"),
+        "notifyutil -g com.apple.system.thermalpressurelevel": (0, "com.apple.system.thermalpressurelevel 0\n"),
+        "sysctl -n kern.boottime": (0, "{ sec = 1791300000, usec = 0 } Thu Oct  8 10:00:00 2026\n"),
+        "pmset -g batt": (0, "Now drawing from 'AC Power'\n"),
+        "networksetup -listallhardwareports": (0, liste),
+        "system_profiler SPAirPortDataType": (0, profiler),
+        "ipconfig getifaddr en1": (0, "192.168.0.7\n"),
+        "system_profiler SPCameraDataType SPAudioDataType SPDisplaysDataType -json": (0, json.dumps(geraete)),
+    }
+    aufrufe = []
+
+    def ausfuehren(befehl, timeout=5, **rest):
+        aufrufe.append(list(befehl))
+        antwort = antworten.get(" ".join(befehl))
+        if callable(antwort):
+            return antwort()
+        return antwort if antwort is not None else (1, "", "unbekannter Befehl")
+    return ausfuehren, aufrufe, antworten
+
+
+_START_JETZT = 1791300000 + 3 * 86400 + 4 * 3600 + 120
+
+
+def _start_bericht(ersatz=None, **messen):
+    """Ein Hardware-Bericht über den Fake-Mac; ``ersatz`` tauscht einzelne Antworten aus."""
+    import modules.hardware as hw
+    ausfuehren, aufrufe, antworten = _start_mac_fake()
+    antworten.update(ersatz or {})
+    vorgabe = {"plattform": "darwin", "netz": lambda host, port, timeout: None, "last": lambda: (0.8, 4),
+               "platte": lambda: (1000 * 10 ** 9, 500 * 10 ** 9, 500 * 10 ** 9), "jetzt": lambda: _START_JETZT}
+    vorgabe.update(messen)
+    bericht = hw.hardware_bericht(ausfuehren=ausfuehren, **vorgabe)
+    bericht["_aufrufe"] = aufrufe
+    return bericht
+
+
+def _start_kachel(bericht, name):
+    return next((k for k in bericht["werte"] if k["name"] == name), {})
+
+
+def _start_hardware(agent):
+    """hardware_bericht und wlan_bericht mit eingespeisten Antworten."""
+    import modules.hardware as hw
+    w = agent.tools
+    schluessel_vorher = config.ANTHROPIC_API_KEY
+    config.ANTHROPIC_API_KEY = "test"
+    try:
+        bericht = _start_bericht()
+        ram = _start_kachel(bericht, "Arbeitsspeicher")
+        klein = _start_kachel(_start_bericht({"vm_stat": (0, "Mach Virtual Memory Statistics: (page size of 4096 bytes)\n"
+                                                           "Pages active: 200000.\nPages wired down: 80000.\n")}),
+                              "Arbeitsspeicher")
+        pruefen("Hardware: der Arbeitsspeicher rechnet mit der Seitengröße aus vm_stat",
+                ram.get("status") == "ok" and ram.get("wert") == 4.6 and ram.get("text") == "4,6 von 16 GB belegt"
+                and klein.get("wert") == 1.1, ram.get("text", ""))
+
+        druck61 = _start_kachel(bericht, "Speicherdruck")
+        druck18 = _start_bericht({"memory_pressure": (0, "System-wide memory free percentage: 18%\n")})
+        pruefen("Hardware: der Speicherdruck kommt aus der letzten Zeile, unter 20 % frei ist eine Warnung",
+                druck61.get("wert") == 61 and druck61.get("status") == "ok"
+                and _start_kachel(druck18, "Speicherdruck").get("wert") == 18
+                and _start_kachel(druck18, "Speicherdruck").get("status") == "warnung"
+                and "Speicher 18 % frei" in druck18["kurz"], druck18["kurz"][:55])
+
+        laufzeit = _start_kachel(bericht, "Laufzeit")
+        pruefen("Hardware: die Laufzeit kommt aus kern.boottime",
+                laufzeit.get("text") == "3 Tage 4 Stunden" and laufzeit.get("wert") == 3 * 86400 + 4 * 3600 + 120,
+                laufzeit.get("text", ""))
+
+        stark = _start_bericht({"notifyutil -g com.apple.system.thermalpressurelevel":
+                                (0, "com.apple.system.thermalpressurelevel 2\n")})
+        erhoeht = _start_bericht({"memory_pressure": (0, "System-wide memory free percentage: 18%\n"),
+                                  "notifyutil -g com.apple.system.thermalpressurelevel":
+                                  (0, "com.apple.system.thermalpressurelevel 1\n")})
+        kritisch = _start_bericht({"notifyutil -g com.apple.system.thermalpressurelevel": (0, "4\n")})
+        grad = _start_kachel(bericht, "Temperatur")
+        pruefen("Hardware: Wärme als Stufe (stark ist eine Warnung), Grad ehrlich als Lücke",
+                _start_kachel(stark, "Wärme").get("status") == "warnung" and "stark" in _start_kachel(stark, "Wärme")["text"]
+                and _start_kachel(kritisch, "Wärme").get("status") == "warnung"
+                and _start_kachel(kritisch, "Wärme")["text"] == "kritisch"
+                and _start_kachel(bericht, "Wärme").get("text") == "normal"
+                and grad.get("status") == "fehlt" and "Administratorrechte" in grad.get("text", ""),
+                grad.get("text", ""))
+        pruefen("Hardware: der Satz nennt nur, was auffällt",
+                erhoeht["kurz"] == "Speicher 18 % frei, Wärme erhöht, sonst alles in Ordnung."
+                and bericht["kurz"] == "Alles in Ordnung.", erhoeht["kurz"])
+
+        akku = ("Now drawing from 'Battery Power'\n -InternalBattery-0 (id=4653155)\t%d%%; discharging; "
+                "3:42 remaining present: true\n")
+        mit_akku = _start_bericht({"pmset -g batt": (0, akku % 87)})
+        leer = _start_bericht({"pmset -g batt": (0, akku % 12)})
+        pruefen("Hardware: ohne InternalBattery keine Batterie-Kachel, nur Netzbetrieb",
+                not _start_kachel(bericht, "Batterie") and "Netzbetrieb" in _start_kachel(bericht, "Rechner")["text"]
+                and _start_kachel(mit_akku, "Batterie").get("wert") == 87
+                and "Netzbetrieb" not in _start_kachel(mit_akku, "Rechner")["text"]
+                and _start_kachel(leer, "Batterie").get("status") == "warnung" and "Akku 12 %" in leer["kurz"], "")
+
+        beginn = time.time()
+        langsam = _start_bericht({"vm_stat": lambda: (time.sleep(5), (0, ""))[1]})
+        dauer = time.time() - beginn
+        ram_langsam = _start_kachel(langsam, "Arbeitsspeicher")
+        pruefen("Hardware: eine Messung, die hängt, wird zur Lücke - der Bericht bleibt unter 3 Sekunden",
+                ram_langsam.get("status") == "fehlt" and "Zeitüberschreitung" in ram_langsam.get("text", "")
+                and dauer < 3 and _start_kachel(langsam, "Laufzeit").get("status") == "ok",
+                "%.1f s, %s" % (dauer, ram_langsam.get("text", "")))
+
+        def kaputt():
+            raise RuntimeError("kaputt")
+        gefallen = _start_bericht({"sysctl -n hw.model": kaputt})
+        pruefen("Hardware: wirft eine Messung, wird sie zur Lücke statt den Bericht zu kippen",
+                _start_kachel(gefallen, "Rechner").get("status") == "fehlt"
+                and "nicht messbar" in _start_kachel(gefallen, "Rechner")["text"]
+                and _start_kachel(gefallen, "Laufzeit").get("status") == "ok", _start_kachel(gefallen, "Rechner")["text"][:50])
+
+        fremd = _start_bericht(plattform="linux")
+        mac_namen = ("Rechner", "Arbeitsspeicher", "Speicherdruck", "WLAN", "Wärme", "Temperatur", "Laufzeit",
+                     "Kamera", "Mikrofon", "Bildschirme")
+        pruefen("Hardware: auf einem anderen System melden alle Mac-Messungen \"Nur auf dem Mac\", ohne einen Befehl",
+                all(_start_kachel(fremd, n).get("status") == "fehlt" and "Nur auf dem Mac" in _start_kachel(fremd, n)["text"]
+                    for n in mac_namen) and not fremd["_aufrufe"]
+                and _start_kachel(fremd, "Festplatte").get("status") == "ok"
+                and _start_kachel(fremd, "Internet").get("status") == "ok" and "kein mac" in fremd["kurz"].lower(), fremd["kurz"][:55])
+
+        def ohne_netz(host, port, timeout):
+            raise OSError("kein Netz")
+        offline = _start_bericht(netz=ohne_netz)
+        platte_voll = _start_bericht(platte=lambda: (1000 * 10 ** 9, 950 * 10 ** 9, 50 * 10 ** 9))
+        pruefen("Hardware: kein Internet und eine fast volle Platte stehen im Satz",
+                _start_kachel(offline, "Internet").get("status") == "fehlt"
+                and _start_kachel(offline, "Internet")["text"] == "kein Internet" and "kein internet" in offline["kurz"].lower()
+                and _start_kachel(platte_voll, "Festplatte").get("status") == "warnung"
+                and "Festplatte nur 5 % frei" in platte_voll["kurz"], offline["kurz"][:50])
+
+        stufen = [_start_kachel(_start_bericht(last=lambda eins=eins: (eins, 2)), "Last")
+                  for eins in (0.6, 1.4, 3.0)]
+        pruefen("Hardware: die Last je Kern - unter 0,7 normal, unter 1,5 hoch, sonst sehr hoch",
+                [k["status"] for k in stufen] == ["ok", "warnung", "warnung"]
+                and stufen[0]["text"].startswith("normal") and stufen[1]["text"].startswith("hoch")
+                and stufen[2]["text"].startswith("sehr hoch"), [k["text"][:9] for k in stufen])
+
+        bildschirme = _start_kachel(bericht, "Bildschirme")
+        kaputt_json = _start_bericht({"system_profiler SPCameraDataType SPAudioDataType SPDisplaysDataType -json":
+                                      (0, "kein json")})
+        pruefen("Hardware: Kamera, Mikrofon und Bildschirme werden gezählt, kaputte Antworten sind Lücken",
+                _start_kachel(bericht, "Kamera").get("wert") == 1 and _start_kachel(bericht, "Mikrofon").get("wert") == 1
+                and bildschirme.get("wert") == 2 and bildschirme.get("text") == "2 Bildschirme"
+                and _start_kachel(kaputt_json, "Kamera").get("status") == "fehlt", bildschirme.get("text", ""))
+
+        text = hw.hardware_text(erhoeht)
+        pruefen("Hardware: der Bericht hat höchstens 16 Zeilen und lässt sich als Text drucken",
+                len(bericht["werte"]) <= 16 and "[!!] Speicherdruck" in text and text.endswith(erhoeht["kurz"]),
+                "%d Messungen" % len(bericht["werte"]))
+
+        # -- WLAN ----------------------------------------------------------------
+        ausfuehren, aufrufe, antworten = _start_mac_fake()
+        netz = hw.wlan_bericht(ausfuehren, "darwin")
+        antworten["system_profiler SPAirPortDataType"] = (0, "Wi-Fi:\n  Interfaces:\n    en1:\n      Status: Connected\n"
+                                                           "      Current Network Information:\n        <redacted>:\n")
+        verdeckt = hw.wlan_bericht(ausfuehren, "darwin")
+        antworten["networksetup -listallhardwareports"] = (0, "Hardware Port: Ethernet\nDevice: en0\n")
+        ohne_geraet = hw.wlan_bericht(ausfuehren, "darwin")
+        pruefen("WLAN: Gerät aus listallhardwareports (en1), Netzname aus system_profiler",
+                hw.wlan_geraet_lesen("Hardware Port: Ethernet\nDevice: en0\n\nHardware Port: Wi-Fi\nDevice: en1\n") == "en1"
+                and netz.get("geraet") == "en1" and netz.get("wert") == "MeinNetz" and netz["text"] == "verbunden mit MeinNetz",
+                netz["text"])
+        pruefen("WLAN: verdeckter Name und fehlendes Gerät werden ehrlich gemeldet",
+                verdeckt["text"] == "verbunden (Name nicht lesbar)" and ohne_geraet["text"] == "kein WLAN-Gerät"
+                and hw.wlan_bericht(ausfuehren, "linux")["text"] == "Nur auf dem Mac messbar", verdeckt["text"])
+
+        # networksetup -getairportnetwork ist ab macOS 15 falsch - systeminfo wlan nimmt den Bericht.
+        gesehen = []
+        mac_ausfuehren, _, _ = _start_mac_fake()
+
+        def falsches_run(befehl, *args, **optionen):
+            gesehen.append([str(t) for t in befehl])
+            antwort = mac_ausfuehren(befehl)
+            return types.SimpleNamespace(returncode=antwort[0], stdout=antwort[1], stderr="")
+        echt_run, echt_hilfen = subprocess.run, w.hardware_messhilfen
+        subprocess.run = falsches_run
+        w.hardware_messhilfen = {"plattform": "darwin"}
+        hw._WLAN_CACHE.update(zeit=0.0, text=None)
+        try:
+            w.lauf_beginnen()
+            wlan = w.run("systeminfo", {"was": "wlan"})
+        finally:
+            subprocess.run = echt_run
+            w.hardware_messhilfen = echt_hilfen
+            hw._WLAN_CACHE.update(zeit=0.0, text=None)
+        pruefen("systeminfo wlan benutzt nie -getairportnetwork, sondern den Bericht",
+                wlan.get("ok") and "MeinNetz" in wlan.get("text", "")
+                and not any("-getairportnetwork" in t for befehl in gesehen for t in befehl)
+                and ["networksetup", "-listallhardwareports"] in gesehen, wlan.get("text", wlan.get("fehler", "")))
+
+        w.lauf_beginnen()
+        w.hardware_messhilfen = {"ausfuehren": mac_ausfuehren, "plattform": "darwin",
+                                 "netz": lambda host, port, timeout: None, "last": lambda: (0.8, 4),
+                                 "platte": lambda: (1000 * 10 ** 9, 500 * 10 ** 9, 500 * 10 ** 9),
+                                 "jetzt": lambda: _START_JETZT}
+        try:
+            werkzeug = w.run("hardware_bericht", {})
+        finally:
+            w.hardware_messhilfen = echt_hilfen
+        pruefen("Werkzeug hardware_bericht: kurzer Satz und alle Messungen, unter 5500 Zeichen",
+                werkzeug.get("ok") and werkzeug.get("text") == "Alles in Ordnung." and len(werkzeug.get("werte", [])) >= 12
+                and len(json.dumps(werkzeug, ensure_ascii=False)) < 5500, str(len(json.dumps(werkzeug))))
+    finally:
+        config.ANTHROPIC_API_KEY = schluessel_vorher
+
+
+def _start_hochfahren(agent):
+    """Hochfahren, Begrüßung und POST /api/hochfahren - ohne Wetterdienst, ohne Schlüssel, mit Fake-Mac."""
+    import socket as _socket
+    import urllib.request as _netz
+    import modules.hardware as hw
+    import modules.webapp as webapp_modul
+    w = agent.tools
+    vorher = (config.LOG_VERZEICHNIS, config.ANTHROPIC_API_KEY, config.WETTER_ORT, config.BEGRUESSUNG_AN,
+              hw.hardware_bericht, w.freigabe_kanal)
+    tmp = pathlib.Path(tempfile.mkdtemp())
+    config.LOG_VERZEICHNIS = tmp
+    config.ANTHROPIC_API_KEY, config.WETTER_ORT, config.BEGRUESSUNG_AN = "", "", True
+    echt_bericht = vorher[4]
+
+    def bericht_mit_fakes(**rest):
+        ausfuehren, _, antworten = _start_mac_fake()
+        antworten["memory_pressure"] = (0, "System-wide memory free percentage: 18%\n")
+        return echt_bericht(ausfuehren=ausfuehren, plattform="darwin", netz=lambda h, p, t: None,
+                            last=lambda: (0.8, 4), platte=lambda: (1000 * 10 ** 9, 500 * 10 ** 9, 500 * 10 ** 9),
+                            jetzt=lambda: _START_JETZT, **rest)
+    hw.hardware_bericht = bericht_mit_fakes
+    probe = _socket.socket()
+    probe.bind(("127.0.0.1", 0))
+    port = probe.getsockname()[1]
+    probe.close()
+    web = JarvisWeb(agent, port=port)
+    web.starten(blockierend=False)
+    time.sleep(0.3)
+
+    def rufen():
+        anfrage = _netz.Request("http://127.0.0.1:%d/api/hochfahren" % port, data=b"{}")
+        anfrage.add_header("Content-Type", "application/json")
+        with _netz.urlopen(anfrage, timeout=20) as antwort:
+            return antwort.status, json.loads(antwort.read().decode("utf-8"))
+    try:
+        version0 = w.anzeige.stand("hochfahren")["version"]
+        code1, erste = rufen()
+        stand = w.anzeige.stand("hochfahren")
+        buehne = w.anzeige.stand("buehne")["daten"]
+        code2, zweite = rufen()
+        version2 = w.anzeige.stand("hochfahren")["version"]
+        marke = (tmp / "hochgefahren.txt").read_text(encoding="utf-8").strip()
+    finally:
+        web.stoppen()
+        w.freigabe_kanal_setzen(vorher[5])
+    pruefen("POST /api/hochfahren: beim ersten Mal des Tages neu, mit den Schritten und der Begrüßung",
+            code1 == 200 and erste.get("ok") is True and erste.get("neu") is True and len(erste.get("schritte", [])) >= 10
+            and all(set(s) == {"name", "ok", "text"} for s in erste["schritte"])
+            and erste["begruessung"].startswith("Hallo. Ich bin da. Speicher 18 % frei")
+            and "Offene Punkte:" in erste["begruessung"] and erste.get("sprechstuecke")
+            and marke == datetime.now().strftime("%Y-%m-%d"), erste.get("begruessung", "")[:55])
+    pruefen("POST /api/hochfahren: die Anzeige bekommt die Schritte, dann die Begrüßung mit fertig",
+            stand["version"] > version0 and stand["daten"].get("fertig") is True
+            and stand["daten"].get("begruessung") == erste["begruessung"]
+            and stand["daten"]["schritte"] == erste["schritte"] and buehne.get("modus") == "hochfahren"
+            and w.anzeige.stand("buehne")["bis"] > time.time(), "Version %d" % stand["version"])
+    pruefen("POST /api/hochfahren: am selben Tag nur \"wieder da\" und Auffälliges",
+            code2 == 200 and zweite.get("neu") is False and zweite["begruessung"].startswith("Ich bin wieder da. Auffällig:")
+            and "Speicher 18 % frei" in zweite["begruessung"] and "Offene Punkte" not in zweite["begruessung"]
+            and version2 > stand["version"], zweite.get("begruessung", "")[:55])
+
+    class Zeigt:
+        def __init__(self):
+            self.aufrufe = []
+
+        def melden(self, kanal, daten, dauer_s=0):
+            self.aufrufe.append(("melden", kanal, dict(daten)))
+
+        def zeigen(self, modus, daten=None, dauer_s=None, quelle=""):
+            self.aufrufe.append(("zeigen", modus, dauer_s))
+
+    class Kaputt:
+        tools, stimme = w, None
+
+        @staticmethod
+        def begruessung(bericht):
+            raise RuntimeError("Claude nicht erreichbar")
+    try:
+        (tmp / "hochgefahren.txt").unlink()
+        zeigt = Zeigt()
+        kaputt = hw.hochfahren(Kaputt(), anzeige=zeigt)
+        (tmp / "hochgefahren.txt").unlink()
+        config.BEGRUESSUNG_AN = False
+        still = hw.hochfahren(Kaputt(), anzeige=Zeigt())
+    finally:
+        (config.LOG_VERZEICHNIS, config.ANTHROPIC_API_KEY, config.WETTER_ORT, config.BEGRUESSUNG_AN,
+         hw.hardware_bericht, _) = vorher
+        shutil.rmtree(tmp, ignore_errors=True)
+    melden = [a for a in zeigt.aufrufe if a[0] == "melden"]
+    pruefen("Hochfahren: scheitert die Begrüßung, bleibt der Gruß; die Anzeige läuft in zwei Schritten (60 s)",
+            kaputt["ok"] and kaputt["neu"] and kaputt["begruessung"].startswith("Hallo. Ich bin da. Speicher 18 % frei")
+            and [m[2]["fertig"] for m in melden] == [False, True] and melden[0][2]["begruessung"] == ""
+            and ("zeigen", "hochfahren", 60) in zeigt.aufrufe, kaputt["begruessung"][:50])
+    pruefen("Hochfahren: BEGRUESSUNG_AN aus heißt kurz \"Ich bin da.\" - ohne den Tag",
+            still["neu"] and still["begruessung"].startswith("Ich bin da.") and "Offene Punkte" not in still["begruessung"],
+            still["begruessung"][:50])
+    pruefen("POST /api/hochfahren ist keine Anzeige-Route: im Dienst nicht erreichbar",
+            "/api/hochfahren" not in webapp_modul.ANZEIGE_PFADE, "")
+
+    # -- agent.begruessung -----------------------------------------------------
+    erfasst = {}
+
+    def denken_fake(auftrag, protokollieren=True, anzeigen=True):
+        erfasst.update(auftrag=auftrag, protokollieren=protokollieren, anzeigen=anzeigen)
+        return "Guten Morgen, Chef."
+    schluessel = config.ANTHROPIC_API_KEY, config.WETTER_ORT
+    try:
+        config.ANTHROPIC_API_KEY, config.WETTER_ORT = "", ""
+        ohne = agent.begruessung({"kurz": "Alles in Ordnung."})
+        config.ANTHROPIC_API_KEY = "test"
+        agent.denken = denken_fake
+        mit = agent.begruessung({"kurz": "Speicher 18 % frei, sonst alles in Ordnung."})
+    finally:
+        config.ANTHROPIC_API_KEY, config.WETTER_ORT = schluessel
+        if "denken" in vars(agent):
+            del agent.denken
+    auftrag = erfasst.get("auftrag", "")
+    pruefen("agent.begruessung ohne Schlüssel: \"Ich bin da\", der Rechner und die Daten",
+            ohne.startswith("Hallo. Ich bin da. Alles in Ordnung.\n") and "Offene Punkte:" in ohne and "Leads:" in ohne
+            and "Wetter" not in ohne, ohne[:45])
+    pruefen("agent.begruessung mit Schlüssel: Claude bekommt den Rechner und die Daten und darf nichts erfinden",
+            mit == "Guten Morgen, Chef." and "Rechner: Speicher 18 % frei, sonst alles in Ordnung." in auftrag
+            and "\n\nDaten:\n" in auftrag and "Offene Punkte:" in auftrag and "Erfinde nichts" in auftrag
+            and "drei bis fünf gesprochenen Sätzen" in auftrag and erfasst["protokollieren"] is False
+            and erfasst["anzeigen"] is False, auftrag[:50])
+
+
+def _start_kurzbefehle(agent):
+    """Kurzbefehle: nur aus der Live-Liste, Eingabe über stdin, Ausgabe nie zurück, Freigabe beim ersten Lauf."""
+    import modules.steuerung as st
+    from modules.freigabe import freigabe_lesen
+    w = agent.tools
+    aufrufe = []
+
+    def fake(namen=("Licht Büro an", "Szene Feierabend"), laufcode=0, listcode=0):
+        def ausfuehren(befehl, timeout=5, eingabe=None):
+            aufrufe.append((list(befehl), timeout, eingabe))
+            if befehl[:2] == ["shortcuts", "list"]:
+                return listcode, ("\n".join(namen) + "\n") if listcode == 0 else "", "" if listcode == 0 else "fehlt"
+            if befehl[:2] == ["shortcuts", "run"]:
+                return laufcode, "GEHEIM: Kontakt Meier, 0664 1234567", "Ablauf kaputt" if laufcode else ""
+            return 1, "", "?"
+        return ausfuehren
+
+    def laeufe():
+        return [a for a in aufrufe if a[0][:2] == ["shortcuts", "run"]]
+
+    echt_run = subprocess.run
+
+    def kein_echter_lauf(befehl, *args, **optionen):
+        raise AssertionError("echter Befehl in der Prüfung: %s" % (befehl,))
+    subprocess.run = kein_echter_lauf
+    kanal_vorher, ausfuehren_vorher = w.freigabe_kanal, w.steuerung_ausfuehren
+    try:
+        unbekannt = st.kurzbefehl_ausfuehren("Alles löschen", ausfuehren=fake())
+        gefaehrlich = st.kurzbefehl_ausfuehren("Licht Büro an", "a;b", ausfuehren=fake())
+        aufrufe.clear()
+        gut = st.kurzbefehl_ausfuehren("Licht Büro an", "50", ausfuehren=fake())
+        text_gut = json.dumps(gut, ensure_ascii=False)
+        klein = st.kurzbefehl_ausfuehren("  licht  büro AN ", ausfuehren=fake())
+        liste = st.kurzbefehle_liste(ausfuehren=fake())
+        pruefen("Kurzbefehle: ein Name, den es im Ordner nicht gibt, läuft nie - die Antwort nennt, was da ist",
+                not unbekannt["ok"] and "gibt es im Ordner Jarvis nicht" in unbekannt["fehler"]
+                and "Licht Büro an" in unbekannt["fehler"] and not [a for a in aufrufe if "Alles löschen" in a[0]],
+                unbekannt["fehler"][:55])
+        pruefen("Kurzbefehle: eine Eingabe mit gefährlichen Zeichen wird abgelehnt",
+                not gefaehrlich["ok"] and "Eingabe" in gefaehrlich["fehler"], gefaehrlich["fehler"][:55])
+        pruefen("Kurzbefehle: shortcuts run <Name>, die Eingabe über stdin (nie -i/-o), Ausgabe nie zurück",
+                gut["ok"] and laeufe()[0] == (["shortcuts", "run", "Licht Büro an"], 60, "50")
+                and aufrufe[0][0] == ["shortcuts", "list", "-f", "Jarvis"]
+                and not any(t in ("-i", "-o") for a in aufrufe for t in a[0]) and "GEHEIM" not in text_gut
+                and klein["ok"] and klein["name"] == "Licht Büro an", text_gut[:55])
+        pruefen("Kurzbefehle: die Liste kommt live aus dem Ordner",
+                liste["ok"] and liste["namen"] == ["Licht Büro an", "Szene Feierabend"]
+                and "Licht Büro an" in liste["text"], liste["text"][:55])
+        leer = st.kurzbefehle_liste(ausfuehren=fake(namen=()))
+        fehlt = st.kurzbefehle_liste(ausfuehren=fake(listcode=127))
+        kaputt = st.kurzbefehle_liste("Haus", fake(listcode=1))
+        pruefen("Kurzbefehle: leerer Ordner, fehlendes shortcuts und Fehler werden ehrlich gemeldet",
+                leer["ok"] and "liegt noch nichts" in leer["text"] and "Licht Büro an" in leer["text"]
+                and not fehlt["ok"] and "erst ab macOS 12" in fehlt["text"]
+                and not kaputt["ok"] and "'Haus'" in kaputt["text"], leer["text"][:50])
+        scheitert = st.kurzbefehl_ausfuehren("Licht Büro an", ausfuehren=fake(laufcode=1))
+        pruefen("Kurzbefehle: ein Fehler beim Lauf liefert nur den Fehlertext, nie die Ausgabe",
+                not scheitert["ok"] and scheitert["fehler"].startswith("Der Kurzbefehl ist fehlgeschlagen")
+                and "GEHEIM" not in json.dumps(scheitert, ensure_ascii=False), scheitert["fehler"][:55])
+
+        # -- das Werkzeug: Freigabe beim ersten Lauf ------------------------------------
+        fragen, antwort = [], {"ja": False}
+
+        class Frage:
+            def anfordern(self, aktion, details):
+                fragen.append((aktion, details))
+                return {"erlaubt": antwort["ja"], "grund": "Test"}
+        w.freigabe_kanal = Frage()
+        w.steuerung_ausfuehren = fake()
+        aufrufe.clear()
+        argumente = {"name": "Licht Büro an", "begruendung": "Er will im Büro Licht haben."}
+        w.lauf_beginnen()
+        nein = w.run("kurzbefehl_ausfuehren", argumente)
+        beschr = freigabe_lesen(fragen[0][1]) if fragen else {}
+        bekannt_nein = st.kurzbefehl_bekannt("Licht Büro an", w.memory.db_pfad)
+        antwort["ja"] = True
+        ja = w.run("kurzbefehl_ausfuehren", argumente)
+        bekannt_ja = st.kurzbefehl_bekannt("Licht Büro an", w.memory.db_pfad)
+        nochmal = w.run("kurzbefehl_ausfuehren", argumente)
+        fragen_vor_fremd = len(fragen)
+        pruefen("kurzbefehl_ausfuehren: der erste Lauf fragt mit Was, Warum und Wie - bei Nein läuft nichts",
+                not nein["ok"] and nein.get("abgebrochen") and not bekannt_nein and len(fragen) >= 1
+                and fragen[0][0] == "kurzbefehl_ausfuehren"
+                and "den Kurzbefehl „Licht Büro an“ ausführen" in beschr.get("was", "")
+                and "legt der Kurzbefehl selbst fest" in beschr.get("wie", "") and "erste Lauf" in beschr.get("wie", "")
+                and beschr.get("warum", "").startswith("Er will im Büro"), beschr.get("was", "")[:55])
+        pruefen("kurzbefehl_ausfuehren: nach einem Ja gilt der Name als bekannt und läuft ohne Rückfrage",
+                ja["ok"] and bekannt_ja and nochmal["ok"] and fragen_vor_fremd == 2 and len(laeufe()) == 2
+                and "GEHEIM" not in json.dumps([ja, nochmal], ensure_ascii=False), "%d Fragen" % fragen_vor_fremd)
+
+        w.lauf_beginnen()
+        w._lauf.fremd = True
+        antwort["ja"] = False
+        nach_fremdem = w.run("kurzbefehl_ausfuehren", argumente)
+        beschr_fremd = freigabe_lesen(fragen[-1][1]) if len(fragen) > fragen_vor_fremd else {}
+        pruefen("kurzbefehl_ausfuehren: nach fremdem Text fragt auch ein bekannter Name noch einmal",
+                len(fragen) == fragen_vor_fremd + 1 and not nach_fremdem["ok"] and len(laeufe()) == 2
+                and "fremden Text" in beschr_fremd.get("wie", ""), beschr_fremd.get("wie", "")[-40:])
+
+        w.lauf_beginnen(hintergrund=True)
+        antwort["ja"] = True
+        im_hintergrund = w.run("kurzbefehl_ausfuehren", argumente)
+        w.lauf_beginnen()
+        ohne_name = w.run("kurzbefehl_ausfuehren", {"name": "Alles löschen", "begruendung": "Test"})
+        ohne_eingabe = w.run("kurzbefehl_ausfuehren", dict(argumente, eingabe="x | y"))
+        pruefen("kurzbefehl_ausfuehren: im Hintergrund nie; Unbekanntes und Gefährliches ohne Frage abgelehnt",
+                not im_hintergrund["ok"] and "Hintergrund" in im_hintergrund["fehler"]
+                and not ohne_name["ok"] and "gibt es im Ordner" in ohne_name["fehler"] and not ohne_eingabe["ok"]
+                and len(fragen) == fragen_vor_fremd + 1 and len(laeufe()) == 2, ohne_name["fehler"][:45])
+        protokoll = w.memory._lesen("SELECT ergebnis FROM aktionen WHERE werkzeug = 'kurzbefehl_ausfuehren'")
+        pruefen("kurzbefehl_ausfuehren: im Protokoll steht nie die Ausgabe des Kurzbefehls",
+                protokoll and not any("GEHEIM" in z["ergebnis"] for z in protokoll), "%d Einträge" % len(protokoll))
+        liste_werkzeug = w.run("kurzbefehle_liste", {})
+        pruefen("Werkzeug kurzbefehle_liste zeigt die Namen aus dem Ordner",
+                liste_werkzeug["ok"] and "Szene Feierabend" in liste_werkzeug["text"], liste_werkzeug["text"][:45])
+    finally:
+        subprocess.run = echt_run
+        w.freigabe_kanal, w.steuerung_ausfuehren = kanal_vorher, ausfuehren_vorher
+        w.lauf_beginnen()
+
+    katalog = {t["name"]: t for t in w.katalog()}
+    rollen = [n for n, r in ROLLEN.items() if "kurzbefehl_ausfuehren" in r["werkzeuge"]]
+    pruefen("Kurzbefehl-Werkzeug: Begründung Pflicht, nicht in den Rollen der Fachkräfte, nicht pauschal freigabepflichtig",
+            "begruendung" in katalog["kurzbefehl_ausfuehren"]["input_schema"]["required"]
+            and "name" in katalog["kurzbefehl_ausfuehren"]["input_schema"]["required"]
+            and not rollen and "kurzbefehl_ausfuehren" not in FREIGABE_PFLICHTIG, str(rollen))
+
+
+def _start_fenster(agent):
+    """Bildschirme, Fensterlayouts, Lautstärke und datei_oeffnen - nichts öffnet ein Fenster."""
+    import modules.steuerung as st
+    import modules.tools as tools_modul
+    w = agent.tools
+    aufrufe = []
+    zwei = [{"x": 0, "y": 0, "w": 2560, "h": 1440}, {"x": 2560, "y": -200, "w": 1920, "h": 1080}]
+
+    def fake(schirme=None, korrektur=(0, "", ""), offen=(0, "", ""), pid="4242\n"):
+        def ausfuehren(befehl, timeout=5, **rest):
+            aufrufe.append(list(befehl))
+            if befehl[0] == "pgrep":
+                return (0, pid, "") if pid else (1, "", "")
+            if befehl[0] == "osascript" and "JavaScript" in befehl:
+                return (0, json.dumps(zwei if schirme is None else schirme) + "\n", "") if schirme != [] else (1, "", "x")
+            if befehl[0] == "osascript":
+                return korrektur
+            if befehl[0] == "open":
+                return offen
+            return 1, "", "?"
+        return ausfuehren
+
+    def oeffnungen():
+        return [a for a in aufrufe if a[0] == "open"]
+
+    def korrekturen():
+        return [a for a in aufrufe if a[0] == "osascript" and "JavaScript" not in a]
+    schnell = dict(chrome_da=lambda: True, pause=lambda sekunden: None)
+    echt_run = subprocess.run
+
+    def kein_echter_lauf(befehl, *args, **optionen):
+        raise AssertionError("echter Befehl in der Prüfung: %s" % (befehl,))
+    subprocess.run = kein_echter_lauf
+    bildschirm_vorher = config.ANZEIGE_BILDSCHIRM
+    try:
+        # -- Bildschirme --------------------------------------------------------------
+        gelesen = st.bildschirme_lesen(json.dumps(zwei))
+        pruefen("Bildschirme: y wird von unten links auf oben links umgerechnet (2560x1440, zweiter bei y -200)",
+                gelesen == [{"x": 0, "y": 0, "w": 2560, "h": 1440}, {"x": 2560, "y": 560, "w": 1920, "h": 1080}]
+                and st.bildschirme_lesen("") == [] and st.bildschirme_lesen("kein json") == []
+                and st.bildschirme_lesen('[{"x": 0}]') == [], str(gelesen[1:]))
+        ueber_befehl = st.bildschirme(fake())
+        pruefen("Bildschirme: das JXA läuft über osascript -l JavaScript und gibt den Hauptbildschirm zuerst",
+                ueber_befehl == gelesen and aufrufe[0][:3] == ["osascript", "-l", "JavaScript"]
+                and "NSScreen" in aufrufe[0][-1], "")
+
+        # -- Layouts ---------------------------------------------------------------------
+        aufrufe.clear()
+        zentrale = st.fenster_anordnen("zentrale", fake(), port_belegt=lambda port: port == 8765, **schnell)
+        auf = oeffnungen()[0] if oeffnungen() else []
+        pruefen("fenster_anordnen zentrale: Chrome --app auf dem zweiten Bildschirm, Position umgerechnet",
+                zentrale["ok"] and len(oeffnungen()) == 1 and auf[:4] == ["open", "-na", "Google Chrome", "--args"]
+                and "--app=http://localhost:8765/zentrale" in auf and "--window-position=2560,560" in auf
+                and "--window-size=1920,1080" in auf and "--no-first-run" in auf
+                and "--no-default-browser-check" in auf
+                and "--user-data-dir=%s" % (config.PROFIL_VERZEICHNIS / "chrome-anzeige") in auf, " ".join(auf[4:7])[:55])
+        aufrufe.clear()
+        st.fenster_anordnen("zentrale", fake(), port_belegt=lambda port: True, **schnell)
+        dienst_zuerst = "--app=http://localhost:8766/zentrale" in oeffnungen()[0]
+        aufrufe.clear()
+        config.ANZEIGE_BILDSCHIRM = 0
+        st.fenster_anordnen("zentrale", fake(), port_belegt=lambda port: True, **schnell)
+        auf_haupt = "--window-position=0,0" in oeffnungen()[0] and "--window-size=2560,1440" in oeffnungen()[0]
+        config.ANZEIGE_BILDSCHIRM = bildschirm_vorher
+        pruefen("fenster_anordnen: erst der Dienst (8766), dann die Web-App (8765); ANZEIGE_BILDSCHIRM gilt",
+                dienst_zuerst and auf_haupt, "")
+
+        aufrufe.clear()
+        arbeiten = st.fenster_anordnen("arbeiten", fake(), port_belegt=lambda port: port == 8765, **schnell)
+        seiten = [[t for t in a if t.startswith("--app=")][0] for a in oeffnungen()]
+        links = oeffnungen()[0] if oeffnungen() else []
+        pruefen("fenster_anordnen arbeiten: Hauptseite rechts (60/40) auf dem Hauptbildschirm, Zentrale auf dem zweiten",
+                arbeiten["ok"] and seiten == ["--app=http://localhost:8765/", "--app=http://localhost:8765/zentrale"]
+                and "--window-position=1536,0" in links and "--window-size=1024,1440" in links, str(seiten)[:55])
+        aufrufe.clear()
+        nur_dienst = st.fenster_anordnen("arbeiten", fake(), port_belegt=lambda port: port == 8766, **schnell)
+        pruefen("fenster_anordnen: die Hauptseite gibt es im Dienst nicht - ehrlicher Hinweis, die Zentrale öffnet",
+                nur_dienst["ok"] and len(oeffnungen()) == 1 and "8766/zentrale" in " ".join(oeffnungen()[0])
+                and "nur in der Web-App" in nur_dienst["text"], nur_dienst["text"][:55])
+        keiner = st.fenster_anordnen("zentrale", fake(), port_belegt=lambda port: False, **schnell)
+        aufrufe.clear()
+        ein_schirm = st.fenster_anordnen("zentrale", fake(zwei[:1]), port_belegt=lambda port: port == 8765, **schnell)
+        praesentation = st.fenster_anordnen("praesentation", fake(), port_belegt=lambda port: port == 8765, **schnell)
+        pruefen("fenster_anordnen: ohne laufende Anzeige eine Meldung; fehlender Bildschirm fällt auf den Hauptbildschirm",
+                not keiner["ok"] and "läuft gerade nicht" in keiner["fehler"] and ein_schirm["ok"]
+                and "Bildschirm 1 gibt es nicht" in ein_schirm["text"] and praesentation["ok"]
+                and "--window-position=0,0" in oeffnungen()[0], keiner["fehler"][:45])
+        kein_chrome = st.fenster_anordnen("zentrale", fake(), port_belegt=lambda port: True,
+                                          chrome_da=lambda: False, pause=lambda s: None)
+        ohne_schirme = st.fenster_anordnen("zentrale", fake([]), port_belegt=lambda port: True, **schnell)
+        fremdes = st.fenster_anordnen("kino", fake(), port_belegt=lambda port: True, **schnell)
+        pruefen("fenster_anordnen: ohne Chrome, ohne lesbare Bildschirme und mit unbekanntem Layout ehrlich abgelehnt",
+                kein_chrome["fehler"] == "Für Anzeige-Fenster brauche ich Google Chrome."
+                and "Bildschirme" in ohne_schirme["fehler"] and "kino" in fremdes["fehler"]
+                and "zentrale" in fremdes["fehler"], kein_chrome["fehler"][:50])
+        pruefen("Layouts: zentrale, arbeiten und praesentation mit den festen Rahmen",
+                sorted(st.LAYOUTS) == ["arbeiten", "praesentation", "zentrale"]
+                and st.layout_fenster("zentrale") == [{"seite": "/zentrale", "bildschirm": config.ANZEIGE_BILDSCHIRM,
+                                                        "rahmen": [0, 0, 1, 1]}]
+                and st.layout_fenster("arbeiten")[0] == {"seite": "/", "bildschirm": 0, "rahmen": [0.6, 0, 0.4, 1]}
+                and st.layout_fenster("praesentation")[0]["bildschirm"] == 0, "")
+
+        aufrufe.clear()
+        bedienung = st.fenster_anordnen(
+            "arbeiten", fake(korrektur=(1, "", "execution error: osascript is not allowed assistive access. (-1719)")),
+            port_belegt=lambda port: port == 8765, **schnell)
+        aufrufe.clear()
+        automation = st.fenster_anordnen(
+            "zentrale", fake(korrektur=(1, "", "execution error: Not authorized to send Apple events to System Events. (-1743)")),
+            port_belegt=lambda port: port == 8765, **schnell)
+        pruefen("fenster_anordnen: Fehler -1719 nennt die Bedienungshilfen, -1743 die Automation - die Fenster bleiben offen",
+                bedienung["ok"] and "Bedienungshilfen" in bedienung["text"] and len(bedienung["fenster"]) == 2
+                and automation["ok"] and "Automation" in automation["text"] and len(automation["fenster"]) == 1,
+                bedienung["text"][-55:])
+        aufrufe.clear()
+        st.fenster_anordnen("arbeiten", fake(korrektur=(1, "", "(-1719)")), port_belegt=lambda port: port == 8765, **schnell)
+        pruefen("fenster_anordnen: fehlt die Erlaubnis, wird sie nur einmal versucht", len(korrekturen()) == 1, "")
+        aufrufe.clear()
+        st.fenster_anordnen("zentrale", fake(), port_belegt=lambda port: port == 8765, **schnell)
+        suche = [a for a in aufrufe if a[0] == "pgrep"]
+        skript = " ".join(korrekturen()[0]) if korrekturen() else ""
+        aufrufe.clear()
+        st.fenster_anordnen("zentrale", fake(pid=""), port_belegt=lambda port: port == 8765, **schnell)
+        pruefen("fenster_anordnen: nachgezogen wird nur der Chrome mit dem eigenen Profil, sonst gar nichts",
+                suche and suche[0][1] == "-of" and not suche[0][2].startswith("-") and "chrome-anzeige" in suche[0][2].replace("\\", "")
+                and "first process whose unix id is 4242" in skript and "{2560, 560}" in skript and "{1920, 1080}" in skript
+                and not korrekturen() and len(oeffnungen()) == 1, skript[:55])
+
+        # -- Lautstärke ----------------------------------------------------------------------
+        aufrufe.clear()
+        zu_laut = st.lautstaerke_setzen(150, fake())
+        schlecht = [st.lautstaerke_setzen(wert, fake()) for wert in (-1, 3.5, None, True, "laut", float("nan"))]
+        leise = st.lautstaerke_setzen(30, fake())
+        stumm, voll = st.lautstaerke_setzen(0, fake()), st.lautstaerke_setzen(100, fake())
+        pruefen("lautstaerke_setzen: nur ganze Zahlen von 0 bis 100, sonst abgelehnt",
+                not zu_laut["ok"] and zu_laut["fehler"] == "Die Lautstärke geht von 0 bis 100."
+                and not any(r["ok"] for r in schlecht) and leise["ok"] and stumm["ok"] and voll["ok"]
+                and len(aufrufe) == 3, zu_laut["fehler"])
+        pruefen("lautstaerke_setzen: osascript -e set volume output volume 30",
+                aufrufe[0] == ["osascript", "-e", "set volume output volume 30"] and leise["prozent"] == 30, "")
+
+        # -- die Werkzeuge ---------------------------------------------------------------------
+        ausfuehren_vorher = w.steuerung_ausfuehren
+        w.steuerung_ausfuehren = fake()
+        aufrufe.clear()
+        try:
+            w.lauf_beginnen()
+            laut = w.run("lautstaerke_setzen", {"prozent": 40})
+            w.lauf_beginnen(hintergrund=True)
+            im_hintergrund = w.run("lautstaerke_setzen", {"prozent": 10})
+            fenster_hintergrund = w.run("fenster_anordnen", {"layout": "zentrale"})
+            w.lauf_beginnen()
+        finally:
+            w.steuerung_ausfuehren = ausfuehren_vorher
+        pruefen("Werkzeuge: lautstaerke_setzen läuft, im Hintergrund weder Lautstärke noch Fenster",
+                laut["ok"] and aufrufe == [["osascript", "-e", "set volume output volume 40"]]
+                and not im_hintergrund["ok"] and not fenster_hintergrund["ok"], str(aufrufe)[:50])
+
+        # -- datei_oeffnen: nie über den freien open-Befehl ----------------------------------
+        tmp = pathlib.Path(tempfile.mkdtemp())
+        (tmp / "home" / "Documents").mkdir(parents=True)
+        (tmp / "home" / "Desktop").mkdir(parents=True)
+        pdf, skript = tmp / "home" / "Documents" / "a.pdf", tmp / "home" / "Desktop" / "x.command"
+        pdf.write_text("x")
+        skript.write_text("echo")
+        echt_mac = (w.mac.home, w.mac.programm)
+        w.mac.home, w.mac.programm = (tmp / "home").resolve(), (tmp / "prog").resolve()
+        gestartet = []
+
+        def aufzeichnen(befehl, *args, **optionen):
+            gestartet.append([str(t) for t in befehl])
+            return types.SimpleNamespace(returncode=0, stdout="", stderr="")
+        subprocess.run = aufzeichnen
+        try:
+            w.lauf_beginnen()
+            skript_nein = w.run("datei_oeffnen", {"pfad": str(skript)})
+            hosts_nein = w.run("datei_oeffnen", {"pfad": "/etc/hosts"})
+            vor_pdf = list(gestartet)
+            pdf_ja = w.run("datei_oeffnen", {"pfad": str(pdf)})
+        finally:
+            subprocess.run = kein_echter_lauf
+            w.mac.home, w.mac.programm = echt_mac
+            shutil.rmtree(tmp, ignore_errors=True)
+        pruefen("datei_oeffnen: Skripte und Systemdateien nie, ein PDF mit open - über mac.oeffnen, nicht den freien Befehl",
+                not skript_nein["ok"] and not hosts_nein["ok"] and vor_pdf == []
+                and pdf_ja["ok"] and gestartet == [["open", str(pdf.resolve())]]
+                and "datei_oeffnen" in w.namen() and "datei_oeffnen" not in tools_modul.PARAMETER_AKTIONEN,
+                skript_nein.get("fehler", "")[:50])
+    finally:
+        subprocess.run = echt_run
+        config.ANZEIGE_BILDSCHIRM = bildschirm_vorher
+        w.lauf_beginnen()
+
+
+def _start_anbindung(agent):
+    """Katalog, Hilfezeilen, Konfiguration."""
+    import modules.steuerung as st
+    w = agent.tools
+    katalog = {t["name"]: t for t in w.katalog()}
+    neu = ("hardware_bericht", "kurzbefehle_liste", "kurzbefehl_ausfuehren", "fenster_anordnen", "lautstaerke_setzen")
+    layout = katalog["fenster_anordnen"]["input_schema"]["properties"]["layout"]
+    pruefen("Katalog: die fünf Werkzeuge für Start und Steuerung, kurz beschrieben",
+            all(n in katalog for n in neu) and all(len(katalog[n]["description"]) < 260 for n in neu)
+            and layout["enum"] == sorted(st.LAYOUTS) and katalog["lautstaerke_setzen"]["input_schema"]["required"] == ["prozent"]
+            and katalog["fenster_anordnen"]["input_schema"]["required"] == ["layout"], "")
+    pruefen("Der Systemprompt weist Kurzbefehle den Namen aus der Liste zu",
+            "kurzbefehle_liste" in agent.systemprompt("") and "siehst du nicht" in agent.systemprompt(""), "")
+    with open(os.path.join(WURZEL, "src", "run.py"), encoding="utf-8") as quelle:
+        run_quelle = quelle.read()
+    with open(os.path.join(WURZEL, "build_single.py"), encoding="utf-8") as quelle:
+        bau_quelle = quelle.read()
+    hilfe = "    python3 jarvis.py hardware    den Mac prüfen: Last, Speicher, Platte, Netz, Wärme\n"
+    einrichten = "    python3 jarvis.py einrichten  geführte Ersteinrichtung\n"
+    pruefen("Die Hilfezeile hardware steht in run.py und in KOPF direkt nach einrichten",
+            einrichten + hilfe in run_quelle and einrichten + hilfe in bau_quelle, "")
+    with open(os.path.join(WURZEL, "config", ".env.beispiel"), encoding="utf-8") as quelle:
+        beispiel = quelle.read()
+    pruefen("Konfiguration: BEGRUESSUNG_AN, KURZBEFEHL_ORDNER und ANZEIGE_BILDSCHIRM mit Standard und im Beispiel",
+            config.BEGRUESSUNG_AN is True and config.KURZBEFEHL_ORDNER == "Jarvis" and config.ANZEIGE_BILDSCHIRM == 1
+            and all(("%s=" % s) in beispiel for s in ("BEGRUESSUNG_AN", "KURZBEFEHL_ORDNER", "ANZEIGE_BILDSCHIRM")), "")
+
+
+def pruefung_start_steuerung(agent):
+    """Start und Steuerung: Hardware-Bericht, Hochfahren, Kurzbefehle, Fensterlayouts, Lautstärke - offline.
+
+    Alle Messungen laufen über eingespeiste Antworten, nichts öffnet ein Fenster, nichts ruft einen Dienst.
+    """
+    abschnitt("Start und Steuerung")
+    _start_hardware(agent)
+    _start_hochfahren(agent)
+    _start_kurzbefehle(agent)
+    _start_fenster(agent)
+    _start_anbindung(agent)
 # [P7 Start] Ende
 
 
@@ -3792,6 +4512,7 @@ def main() -> int:
     # [P6 Stimme] Anfang
     # [P6 Stimme] Ende
     # [P7 Start] Anfang
+    pruefung_start_steuerung(agent)
     # [P7 Start] Ende
     pruefung_einzeldatei()
 

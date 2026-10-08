@@ -190,7 +190,7 @@ def wlan_netz_lesen(text: str, geraet: str = "") -> tuple:
     schnittstelle = ""
     stati, namen = {}, {}
     for nummer, zeile in enumerate(zeilen):
-        treffer = re.match(r"^\s+([A-Za-z]+\d+):\s*$", zeile)
+        treffer = re.match(r"^\s+((?:en|awdl|llw|ap|p2p|bridge)\d+):\s*$", zeile)
         if treffer:
             schnittstelle = treffer.group(1)
             continue
@@ -247,8 +247,8 @@ def wlan_bericht(ausfuehren=None, plattform=None) -> dict:
             with _CACHE_SPERRE:
                 _WLAN_CACHE["text"], _WLAN_CACHE["zeit"] = roh, time.monotonic()
     verbunden, name = wlan_netz_lesen(roh, geraet)
-    if verbunden is None or (verbunden and not name):
-        # Aus der Liste nicht zu sehen: hat das Gerät eine Adresse, ist es verbunden.
+    if verbunden is None:
+        # Aus der Ausgabe nicht zu sehen: hat das Gerät eine Adresse, ist es verbunden.
         code, adresse, _ = befehl_lauf(ausfuehren, ["ipconfig", "getifaddr", geraet], 4)
         verbunden = bool(code == 0 and adresse.strip())
     kachel = hardware_kachel("WLAN", name or None, "", "ok",
@@ -658,7 +658,12 @@ def hochfahren(agent, stimme=None, anzeige=None, **messen) -> dict:
     stimme = stimme if stimme is not None else getattr(agent, "stimme", None)
     anzeige = anzeige if anzeige is not None else werkzeuge
 
-    bericht = hardware_bericht(stimme=stimme, tools=werkzeuge, **messen)
+    try:
+        bericht = hardware_bericht(stimme=stimme, tools=werkzeuge, **messen)
+    except Exception as fehler:
+        print("[hochfahren] Der Rechnerbericht ließ sich nicht erstellen: %s" % fehler)
+        bericht = {"zeit": "", "werte": [], "auffaellig": [],
+                   "kurz": "Der Rechnerbericht ließ sich nicht erstellen."}
     schritte = _schritte_aus(bericht)
     # Die Zeilen laufen schon über die Anzeige, während die Begrüßung noch entsteht.
     _hochfahren_zeigen(anzeige, schritte, "", False)

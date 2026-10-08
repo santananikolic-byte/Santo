@@ -23,6 +23,7 @@ speisen eigene Antworten ein, nichts öffnet dabei ein Fenster.
 
 import json
 import os
+import re
 import socket
 import sqlite3
 import time
@@ -316,6 +317,36 @@ def _korrektur_hinweis(text) -> str:
     return ""
 
 
+def _fenster_nachziehen(ausfuehren, suchmuster, rahmen, pause) -> str:
+    """Rückt das neueste Fenster des Anzeige-Chrome mit System Events zurecht.
+
+    Gefunden wird nur der Chrome-Prozess mit dem eigenen Profil (``pgrep``, der älteste
+    Treffer ist der Hauptprozess): Ein Fenster des Chrome, in dem der Nutzer sonst
+    arbeitet, wird nie angefasst. Gibt einen Hinweis zurück, wenn eine Erlaubnis fehlt -
+    sonst leer; ohne gefundenen Prozess bleibt es bei der Position, die Chrome übernommen hat.
+    """
+    pid = ""
+    for _ in range(3):
+        pause(1.0)
+        code, ausgabe, _ = befehl_lauf(ausfuehren, ["pgrep", "-of", suchmuster], 5)
+        treffer = ausgabe.split()[0] if code == 0 and ausgabe.split() else ""
+        if treffer.isdigit():
+            pid = treffer
+            break
+    if not pid:
+        return ""
+    x, y, breite, hoehe = rahmen
+    skript = ["osascript",
+              "-e", 'tell application "System Events"',
+              "-e", "tell (first process whose unix id is %s)" % pid,
+              "-e", "set position of window 1 to {%d, %d}" % (x, y),
+              "-e", "set size of window 1 to {%d, %d}" % (breite, hoehe),
+              "-e", "end tell",
+              "-e", "end tell"]
+    code, ausgabe, fehler = befehl_lauf(ausfuehren, skript, 10)
+    return _korrektur_hinweis("%s %s" % (ausgabe, fehler)) if code != 0 else ""
+
+
 def fenster_anordnen(layout, ausfuehren=None, port_belegt=None, chrome_da=None, pause=None) -> dict:
     """Ordnet die Fenster nach einem festen Layout (zentrale, arbeiten, praesentation).
 
@@ -339,6 +370,7 @@ def fenster_anordnen(layout, ausfuehren=None, port_belegt=None, chrome_da=None, 
     pause = pause or time.sleep
     hinweise, fenster = [], []
     profil = "--user-data-dir=%s" % (config.PROFIL_VERZEICHNIS / "chrome-anzeige")
+    suchmuster = "user-data-dir=" + re.escape(str(config.PROFIL_VERZEICHNIS / "chrome-anzeige"))
     korrigieren = True
     for eintrag in layout_fenster(name):
         seite = eintrag["seite"]
@@ -368,14 +400,7 @@ def fenster_anordnen(layout, ausfuehren=None, port_belegt=None, chrome_da=None, 
         fenster.append({"seite": seite, "bildschirm": index, "port": port,
                         "position": [x, y], "groesse": [b, h]})
         if korrigieren:
-            pause(1.2)
-            skript = ["osascript",
-                      "-e", 'tell application "System Events" to tell process "Google Chrome"',
-                      "-e", "set position of window 1 to {%d, %d}" % (x, y),
-                      "-e", "set size of window 1 to {%d, %d}" % (b, h),
-                      "-e", "end tell"]
-            code, ausgabe, fehler = befehl_lauf(ausf, skript, 10)
-            hinweis = _korrektur_hinweis("%s %s" % (ausgabe, fehler)) if code != 0 else ""
+            hinweis = _fenster_nachziehen(ausf, suchmuster, (x, y, b, h), pause)
             if hinweis:
                 korrigieren = False
                 if hinweis not in hinweise:
