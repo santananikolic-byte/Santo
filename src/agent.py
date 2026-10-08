@@ -195,6 +195,10 @@ ZUSATZREGELN = (
     "gemeldet hat.",
     # [P1 Bühne] Ende
     # [P2 Weltlage] Anfang
+        "Fragt er nach der Lage in der Welt, nach Nachrichten oder Kursen: weltlage, maerkte oder "
+        "lagebild benutzen, dann in zwei bis vier gesprochenen Sätzen berichten und die Quelle "
+        "nennen. Bei einem Lagebild die Stichwörter aus dem Ergebnis in der Reihenfolge sprechen, "
+        "ohne vorher alle Themen aufzuzählen. Nenne nur Zahlen, die das Werkzeug geliefert hat.",
     # [P2 Weltlage] Ende
     # [P3 Telefon] Anfang
     # [P3 Telefon] Ende
@@ -210,6 +214,9 @@ ZUSATZREGELN = (
     # [P6 Stimme] Anfang
     # [P6 Stimme] Ende
     # [P7 Start] Anfang
+        "Dateien ordnest du immer erst mit ordnen_planen (zeigt nur den Plan); verschoben wird erst "
+        "nach der Freigabe mit ordnen_ausfuehren. Beiträge für soziale Netze sind Entwürfe - "
+        "veröffentlicht wird nie etwas von dir.",
     # [P7 Start] Ende
 )
 

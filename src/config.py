@@ -260,12 +260,18 @@ BRIEFING_MAERKTE = _wahrheit("BRIEFING_MAERKTE", False)
 # [P3 Telefon] Anfang
 # [P3 Telefon] Ende
 # [P4 Büro] Anfang
+# Gesten als zweiter Weg für ein Ja (nur in der Web-App, nur bei genau einer offenen Frage).
+GESTEN_FREIGABE = _wahrheit("GESTEN_FREIGABE", False)
+# Jarvis darf von sich aus etwas vorschlagen (nie ausführen).
+VORSCHLAEGE_AN = _wahrheit("VORSCHLAEGE_AN", True)
 # [P4 Büro] Ende
 # [P5 Sicht] Anfang
 # [P5 Sicht] Ende
 # [P6 Stimme] Anfang
 # [P6 Stimme] Ende
 # [P7 Start] Anfang
+# Für welche Plattformen die Inhalte-Planung Beiträge schreibt.
+INHALTE_PLATTFORMEN = _text("INHALTE_PLATTFORMEN", "instagram,facebook,google")
 # [P7 Start] Ende
 
 

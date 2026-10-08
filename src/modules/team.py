@@ -294,16 +294,21 @@ statt es zu umgehen.""",
 # [P1 Bühne] Anfang
 # [P1 Bühne] Ende
 # [P2 Weltlage] Anfang
+ROLLEN["rechercheur"]["werkzeuge"] += ["weltlage", "lagebild", "nachrichten_suchen", "maerkte", "aktienkurs", "webseite_lesen"]
+ROLLEN["controller"]["werkzeuge"] += ["maerkte"]
 # [P2 Weltlage] Ende
 # [P3 Telefon] Anfang
+ROLLEN["rechercheur"]["werkzeuge"] += ["lokale_suchen"]
 # [P3 Telefon] Ende
 # [P4 Büro] Anfang
+ROLLEN["postmeister"]["werkzeuge"] += ["mail_antworten", "mail_entwurf"]
 # [P4 Büro] Ende
 # [P5 Sicht] Anfang
 # [P5 Sicht] Ende
 # [P6 Stimme] Anfang
 # [P6 Stimme] Ende
 # [P7 Start] Anfang
+ROLLEN["marketing"]["werkzeuge"] += ["inhalte_planen", "inhalte_plan", "inhalte_status"]
 # [P7 Start] Ende
 
 

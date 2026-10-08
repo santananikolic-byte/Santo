@@ -219,8 +219,8 @@ def _adressliste(paare) -> list:
 def _eigene_adressen() -> set:
     """Die Adressen des eigenen Postfachs (kleingeschrieben)."""
     eigene = set()
-    for wert in (getattr(config, "SMTP_ABSENDER", ""), getattr(config, "SMTP_USER", ""),
-                 getattr(config, "IMAP_USER", "")):
+    for wert in (config.SMTP_ABSENDER, config.SMTP_USER,
+                 config.IMAP_USER):
         for _name, adresse in email.utils.getaddresses([str(wert or "")]):
             if "@" in adresse:
                 eigene.add(adresse.strip().lower())

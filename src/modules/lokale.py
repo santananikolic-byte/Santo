@@ -276,7 +276,7 @@ class Lokale:
         Legt nie einen Interessenten an. Der Ort ist ``WETTER_ORT``, wenn keiner
         genannt wird.
         """
-        ort = _lokale_text(ort or getattr(config, "WETTER_ORT", "") or "", 80)
+        ort = _lokale_text(ort or config.WETTER_ORT or "", 80)
         if not ort:
             return {"ok": False, "fehler": "In welchem Ort soll ich suchen?"}
         schluessel = _lokale_kueche(kueche)

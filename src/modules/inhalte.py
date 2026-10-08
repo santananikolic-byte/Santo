@@ -284,7 +284,7 @@ def inhalt_datum_text(tag: date, mit_wochentag: bool = False) -> str:
 def inhalt_anrede() -> str:
     """"du" oder "sie" nach JARVIS_STIL. Steht dort beides oder keins, gilt "sie" –
     Fremde und Kunden spricht man im Zweifel mit Sie an."""
-    stil = inhalt_falten(getattr(config, "JARVIS_STIL", "") or "")
+    stil = inhalt_falten(config.JARVIS_STIL or "")
     du = re.search(r"\bdu\b|duze|duzt|du-form|per du\b|\bdich\b", stil)
     sie = re.search(r"\bsie\b|siez|sie-form|per sie\b", stil)
     return "du" if du and not sie else "sie"

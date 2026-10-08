@@ -218,6 +218,10 @@ class MacZugriff:
     def __init__(self, benutzerordner=None, programmordner=None):
         self.home = Path(benutzerordner or Path.home()).resolve()
         self.programm = Path(programmordner or config.BASIS).resolve()
+        # Plan und Protokoll des Ordnens liegen in der Datenbank; Jarvis setzt den Pfad.
+        self.db_pfad = None
+        # Liefert die Kundennamen für "nach_kunde" (Firmen aus Kontakten und Interessenten).
+        self.kunden_quelle = None
 
     # -- Prüfung ------------------------------------------------------------
 
@@ -394,3 +398,295 @@ class MacZugriff:
             return {"ok": False, "fehler": "Nicht schreibbar: %s" % fehler}
         return {"ok": True, "pfad": str(ziel), "zeichen": len(inhalt),
                 "text": "Gespeichert: %s." % ziel}
+
+    # -- Datei öffnen -------------------------------------------------------
+
+    def oeffnen_pruefen(self, pfad: str) -> dict:
+        """Darf diese Datei geöffnet werden? Positivliste: nur Dokumente, Bilder, Medien."""
+        ziel = self._aufloesen(pfad)
+        if ziel is None:
+            return {"ok": False, "fehler": "Sag mir, welche Datei ich öffnen soll."}
+        if not ziel.exists():
+            return {"ok": False, "fehler": "Die Datei gibt es nicht."}
+        if not _unter(ziel, self.home):
+            return {"ok": False, "fehler": "Ich öffne nur Dateien in deinem Benutzerordner."}
+        relativ = str(ziel).lower()[len(str(self.home).lower()):].lstrip("/")
+        if (relativ == "library" or relativ.startswith("library/")) \
+                and not (relativ + "/").startswith(OEFFNEN_LIBRARY_FREI):
+            return {"ok": False, "fehler": "In die Library öffne ich nichts - nur iCloud Drive."}
+        grund = self.gesperrt(ziel)
+        if grund:
+            return {"ok": False, "fehler": grund}
+        if ziel.is_dir() or any(eltern.suffix.lower() in (".app", ".framework", ".bundle", ".pkg", ".kext")
+                                for eltern in ziel.parents):
+            return {"ok": False, "fehler": OEFFNEN_ABLEHNUNG}
+        if ziel.suffix.lower() not in OEFFNEN_ERLAUBT:
+            return {"ok": False, "fehler": OEFFNEN_ABLEHNUNG}
+        return {"ok": True, "ziel": ziel}
+
+    def oeffnen(self, pfad: str, oeffner=None) -> dict:
+        """Öffnet eine Datei mit dem passenden Programm (``open``, ohne Shell).
+
+        ``oeffner(befehl) -> (code, fehlertext)`` ist für Prüfungen austauschbar.
+        """
+        pruefung = self.oeffnen_pruefen(pfad)
+        if not pruefung["ok"]:
+            return pruefung
+        ziel = pruefung["ziel"]
+        try:
+            code, text = _ordnen_oeffner_antwort((oeffner or _ordnen_standard_oeffner)(["open", str(ziel)]))
+        except (OSError, subprocess.SubprocessError) as fehler:
+            return {"ok": False, "fehler": "Das Öffnen ging nicht: %s" % fehler}
+        if code != 0:
+            return {"ok": False, "fehler": "Das Öffnen ging nicht%s" % ((": " + text[:160]) if text else ".")}
+        return {"ok": True, "pfad": str(ziel), "text": "Ich habe %s geöffnet." % ziel.name}
+
+    # -- Ordnen: erst planen, dann (mit Freigabe) ausführen, jederzeit zurück ----
+
+    def _ordnen_datenbank(self) -> str:
+        pfad = self.db_pfad or config.DB_PFAD
+        db_schema_anlegen(SCHEMA_ORDNEN, pfad)
+        return pfad
+
+    def _ordnen_wurzel_pruefen(self, wurzel) -> str:
+        """Warum dieser Ordner nicht geordnet wird - leer, wenn er darf."""
+        if wurzel is None:
+            return "Sag mir, welchen Ordner ich ordnen soll."
+        if not wurzel.is_dir():
+            return "Den Ordner gibt es nicht."
+        if _unter(wurzel, self.programm):
+            return "Jarvis ändert nichts in seinem eigenen Programmordner."
+        if not any(_unter(wurzel, ordner) for ordner in self.schreib_ordner()):
+            return ("Ich ordne nur in Dokumente, Schreibtisch und Downloads. "
+                    "Weitere Ordner kannst du in MAC_SCHREIBORDNER freigeben.")
+        relativ = str(wurzel).lower()[len(str(self.home).lower()):].lstrip("/")
+        for teil in SCHREIBEN_GESPERRT:
+            if relativ == teil or relativ.startswith(teil + "/"):
+                return "In diesen Bereich ordne ich nichts: Dort liegen Startobjekte, Schlüssel oder Einstellungen."
+        return self.gesperrt(wurzel)
+
+    def _ordnen_kunden(self) -> list:
+        try:
+            namen = list(self.kunden_quelle() or []) if self.kunden_quelle else []
+        except Exception:
+            namen = []
+        rein = {}
+        for name in namen:
+            ordner = _ordnen_ordnername(name)
+            kurz = _ordnen_normal(name)
+            if ordner and len(kurz) >= 3:
+                rein[kurz] = ordner
+        return sorted(rein.items(), key=lambda paar: -len(paar[0]))
+
+    @staticmethod
+    def _ordnen_ziel(regel: str, datei: Path, kunden: list):
+        """In welchen Unterordner die Datei gehört - ``None``, wenn sie bleibt."""
+        if regel == "nach_typ":
+            endung = datei.suffix.lower()
+            for ordner, endungen in ORDNEN_TYP_ENDUNGEN.items():
+                if endung in endungen:
+                    return ordner
+            return ORDNEN_SONSTIGES
+        if regel == "nach_monat":
+            try:
+                return datetime.fromtimestamp(datei.stat().st_mtime).strftime("%Y-%m")
+            except OSError:
+                return None
+        name = _ordnen_normal(datei.stem)
+        for kurz, ordner in kunden:
+            if kurz in name:
+                return ordner
+        return None
+
+    def ordnen_planen(self, ordner: str, regel: str = "nach_typ") -> dict:
+        """Plant das Aufräumen eines Ordners (nur oberste Ebene). Verschiebt nichts."""
+        regel = str(regel or "nach_typ").strip().lower()
+        if regel not in ORDNEN_REGELN:
+            return {"ok": False, "fehler": "Diese Regel kenne ich nicht. Möglich: %s." % ", ".join(ORDNEN_REGELN)}
+        wurzel = self._aufloesen(ordner)
+        grund = self._ordnen_wurzel_pruefen(wurzel)
+        if grund:
+            return {"ok": False, "fehler": grund}
+        try:
+            with os.scandir(str(wurzel)) as verzeichnis:
+                eintraege = sorted(verzeichnis, key=lambda e: e.name.lower())[:ORDNEN_MAX_EINTRAEGE]
+        except OSError as fehler:
+            return {"ok": False, "fehler": "Den Ordner kann ich nicht lesen: %s" % fehler}
+        kunden = self._ordnen_kunden() if regel == "nach_kunde" else []
+        if regel == "nach_kunde" and not kunden:
+            return {"ok": False, "fehler": "Ich kenne noch keine Kunden, nach denen ich ordnen könnte. "
+                                           "Lege erst Kontakte oder Interessenten mit Firmennamen an."}
+        zuege, uebersprungen, voll = [], 0, False
+        for eintrag in eintraege:
+            name = eintrag.name
+            if name.startswith(".") or name.startswith("~$"):
+                continue
+            try:
+                if not eintrag.is_file(follow_symlinks=False):
+                    continue  # Ordner und Verknüpfungen bleiben, wo sie sind
+            except OSError:
+                continue
+            datei = Path(eintrag.path)
+            if datei.suffix.lower() in ORDNEN_UNFERTIG or self.gesperrt(datei):
+                continue
+            unter = self._ordnen_ziel(regel, datei, kunden)
+            if not unter:
+                continue
+            zielordner = wurzel / unter
+            ziel = zielordner / name
+            if (zielordner.exists() and not zielordner.is_dir()) or zielordner.is_symlink() or ziel.exists():
+                uebersprungen += 1
+                continue
+            if len(zuege) >= ORDNEN_MAX_ZUEGE:
+                voll = True
+                break
+            zuege.append({"von": str(datei), "nach": str(ziel)})
+        if not zuege:
+            return {"ok": True, "plan_id": None, "anzahl": 0, "zuege": [], "uebersprungen": uebersprungen,
+                    "text": "In %s gibt es nichts zu ordnen%s." % (
+                        wurzel.name, " (%d Dateien haben ihren Platz schon)" % uebersprungen if uebersprungen else "")}
+        pfad = self._ordnen_datenbank()
+        verbindung = db_verbindung(pfad)
+        try:
+            lauf = verbindung.execute(
+                "INSERT INTO ordnungsplaene (ordner, regel, zuege_json, angelegt) VALUES (?, ?, ?, ?)",
+                (str(wurzel), regel, json.dumps(zuege, ensure_ascii=False), zeitstempel()))
+            verbindung.commit()
+            plan_id = lauf.lastrowid
+        finally:
+            verbindung.close()
+        zeilen = [_ordnen_zeile(z, wurzel) for z in zuege[:ORDNEN_MAX_ANZEIGE]]
+        if len(zuege) > ORDNEN_MAX_ANZEIGE:
+            zeilen.append("und %d weitere" % (len(zuege) - ORDNEN_MAX_ANZEIGE))
+        text = "Plan %d: %d Dateien in %s ordnen (%s). Bewegt wird erst nach deiner Freigabe." % (
+            plan_id, len(zuege), wurzel.name, regel.replace("_", " "))
+        if voll:
+            text += " Mehr als %d auf einmal ordne ich nicht." % ORDNEN_MAX_ZUEGE
+        return {"ok": True, "plan_id": plan_id, "anzahl": len(zuege), "zuege": zeilen,
+                "uebersprungen": uebersprungen, "text": text}
+
+    def _ordnen_plan_lesen(self, plan_id):
+        nummer = _ordnen_plan_nummer(plan_id)
+        if nummer is None:
+            return None, {"ok": False, "fehler": "Sag mir die Nummer des Plans."}
+        verbindung = db_verbindung(self._ordnen_datenbank())
+        try:
+            zeile = verbindung.execute("SELECT * FROM ordnungsplaene WHERE id=?", (nummer,)).fetchone()
+        finally:
+            verbindung.close()
+        if zeile is None:
+            return None, {"ok": False, "fehler": "Einen Plan mit der Nummer %d gibt es nicht." % nummer}
+        plan = dict(zeile)
+        try:
+            plan["zuege"] = json.loads(plan["zuege_json"])
+        except ValueError:
+            plan["zuege"] = []
+        return plan, None
+
+    def ordnen_plan_zeigen(self, plan_id) -> dict:
+        """Der Plan als lesbare Liste - für die Freigabefrage, die nie nur eine Nummer zeigen darf."""
+        plan, fehler = self._ordnen_plan_lesen(plan_id)
+        if fehler:
+            return fehler
+        wurzel = Path(plan["ordner"])
+        zeilen = [_ordnen_zeile(z, wurzel) for z in plan["zuege"][:ORDNEN_MAX_ANZEIGE]]
+        if len(plan["zuege"]) > ORDNEN_MAX_ANZEIGE:
+            zeilen.append("und %d weitere" % (len(plan["zuege"]) - ORDNEN_MAX_ANZEIGE))
+        return {"ok": True, "plan_id": plan["id"], "ordner": plan["ordner"], "regel": plan["regel"],
+                "status": plan["status"], "anzahl": len(plan["zuege"]), "zuege": zeilen}
+
+    def ordnen_ausfuehren(self, plan_id) -> dict:
+        """Führt einen Plan aus: nur verschieben, nie löschen, nie überschreiben."""
+        with _ORDNEN_SPERRE:
+            plan, fehler = self._ordnen_plan_lesen(plan_id)
+            if fehler:
+                return fehler
+            if plan["status"] != "geplant":
+                return {"ok": False, "fehler": "Dieser Plan ist schon %s." % plan["status"]}
+            wurzel = Path(plan["ordner"])
+            grund = self._ordnen_wurzel_pruefen(wurzel)
+            if grund:
+                return {"ok": False, "fehler": grund}
+            pfad = self._ordnen_datenbank()
+            verbindung = db_verbindung(pfad)
+            verschoben, uebergangen = 0, []
+            try:
+                for zug in plan["zuege"]:
+                    von, nach = Path(str(zug.get("von", ""))), Path(str(zug.get("nach", "")))
+                    # Jede Quelle und jedes Ziel wird jetzt noch einmal geprüft.
+                    if (_ordnen_ebene(wurzel, von) != 1 or _ordnen_ebene(wurzel, nach) != 2
+                            or nach.name != von.name or not von.is_file() or von.is_symlink()
+                            or self.gesperrt(von) or nach.exists() or nach.parent.is_symlink()
+                            or (nach.parent.exists() and not nach.parent.is_dir())):
+                        uebergangen.append(von.name)
+                        continue
+                    try:
+                        nach.parent.mkdir(exist_ok=True)
+                        os.link(str(von), str(nach))  # scheitert, wenn das Ziel da ist: überschreibt nie
+                        os.unlink(str(von))
+                    except OSError:
+                        uebergangen.append(von.name)
+                        continue
+                    verbindung.execute("INSERT INTO ordnungs_protokoll (plan_id, von, nach, zeit) VALUES (?, ?, ?, ?)",
+                                       (plan["id"], str(von), str(nach), zeitstempel()))
+                    verschoben += 1
+                verbindung.execute("UPDATE ordnungsplaene SET status='ausgeführt' WHERE id=?", (plan["id"],))
+                verbindung.commit()
+            finally:
+                verbindung.close()
+        text = "%d Dateien in %s geordnet." % (verschoben, wurzel.name)
+        if uebergangen:
+            text += " %d habe ich nicht angefasst, weil sich etwas geändert hatte." % len(uebergangen)
+        if verschoben:
+            text += " Rückgängig mit der Plannummer %d." % plan["id"]
+        return {"ok": True, "plan_id": plan["id"], "verschoben": verschoben,
+                "uebergangen": uebergangen[:ORDNEN_MAX_ANZEIGE], "text": text}
+
+    def ordnen_rueckgaengig(self, plan_id) -> dict:
+        """Legt die Dateien eines ausgeführten Plans an ihren alten Platz zurück."""
+        with _ORDNEN_SPERRE:
+            plan, fehler = self._ordnen_plan_lesen(plan_id)
+            if fehler:
+                return fehler
+            if plan["status"] != "ausgeführt":
+                return {"ok": False, "fehler": "Dieser Plan ist nicht ausgeführt (Stand: %s)." % plan["status"]}
+            wurzel = Path(plan["ordner"])
+            grund = self._ordnen_wurzel_pruefen(wurzel)
+            if grund:
+                return {"ok": False, "fehler": grund}
+            pfad = self._ordnen_datenbank()
+            verbindung = db_verbindung(pfad)
+            zurueck, geblieben = 0, []
+            try:
+                zeilen = verbindung.execute(
+                    "SELECT * FROM ordnungs_protokoll WHERE plan_id=? AND zurueck='' ORDER BY id DESC",
+                    (plan["id"],)).fetchall()
+                for zeile in zeilen:
+                    von, nach = Path(zeile["von"]), Path(zeile["nach"])
+                    if (_ordnen_ebene(wurzel, von) != 1 or _ordnen_ebene(wurzel, nach) != 2
+                            or not nach.is_file() or nach.is_symlink() or von.exists()):
+                        geblieben.append(nach.name)  # Original ist wieder belegt oder die Datei fehlt
+                        continue
+                    try:
+                        os.link(str(nach), str(von))
+                        os.unlink(str(nach))
+                    except OSError:
+                        geblieben.append(nach.name)
+                        continue
+                    verbindung.execute("UPDATE ordnungs_protokoll SET zurueck=? WHERE id=?",
+                                       (zeitstempel(), zeile["id"]))
+                    zurueck += 1
+                    try:
+                        nach.parent.rmdir()  # nur wenn leer; sonst bleibt der Ordner
+                    except OSError:
+                        pass
+                verbindung.execute("UPDATE ordnungsplaene SET status=? WHERE id=?",
+                                   ("zurückgenommen" if not geblieben else "ausgeführt", plan["id"]))
+                verbindung.commit()
+            finally:
+                verbindung.close()
+        text = "%d Dateien liegen wieder an ihrem alten Platz." % zurueck
+        if geblieben:
+            text += " %d sind geblieben, weil ihr alter Name wieder belegt ist oder die Datei fehlt." % len(geblieben)
+        return {"ok": True, "plan_id": plan["id"], "zurueck": zurueck,
+                "geblieben": geblieben[:ORDNEN_MAX_ANZEIGE], "text": text}

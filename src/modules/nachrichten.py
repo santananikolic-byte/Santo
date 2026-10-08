@@ -536,7 +536,7 @@ class Nachrichten:
     def _quellen_an() -> list:
         """Die eingeschalteten Quellen laut NACHRICHTEN_QUELLEN."""
         # getattr: bis die Verbindung den Schlüssel in config.py trägt, gilt der Standard.
-        roh = getattr(config, "NACHRICHTEN_QUELLEN", "tagesschau,google,dw")
+        roh = config.NACHRICHTEN_QUELLEN
         kennungen = [k.strip().lower() for k in str(roh or "").split(",")]
         return [NACHRICHTEN_KENNUNGEN[k] for k in kennungen if k in NACHRICHTEN_KENNUNGEN]
 

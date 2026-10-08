@@ -3114,9 +3114,50 @@ def pruefung_kern(agent):
             eintrag.get("was") == beschrieben["was"] and eintrag.get("warum") == beschrieben["warum"]
             and eintrag.get("wie") == beschrieben["wie"] and argumente == beschrieben["argumente"]
             and "\n" in eintrag.get("details", "") and eintrag.get("geste_erlaubt") is False, "")
-    pruefen("Eine Geste gibt in dieser Stufe nichts frei, ein Klick schon",
-            geste is False and grund == "Gesten-Freigabe ist noch nicht eingebaut." and noch_offen
-            and klick is True and ergebnis.get("erlaubt") is True and ergebnis.get("weg") == "klick", grund)
+    pruefen("Gesten-Freigabe ist standardmäßig aus: die Geste gibt nichts frei, ein Klick schon",
+            geste is False and grund == "Die Geste zählt hier nicht: Gesten-Freigabe ist ausgeschaltet."
+            and noch_offen and klick is True and ergebnis.get("erlaubt") is True
+            and ergebnis.get("weg") == "klick", grund)
+
+    # Mit eingeschalteter Geste: nur bei genau einer offenen Frage, erlaubter Aktion und
+    # nach zwei Sekunden - Zeit läuft hier über eine Fake-Uhr.
+    uhr = {"jetzt": 1000.0}
+    gesten_vorher = config.GESTEN_FREIGABE
+    config.GESTEN_FREIGABE = True
+    try:
+        fuer_geste = WebFreigabe(timeout=8, uhr=lambda: uhr["jetzt"])
+        ausgang = {}
+        fa = threading.Thread(target=lambda: ausgang.update(fuer_geste.anfordern(
+            "mail_senden", json.dumps(beschrieben, ensure_ascii=False))), daemon=True)
+        fa.start()
+        for _ in range(50):
+            if fuer_geste.offene():
+                break
+            time.sleep(0.02)
+        kennung_g = fuer_geste.offene()[0]["id"]
+        erlaubt_g = fuer_geste.offene()[0]["geste_erlaubt"]
+        zu_frisch = fuer_geste.beantworten(kennung_g, True, "geste")
+        grund_frisch = fuer_geste.letzter_grund
+        uhr["jetzt"] += 2.5
+        gesperrt = WebFreigabe(timeout=8, uhr=lambda: uhr["jetzt"])
+        fb = threading.Thread(target=lambda: gesperrt.anfordern("skript_ausfuehren", "x"), daemon=True)
+        fb.start()
+        for _ in range(50):
+            if gesperrt.offene():
+                break
+            time.sleep(0.02)
+        gesperrt_ok = gesperrt.beantworten(gesperrt.offene()[0]["id"], True, "geste")
+        grund_gesperrt = gesperrt.letzter_grund
+        gesperrt.beantworten(gesperrt.offene()[0]["id"], False, "klick")
+        angenommen = fuer_geste.beantworten(kennung_g, True, "geste")
+        fa.join(3)
+    finally:
+        config.GESTEN_FREIGABE = gesten_vorher
+    pruefen("Gesten-Freigabe an: zu frisch und gesperrte Aktionen werden abgewiesen, sonst zählt sie",
+            erlaubt_g is True and zu_frisch is False and "erst gerade gestellt" in grund_frisch
+            and gesperrt_ok is False and "nur ein Klick" in grund_gesperrt
+            and angenommen is True and ausgang.get("erlaubt") is True and ausgang.get("weg") == "geste",
+            grund_frisch[:40])
 
     # -- Echte Anfragen an die Web-App ---------------------------------------
     probe = _socket.socket()
@@ -3168,7 +3209,7 @@ def pruefung_kern(agent):
                                         "ORDER BY id DESC LIMIT 2")
         pruefen("/api/freigabe nimmt den Weg an: Geste abgelehnt, Klick zählt, beides im Protokoll",
                 code_geste == 200 and geste.get("ok") is False
-                and geste.get("text") == "Gesten-Freigabe ist noch nicht eingebaut."
+                and geste.get("text") == "Die Geste zählt hier nicht: Gesten-Freigabe ist ausgeschaltet."
                 and code_klick == 200 and klick.get("ok") is True and offen_web.get("erlaubt") is False
                 and len(protokoll) == 2 and '"klick"' in protokoll[0]["argumente"]
                 and '"geste"' in protokoll[1]["argumente"] and protokoll[1]["status"] == "abgelehnt", "")
@@ -3380,6 +3421,247 @@ def pruefung_kern(agent):
 # [P7 Start] Ende
 
 
+def pruefung_video_funktionen(agent):
+    """Nachrichten, Märkte, Web-Lesen, Lokale, Mail-Antwort, Ordnen, Inhalte - alles offline mit Fakes."""
+    abschnitt("Video-Funktionen")
+    import tempfile
+    from modules.freigabe import freigabe_beschreiben, freigabe_lesen
+    from modules.mac import MacZugriff
+    w = agent.tools
+    namen = set(w.namen())
+    neu = {"weltlage", "lagebild", "nachrichten_suchen", "maerkte", "aktienkurs", "webseite_lesen",
+           "lokale_suchen", "mail_antworten", "mail_entwurf", "vorschlaege_offen", "vorschlag_beantworten",
+           "datei_oeffnen", "ordnen_planen", "ordnen_ausfuehren", "ordnen_rueckgaengig",
+           "inhalte_planen", "inhalte_plan", "inhalte_status", "anzeige_zeigen"}
+    pruefen("Alle Werkzeuge der neuen Funktionen stehen im Katalog", neu <= namen,
+            ", ".join(sorted(neu - namen)) or "%d Werkzeuge" % len(neu))
+    katalog = {t["name"]: t for t in w.katalog()}
+    ohne_grund = [n for n in ("mail_antworten", "ordnen_ausfuehren", "ordnen_rueckgaengig")
+                  if "begruendung" not in katalog[n]["input_schema"]["required"]]
+    pruefen("Neue Werkzeuge mit Wirkung verlangen eine Begründung und eine Freigabe",
+            not ohne_grund and all(w.braucht_freigabe(n) for n in
+                                   ("mail_antworten", "ordnen_ausfuehren", "ordnen_rueckgaengig"))
+            and not w.braucht_freigabe("ordnen_planen") and not w.braucht_freigabe("weltlage"), str(ohne_grund))
+    pruefen("Alles, was Text ins Netz trägt, fragt nach fremdem Inhalt nach",
+            all(n in NETZ_SENDEND for n in ("nachrichten_suchen", "aktienkurs", "webseite_lesen", "lokale_suchen",
+                                            "mail_entwurf")), "")
+
+    # -- Weltlage: Nachrichten mit Fake-Netz --------------------------------
+    gn = ('<?xml version="1.0"?><rss><channel>'
+          '<item><title>Iran meldet neue Gespräche - Tagesschau</title><link>https://n.example/1</link>'
+          '<pubDate>Thu, 08 Oct 2026 08:00:00 GMT</pubDate><source>Tagesschau</source></item>'
+          '<item><title>Ölpreis steigt - Reuters</title><link>https://n.example/2</link>'
+          '<pubDate>Thu, 08 Oct 2026 07:00:00 GMT</pubDate><source>Reuters</source></item>'
+          '</channel></rss>').encode("utf-8")
+    abrufe = []
+
+    def fake_news(url, kopf=None, timeout=0):
+        abrufe.append(url)
+        if "news.google.com" in url:
+            return 200, gn, ""
+        return 0, b"", "nicht erreichbar"
+    echt_holen = w.nachrichten._holen
+    w.nachrichten._holen = fake_news
+    w.nachrichten.cache_leeren()
+    config.NACHRICHTEN_QUELLEN = "google"
+    try:
+        lage = w.run("weltlage", {"region": "iran"})
+        zeigt = w.anzeige.stand("buehne")
+        text = json.dumps(lage, ensure_ascii=False)
+        pruefen("weltlage liefert Schlagzeilen mit Quelle und richtet den Globus auf die Region",
+                lage.get("ok") and "Iran meldet neue Gespräche" in text and "Tagesschau" in text
+                and zeigt["daten"].get("modus") == "globus" and zeigt["daten"].get("fokus"),
+                text[:55])
+        pruefen("Das Ergebnis bleibt unter der Grenze, bei der agent.py abschneidet", len(text) < 5500, "%d" % len(text))
+        w.lauf_beginnen()  # neuer Gedankengang: sonst fragt Jarvis nach dem Lesen fremder Texte erst nach
+        gesucht = w.run("nachrichten_suchen", {"suchtext": "Ölpreis"})
+        pruefen("Freie Nachrichtensuche findet Treffer", gesucht.get("ok") and "Ölpreis" in json.dumps(gesucht, ensure_ascii=False), "")
+        w.nachrichten.cache_leeren()
+        w.nachrichten._holen = lambda url, kopf=None, timeout=0: (0, b"", "nicht erreichbar")
+        aus = w.run("weltlage", {"region": "iran"})
+        pruefen("Ohne Netz: ehrliche Meldung statt erfundener Nachrichten",
+                not aus.get("ok") and aus.get("fehler"), (aus.get("fehler") or "")[:55])
+    finally:
+        w.nachrichten._holen = echt_holen
+        config.NACHRICHTEN_QUELLEN = "tagesschau,google,dw"
+
+    # -- Märkte mit Fake-Yahoo -----------------------------------------------
+    spark = json.dumps({"^GDAXI": {"symbol": "^GDAXI", "timestamp": [1, 2, 3], "close": [100.0, 101.0, 102.5],
+                                    "previousClose": 100.0}}).encode("utf-8")
+    echt_markt = w.maerkte._holen
+    w.maerkte._holen = lambda url, kopf=None, timeout=0: (200, spark, "") if "spark" in url else (0, b"", "aus")
+    w.maerkte._zwischenspeicher.clear()
+    try:
+        kurse = w.run("maerkte", {"auswahl": ["dax"]})
+        pruefen("maerkte: Wert, Änderung und Quelle aus den gelieferten Daten",
+                kurse.get("ok") and "102" in json.dumps(kurse) and "Yahoo" in json.dumps(kurse, ensure_ascii=False)
+                and w.anzeige.stand("buehne")["daten"].get("modus") == "maerkte", json.dumps(kurse)[:55])
+        w.maerkte._zwischenspeicher.clear()
+        w.maerkte._holen = lambda url, kopf=None, timeout=0: (0, b"", "nicht erreichbar")
+        ohne = w.run("maerkte", {"auswahl": ["dax"]})
+        pruefen("maerkte ohne Netz erfindet keinen Kurs", not ohne.get("ok") or not ohne.get("kurse"),
+                (ohne.get("fehler") or "")[:50])
+    finally:
+        w.maerkte._holen = echt_markt
+
+    # -- Webseiten lesen: nie interne Adressen --------------------------------
+    interne = ["http://127.0.0.1/", "http://localhost:8765/api/lage", "http://192.168.1.1/", "http://10.0.0.5/",
+               "http://169.254.169.254/latest/meta-data/", "http://[::1]/", "http://2130706433/",
+               "http://0x7f000001/", "file:///etc/passwd", "ftp://example.com/"]
+    angefasst = []
+    echt_web = w.weblesen._holen
+    w.weblesen._holen = lambda url, kopf=None, timeout=0: angefasst.append(url) or (200, b"<p>x</p>", "")
+    try:
+        w.lauf_beginnen()
+        abgewiesen = [u for u in interne if not w.run("webseite_lesen", {"adresse": u}).get("ok")]
+        w.weblesen._holen = lambda url, kopf=None, timeout=0: (
+            200, ("<html><title>Test</title><body><nav>Menü</nav><h1>Überschrift</h1>"
+                  "<p>Das ist ein ausreichend langer Absatz über die Reinigung von Büros.</p>"
+                  "<script>boese()</script></body></html>").encode("utf-8"), "")
+        w.lauf_beginnen()
+        gelesen = w.run("webseite_lesen", {"adresse": "https://beispiel.example/seite"})
+    finally:
+        w.weblesen._holen = echt_web
+    pruefen("webseite_lesen weist alle internen und fremden Adressen ab, ohne sie anzufragen",
+            len(abgewiesen) == len(interne) and not angefasst, "%d von %d" % (len(abgewiesen), len(interne)))
+    pruefen("webseite_lesen gibt Text mit Quelle zurück, ohne Skripte und Menüs",
+            gelesen.get("ok") and "Reinigung von Büros" in json.dumps(gelesen, ensure_ascii=False)
+            and "boese" not in json.dumps(gelesen) and "Menü" not in json.dumps(gelesen, ensure_ascii=False),
+            json.dumps(gelesen, ensure_ascii=False)[:50])
+
+    # -- Lokale ---------------------------------------------------------------
+    osm = {"elements": [
+        {"type": "node", "lat": 48.2095, "lon": 16.3725, "tags": {"name": "Lotus", "amenity": "restaurant",
+                                                                   "cuisine": "chinese", "phone": "+43 1 2345678",
+                                                                   "opening_hours": "Mo-Sa 11:30-22:00"}},
+        {"type": "node", "lat": 48.21, "lon": 16.38, "tags": {"name": "Ohne Telefon", "amenity": "restaurant",
+                                                              "cuisine": "thai"}}]}
+    echt_ort = w.welt.ort_finden
+    w.welt.ort_finden = lambda ort: ({"name": "Wien", "breite": 48.2082, "laenge": 16.3738}, "")
+    w.lokale.holen = lambda abfrage: (osm, "")
+    try:
+        w.lauf_beginnen()
+        lokale = w.run("lokale_suchen", {"ort": "Wien", "kueche": "asiatisch"})
+        w.lauf_beginnen()
+        unbekannt = w.run("lokale_suchen", {"ort": "Wien", "kueche": "marsianisch"})
+    finally:
+        w.welt.ort_finden = echt_ort
+        w.lokale.holen = None
+    text = json.dumps(lokale, ensure_ascii=False)
+    pruefen("lokale_suchen: Name, Entfernung, Telefon und Öffnungszeiten laut Karte - nur mit Telefon",
+            lokale.get("ok") and "Lotus" in text and "+43" in text and "Ohne Telefon" not in text
+            and w.anzeige.stand("buehne")["daten"].get("modus") == "recherche", text[:55])
+    pruefen("lokale_suchen: unbekannte Küche wird benannt", not unbekannt.get("ok") and "marsianisch" in unbekannt.get("fehler", ""), "")
+
+    # -- Mail antworten: die Freigabe nennt, auf wessen Mail --------------------
+    echt_kopf = w.mail.kopf_zu_kennung
+    w.mail.kopf_zu_kennung = lambda kennung: {"ok": True, "absender": "Dr. Huber <huber@praxis.at>",
+                                              "betreff": "Angebot Praxisreinigung", "antwort_an": "huber@praxis.at",
+                                              "empfaenger": "ich@firma.at", "kennung": kennung, "hinweis": ""}
+    gefragt = []
+
+    class Merker:
+        def anfordern(self, aktion, details):
+            gefragt.append(details)
+            return {"erlaubt": False, "grund": "Test"}
+    kanal_vorher = w.freigabe_kanal
+    w.freigabe_kanal = Merker()
+    try:
+        w.lauf_beginnen()
+        w.run("mail_antworten", {"kennung": "<abc@mail>", "text": "Gern, ich komme Dienstag.", "begruendung": "Er hat nach einem Termin gefragt."})
+    finally:
+        w.freigabe_kanal = kanal_vorher
+        w.mail.kopf_zu_kennung = echt_kopf
+    beschr = freigabe_lesen(gefragt[0]) if gefragt else None
+    pruefen("Mail-Antwort: Freigabe nennt Absender, Betreff und Grund, nie nur eine Kennung",
+            beschr and "huber@praxis.at" in beschr["was"] and "Angebot Praxisreinigung" in beschr["was"]
+            and beschr["warum"].startswith("Er hat nach"), (beschr or {}).get("was", "")[:55])
+
+    # -- Ordnen und Öffnen (in einem Wegwerf-Zuhause) -------------------------
+    tmp = pathlib.Path(tempfile.mkdtemp())
+    (tmp / "home" / "Downloads").mkdir(parents=True)
+    d = tmp / "home" / "Downloads"
+    for n in ("a.pdf", "b.jpg", "c.xlsx", "d.txt"):
+        (d / n).write_text("x")
+    (d / "start.command").write_text("echo")
+    echt_mac = (w.mac.home, w.mac.programm, w.mac.db_pfad)
+    w.mac.home, w.mac.programm = (tmp / "home").resolve(), (tmp / "prog").resolve()
+    freigaben = []
+
+    class Ja:
+        def anfordern(self, aktion, details):
+            freigaben.append((aktion, details))
+            return {"erlaubt": True, "grund": "ok"}
+    w.freigabe_kanal = Ja()
+    try:
+        plan = w.run("ordnen_planen", {"ordner": str(d), "regel": "nach_typ"})
+        vorher = sorted(os.listdir(d))
+        w.lauf_beginnen()
+        erledigt = w.run("ordnen_ausfuehren", {"plan_id": plan.get("plan_id"), "begruendung": "Downloads aufräumen."})
+        nachher = sorted(os.listdir(d))
+        beschr = freigabe_lesen(freigaben[0][1]) if freigaben else {}
+        zurueck = w.run("ordnen_rueckgaengig", {"plan_id": plan.get("plan_id"), "begruendung": "Doch nicht."})
+        wieder = sorted(os.listdir(d))
+        geoeffnet = []
+        oeffnen_ok = w.mac.oeffnen(str(d / "a.pdf"), oeffner=lambda b: geoeffnet.append(b) or 0)
+        oeffnen_nein = w.mac.oeffnen(str(d / "start.command"), oeffner=lambda b: geoeffnet.append(b) or 0)
+    finally:
+        w.freigabe_kanal = kanal_vorher
+        w.mac.home, w.mac.programm, w.mac.db_pfad = echt_mac
+        shutil.rmtree(tmp, ignore_errors=True)
+    pruefen("ordnen_planen verschiebt nichts, ordnen_ausfuehren erst nach der Freigabe - und zeigt in ihr die Züge",
+            plan.get("ok") and plan.get("anzahl") == 5 and vorher == sorted(["a.pdf", "b.jpg", "c.xlsx", "d.txt", "start.command"])
+            and erledigt.get("verschoben") == 5 and "PDF" in nachher and "a.pdf" not in nachher
+            and beschr and "a.pdf" in beschr["was"] and "PDF/" in beschr["was"], str(erledigt.get("text", ""))[:50])
+    pruefen("ordnen_rueckgaengig legt alles an den alten Platz zurück",
+            zurueck.get("zurueck") == 5 and wieder == vorher, zurueck.get("text", "")[:50])
+    pruefen("datei_oeffnen: Dokumente ja, Skripte nie",
+            oeffnen_ok.get("ok") and not oeffnen_nein.get("ok") and len(geoeffnet) == 1, oeffnen_nein.get("fehler", "")[:45])
+
+    # -- Vorschläge --------------------------------------------------------------
+    vs = w.vorschlaege.einbringen("test-regel-1", "Soll ich morgen zwei Termine verschieben?", "test")
+    nochmal = w.vorschlaege.einbringen("test-regel-1", "Soll ich morgen zwei Termine verschieben?", "test")
+    offen = w.run("vorschlaege_offen", {})
+    beantwortet = w.run("vorschlag_beantworten", {"id": vs.get("id"), "angenommen": True})
+    umgedreht = w.run("vorschlag_beantworten", {"id": vs.get("id"), "angenommen": False})
+    pruefen("Vorschläge: einmal je Schlüssel, offen sichtbar, eine Antwort lässt sich nicht umdrehen",
+            vs.get("ok") and nochmal.get("doppelt") and offen.get("anzahl", 0) >= 1 and beantwortet.get("ok")
+            and not umgedreht.get("ok"), str(umgedreht.get("fehler", ""))[:45])
+
+    # -- Inhalte ----------------------------------------------------------------
+    plan_json = {"idee": "Sauberkeit sichtbar machen", "kernbotschaft": "Gepflegte Räume, ruhiger Betrieb",
+                 "beitraege": [{"plattform": "instagram", "titel": "Vorher/Nachher", "text": "Ein Büro, frisch gereinigt. #Reinigung",
+                                "hashtags": ["#Reinigung", "#Wien"]}],
+                 "video": {"titel": "Ein Tag", "laenge_s": 30, "szenen": [{"nr": 1, "bild": "Eingang", "ton": "Musik", "dauer_s": 5}]},
+                 "skript": "Kurzes Skript.", "termine": [{"datum": "2026-10-12", "plattform": "instagram"}]}
+
+    class FakeAgent:
+        @staticmethod
+        def einsatzbereit():
+            return True
+
+        @staticmethod
+        def json_anfrage(auftrag, **rest):
+            return {"ok": True, "daten": plan_json}
+    echt_agent = w.inhalte.agent
+    w.inhalte.agent = FakeAgent()
+    try:
+        geplant = w.run("inhalte_planen", {"thema": "Büroreinigung", "plattformen": ["instagram"]})
+        stand = w.run("inhalte_plan", {})
+    finally:
+        w.inhalte.agent = echt_agent
+    pruefen("inhalte_planen legt Entwürfe an und veröffentlicht nichts",
+            geplant.get("ok") and "Entwürfe" in geplant.get("text", "") and stand.get("ok")
+            and not any(str(e.get("status", "entwurf")) == "veroeffentlicht"
+                        for e in (stand.get("eintraege") or stand.get("plan") or []) if isinstance(e, dict)),
+            geplant.get("text", "")[:55])
+    # ohne Claude ehrlich bleiben
+    w.inhalte.agent = None
+    ohne_claude = w.run("inhalte_planen", {"thema": "Büroreinigung"})
+    w.inhalte.agent = echt_agent
+    pruefen("Ohne Claude erfindet inhalte_planen nichts", not ohne_claude.get("ok") and ohne_claude.get("fehler"), "")
+
+
 def pruefung_einzeldatei():
     abschnitt("Einzeldatei")
     pfad = os.path.join(WURZEL, "jarvis.py")
@@ -3496,6 +3778,7 @@ def main() -> int:
     # [P1 Bühne] Anfang
     # [P1 Bühne] Ende
     # [P2 Weltlage] Anfang
+    pruefung_video_funktionen(agent)
     # [P2 Weltlage] Ende
     # [P3 Telefon] Anfang
     # [P3 Telefon] Ende
