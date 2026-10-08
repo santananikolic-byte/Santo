@@ -15,6 +15,7 @@ Zwei Dinge, beide ehrlich:
 """
 
 import math
+import sqlite3
 from datetime import datetime, timedelta
 
 import config
@@ -179,8 +180,12 @@ class Leistung:
         last = self._tageslast(termine) if termine is not None else None
         erholung = {e["tag"]: e["wert"] for e in self.erholung.verlauf(tage + 1)}
         gespraeche = {}
-        for zeile in self.memory._lesen("SELECT datum, ergebnis FROM gespraeche WHERE datum>=? AND datum<=?",
-                                        (ab.isoformat(), heute.isoformat())):
+        try:
+            zeilen = self.memory._lesen("SELECT datum, ergebnis FROM gespraeche WHERE datum>=? AND datum<=?",
+                                        (ab.isoformat(), heute.isoformat()))
+        except sqlite3.Error:
+            zeilen = []  # noch keine Gespräche festgehalten
+        for zeile in zeilen:
             tag = erholung_tag_text(zeile["datum"])
             eintrag = gespraeche.setdefault(tag, {"alle": 0, "gewonnen": 0, "verloren": 0})
             eintrag["alle"] += 1

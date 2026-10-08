@@ -5129,6 +5129,7 @@ def pruefung_erholung(agent):
     """Erholung (Apple Health, Oura, Whoop, von Hand), Zusammenhang mit der Abschlussquote, Belastungsprüfung."""
     abschnitt("Erholung und Leistung")
     import fcntl
+    import zipfile
     import http.server
     import random
     import socketserver
@@ -5290,6 +5291,16 @@ def pruefung_erholung(agent):
                 and "Diese Datei lese ich nicht." in abgelehnt[2]["fehler"], abgelehnt[0]["fehler"][:50])
         pruefen("Import: eine kaputte Zip wird freundlich gemeldet, nichts stürzt ab",
                 not er.importieren(kaputt)["ok"] and "Zip" in er.importieren(kaputt)["fehler"], "")
+        bombe = os.path.join(daheim, "Downloads", "bombe.zip")
+        with zipfile.ZipFile(bombe, "w", zipfile.ZIP_DEFLATED, compresslevel=1) as archiv:
+            archiv.writestr("apple_health_export/export.xml", b"a" * 120000000)
+        bombe_antwort = er.importieren(bombe)
+        pruefen("Import: eine Zip-Bombe (winzig gepackt, riesig entpackt) wird nicht gelesen",
+                os.path.getsize(bombe) < 1000000 and not bombe_antwort["ok"] and "unglaublich groß" in bombe_antwort["fehler"],
+                bombe_antwort.get("fehler", "")[:50])
+        os.remove(bombe)
+        pruefen("Import: für 'groß' zählt die entpackte Größe, nicht die der Zip",
+                erh_modul.erholung_export_groesse(gross) > os.path.getsize(gross), "")
         # Große Dateien im Hintergrund
         gemeldet = []
         er.ausgabe = gemeldet.append
@@ -5380,6 +5391,11 @@ def pruefung_erholung(agent):
         netz.readiness_status = 200
         uhr.jetzt = datetime(2026, 9, 14, 16, 3)
         pruefen("Oura: nach der Wartezeit geht es weiter", oura.oura_holen()["ok"], "")
+        netz.readiness_status = 400
+        schief = oura.oura_holen()
+        netz.readiness_status = 200
+        pruefen("Oura: ein 400 auf die Daten ist kein abgelehnter Zugang, sondern ein Fehler 400",
+                not schief["ok"] and not schief.get("neu_verbinden") and "Fehler 400" in schief["fehler"], schief["fehler"][:50])
         netz.erwartet["oura"] = "anderer"
         verbraucht = oura.oura_holen()
         pruefen("Oura: ein abgelehnter Token führt zu 'neu verbinden', nicht zum Absturz",
@@ -5761,6 +5777,13 @@ def pruefung_erholung(agent):
             pruefen("Diskretmodus: der Kanal sicht gibt keine Gesundheitswerte heraus",
                     diskret["erholung"]["wert"] is None and diskret["erholung"]["quelle"] == "von Hand"
                     and diskret.get("handruhe", {}).get("mm") is None, str(diskret)[:56])
+            uhr.jetzt = datetime(2026, 9, 15, 12, 0)
+            ohne_heute = w.run("erholung_lesen", {})
+            alter_kanal = w.anzeige.stand("sicht")["daten"]["erholung"]
+            uhr.jetzt = datetime(2026, 9, 14, 12, 0)
+            pruefen("erholung_lesen: gibt es für heute nichts, steht der letzte Wert mit seinem Tag da - nicht als heutiger",
+                    ohne_heute["ok"] and "heute" not in ohne_heute and "Der letzte ist von" in ohne_heute["text"]
+                    and alter_kanal["tag"] == D and alter_kanal["wert"] == 55, ohne_heute["text"][:56])
             w.lauf_beginnen(hintergrund=True)
             w.anzeige.melden("sicht", {})
             w.run("erholung_lesen", {})

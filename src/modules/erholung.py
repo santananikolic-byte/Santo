@@ -288,6 +288,31 @@ def _schlaf_tag(ende) -> str:
     return tag.isoformat()
 
 
+def _export_mitglied(archiv):
+    """Das ``export.xml`` in der Zip (die Health-App legt es nach apple_health_export/). ``None``, wenn keines da ist."""
+    kandidaten = [i for i in archiv.infolist()
+                  if i.filename.lower().endswith(".xml") and not i.is_dir()
+                  and not any(w in i.filename.lower() for w in ("cda", "electrocardiogram", "clinical", "workout-routes"))]
+    wahl = [i for i in kandidaten if i.filename.lower().rsplit("/", 1)[-1] in ("export.xml", "exportieren.xml")]
+    if not wahl and kandidaten:
+        wahl = [max(kandidaten, key=lambda i: i.file_size)]
+    return wahl[0] if wahl else None
+
+
+def erholung_export_groesse(pfad) -> int:
+    """Wie viele Bytes der Export entpackt hat - bei einer Zip die des ``export.xml``, sonst die Dateigröße."""
+    groesse = os.path.getsize(str(pfad))
+    if str(pfad).lower().endswith(".zip"):
+        try:
+            with zipfile.ZipFile(str(pfad)) as archiv:
+                info = _export_mitglied(archiv)
+                if info is not None:
+                    groesse = max(groesse, info.file_size)
+        except (zipfile.BadZipFile, OSError):
+            pass
+    return groesse
+
+
 @contextmanager
 def _export_oeffnen(pfad):
     """Öffnet ``export.xml`` zum Lesen: aus der Zip, ohne sie zu entpacken, oder direkt."""
@@ -298,18 +323,11 @@ def _export_oeffnen(pfad):
         except zipfile.BadZipFile:
             raise ValueError("Das ist keine lesbare Zip-Datei.")
         with archiv:
-            kandidaten = [i for i in archiv.infolist()
-                          if i.filename.lower().endswith(".xml") and not i.is_dir()
-                          and not any(w in i.filename.lower()
-                                      for w in ("cda", "electrocardiogram", "clinical", "workout-routes"))]
-            wahl = [i for i in kandidaten
-                    if i.filename.lower().rsplit("/", 1)[-1] in ("export.xml", "exportieren.xml")]
-            if not wahl and kandidaten:
-                wahl = [max(kandidaten, key=lambda i: i.file_size)]
-            if not wahl:
+            info = _export_mitglied(archiv)
+            if info is None:
                 raise ValueError("In der Zip-Datei steckt kein export.xml - ist das der Export aus der Health-App?")
-            info = wahl[0]
-            if info.file_size > IMPORT_MAX_ENTPACKT:
+            # Ein echter Export schrumpft auf etwa ein Zehntel; ein Vielfaches davon ist eine Zip-Bombe.
+            if info.file_size > IMPORT_MAX_ENTPACKT or info.file_size > 100 * max(info.compress_size, 1) + 67108864:
                 raise ValueError("Die Datei ist entpackt unglaublich groß - das lese ich nicht.")
             _export_kopf_pruefen(archiv.open(info))
             with archiv.open(info) as datei:
@@ -666,10 +684,10 @@ class Erholung:
     # -- Anzeige ----------------------------------------------------------------
 
     def anzeigen(self, eintrag: dict = None, dauer_s: float = 120):
-        """Zeigt den Erholungswert auf der Zentrale (Kanal ``sicht`` und Ansicht ``sicht``)."""
+        """Zeigt einen Erholungswert (Standard: den von heute) auf der Zentrale - Kanal ``sicht`` und Ansicht ``sicht``."""
         eintrag = eintrag or self.heute()
-        if not eintrag.get("ok"):
-            return
+        if "wert" not in eintrag:
+            return  # nichts da, nichts gezeigt (auch ein älterer Wert mit seinem Tag darf erscheinen)
         sicht_teil_schreiben(self.anzeige, {"erholung": {
             "wert": eintrag["wert"], "band": eintrag["band"], "quelle": eintrag["quelle"], "tag": eintrag["tag"]}},
             dauer_s)
@@ -727,13 +745,14 @@ class Erholung:
     def importieren(self, pfad, hintergrund: bool = True) -> dict:
         """Liest einen Apple-Health-Export und rechnet die Erholung je Tag.
 
-        Große Dateien (über 300 MB) liest ein Hintergrundfaden; das Ergebnis kommt dann über
+        Große Exporte (entpackt über 300 MB) liest ein Hintergrundfaden; das Ergebnis kommt dann über
         ``ausgabe`` und steht in ``letzter_import``.
         """
         ziel, fehler = self._import_pfad(pfad)
         if fehler:
             return {"ok": False, "fehler": fehler}
-        if hintergrund and ziel.stat().st_size > IMPORT_HINTERGRUND_BYTES:
+        groesse = erholung_export_groesse(ziel)
+        if hintergrund and groesse > IMPORT_HINTERGRUND_BYTES:
             if not self._import_sperre.acquire(False):
                 return {"ok": False, "fehler": "Ein Export wird gerade gelesen. Ich melde mich, wenn er fertig ist."}
             faden = threading.Thread(target=self._import_im_hintergrund, args=(ziel,), daemon=True,
@@ -742,7 +761,7 @@ class Erholung:
             faden.start()
             return {"ok": True, "hintergrund": True,
                     "text": "Der Export ist groß (%d MB). Ich lese ihn im Hintergrund und melde mich, "
-                            "wenn ich fertig bin." % (ziel.stat().st_size // (1024 * 1024))}
+                            "wenn ich fertig bin." % (groesse // (1024 * 1024))}
         return self._import_ausfuehren(ziel)
 
     def _import_im_hintergrund(self, ziel):
@@ -885,8 +904,11 @@ class Erholung:
                       (dienst, jetzt if gelungen else alt["zeit"], jetzt + warten_s if warten_s else 0.0,
                        status[:200]))
 
-    def _http_fehler(self, dienst: str, status: int, text: str, kopf: dict) -> dict:
-        """Aus einem fehlgeschlagenen Aufruf eine ehrliche Meldung machen (nie mit Schlüsseln darin)."""
+    def _http_fehler(self, dienst: str, status: int, text: str, kopf: dict, token: bool = False) -> dict:
+        """Aus einem fehlgeschlagenen Aufruf eine ehrliche Meldung machen (nie mit Schlüsseln darin).
+
+        ``token``: der Aufruf ging an den Token-Dienst - dort heißt 400 "Schlüssel ungültig".
+        """
         info = WEARABLE_DIENSTE[dienst]
         name = info["name"]
         if status == 0:
@@ -898,7 +920,7 @@ class Erholung:
                 warten = 3600
             return {"ok": False, "warten_s": warten,
                     "fehler": "%s bittet um Geduld (zu viele Anfragen). Ich versuche es später wieder." % name}
-        if status in (400, 401, 403):
+        if status in (401, 403) or (token and status == 400):
             return {"ok": False, "neu_verbinden": True,
                     "fehler": "Der Zugang zu %s wird abgelehnt - er ist abgelaufen oder wurde widerrufen. "
                               "Bitte neu verbinden: python3 jarvis.py zugang %s" % (name, dienst)}
@@ -909,7 +931,7 @@ class Erholung:
         info = WEARABLE_DIENSTE[dienst]
         status, text, kopf = self._holen("POST", info["token"], {}, formular)
         if status != 200:
-            return self._http_fehler(dienst, status, text, kopf)
+            return self._http_fehler(dienst, status, text, kopf, token=True)
         antwort = _erh_json(text)
         if not antwort or not antwort.get("access_token"):
             return {"ok": False, "fehler": "%s hat keinen Zugangsschlüssel geliefert." % info["name"]}
