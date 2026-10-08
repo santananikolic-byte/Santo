@@ -26,6 +26,8 @@ Terminal spricht, nimmt ``hoeren``.
     python3 jarvis.py zugang telegram  Handy verbinden: schreiben und sprechen von unterwegs
     python3 jarvis.py macapp      Jarvis als Programm: Symbol im Dock und im Programme-Ordner
     python3 jarvis.py autopilot   Postfach des Autopiloten (an / aus zum Schalten)
+    python3 jarvis.py gesundheit  Apple-Health-Export einlesen (Datei) oder alle Gesundheitswerte vergessen
+    python3 jarvis.py zugang oura Oura Ring verbinden (ebenso: zugang whoop) für den Erholungswert
     python3 jarvis.py daemon      dauerhaft, nur Stimme, ohne Fenster (der iMac als Kopf)
     python3 jarvis.py dienst      installieren | entfernen | status | neustart | hinweise
     python3 jarvis.py anzeige     Zentrale und Gehirn auf den Bildschirmen öffnen
@@ -63,6 +65,7 @@ from modules.webapp import JarvisWeb, STANDARD_PORT
 # [P4 Büro] Anfang
 # [P4 Büro] Ende
 # [P5 Sicht] Anfang
+from modules.erholung import gesundheit_im_terminal, wearable_zugang_im_terminal
 # [P5 Sicht] Ende
 # [P6 Stimme] Anfang
 # [P6 Stimme] Ende
@@ -218,6 +221,8 @@ def dauerbetrieb(dienst: bool = False):
     # [P4 Büro] Anfang
     # [P4 Büro] Ende
     # [P5 Sicht] Anfang
+    # Ein langer Gesundheitsimport läuft im Hintergrund und meldet sich, wenn er fertig ist.
+    agent.tools.erholung.ausgabe = ansager.sagen if dienst else stimme.sprich
     # [P5 Sicht] Ende
     # [P6 Stimme] Anfang
     # [P6 Stimme] Ende
@@ -578,6 +583,7 @@ def webbetrieb(argumente=None):
     # [P4 Büro] Anfang
     # [P4 Büro] Ende
     # [P5 Sicht] Anfang
+    agent.tools.erholung.ausgabe = web.melden
     # [P5 Sicht] Ende
     # [P6 Stimme] Anfang
     # [P6 Stimme] Ende
@@ -1054,7 +1060,8 @@ def hauptprogramm(argumente=None) -> int:
         return macapp_anlegen(argumente[1:])
     elif modus == "autopilot":
         return autopilot_zeigen(argumente[1:])
-    elif modus in ("zugang", "schluessel", "schlüssel"):
+    elif modus in ("zugang", "schluessel", "schlüssel") \
+            and (argumente[1].strip().lower() if len(argumente) > 1 else "") not in ("oura", "whoop"):
         return 0 if zugang_eintragen(argumente[1] if len(argumente) > 1 else "") else 1
     # Neue Betriebsarten der Pakete, je als "elif modus == ...:".
     # [P1 Bühne] Anfang
@@ -1066,6 +1073,11 @@ def hauptprogramm(argumente=None) -> int:
     # [P4 Büro] Anfang
     # [P4 Büro] Ende
     # [P5 Sicht] Anfang
+    elif modus in ("zugang", "schluessel", "schlüssel"):
+        # nur oura und whoop kommen hier an (siehe die Bedingung der ersten Zeile von "zugang")
+        return wearable_zugang_im_terminal(argumente[1].strip().lower())
+    elif modus in ("gesundheit", "erholung"):
+        return gesundheit_im_terminal(argumente[1:])
     # [P5 Sicht] Ende
     # [P6 Stimme] Anfang
     # [P6 Stimme] Ende

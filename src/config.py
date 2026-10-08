@@ -285,6 +285,22 @@ VORSCHLAEGE_AN = _wahrheit("VORSCHLAEGE_AN", True)
 CALDAV_ZEITZONE = _text("CALDAV_ZEITZONE", "Europe/Vienna")
 # [P4 Büro] Ende
 # [P5 Sicht] Anfang
+# Erholung aus Oura oder Whoop. Beide verlangen eine eigene App (OAuth): Client-ID und Client-Secret trägt
+# `python3 jarvis.py zugang oura` (oder whoop) ein; den Refresh-Token schreibt Jarvis selbst nach config/.env
+# und erneuert ihn bei jedem Abruf (er gilt nur einmal).
+OURA_CLIENT_ID = _text("OURA_CLIENT_ID")
+OURA_CLIENT_SECRET = _text("OURA_CLIENT_SECRET")
+OURA_REFRESH_TOKEN = _text("OURA_REFRESH_TOKEN")
+WHOOP_CLIENT_ID = _text("WHOOP_CLIENT_ID")
+WHOOP_CLIENT_SECRET = _text("WHOOP_CLIENT_SECRET")
+WHOOP_REFRESH_TOKEN = _text("WHOOP_REFRESH_TOKEN")
+# Woran Jarvis im Kalender einen Verkaufstermin erkennt (Stichwörter im Titel, kommagetrennt).
+VERKAUFS_STICHWOERTER = _text("VERKAUFS_STICHWOERTER", "besichtigung,angebot,erstgespräch,beratung,vor ort,akquise,objektbegehung")
+# Belastungsprüfung am Abend: Liegt die Erholung unter der Schwelle und stehen morgen mindestens so viele Termine an,
+# macht Jarvis (bei genug Zahlen) einen Vorschlag - ändern tut er nichts. Die Uhrzeit "aus" schaltet sie ab.
+BELASTUNG_SCHWELLE = _ganzzahl("BELASTUNG_SCHWELLE", 34)
+BELASTUNG_MIN_TERMINE = _ganzzahl("BELASTUNG_MIN_TERMINE", 4)
+BELASTUNG_PRUEFEN_UM = _text("BELASTUNG_PRUEFEN_UM", "18:25")
 # [P5 Sicht] Ende
 # [P6 Stimme] Anfang
 # [P6 Stimme] Ende
@@ -378,6 +394,7 @@ def konfig_uebersicht() -> dict:
         # [P4 Büro] Anfang
         # [P4 Büro] Ende
         # [P5 Sicht] Anfang
+        "Wearable": bool(OURA_REFRESH_TOKEN or WHOOP_REFRESH_TOKEN),
         # [P5 Sicht] Ende
         # [P6 Stimme] Anfang
         # [P6 Stimme] Ende

@@ -509,6 +509,10 @@ class Einrichtung:
         # [P4 Büro] Anfang
         # [P4 Büro] Ende
         # [P5 Sicht] Anfang
+        # Beide verbinden sich über eine eigene App (OAuth): hier nur das Client-Secret, alles Weitere macht
+        # `python3 jarvis.py zugang oura` bzw. `zugang whoop` (fragt auch die Client-ID und meldet an).
+        ("oura", "Oura Ring, Client-Secret (danach: zugang oura)", "OURA_CLIENT_SECRET", "https://cloud.ouraring.com/oauth/applications"),
+        ("whoop", "Whoop, Client-Secret (danach: zugang whoop)", "WHOOP_CLIENT_SECRET", "https://developer-dashboard.whoop.com/"),
         # [P5 Sicht] Ende
         # [P6 Stimme] Anfang
         # [P6 Stimme] Ende

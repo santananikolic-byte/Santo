@@ -886,6 +886,14 @@ class JarvisAgent:
         # [P4 Büro] Anfang
         # [P4 Büro] Ende
         # [P5 Sicht] Anfang
+        if morgens:
+            # Eine Zeile zur Erholung - nur, wenn es für heute einen echten Wert gibt (sonst gar nichts).
+            try:
+                erholung = self.tools.erholung.heute(abrufen=True)
+                if erholung.get("ok"):
+                    teile.append("Erholung: %s" % erholung["text"])
+            except Exception as fehler:
+                print("[briefing] Erholung nicht abrufbar: %s" % fehler)
         # [P5 Sicht] Ende
         # [P6 Stimme] Anfang
         # [P6 Stimme] Ende

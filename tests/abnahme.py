@@ -5014,6 +5014,883 @@ def pruefung_buero(agent):
         w.lauf_beginnen()
 # [P4 Büro] Ende
 # [P5 Sicht] Anfang
+def _erholung_satz(typ, start, ende, wert=None, quelle="Apple Watch"):
+    """Eine Zeile Record im Format des Apple-Health-Exports (Ortszeit +0200)."""
+    z = lambda d: d.strftime("%Y-%m-%d %H:%M:%S +0200")  # noqa: E731
+    wert_teil = ' value="%s"' % wert if wert is not None else ""
+    return (' <Record type="%s" sourceName="%s" creationDate="%s" startDate="%s" endDate="%s"%s/>\n'
+            % (typ, quelle, z(ende), z(start), z(ende), wert_teil))
+
+
+ERHOLUNG_XML_KOPF = (
+    '<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE HealthData [\n'
+    '<!-- HealthKit Export Version: 14 -->\n'
+    '<!ELEMENT HealthData (ExportDate,Me,(Record)*)>\n<!ATTLIST HealthData locale CDATA #REQUIRED>\n'
+    '<!ELEMENT Record ((MetadataEntry)*)>\n'
+    '<!ATTLIST Record type CDATA #REQUIRED sourceName CDATA #REQUIRED value CDATA #IMPLIED '
+    'creationDate CDATA #IMPLIED startDate CDATA #REQUIRED endDate CDATA #REQUIRED>\n'
+    '<!ELEMENT MetadataEntry EMPTY>\n<!ATTLIST MetadataEntry key CDATA #REQUIRED value CDATA #REQUIRED>\n'
+    ']>\n<HealthData locale="de_DE">\n <ExportDate value="2026-09-15 07:00:00 +0200"/>\n'
+    ' <Me HKCharacteristicTypeIdentifierDateOfBirth="1985-01-01"/>\n')
+
+
+def _erholung_export_schreiben(pfad, inhalt, als_zip=True):
+    """Schreibt einen kleinen Export: als export.zip (apple_health_export/export.xml) oder als nackte XML."""
+    import zipfile
+    xml = ERHOLUNG_XML_KOPF + inhalt + "</HealthData>\n"
+    os.makedirs(os.path.dirname(pfad), exist_ok=True)
+    if als_zip:
+        with zipfile.ZipFile(pfad, "w", zipfile.ZIP_DEFLATED) as z:
+            z.writestr("apple_health_export/export.xml", xml)
+            z.writestr("apple_health_export/export_cda.xml", "<ClinicalDocument/>")
+    else:
+        with open(pfad, "w", encoding="utf-8") as datei:
+            datei.write(xml)
+
+
+class ErholungNetz(object):
+    """Ein Fake für Oura und Whoop: Token-Dienst mit einmaligen Refresh-Tokens und die Datenadressen."""
+
+    def __init__(self, tag):
+        self.tag = tag
+        self.aufrufe = []
+        self.log = []
+        self.erwartet = {"oura": "alt-1", "whoop": "alt-1"}
+        self.zaehler = {"oura": 0, "whoop": 0}
+        self.readiness_status = 200
+        self.retry_after = "120"
+
+    def __call__(self, methode, url, kopf=None, formular=None, timeout=20):
+        self.aufrufe.append((methode, url, dict(kopf or {}), dict(formular or {})))
+        self.log.append(url)
+        dienst = "oura" if "ouraring" in url else "whoop"
+        if url.endswith("/token") or url.endswith("/oauth2/token"):
+            art = formular.get("grant_type")
+            if art == "refresh_token" and formular.get("refresh_token") != self.erwartet[dienst]:
+                return 400, '{"error":"invalid_grant","error_description":"Token schon benutzt"}', {}
+            if art == "authorization_code" and formular.get("code") != "gueltiger-code":
+                return 400, '{"error":"invalid_grant"}', {}
+            self.zaehler[dienst] += 1
+            self.erwartet[dienst] = "neu-%d" % self.zaehler[dienst]
+            return 200, json.dumps({"access_token": "acc-%s-%d" % (dienst, self.zaehler[dienst]),
+                                    "refresh_token": self.erwartet[dienst], "expires_in": 86400}), {}
+        if "daily_readiness" in url:
+            if self.readiness_status != 200:
+                return self.readiness_status, "{}", {"retry-after": self.retry_after}
+            gestern = (datetime.strptime(self.tag, "%Y-%m-%d") - timedelta(days=1)).strftime("%Y-%m-%d")
+            return 200, json.dumps({"data": [{"day": gestern, "score": 80}, {"day": self.tag, "score": 72}],
+                                    "next_token": None}), {}
+        if "daily_sleep" in url:
+            return 200, json.dumps({"data": [{"day": self.tag, "score": 77}]}), {}
+        if url.startswith("https://api.ouraring.com/v2/usercollection/sleep"):
+            return 200, json.dumps({"data": [
+                {"day": self.tag, "type": "rest", "average_hrv": 10, "lowest_heart_rate": 70,
+                 "total_sleep_duration": 1200},
+                {"day": self.tag, "type": "long_sleep", "average_hrv": 44.5, "lowest_heart_rate": 52,
+                 "total_sleep_duration": 27000}]}), {}
+        if "whoop.com/developer/v2/recovery" in url:
+            return 200, json.dumps({"records": [
+                {"cycle_id": 1, "created_at": self.tag + "T12:00:12.123Z", "score_state": "SCORED",
+                 "score": {"recovery_score": 88.0, "resting_heart_rate": 50.0, "hrv_rmssd_milli": 63.2}},
+                {"cycle_id": 2, "created_at": "2026-01-01T12:00:00.000Z", "score_state": "PENDING_SCORE"}],
+                "next_token": None}), {}
+        return 404, "{}", {}
+
+
+class ErholungKalender(object):
+    """Ein Kalender aus einem Wörterbuch ``{Tag: [Titel, ...]}``; kürzt lange Zeiträume wie der echte."""
+
+    def __init__(self, tage, kuerzen_ab=6, ganztaegig=()):
+        self.tage = tage
+        self.kuerzen_ab = kuerzen_ab
+        self.ganztaegig = ganztaegig
+        self.anfragen = []
+
+    def verfuegbar(self):
+        return True
+
+    def termine(self, tage=7, ab=None):
+        self.anfragen.append((tage, ab.strftime("%Y-%m-%d")))
+        liste = []
+        for i in range(tage):
+            tag = (ab + timedelta(days=i)).strftime("%Y-%m-%d")
+            for nr, titel in enumerate(self.tage.get(tag, [])):
+                liste.append({"titel": titel, "beginn": "%s %02d:00" % (tag, 8 + nr), "ende": "%s %02d:45" % (tag, 8 + nr)})
+            if tag in self.ganztaegig:
+                liste.append({"titel": "Feiertag", "beginn": tag + " 00:00", "ende": tag + " 23:59", "ganztaegig": True})
+        antwort = {"ok": True, "anzahl": len(liste), "termine": liste}
+        if tage > self.kuerzen_ab and len(liste) > 2:
+            antwort["termine"] = liste[:2]
+            antwort["gekuerzt"] = "Es sind noch %d spätere Termine da." % (len(liste) - 2)
+        return antwort
+
+
+def pruefung_erholung(agent):
+    """Erholung (Apple Health, Oura, Whoop, von Hand), Zusammenhang mit der Abschlussquote, Belastungsprüfung."""
+    abschnitt("Erholung und Leistung")
+    import fcntl
+    import http.server
+    import random
+    import socketserver
+    import modules.erholung as erh_modul
+    import modules.leistung as leistung_modul
+    from modules.call_analysis import CallAnalysis
+    from modules.erholung import (Erholung, apple_export_lesen, erholung_band, erholung_schaetzen,
+                                  gesundheit_im_terminal, schlaf_stunden)
+    from modules.leistung import Leistung, pearson, verkaufstermin
+    from modules.mac import MacZugriff
+    from modules.memory import Memory
+    from modules.vorschlaege import Vorschlaege
+
+    ordner = os.path.join(ARBEITSVERZEICHNIS, "erholung")
+    os.makedirs(ordner, exist_ok=True)
+    daheim = os.path.join(ordner, "daheim")  # das "Benutzerverzeichnis" dieser Prüfung
+    zugriff = MacZugriff(benutzerordner=daheim)
+    D = "2026-09-14"
+
+    class Uhr(object):
+        def __init__(self):
+            self.jetzt = datetime(2026, 9, 14, 12, 0)
+
+        def __call__(self):
+            return self.jetzt
+
+    uhr = Uhr()
+    sicher = (config.OURA_CLIENT_ID, config.OURA_CLIENT_SECRET, config.OURA_REFRESH_TOKEN, config.WHOOP_CLIENT_ID,
+              config.WHOOP_CLIENT_SECRET, config.WHOOP_REFRESH_TOKEN, config.ENV_DATEI, config.CONFIG_VERZEICHNIS,
+              config.VORSCHLAEGE_AN, config.ANZEIGE_DISKRET, config.WETTER_ORT)
+    try:
+        # ---------------------------------------------------------------- Apple Health: Export lesen
+        z = lambda tag, h, m=0: datetime(2026, 9, tag, h, m)  # noqa: E731
+        inhalt = (
+            _erholung_satz("HKQuantityTypeIdentifierHeartRateVariabilitySDNN", z(10, 3), z(10, 3, 1), 50)
+            + _erholung_satz("HKQuantityTypeIdentifierHeartRateVariabilitySDNN", z(10, 14), z(10, 14, 1), 20)
+            + _erholung_satz("HKQuantityTypeIdentifierRestingHeartRate", z(10, 0), z(10, 9), 55)
+            # Schlaf: Uhr in Phasen, iPhone überlappend; InBed und Awake zählen nicht.
+            + _erholung_satz("HKCategoryTypeIdentifierSleepAnalysis", z(9, 22, 30), z(10, 7), "HKCategoryValueSleepAnalysisInBed")
+            + _erholung_satz("HKCategoryTypeIdentifierSleepAnalysis", z(9, 23), z(9, 23, 40), "HKCategoryValueSleepAnalysisAsleepCore")
+            + _erholung_satz("HKCategoryTypeIdentifierSleepAnalysis", z(9, 23, 40), z(10, 3), "HKCategoryValueSleepAnalysisAsleepDeep")
+            + _erholung_satz("HKCategoryTypeIdentifierSleepAnalysis", z(10, 3), z(10, 3, 20), "HKCategoryValueSleepAnalysisAwake")
+            + _erholung_satz("HKCategoryTypeIdentifierSleepAnalysis", z(10, 3, 20), z(10, 6, 30), "HKCategoryValueSleepAnalysisAsleepREM")
+            + _erholung_satz("HKCategoryTypeIdentifierSleepAnalysis", z(9, 23, 15), z(10, 6), "HKCategoryValueSleepAnalysisAsleepUnspecified", "iPhone")
+            + _erholung_satz("HKQuantityTypeIdentifierHeartRate", z(10, 8), z(10, 8, 1), 70))
+        zip_pfad = os.path.join(daheim, "Downloads", "export.zip")
+        _erholung_export_schreiben(zip_pfad, inhalt)
+        daten = apple_export_lesen(zip_pfad, "2026-09-01")
+        tag = daten.get("2026-09-10", {})
+        # Der iPhone-Eintrag (23:15-06:00) überlappt die Uhr-Phasen und deckt auch die Wachphase 3:00-3:20 ab.
+        pruefen("Apple Health: HRV nur aus der Nacht, Ruhepuls, Schlaf (zwei Quellen, einmal gezählt) am Tag des Aufwachens",
+                tag.get("hrv") == [50.0] and tag.get("ruhepuls") == [55.0] and "2026-09-09" not in daten
+                and schlaf_stunden(tag.get("schlaf", [])) == 7.5,
+                str({k: (len(v) if k == "schlaf" else v) for k, v in tag.items()})[:58])
+        pruefen("Apple Health: Awake und InBed zählen nicht - die Wachphase bleibt eine Lücke",
+                len(tag.get("schlaf", [])) == 4 and abs(schlaf_stunden([(z(9, 23), z(10, 3)), (z(10, 3, 20), z(10, 6, 30))])
+                                                        - (7 + 10 / 60.0)) < 1e-9 and schlaf_stunden([]) == 0.0,
+                "%d Intervalle" % len(tag.get("schlaf", [])))
+        nur_xml = os.path.join(daheim, "Downloads", "export.xml")
+        _erholung_export_schreiben(nur_xml, inhalt, als_zip=False)
+        pruefen("Apple Health: eine nackte export.xml geht auch, ab_tag filtert",
+                apple_export_lesen(nur_xml, "2026-09-01").get("2026-09-10", {}).get("hrv") == [50.0]
+                and "2026-09-10" not in apple_export_lesen(nur_xml, "2026-09-11"), "")
+        boese = os.path.join(daheim, "Downloads", "boese.xml")
+        with open(boese, "w", encoding="utf-8") as datei:
+            datei.write('<?xml version="1.0"?><!DOCTYPE x [<!ENTITY a "aaaa">]><HealthData>&a;</HealthData>')
+        try:
+            apple_export_lesen(boese, "2026-01-01")
+            boese_ok = False
+        except ValueError:
+            boese_ok = True
+        pruefen("Apple Health: eine Datei mit eigenen XML-Entitäten wird abgewiesen", boese_ok, "")
+
+        # ---------------------------------------------------------------- Erholung schätzen
+        date_ab = datetime(2026, 8, 1).date()
+
+        def reihe(anzahl, wert_a, wert_b):
+            return {(date_ab + timedelta(days=i)).isoformat(): (wert_a if i % 2 else wert_b) for i in range(anzahl)}
+        hrv30, puls30 = reihe(30, 45.0, 55.0), reihe(30, 54.0, 58.0)
+        heute_tag = (date_ab + timedelta(days=30)).isoformat()
+        pruefen("Erholung schätzen: zehn Vergleichstage sind zu wenig - keine Zahl",
+                erholung_schaetzen(heute_tag, dict(reihe(10, 45.0, 55.0), **{heute_tag: 50.0}),
+                                   dict(reihe(10, 54.0, 58.0), **{heute_tag: 56.0}), {}) is None, "None")
+        normal = erholung_schaetzen(heute_tag, dict(hrv30, **{heute_tag: 50.0}), dict(puls30, **{heute_tag: 56.0}),
+                                    {heute_tag: 5.0})
+        ohne_schlaf = erholung_schaetzen(heute_tag, dict(hrv30, **{heute_tag: 50.0}), dict(puls30, **{heute_tag: 56.0}), {})
+        pruefen("Erholung schätzen: 30 normale Tage ergeben um 50 (mit und ohne Schlaf)",
+                normal and 35 <= normal["wert"] <= 65 and ohne_schlaf and 48 <= ohne_schlaf["wert"] <= 52
+                and normal["band"] == "gelb", "%s / %s" % (normal and normal["wert"], ohne_schlaf and ohne_schlaf["wert"]))
+        schlecht = erholung_schaetzen(heute_tag, dict(hrv30, **{heute_tag: 25.0}), dict(puls30, **{heute_tag: 64.0}),
+                                      {heute_tag: 4.0})
+        pruefen("Erholung schätzen: niedrige HRV, Puls +8 und 4 Stunden Schlaf sind rot unter 34",
+                schlecht and schlecht["wert"] < 34 and schlecht["band"] == "rot"
+                and erholung_band(66) == "gelb" and erholung_band(67) == "gruen" and erholung_band(34) == "gelb"
+                and erholung_band(33) == "rot", str(schlecht and schlecht["wert"]))
+        pruefen("Erholung schätzen: ohne HRV am Tag selbst keine Zahl",
+                erholung_schaetzen(heute_tag, hrv30, puls30, {}) is None, "")
+
+        # ---------------------------------------------------------------- Import (Datei -> Tage)
+        lange = ""
+        basis = datetime(2026, 8, 1)
+        for t in range(45):
+            tag0 = basis + timedelta(days=t)
+            letzter = t == 44
+            hrv_wert = 25 if letzter else (55 if t % 2 else 45)
+            lange += _erholung_satz("HKQuantityTypeIdentifierHeartRateVariabilitySDNN",
+                                    tag0 + timedelta(hours=3), tag0 + timedelta(hours=3, minutes=1), hrv_wert)
+            lange += _erholung_satz("HKQuantityTypeIdentifierHeartRateVariabilitySDNN",
+                                    tag0 + timedelta(hours=14), tag0 + timedelta(hours=14, minutes=1), 5)
+            lange += _erholung_satz("HKQuantityTypeIdentifierRestingHeartRate", tag0, tag0 + timedelta(hours=9),
+                                    64 if letzter else (58 if t % 2 else 54))
+            schlaf_von = tag0 + timedelta(hours=2, minutes=30) if letzter else tag0 - timedelta(hours=1)
+            lange += _erholung_satz("HKCategoryTypeIdentifierSleepAnalysis", schlaf_von, tag0 + timedelta(hours=6, minutes=30),
+                                    "HKCategoryValueSleepAnalysisAsleepCore")
+        gross = os.path.join(daheim, "Downloads", "gesundheit", "export.zip")
+        _erholung_export_schreiben(gross, lange)
+        mem = Memory(os.path.join(ordner, "erholung.db"))
+        er = Erholung(mem, uhr=uhr, zugriff=zugriff, env_lesen=lambda name: "", sperrdatei=os.path.join(ordner, "a.lock"))
+        pruefen("heute(): ohne jede Quelle nennt der Fehler Apple-Health-Export und Oura",
+                not er.heute()["ok"] and "Apple-Health-Export" in er.heute()["fehler"] and "Oura" in er.heute()["fehler"],
+                er.heute()["fehler"][:50])
+        ergebnis = er.importieren(gross)
+        verlauf = er.verlauf(60)
+        pruefen("Import: 31 Tage berechnet (ab dem 15. Tag), der letzte ist rot und heute",
+                ergebnis.get("ok") and ergebnis["tage"] == 31 and len(verlauf) == 31
+                and verlauf[-1]["tag"] == D and verlauf[-1]["band"] == "rot"
+                and verlauf[-1]["quelle"] == "Apple Health (eigene Schätzung)", str(ergebnis.get("text"))[:56])
+        heute = er.heute()
+        pruefen("heute(): Wert, Band, Quelle und Text mit 'kein Medizinprodukt'",
+                heute["ok"] and heute["tag"] == D and heute["wert"] == verlauf[-1]["wert"] and heute["band"] == "rot"
+                and "Schätzung" in heute["text"] and "Medizinprodukt" in heute["text"], heute.get("text", "")[:56])
+        zeile = mem._lesen("SELECT * FROM erholung_tage WHERE tag=?", (D,))[0]
+        pruefen("Import: HRV ist die der Nacht (25), nicht die vom Nachmittag; Schlaf 4 Stunden",
+                zeile["hrv"] == 25.0 and zeile["ruhepuls"] == 64.0 and abs(zeile["schlaf_h"] - 4.0) < 1e-9, "")
+        pruefen("Import: die Tabelle hat die vereinbarten Spalten",
+                [s["name"] for s in mem._lesen("PRAGMA table_info(erholung_tage)")]
+                == ["tag", "quelle", "wert", "hrv", "ruhepuls", "schlaf_h", "roh", "geholt"], "")
+        uhr.jetzt = datetime(2026, 9, 17, 12, 0)
+        alt = er.heute()
+        pruefen("heute(): ein älterer Wert wird nicht als heutiger ausgegeben, der letzte wird genannt",
+                not alt["ok"] and "Der letzte ist von" in alt["fehler"] and alt["letzter"]["tag"] == D, alt["fehler"][:56])
+        uhr.jetzt = datetime(2026, 9, 14, 12, 0)
+
+        # Pfade: nur im Benutzerordner, nur .zip/.xml, nichts Gesperrtes
+        draussen = os.path.join(ordner, "ausserhalb.zip")
+        _erholung_export_schreiben(draussen, lange)
+        gesperrt_pfad = os.path.join(daheim, "Downloads", "token.zip")
+        _erholung_export_schreiben(gesperrt_pfad, lange)
+        textdatei = os.path.join(daheim, "Downloads", "notiz.txt")
+        with open(textdatei, "w") as datei:
+            datei.write("x")
+        kaputt = os.path.join(daheim, "Downloads", "kaputt.zip")
+        with open(kaputt, "w") as datei:
+            datei.write("keine zip")
+        abgelehnt = [er.importieren(p) for p in (draussen, gesperrt_pfad, textdatei, "", os.path.join(daheim, "nichtda.zip"))]
+        pruefen("Import: außerhalb des Benutzerordners, gesperrte Namen und andere Endungen werden abgelehnt",
+                all(not a["ok"] for a in abgelehnt) and "Diese Datei lese ich nicht." in abgelehnt[0]["fehler"]
+                and "Diese Datei lese ich nicht." in abgelehnt[1]["fehler"]
+                and "Diese Datei lese ich nicht." in abgelehnt[2]["fehler"], abgelehnt[0]["fehler"][:50])
+        pruefen("Import: eine kaputte Zip wird freundlich gemeldet, nichts stürzt ab",
+                not er.importieren(kaputt)["ok"] and "Zip" in er.importieren(kaputt)["fehler"], "")
+        # Große Dateien im Hintergrund
+        gemeldet = []
+        er.ausgabe = gemeldet.append
+        grenze = erh_modul.IMPORT_HINTERGRUND_BYTES
+        erh_modul.IMPORT_HINTERGRUND_BYTES = 10
+        try:
+            hinten = er.importieren(gross)
+            er._import_faden.join(20)
+        finally:
+            erh_modul.IMPORT_HINTERGRUND_BYTES = grenze
+        pruefen("Import: eine große Datei läuft im Hintergrund und meldet sich über die Ausgabe",
+                hinten.get("hintergrund") and len(gemeldet) == 1 and "Apple Health gelesen" in gemeldet[0]
+                and er.letzter_import and er.letzter_import["ok"], (gemeldet or [""])[0][:50])
+
+        # ---------------------------------------------------------------- Von Hand und die Reihenfolge der Quellen
+        zweiter = Erholung(Memory(os.path.join(ordner, "hand.db")), uhr=uhr, env_lesen=lambda n: "",
+                           sperrdatei=os.path.join(ordner, "a.lock"))
+        schlecht_eingaben = [zweiter.manuell(None, wert) for wert in (150, -1, True, "viel", float("nan"))]
+        zukunft = zweiter.manuell("2026-09-20", 50)
+        pruefen("von Hand: nur 0 bis 100, keine Wahrheitswerte, nichts aus der Zukunft",
+                all(not e["ok"] for e in schlecht_eingaben) and not zukunft["ok"], "")
+        von_hand = zweiter.manuell(None, "40,5")
+        pruefen("von Hand: Komma-Zahl wird eingetragen, heute() nennt 'von Hand'",
+                von_hand["ok"] and zweiter.heute()["wert"] == 40 and zweiter.heute()["quelle"] == "von Hand", "")
+
+        # ---------------------------------------------------------------- Oura mit Fake-HTTP
+        config.OURA_CLIENT_ID, config.OURA_CLIENT_SECRET = "cid", "csec"
+        store = {"OURA_REFRESH_TOKEN": "alt-1"}
+        netz = ErholungNetz(D)
+
+        def speichern(name, wert):
+            netz.log.append("speichern:%s=%s" % (name, wert))
+            store[name] = wert
+            return True
+
+        oura_mem = Memory(os.path.join(ordner, "oura.db"))
+        oura = Erholung(oura_mem, holen=netz, uhr=uhr, env_lesen=lambda n: store.get(n, ""), env_setzen=speichern,
+                        sperrdatei=os.path.join(ordner, "b.lock"), sperr_wartezeit=0.3)
+        erstes = oura.oura_holen(14)
+        token_post = [a for a in netz.aufrufe if a[1].endswith("/oauth/token")]
+        gets = [a for a in netz.aufrufe if a[0] == "GET"]
+        zeile = oura_mem._lesen("SELECT * FROM erholung_tage WHERE tag=?", (D,))[0]
+        pruefen("Oura: Token mit grant_type refresh_token erneuert, der neue sofort gespeichert",
+                erstes["ok"] and token_post[0][3]["grant_type"] == "refresh_token"
+                and token_post[0][3]["refresh_token"] == "alt-1" and token_post[0][3]["client_id"] == "cid"
+                and store["OURA_REFRESH_TOKEN"] == "neu-1", str(erstes.get("text") or erstes.get("fehler"))[:50])
+        pruefen("Oura: der neue Token steht vor dem ersten Datenabruf in der Datei",
+                netz.log.index("speichern:OURA_REFRESH_TOKEN=neu-1") < min(netz.log.index(a[1]) for a in gets), "")
+        pruefen("Oura: Readiness mit Quelle 'Oura (Readiness)', HRV und Schlaf aus der langen Nacht",
+                zeile["quelle"] == "Oura (Readiness)" and zeile["wert"] == 72 and zeile["hrv"] == 44.5
+                and zeile["ruhepuls"] == 52 and zeile["schlaf_h"] == 7.5
+                and all(a[2].get("Authorization") == "Bearer acc-oura-1" for a in gets) and len(gets) == 3,
+                "%s %s" % (zeile["quelle"], zeile["wert"]))
+        oura.manuell(D, 10)
+        pruefen("Quellen: bei Oura und von Hand am selben Tag gilt Oura",
+                oura.heute()["quelle"] == "Oura (Readiness)" and oura.heute()["wert"] == 72, "")
+        zweites = oura.oura_holen()
+        pruefen("Oura: der zweite Abruf nimmt den rotierten Token (jeder gilt nur einmal)",
+                zweites["ok"] and store["OURA_REFRESH_TOKEN"] == "neu-2", "")
+        # Sperre: ein anderer Prozess hält sie
+        sperr_pfad = os.path.join(ordner, "b.lock")
+        fremd = open(sperr_pfad, "a")
+        fcntl.flock(fremd.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        vorher = len(netz.aufrufe)
+        gesperrt = oura.oura_holen()
+        fcntl.flock(fremd.fileno(), fcntl.LOCK_UN)
+        fremd.close()
+        pruefen("Sperre: hält ein anderer Prozess sie, wird nichts abgerufen und sanft aufgegeben",
+                not gesperrt["ok"] and gesperrt.get("gesperrt") and len(netz.aufrufe) == vorher
+                and store["OURA_REFRESH_TOKEN"] == "neu-2", gesperrt.get("fehler", "")[:50])
+        pruefen("Sperre: danach geht es wieder", oura.oura_holen()["ok"] and store["OURA_REFRESH_TOKEN"] == "neu-3", "")
+        # Drosselung beim automatischen Holen
+        vorher = len(netz.aufrufe)
+        auto = oura.aktualisieren()
+        pruefen("aktualisieren: innerhalb von drei Stunden wird nicht noch einmal geholt",
+                len(auto) == 1 and auto[0].get("uebersprungen") and len(netz.aufrufe) == vorher, "")
+        uhr.jetzt = datetime(2026, 9, 14, 16, 0)
+        pruefen("aktualisieren: nach vier Stunden wird geholt", oura.aktualisieren()[0]["ok"]
+                and len(netz.aufrufe) > vorher, "")
+        # 429 und ungültiger Token
+        netz.readiness_status = 429
+        weich = oura.oura_holen()
+        vorher = len(netz.aufrufe)
+        wieder = oura.oura_holen()
+        pruefen("Oura: bei 429 wird Retry-After beachtet, ohne Absturz und ohne neuen Abruf",
+                not weich["ok"] and weich.get("warten_s") == 120 and not wieder["ok"]
+                and len(netz.aufrufe) == vorher and "Geduld" in wieder["fehler"], weich.get("fehler", "")[:50])
+        netz.readiness_status = 200
+        uhr.jetzt = datetime(2026, 9, 14, 16, 3)
+        pruefen("Oura: nach der Wartezeit geht es weiter", oura.oura_holen()["ok"], "")
+        netz.erwartet["oura"] = "anderer"
+        verbraucht = oura.oura_holen()
+        pruefen("Oura: ein abgelehnter Token führt zu 'neu verbinden', nicht zum Absturz",
+                not verbraucht["ok"] and verbraucht.get("neu_verbinden") and "zugang oura" in verbraucht["fehler"], "")
+        unverbunden = Erholung(Memory(os.path.join(ordner, "leer.db")), holen=netz, uhr=uhr, env_lesen=lambda n: "",
+                               sperrdatei=os.path.join(ordner, "b.lock"))
+        pruefen("Oura: ohne Zugang eine ehrliche Meldung und kein Aufruf",
+                not unverbunden.abrufen("oura")["ok"] and "nicht verbunden" in unverbunden.abrufen("oura")["fehler"]
+                and not unverbunden.abrufen("garmin")["ok"], "")
+
+        # Die echte .env: neu gelesen vor dem Erneuern, neuer Token sofort in die Datei
+        env_pfad = os.path.join(ordner, "envprobe", ".env")
+        os.makedirs(os.path.dirname(env_pfad))
+        with open(env_pfad, "w", encoding="utf-8") as datei:
+            datei.write("OURA_REFRESH_TOKEN=alt-1\nOURA_CLIENT_ID=cid\nOURA_CLIENT_SECRET=csec\n")
+        config.ENV_DATEI = __import__("pathlib").Path(env_pfad)
+        config.CONFIG_VERZEICHNIS = config.ENV_DATEI.parent
+        config.env_neu_laden()
+        config.OURA_REFRESH_TOKEN = "veraltet-0"  # so alt ist der Wert in einem lange laufenden Prozess
+        netz2 = ErholungNetz(D)
+        datei_er = Erholung(Memory(os.path.join(ordner, "datei.db")), holen=netz2, uhr=uhr,
+                            sperrdatei=os.path.join(ordner, "c.lock"))
+        d1 = datei_er.oura_holen()
+        with open(env_pfad, encoding="utf-8") as datei:
+            env_text = datei.read()
+        pruefen("Token: aus der .env gelesen (nicht der veraltete Wert), neuer sofort in der .env",
+                d1["ok"] and "OURA_REFRESH_TOKEN=neu-1" in env_text and config.OURA_REFRESH_TOKEN == "neu-1"
+                and "OURA_CLIENT_SECRET=csec" in env_text, d1.get("fehler", "")[:50])
+        netz2.erwartet["oura"] = "von-anderem-prozess"  # ein zweiter Prozess hat inzwischen rotiert
+        with open(env_pfad, "w", encoding="utf-8") as datei:
+            datei.write("OURA_REFRESH_TOKEN=von-anderem-prozess\nOURA_CLIENT_ID=cid\nOURA_CLIENT_SECRET=csec\n")
+        pruefen("Token: hat ein anderer Prozess rotiert, gilt dessen Token (die .env wird neu gelesen)",
+                datei_er.oura_holen()["ok"], "")
+        config.ENV_DATEI, config.CONFIG_VERZEICHNIS = sicher[6], sicher[7]
+        config.OURA_REFRESH_TOKEN = sicher[2]
+        config.env_neu_laden()
+
+        # ---------------------------------------------------------------- Whoop
+        config.WHOOP_CLIENT_ID, config.WHOOP_CLIENT_SECRET = "wid", "wsec"
+        wstore = {"WHOOP_REFRESH_TOKEN": "alt-1"}
+        wnetz = ErholungNetz(D)
+        whoop_mem = Memory(os.path.join(ordner, "whoop.db"))
+        whoop = Erholung(whoop_mem, holen=wnetz, uhr=uhr, env_lesen=lambda n: wstore.get(n, ""),
+                         env_setzen=lambda n, w: wstore.update({n: w}) or True, sperrdatei=os.path.join(ordner, "d.lock"))
+        w1 = whoop.whoop_holen()
+        wz = whoop_mem._lesen("SELECT * FROM erholung_tage")
+        wtoken = [a for a in wnetz.aufrufe if a[1].endswith("/oauth2/token")][0]
+        pruefen("Whoop: Recovery gelesen (nur SCORED), Quelle 'Whoop (Recovery)', Token rotiert",
+                w1["ok"] and len(wz) == 1 and wz[0]["quelle"] == "Whoop (Recovery)" and wz[0]["wert"] == 88
+                and wz[0]["tag"] == D and wz[0]["ruhepuls"] == 50 and wstore["WHOOP_REFRESH_TOKEN"] == "neu-1"
+                and wtoken[3]["grant_type"] == "refresh_token" and wtoken[3]["scope"] == "offline",
+                str(w1.get("text") or w1.get("fehler"))[:50])
+
+        # ---------------------------------------------------------------- Anmeldung (OAuth) mit state in der Datenbank
+        oa_mem = Memory(os.path.join(ordner, "oauth.db"))
+        oa_netz = ErholungNetz(D)
+        ostore = {}
+        cli = Erholung(oa_mem, holen=oa_netz, uhr=uhr, env_lesen=lambda n: ostore.get(n, ""),
+                       env_setzen=lambda n, w: ostore.update({n: w}) or True, sperrdatei=os.path.join(ordner, "e.lock"))
+        web = Erholung(oa_mem, holen=oa_netz, uhr=uhr, env_lesen=lambda n: ostore.get(n, ""),
+                       env_setzen=lambda n, w: ostore.update({n: w}) or True, sperrdatei=os.path.join(ordner, "e.lock"))
+        start = cli.oauth_start("oura")
+        start_w = cli.oauth_start("whoop")
+        pruefen("OAuth: die Adresse trägt Client-ID, Weiterleitung, Bereich und state (Oura 24, Whoop genau 8 Zeichen)",
+                start["ok"] and "client_id=cid" in start["url"] and "state=" + start["zustand"] in start["url"]
+                and "localhost%3A8765%2Foura%2Frueckruf" in start["url"] and "scope=daily%20heartrate%20personal" in start["url"]
+                and len(start["zustand"]) == 24 and len(start_w["zustand"]) == 8
+                and "scope=read:recovery%20read:sleep%20offline" in start_w["url"]
+                and start["url"].startswith("https://cloud.ouraring.com/oauth/authorize?"), start["zustand"])
+        pruefen("OAuth: der state liegt in der Datenbank, nicht im Speicher",
+                oa_mem._lesen("SELECT COUNT(*) AS n FROM erholung_oauth")[0]["n"] == 2, "")
+        falsch = web.oauth_abschluss("oura", "gueltiger-code", "FALSCHERZUSTAND0123456789")
+        pruefen("OAuth: ein falscher state wird abgewiesen ('passt nicht'), nichts wird getauscht",
+                not falsch["ok"] and "passt nicht" in falsch["fehler"] and not [a for a in oa_netz.aufrufe], "")
+        fremd_dienst = web.oauth_abschluss("whoop", "gueltiger-code", start["zustand"])
+        pruefen("OAuth: der state eines anderen Dienstes gilt nicht", not fremd_dienst["ok"], "")
+        gut = web.oauth_abschluss("oura", "gueltiger-code", start["zustand"])
+        tausch = [a for a in oa_netz.aufrufe if a[3].get("grant_type") == "authorization_code"][0]
+        pruefen("OAuth: in einem anderen Prozess beendet - Token gespeichert, erste Werte geholt, Fenster-Text",
+                gut["ok"] and "Oura ist verbunden" in gut["text"] and ostore["OURA_REFRESH_TOKEN"] == "neu-1"
+                and tausch[3]["redirect_uri"] == "http://localhost:8765/oura/rueckruf" and tausch[3]["client_id"] == "cid"
+                and oa_mem._lesen("SELECT * FROM erholung_tage WHERE tag=?", (D,))[0]["wert"] == 72, gut.get("text", "")[:50])
+        nochmal = web.oauth_abschluss("oura", "gueltiger-code", start["zustand"])
+        pruefen("OAuth: derselbe state ein zweites Mal wird abgewiesen (einmalig)",
+                not nochmal["ok"] and "passt nicht" in nochmal["fehler"], "")
+        alt_start = cli.oauth_start("oura")
+        uhr.jetzt = uhr.jetzt + timedelta(minutes=11)
+        abgelaufen = web.oauth_abschluss("oura", "gueltiger-code", alt_start["zustand"])
+        pruefen("OAuth: nach elf Minuten ist der state abgelaufen",
+                not abgelaufen["ok"] and "passt nicht" in abgelaufen["fehler"], "")
+        frisch = cli.oauth_start("oura")
+        uhr.jetzt = uhr.jetzt + timedelta(minutes=9)
+        pruefen("OAuth: nach neun Minuten gilt er noch",
+                web.oauth_abschluss("oura", "gueltiger-code", frisch["zustand"])["ok"], "")
+        uhr.jetzt = datetime(2026, 9, 14, 12, 0)
+        ohne_id = Erholung(Memory(os.path.join(ordner, "oid.db")), holen=oa_netz, uhr=uhr, env_lesen=lambda n: "")
+        config.OURA_CLIENT_ID = ""
+        pruefen("OAuth: ohne Client-ID eine klare Meldung", not ohne_id.oauth_start("oura")["ok"]
+                and "Client-ID" in ohne_id.oauth_start("oura")["fehler"], "")
+        config.OURA_CLIENT_ID = "cid"
+        # Im Terminal: Adresse einfügen
+        term_netz = ErholungNetz(D)
+        term_store = {"OURA_CLIENT_ID": "cid", "OURA_CLIENT_SECRET": "csec"}
+        term = Erholung(Memory(os.path.join(ordner, "term.db")), holen=term_netz, uhr=uhr,
+                        env_lesen=lambda n: term_store.get(n, ""), env_setzen=lambda n, w: term_store.update({n: w}) or True,
+                        sperrdatei=os.path.join(ordner, "f.lock"))
+        zeilen_aus, eingaben = [], []
+
+        def fragen(frage):
+            if "Adresse" in frage:
+                zustand = term.memory._lesen("SELECT zustand FROM erholung_oauth ORDER BY erstellt DESC")[0]["zustand"]
+                eingaben.append(zustand)
+                return "http://localhost:8765/oura/rueckruf?code=gueltiger-code&state=%s" % zustand
+            return ""
+        verbunden = term.oauth_im_terminal("oura", fragen=fragen, fragen_geheim=lambda f: "", ausgabe=zeilen_aus.append)
+        pruefen("Terminal: die eingefügte Adresse beendet die Anmeldung",
+                verbunden and term_store.get("OURA_REFRESH_TOKEN") == "neu-1"
+                and any("rueckruf" in z for z in zeilen_aus) and any("oauth/authorize" in z for z in zeilen_aus), "")
+        pruefen("Terminal: eine Adresse ohne code und state wird erklärt, nicht verarbeitet",
+                not term.oauth_im_terminal("oura", fragen=lambda f: "http://localhost:8765/x", ausgabe=lambda t: None), "")
+
+        # ---------------------------------------------------------------- HTTP wirklich (nur localhost)
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                if self.path == "/weg":
+                    self.send_response(302)
+                    self.send_header("Location", "http://127.0.0.1:1/anders")
+                    self.end_headers()
+                    return
+                self.send_response(429 if self.path == "/zuviel" else 200)
+                self.send_header("Retry-After", "5")
+                self.end_headers()
+                self.wfile.write(b'{"ok": true}')
+
+            def log_message(self, *a):
+                pass
+
+        server = socketserver.TCPServer(("127.0.0.1", 0), Handler)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        basis_url = "http://127.0.0.1:%d" % server.server_address[1]
+        h1 = erh_modul.erholung_http_holen("GET", basis_url + "/ok", {"Authorization": "Bearer x"})
+        h2 = erh_modul.erholung_http_holen("GET", basis_url + "/weg")
+        h3 = erh_modul.erholung_http_holen("GET", basis_url + "/zuviel")
+        server.shutdown()
+        server.server_close()
+        h4 = erh_modul.erholung_http_holen("GET", basis_url + "/ok", timeout=2)
+        pruefen("HTTP: Antwort, Weiterleitung wird nicht verfolgt, 429 mit Retry-After, Netzfehler als Status 0",
+                h1[0] == 200 and h2[0] == 302 and h3[0] == 429 and h3[2].get("retry-after") == "5" and h4[0] == 0, str((h1[0], h2[0], h3[0], h4[0])))
+
+        # ---------------------------------------------------------------- Zusammenhang mit der Abschlussquote
+        pruefen("pearson: 1.0 bei Gerade, None bei weniger als drei Paaren oder ohne Streuung",
+                pearson([1, 2, 3], [2, 4, 6]) == 1.0 and pearson([1, 2], [1, 2]) is None
+                and pearson([1, 2, 3], [5, 5, 5]) is None and pearson([1, 2, 3], [3, 2, 1]) == -1.0, "")
+        stich = ["besichtigung", "angebot", "vor ort"]
+        pruefen("Verkaufstermin: Stichwort im Titel oder ein Interessent, sonst nicht",
+                verkaufstermin("Besichtigung Praxis Huber", stich, []) and verkaufstermin("Gespräch mit Müller GmbH", stich, ["Müller GmbH"])
+                and not verkaufstermin("Zahnarzt", stich, ["Müller GmbH"]) and not verkaufstermin("", stich, [])
+                and not verkaufstermin("Büro", stich, ["Bü"]), "")
+        lm = Memory(os.path.join(ordner, "leistung.db"))
+        ca = CallAnalysis(lm)
+        vs = Vorschlaege(lm)
+        fake_erholung_wert = {"wert": 28}
+
+        class FakeErholung(object):
+            def __init__(self, werte):
+                self.werte = werte
+
+            def verlauf(self, tage=14):
+                return [{"tag": t, "wert": w} for t, w in sorted(self.werte.items())]
+
+            def heute(self):
+                tag = uhr.jetzt.strftime("%Y-%m-%d")
+                if tag in self.werte:
+                    w = self.werte[tag]
+                    return {"ok": True, "tag": tag, "wert": w, "band": erholung_band(w), "quelle": "Test", "text": ""}
+                return {"ok": False, "fehler": "keine Quelle"}
+
+        kein_kalender = Leistung(lm, ErholungKalender({}), FakeErholung({}), ca, vorschlaege=vs, uhr=uhr)
+        leer = kein_kalender.zusammenhang(30)
+        pruefen("Zusammenhang: ohne Erholungswerte eine ehrliche Meldung statt einer Zahl",
+                leer["ok"] and "zu wenig" in leer["text"] and leer["n"] == 0 and leer["r"] is None, leer["text"][:56])
+        # 30 Tage: Erholung wechselnd, Gespräche gewonnen an guten Tagen
+        werte, kal_tage = {}, {}
+        rng = random.Random(3)
+        sollte = {"gewonnen": 0, "verloren": 0}
+        for i in range(30):
+            tag = (datetime(2026, 8, 16) + timedelta(days=i)).strftime("%Y-%m-%d")
+            band = ("rot", "gelb", "gruen")[i % 3]
+            werte[tag] = {"rot": 25, "gelb": 50, "gruen": 80}[band]
+            kal_tage[tag] = ["Besichtigung A", "Büro", "Reinigung"] if i % 2 else ["Angebot B"]
+            for k in range(2):
+                gewonnen = (band == "gruen") or (band == "gelb" and k == 0)
+                ca._ablegen({"kunde": "K%d" % i, "datum": tag, "ergebnis": "gewonnen" if gewonnen else "verloren"}, "", {})
+                sollte["gewonnen" if gewonnen else "verloren"] += 1
+            ca._ablegen({"kunde": "Offen", "datum": tag, "ergebnis": "offen"}, "", {})
+        kal = ErholungKalender(kal_tage, kuerzen_ab=6, ganztaegig=("2026-09-01",))
+        leis = Leistung(lm, kal, FakeErholung(werte), ca, vorschlaege=vs, uhr=uhr)
+        tage = leis.tage_zusammenstellen(30)
+        heute_zeile = tage[-1]
+        pruefen("tage_zusammenstellen: eine Zeile je Tag, Kalender trotz Kürzung vollständig gelesen, Ganztägiges zählt nicht",
+                len(tage) == 31 and sum(t["termine"] for t in tage) == sum(len(v) for v in kal_tage.values())
+                and all(t["termine"] <= 3 for t in tage) and tage[0]["tag"] == "2026-08-15"
+                and kal.anfragen[0][0] == 14 and len(kal.anfragen) > 4 and min(a[0] for a in kal.anfragen) <= 6,
+                "%d Abfragen" % len(kal.anfragen))
+        pruefen("tage_zusammenstellen: Quote ist gewonnen geteilt durch gewonnen und verloren, offene zählen nicht",
+                [t for t in tage if t["tag"] == "2026-08-16"][0]["quote"] == 0.0
+                and [t for t in tage if t["tag"] == "2026-08-18"][0]["quote"] == 1.0
+                and [t for t in tage if t["tag"] == "2026-08-17"][0]["quote"] == 0.5
+                and [t for t in tage if t["tag"] == "2026-08-18"][0]["gespraeche"] == 3
+                and [t for t in tage if t["tag"] == "2026-08-18"][0]["entschieden"] == 2
+                and tage[0]["erholung"] is None and tage[0]["quote"] is None, "")
+        zus = leis.zusammenhang(30)
+        verkauf = ca.verkaufsmuster((datetime.now() - datetime(2026, 8, 1)).days + 5)  # alle Testtage
+        pruefen("Zusammenhang: Fallzahlen je Stufe, 'Zusammenhang, keine Ursache', Quote wie verkaufsmuster",
+                zus["n"] == 30 and zus["ausreichend"] and "keine Ursache" in zus["text"]
+                and [s["tage"] for s in zus["tabelle"]] == [10, 10, 10]
+                and zus["stufen"]["rot"]["abschlussquote"] == 0.0 and zus["stufen"]["gruen"]["abschlussquote"] == 1.0
+                and zus["stufen"]["gelb"]["abschlussquote"] == 0.5
+                and "An 10 Tagen mit niedriger Erholung hast du 0 von 20 entschiedenen Gesprächen gewonnen" in zus["text"]
+                and abs(zus["gesamt"]["abschlussquote"] * 100 - verkauf["abschlussquote"]) < 0.1 and zus["r"] > 0.5,
+                zus["text"][:56])
+        # echte Verkaufstermine im Mittel je Stufe
+        pruefen("Zusammenhang: durchschnittliche Termine und Verkaufstermine je Stufe stehen in der Tabelle",
+                all(s["termine"] is not None for s in zus["tabelle"]) and zus["stufen"]["rot"]["verkaufstermine"] is not None, "")
+        # zu wenig
+        orig_zusammenstellen = leis.tage_zusammenstellen
+        leis.tage_zusammenstellen = lambda tage=60: [{"tag": "2026-09-0%d" % (i + 1), "erholung": 40, "band": "gelb", "termine": 2,
+                                                       "verkaufstermine": 0, "gespraeche": 1, "gewonnen": 1, "verloren": 0,
+                                                       "entschieden": 1, "quote": 1.0} for i in range(4)]
+        wenig = leis.zusammenhang(60)
+        leis.tage_zusammenstellen = orig_zusammenstellen
+        pruefen("Zusammenhang: vier Tage sind 'zu wenig für eine Aussage' und die Zahl der Tage steht dabei",
+                "zu wenig" in wenig["text"] and "4 Tage" in wenig["text"] and not wenig["ausreichend"]
+                and "keine Ursache" not in wenig["text"], wenig["text"][:56])
+        # nur Gelb und Grün, kein Rot: nicht vergleichbar
+        leis.tage_zusammenstellen = lambda tage=60: [{"tag": "2026-09-%02d" % (i + 1), "erholung": 50 if i % 2 else 80,
+                                                       "band": "gelb" if i % 2 else "gruen", "termine": 2, "verkaufstermine": 0,
+                                                       "gespraeche": 1, "gewonnen": 1, "verloren": 0, "entschieden": 1,
+                                                       "quote": 1.0} for i in range(14)]
+        ohne_rot = leis.zusammenhang(60)
+        leis.tage_zusammenstellen = orig_zusammenstellen
+        pruefen("Zusammenhang: ohne Tage mit niedriger Erholung kein Vergleich", "zu wenig" in ohne_rot["text"]
+                and "0 mit niedriger" in ohne_rot["text"], ohne_rot["text"][:56])
+
+        # ---------------------------------------------------------------- Belastungsprüfung
+        zuletzt = {}
+
+        class SpionVorschlaege(Vorschlaege):
+            aufrufe = []
+
+            def einbringen(self, schluessel, text, quelle="vorschlag", aktion="", argumente=None):
+                SpionVorschlaege.aufrufe.append((schluessel, quelle))
+                return Vorschlaege.einbringen(self, schluessel, text, quelle, aktion, argumente)
+
+        spion = SpionVorschlaege(lm)
+        morgen_tage = {"2026-09-15": ["Besichtigung Huber", "Angebot Berger", "Beratung Xaver", "Büro", "Zahnarzt"]}
+        bel = Leistung(lm, ErholungKalender(morgen_tage), FakeErholung({D: 28}), ca, vorschlaege=spion, uhr=uhr)
+        stufen_ok = {"ok": True, "n": 17, "stufen": {
+            "rot": {"tage": 6, "gewonnen": 0, "gespraeche": 9, "abschlussquote": 0.0},
+            "gelb": {"tage": 3, "gewonnen": 1, "gespraeche": 2, "abschlussquote": 0.5},
+            "gruen": {"tage": 11, "gewonnen": 6, "gespraeche": 14, "abschlussquote": 0.429}}}
+        bel.zusammenhang = lambda tage=60, anzeigen=False: stufen_ok
+        text = bel.belastung_pruefen()
+        offene = spion.offene()
+        pruefen("Belastung: bei 28 von 100, fünf Terminen morgen und klarem Unterschied kommt ein Vorschlag",
+                text.startswith("Deine Erholung liegt heute bei 28 von 100.") and "Morgen hast du 5 Termine, davon 3 Verkaufstermine" in text
+                and "0 von 9" in text and "Soll ich morgen zwei Termine verschieben oder absagen?" in text
+                and "Welche, sage ich dir vorher." in text, text[:56])
+        pruefen("Belastung: einbringen wurde einmal gerufen (Schlüssel 'belastung:<Tag>'), der Vorschlag ist offen und ohne Aktion",
+                SpionVorschlaege.aufrufe == [("belastung:" + D, "erholung")] and len(offene) == 1 and offene[0]["aktion"] == ""
+                and offene[0]["text"] == text, str(SpionVorschlaege.aufrufe)[:56])
+        zweimal = bel.belastung_pruefen()
+        pruefen("Belastung: ein zweites Mal am selben Tag kommt nichts Neues",
+                zweimal == "" and len(spion.offene()) == 1 and "schon gemacht" in bel.letzter_grund, "")
+        # die Gründe, nichts vorzuschlagen
+        uhr.jetzt = datetime(2026, 9, 21, 12, 0)
+
+        def fall(erholung_werte, tage_kalender, stufen, aus_an=True):
+            config.VORSCHLAEGE_AN = aus_an
+            fall_leistung = Leistung(lm, ErholungKalender(tage_kalender), FakeErholung(erholung_werte), ca,
+                                     vorschlaege=spion, uhr=uhr)
+            fall_leistung.zusammenhang = lambda tage=60, anzeigen=False: stufen
+            ergebnis = fall_leistung.belastung_pruefen()
+            config.VORSCHLAEGE_AN = True
+            return ergebnis, fall_leistung.letzter_grund
+        aufrufe_vorher = len(SpionVorschlaege.aufrufe)
+        heute2, morgen2 = "2026-09-21", "2026-09-22"
+        voll = {morgen2: ["a", "b", "c", "d", "e"]}
+        aus = fall({heute2: 28}, voll, stufen_ok, aus_an=False)
+        gut_erholt = fall({heute2: 60}, voll, stufen_ok)
+        leer_morgen = fall({heute2: 28}, {morgen2: ["a", "b"]}, stufen_ok)
+        ohne_wert = fall({}, voll, stufen_ok)
+        wenige_rot = fall({heute2: 28}, voll, {"stufen": dict(stufen_ok["stufen"], rot=dict(stufen_ok["stufen"]["rot"], tage=3))})
+        kein_abstand = fall({heute2: 28}, voll, {"stufen": dict(stufen_ok["stufen"], rot=dict(stufen_ok["stufen"]["rot"],
+                                                                                              gewonnen=6, abschlussquote=0.40))})
+        gestern_wert = fall({"2026-09-20": 20}, voll, stufen_ok)
+        pruefen("Belastung: VORSCHLAEGE_AN aus -> leerer Text, nichts gespeichert",
+                aus[0] == "" and "ausgeschaltet" in aus[1] and len(spion.offene()) == 1, aus[1][:50])
+        pruefen("Belastung: Erholung über der Schwelle, zu wenige Termine, fehlende Erholung -> nichts",
+                gut_erholt[0] == "" and leer_morgen[0] == "" and ohne_wert[0] == "" and gestern_wert[0] == "",
+                "%s | %s" % (gut_erholt[1][:30], ohne_wert[1][:20]))
+        pruefen("Belastung: zu wenige niedrige Tage oder kein klarer Abstand der Abschlussquote -> nichts",
+                wenige_rot[0] == "" and "reichen noch nicht" in wenige_rot[1] and kein_abstand[0] == ""
+                and "nicht deutlich" in kein_abstand[1], kein_abstand[1][:50])
+        pruefen("Belastung: nichts davon hat einen Vorschlag gespeichert oder auch nur versucht",
+                len(spion.offene()) == 1 and len(SpionVorschlaege.aufrufe) == aufrufe_vorher,
+                "%d offen" % len(spion.offene()))
+        # Schwelle aus der Konfiguration
+        sicher_schwelle = config.BELASTUNG_SCHWELLE
+        config.BELASTUNG_SCHWELLE = 70
+        schwelle = fall({heute2: 60}, voll, stufen_ok)
+        config.BELASTUNG_SCHWELLE = sicher_schwelle
+        pruefen("Belastung: die Schwelle kommt aus BELASTUNG_SCHWELLE", schwelle[0].startswith("Deine Erholung liegt heute bei 60"), "")
+        # Zeitplan-Job
+        uhr.jetzt = datetime(2026, 9, 22, 12, 0)
+        spion.ausgabe = None
+        job_leistung = Leistung(lm, ErholungKalender({"2026-09-23": ["a", "b", "c", "d"]}), FakeErholung({"2026-09-22": 20}), ca,
+                                vorschlaege=spion, uhr=uhr)
+        job_leistung.zusammenhang = lambda tage=60, anzeigen=False: stufen_ok
+        job_text = job_leistung.belastung_job()
+        uhr.jetzt = datetime(2026, 9, 24, 12, 0)
+        spion.ausgabe = lambda t: None
+        job_leistung.erholung = FakeErholung({"2026-09-24": 20})
+        job_leistung.kalender = ErholungKalender({"2026-09-25": ["a", "b", "c", "d"]})
+        job_still = job_leistung.belastung_job()
+        spion.ausgabe = None
+        pruefen("Zeitplan-Job: gibt den Text zurück; ist der Vorschlag schon laut gesagt, bleibt er still",
+                "Soll ich" in job_text and job_still == "", "")
+        # Vorschläge werden erst zur Laufzeit gesucht
+        spaet = Leistung(lm, ErholungKalender({}), FakeErholung({}), ca, uhr=uhr)
+        spaet.vorschlaege_suche = lambda: spion
+        pruefen("Belastung: der Vorschlags-Speicher wird zur Laufzeit gesucht, ohne ihn gibt es keinen Vorschlag",
+                spaet._vorschlaege_holen() is spion and Leistung(lm, ErholungKalender({}), FakeErholung({}), ca,
+                                                                 uhr=uhr)._vorschlaege_holen() is None, "")
+
+        # ---------------------------------------------------------------- Die Werkzeuge in Jarvis
+        w = agent.tools
+        katalog = {t["name"]: t for t in w.katalog()}
+        neu = ["erholung_lesen", "erholung_eintragen", "erholung_abrufen", "gesundheit_importieren",
+               "leistung_zusammenhang", "belastung_pruefen"]
+        pruefen("Werkzeuge: alle da, kurz beschrieben, keine Freigabe nötig, nichts davon sendet frei formulierten Text",
+                all(n in katalog and len(katalog[n]["description"]) < 260 for n in neu)
+                and not [n for n in neu if n in FREIGABE_PFLICHTIG or n in NETZ_SENDEND]
+                and katalog["erholung_abrufen"]["input_schema"]["properties"]["dienst"]["enum"] == ["oura", "whoop"]
+                and katalog["gesundheit_importieren"]["input_schema"]["required"] == ["pfad"]
+                and katalog["erholung_eintragen"]["input_schema"]["required"] == ["wert"], "")
+        pruefen("Werkzeuge: Beschreibung von erholung_lesen und belastung_pruefen wie vereinbart",
+                "Kein Medizinprodukt." in katalog["erholung_lesen"]["description"]
+                and "Ändert selbst nichts." in katalog["belastung_pruefen"]["description"]
+                and "keine Ursache" in katalog["leistung_zusammenhang"]["description"], "")
+        w.lauf_beginnen()
+        echt_uhr, echt_zugriff, echt_env = w.erholung._uhr, w.erholung.zugriff, w.erholung._env_lesen_fn
+        echt_leistung_uhr = w.leistung._uhr
+        w.erholung._uhr, w.leistung._uhr = uhr, uhr
+        uhr.jetzt = datetime(2026, 9, 14, 12, 0)
+        w.erholung.zugriff = zugriff
+        w.erholung._env_lesen_fn = lambda name: ""  # in dieser Prüfung ist nichts verbunden, was immer in der .env steht
+        config.OURA_REFRESH_TOKEN = config.WHOOP_REFRESH_TOKEN = ""
+        try:
+            roh_leer = w.run("erholung_lesen", {})
+            pruefen("erholung_lesen: ohne Daten sagt es das, mit den Möglichkeiten, ohne Zahlen zu erfinden",
+                    roh_leer["ok"] is False and "Apple-Health-Export" in roh_leer["fehler"], roh_leer.get("fehler", "")[:50])
+            eintrag = w.run("erholung_eintragen", {"wert": 55})
+            lesen = w.run("erholung_lesen", {"tage": 3})
+            kanal = w.anzeige.stand("sicht")["daten"]
+            pruefen("erholung_lesen: Wert mit Quelle, und die Zentrale zeigt ihn (Kanal sicht, Ansicht sicht)",
+                    eintrag["ok"] and lesen["ok"] and lesen["heute"]["wert"] == 55 and lesen["heute"]["quelle"] == "von Hand"
+                    and kanal["erholung"] == {"wert": 55, "band": "gelb", "quelle": "von Hand", "tag": D}
+                    and "kein Medizinprodukt" in kanal["hinweis"] and w.anzeige.kurz()["modus"] == "sicht", str(kanal)[:56])
+            w.anzeige.melden("sicht", {"handruhe": {"mm": 0.6}})
+            w.run("erholung_lesen", {})
+            kanal = w.anzeige.stand("sicht")["daten"]
+            pruefen("Zentrale: der Kanal sicht behält die Handruhe-Werte, wenn die Erholung dazukommt",
+                    kanal.get("handruhe") == {"mm": 0.6} and kanal["erholung"]["wert"] == 55, "")
+            config.ANZEIGE_DISKRET = True
+            w.run("erholung_lesen", {})
+            diskret = w.anzeige.stand("sicht")["daten"]
+            config.ANZEIGE_DISKRET = False
+            pruefen("Diskretmodus: der Kanal sicht gibt keine Gesundheitswerte heraus",
+                    diskret["erholung"]["wert"] is None and diskret["erholung"]["quelle"] == "von Hand"
+                    and diskret.get("handruhe", {}).get("mm") is None, str(diskret)[:56])
+            w.lauf_beginnen(hintergrund=True)
+            w.anzeige.melden("sicht", {})
+            w.run("erholung_lesen", {})
+            pruefen("Hintergrund: ein Lauf im Hintergrund schaltet die Zentrale nicht um",
+                    w.anzeige.stand("sicht")["daten"] == {}, "")
+            w.lauf_beginnen()
+            fremd_import = w.run("gesundheit_importieren", {"pfad": draussen})
+            pruefen("gesundheit_importieren: nur im Benutzerordner - ein anderer Pfad wird abgelehnt",
+                    fremd_import["ok"] is False and "Diese Datei lese ich nicht." in fremd_import["fehler"], "")
+            import_ok = w.run("gesundheit_importieren", {"pfad": gross})
+            pruefen("gesundheit_importieren: eine Datei im Benutzerordner wird gelesen und gezeigt",
+                    import_ok["ok"] and import_ok["tage"] == 31 and w.anzeige.stand("sicht")["daten"]["erholung"]["wert"] <= 100,
+                    import_ok.get("text", import_ok.get("fehler", ""))[:50])
+            zusammen = w.run("leistung_zusammenhang", {"tage": 30})
+            pruefen("leistung_zusammenhang: Antwort mit Fallzahl, Hinweis und Anzeige",
+                    zusammen["ok"] and "n" in zusammen and zusammen["hinweis"] == "Zusammenhang, keine Ursache."
+                    and "zusammenhang" in w.anzeige.stand("sicht")["daten"], zusammen["text"][:56])
+            kein_vorschlag = w.run("belastung_pruefen", {})
+            pruefen("belastung_pruefen: ohne Zahlen kein Vorschlag, mit ehrlichem Grund",
+                    kein_vorschlag["ok"] and kein_vorschlag["vorschlag"] is False and "nichts vor" in kein_vorschlag["text"], "")
+            # der Morgen: eine Zeile zur Erholung im Briefing - ohne Netz
+            config.WETTER_ORT = ""
+            morgens = agent._bausteine_sammeln(True)
+            pruefen("Briefing am Morgen: eine Zeile 'Erholung: ...' mit Quelle", morgens.count("Erholung: Erholung heute:") == 1
+                    and "(Quelle:" in morgens, "")
+            abends = agent._bausteine_sammeln(False)
+            pruefen("Briefing am Abend: keine Erholungszeile", "Erholung heute" not in abends, "")
+            uhr.jetzt = datetime(2026, 9, 30, 12, 0)
+            pruefen("Briefing am Morgen: ohne Wert für heute gar keine Zeile (nichts Veraltetes)",
+                    "Erholung heute" not in agent._bausteine_sammeln(True), "")
+            uhr.jetzt = datetime(2026, 9, 14, 12, 0)
+            # Zeitplan
+            zeitplan = Scheduler(agent=agent, ausgabe=lambda t: gemeldet.append(t))
+            zeitplan.standardjobs_anlegen()
+            gemeldet.clear()
+            still = zeitplan.job_ausfuehren("belastung")
+            pruefen("Zeitplan: Job 'belastung' zu BELASTUNG_PRUEFEN_UM; ein leerer Text wird nicht ausgegeben",
+                    "belastung" in zeitplan.jobs and zeitplan.jobs["belastung"]["uhrzeit"] == config.BELASTUNG_PRUEFEN_UM
+                    and still == "" and not gemeldet, config.BELASTUNG_PRUEFEN_UM)
+            sicher_zeit = config.BELASTUNG_PRUEFEN_UM
+            config.BELASTUNG_PRUEFEN_UM = "aus"
+            zeitplan2 = Scheduler(agent=agent)
+            zeitplan2.standardjobs_anlegen()
+            config.BELASTUNG_PRUEFEN_UM = sicher_zeit
+            pruefen("Zeitplan: mit der Uhrzeit 'aus' gibt es den Job nicht", "belastung" not in zeitplan2.jobs, "")
+        finally:
+            w.erholung._uhr, w.erholung.zugriff, w.erholung._env_lesen_fn = echt_uhr, echt_zugriff, echt_env
+            w.leistung._uhr = echt_leistung_uhr
+
+        # ---------------------------------------------------------------- Vergessen
+        stand_mem = Memory(os.path.join(ordner, "vergessen.db"))
+        v_er = Erholung(stand_mem, uhr=uhr, env_lesen=lambda n: "", sperrdatei=os.path.join(ordner, "g.lock"))
+        v_er.manuell(None, 50)
+        stand_mem._schreiben("CREATE TABLE IF NOT EXISTS handruhe (id INTEGER PRIMARY KEY, mm REAL)")
+        stand_mem._schreiben("INSERT INTO handruhe (mm) VALUES (0.5)")
+        stand_mem.aktion_protokollieren("erholung_lesen", {}, "Erholung heute: 50 von 100", "ok")
+        stand_mem.aktion_protokollieren("notiz_speichern", {}, "bleibt", "ok")
+        stand_mem.kennzahl_setzen("handruhe_mm", 0.5, "mm")
+        ausgaben = []
+        nein = gesundheit_im_terminal(["vergessen"], memory=stand_mem, fragen=lambda f: "nein", ausgabe=ausgaben.append)
+        noch = len(stand_mem._lesen("SELECT * FROM erholung_tage"))
+        ja = gesundheit_im_terminal(["vergessen"], memory=stand_mem, fragen=lambda f: "ja", ausgabe=ausgaben.append)
+        pruefen("gesundheit vergessen: erst nach 'ja' - dann sind Erholung, Handruhe und ihre Protokolleinträge weg",
+                nein == 1 and noch == 1 and ja == 0 and not stand_mem._lesen("SELECT * FROM erholung_tage")
+                and not stand_mem._lesen("SELECT * FROM handruhe") and not stand_mem._lesen("SELECT * FROM kennzahlen WHERE name='handruhe_mm'")
+                and [a["werkzeug"] for a in stand_mem._lesen("SELECT werkzeug FROM aktionen")] == ["notiz_speichern"], "")
+        ohne_handruhe = Erholung(Memory(os.path.join(ordner, "ohne.db")), uhr=uhr, env_lesen=lambda n: "")
+        pruefen("gesundheit vergessen: fehlt die Handruhe-Tabelle, ist das kein Fehler", ohne_handruhe.vergessen()["ok"], "")
+        stand_ausgabe = []
+        gesundheit_im_terminal([], memory=stand_mem, ausgabe=stand_ausgabe.append)
+        pruefen("gesundheit ohne Angabe zeigt den Stand, ohne etwas zu verändern",
+                any("Noch keine Erholungswerte" in z for z in stand_ausgabe) and any("Oura" in z for z in stand_ausgabe), "")
+        eingaben_import = []
+        gesundheit_im_terminal([draussen], memory=stand_mem, ausgabe=eingaben_import.append)
+        pruefen("gesundheit <Datei>: außerhalb des Benutzerordners wird abgelehnt",
+                any("Diese Datei lese ich nicht." in z for z in eingaben_import), "")
+
+        # ---------------------------------------------------------------- Der Befehl zugang oura|whoop und die Hilfe
+        import run as run_modul
+        aufrufe = []
+        echt = (run_modul.wearable_zugang_im_terminal, run_modul.zugang_eintragen, run_modul.vorlage_schreiben)
+        run_modul.wearable_zugang_im_terminal = lambda dienst: aufrufe.append(("wearable", dienst)) or 0
+        run_modul.zugang_eintragen = lambda welcher="": aufrufe.append(("schluessel", welcher)) or True
+        run_modul.vorlage_schreiben = lambda: None  # sonst entstünde config/mcp_servers.json
+        try:
+            run_modul.hauptprogramm(["zugang", "oura"])
+            run_modul.hauptprogramm(["zugang", "Whoop"])
+            run_modul.hauptprogramm(["zugang", "gemini"])
+            run_modul.hauptprogramm(["zugang"])
+        finally:
+            run_modul.wearable_zugang_im_terminal, run_modul.zugang_eintragen, run_modul.vorlage_schreiben = echt
+        pruefen("Befehl: 'zugang oura' und 'zugang whoop' gehen in die Anmeldung, alles andere wie bisher",
+                aufrufe == [("wearable", "oura"), ("wearable", "whoop"), ("schluessel", "gemini"), ("schluessel", "")], str(aufrufe)[:56])
+        with open(os.path.join(WURZEL, "src", "run.py"), encoding="utf-8") as quelle:
+            run_quelle = quelle.read()
+        with open(os.path.join(WURZEL, "build_single.py"), encoding="utf-8") as quelle:
+            bau_quelle = quelle.read()
+        autopilot_zeile = "    python3 jarvis.py autopilot   Postfach des Autopiloten (an / aus zum Schalten)\n"
+        gesundheit_zeile = "    python3 jarvis.py gesundheit  Apple-Health-Export einlesen (Datei) oder alle Gesundheitswerte vergessen\n"
+        pruefen("Hilfe: die Zeile gesundheit steht in run.py direkt nach autopilot und in KOPF von build_single.py",
+                autopilot_zeile + gesundheit_zeile in run_quelle and gesundheit_zeile in bau_quelle
+                and "zugang oura" in run_quelle.split('"""')[1], "")
+        beispiel = open(os.path.join(WURZEL, "config", ".env.beispiel"), encoding="utf-8").read()
+        schluessel = ("OURA_CLIENT_ID", "OURA_CLIENT_SECRET", "OURA_REFRESH_TOKEN", "WHOOP_CLIENT_ID", "WHOOP_CLIENT_SECRET",
+                      "WHOOP_REFRESH_TOKEN", "VERKAUFS_STICHWOERTER", "BELASTUNG_SCHWELLE", "BELASTUNG_MIN_TERMINE",
+                      "BELASTUNG_PRUEFEN_UM")
+        pruefen("Konfiguration: alle Schlüssel mit Standard in config.py und im Beispiel",
+                all(("%s=" % s) in beispiel and hasattr(config, s) for s in schluessel)
+                and config.BELASTUNG_SCHWELLE == 34 and config.BELASTUNG_MIN_TERMINE == 4
+                and config.BELASTUNG_PRUEFEN_UM == "18:25" and "besichtigung" in config.VERKAUFS_STICHWOERTER
+                and "Wearable" in config.konfig_uebersicht(), "")
+        pruefen("Setup: Oura und Whoop stehen in der Liste der Zugänge",
+                [z[0] for z in wizard_modul.Einrichtung.ZUGAENGE if z[0] in ("oura", "whoop")] == ["oura", "whoop"], "")
+        quelle_erholung = open(os.path.join(WURZEL, "src", "modules", "erholung.py"), encoding="utf-8").read()
+        quelle_leistung = open(os.path.join(WURZEL, "src", "modules", "leistung.py"), encoding="utf-8").read()
+        pruefen("Netz: nur die festen Adressen von Oura und Whoop, die Leistung selbst ruft nichts auf",
+                "http://" not in quelle_leistung and "https://" not in quelle_leistung
+                and sorted(set(re.findall(r"https://[a-z.-]+", quelle_erholung))) ==
+                ["https://api.ouraring.com", "https://api.prod.whoop.com", "https://cloud.ouraring.com",
+                 "https://developer-dashboard.whoop.com"], "")
+    finally:
+        (config.OURA_CLIENT_ID, config.OURA_CLIENT_SECRET, config.OURA_REFRESH_TOKEN, config.WHOOP_CLIENT_ID,
+         config.WHOOP_CLIENT_SECRET, config.WHOOP_REFRESH_TOKEN, config.ENV_DATEI, config.CONFIG_VERZEICHNIS,
+         config.VORSCHLAEGE_AN, config.ANZEIGE_DISKRET, config.WETTER_ORT) = sicher
+        config.env_neu_laden()
+        try:
+            agent.tools.erholung.vergessen()
+            agent.tools.lauf_beginnen()
+        except Exception as fehler:
+            print("  Aufräumen: %s" % fehler)
 # [P5 Sicht] Ende
 # [P6 Stimme] Anfang
 # [P6 Stimme] Ende
@@ -6114,6 +6991,7 @@ def main() -> int:
     pruefung_buero(agent)
     # [P4 Büro] Ende
     # [P5 Sicht] Anfang
+    pruefung_erholung(agent)
     # [P5 Sicht] Ende
     # [P6 Stimme] Anfang
     # [P6 Stimme] Ende
