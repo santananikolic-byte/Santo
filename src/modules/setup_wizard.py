@@ -504,6 +504,7 @@ class Einrichtung:
         # [P2 Weltlage] Anfang
         # [P2 Weltlage] Ende
         # [P3 Telefon] Anfang
+        ("telefonassistent", "Vapi (Telefonassistent)", "VAPI_SCHLUESSEL", "https://dashboard.vapi.ai/"),
         # [P3 Telefon] Ende
         # [P4 Büro] Anfang
         # [P4 Büro] Ende

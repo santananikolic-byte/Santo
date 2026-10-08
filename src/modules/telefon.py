@@ -9,10 +9,10 @@ Was hier geht und was nicht, ehrlich:
 
 * **Anrufen und etwas ansagen** geht. Jarvis ruft eine Nummer an und spricht
   einen Text - etwa eine Terminerinnerung an einen Kunden.
-* **Ein Gespräch führen** geht damit noch nicht. Dafür müsste Twilio den
-  Rechner von außen erreichen können, und der steht hinter dem Router. Das
-  braucht eine öffentliche Adresse; solange die fehlt, sagt das Modul das,
-  statt so zu tun.
+* **Ein Gespräch führen** geht damit nicht. Dafür müsste Twilio den
+  Rechner von außen erreichen können, und der steht hinter dem Router. Ein
+  echtes Gespräch (etwa eine Reservierung) führt der Telefonassistent
+  (``telefonagent``): Er arbeitet über Vapi und braucht nichts von außen.
 * **SMS** geht.
 
 Jeder Anruf und jede SMS ist eine Wirkung nach außen und braucht deshalb eine
@@ -96,9 +96,8 @@ class Telefon:
         return {"eingerichtet": self.verfuegbar(),
                 "eigene_nummer": config.TWILIO_NUMMER or "nicht gesetzt",
                 "gespraech_moeglich": False,
-                "hinweis": "Ansagen und SMS gehen. Für ein echtes Gespräch "
-                           "bräuchte Twilio eine öffentliche Adresse zu diesem "
-                           "Rechner."}
+                "hinweis": "Ansagen und SMS gehen. Ein echtes Gespräch führt "
+                           "der Telefonassistent (VAPI_SCHLUESSEL)."}
 
     # -- Schnittstelle ------------------------------------------------------
 

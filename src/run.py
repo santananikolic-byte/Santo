@@ -209,6 +209,9 @@ def dauerbetrieb(dienst: bool = False):
     # [P2 Weltlage] Anfang
     # [P2 Weltlage] Ende
     # [P3 Telefon] Anfang
+    # Das Ende eines Telefonats wird gesagt; der Kalendervorschlag steht dann auch im Gespräch
+    # (der Telefonagent merkt ihn über agent.meldung_vormerken vor).
+    agent.tools.telefonagent.ausgabe = ansager.sagen if dienst else stimme.sprich
     # [P3 Telefon] Ende
     # [P4 Büro] Anfang
     # [P4 Büro] Ende
@@ -561,6 +564,8 @@ def webbetrieb(argumente=None):
     # [P2 Weltlage] Anfang
     # [P2 Weltlage] Ende
     # [P3 Telefon] Anfang
+    # Das Ende eines Telefonats landet wie ein Briefing in der Web-App.
+    agent.tools.telefonagent.ausgabe = web.melden
     # [P3 Telefon] Ende
     # [P4 Büro] Anfang
     # [P4 Büro] Ende

@@ -59,7 +59,8 @@ from modules.maerkte import Maerkte, SYMBOLE
 from modules.weblesen import Weblesen
 # [P2 Weltlage] Ende
 # [P3 Telefon] Anfang
-from modules.lokale import Lokale
+from modules.lokale import KUECHEN, Lokale
+from modules.telefonagent import Telefonagent, auftraggeber, telefon_datum_lang, telefon_max_sekunden
 # [P3 Telefon] Ende
 # [P4 Büro] Anfang
 from modules.vorschlaege import Vorschlaege
@@ -125,8 +126,57 @@ NETZ_SENDEND |= {"nachrichten_suchen", "aktienkurs", "webseite_lesen"}
 FREMDE_INHALTE |= {"weltlage", "lagebild", "nachrichten_suchen", "webseite_lesen"}
 # [P2 Weltlage] Ende
 # [P3 Telefon] Anfang
-NETZ_SENDEND |= {"lokale_suchen"}
-FREMDE_INHALTE |= {"lokale_suchen"}
+# Ein Anruf ist eine Wirkung nach außen: Freigabe, und im Hintergrund gibt es ihn nicht.
+FREIGABE_PFLICHTIG |= {"restaurant_anrufen"}
+NETZ_SENDEND |= {"lokale_suchen", "restaurant_anrufen"}
+# Karteneinträge und die Mitschrift eines Telefonats sind Text von anderen.
+FREMDE_INHALTE |= {"lokale_suchen", "anruf_status"}
+
+
+def _telefon_zeile(wert, grenze=0):
+    """Ein Wert als eine Zeile - fehlt er: ``?``. ``grenze`` 0 kürzt nie (Nummern, Namen)."""
+    if wert is None or wert == "":
+        return "?"
+    text = " ".join(str(wert).split())
+    return text if not grenze or len(text) <= grenze else text[:grenze].rstrip() + " …"
+
+
+def _angaben_restaurant_anrufen(a):
+    k = _telefon_zeile
+    nummer = a.get("telefon_nummer") or a.get("nummer")
+    datum = str(a.get("telefon_datum") or a.get("datum") or "")
+    tag = "%s (%s)" % (telefon_datum_lang(datum), datum) if re.match(r"^\d{4}-\d{2}-\d{2}$", datum) \
+        else k(datum)
+    spielraum = a.get("spielraum_minuten")
+    spielraum = 30 if spielraum in (None, "") else spielraum
+    was = ("%s (%s) anrufen und einen Tisch für %s Personen am %s um %s Uhr auf den Namen %s "
+           "reservieren (Spielraum ±%s Minuten)"
+           % (k(a.get("restaurant"), 80), k(nummer), k(a.get("personen")), tag,
+              k(a.get("telefon_uhrzeit") or a.get("uhrzeit")), k(a.get("name") or auftraggeber()),
+              k(spielraum)))
+    if a.get("hinweise"):
+        was += "; Wunsch an das Restaurant: %s" % k(a.get("hinweise"), 160)
+    retell = str(config.TELEFONAGENT_ANBIETER or "").strip().lower() == "retell"
+    wie = ("Ein KI-Telefonassistent (%s) ruft von der dort eingetragenen Nummer an, sagt im ersten "
+           "Satz, dass er eine KI ist und in deinem Auftrag anruft, und dass das Gespräch "
+           "mitgeschrieben, aber nicht aufgenommen wird. Er nennt nur Name, Personen und Zeit%s, gibt "
+           "keine Zahlungs- oder Kartendaten heraus, bezahlt nichts und legt spätestens nach %d "
+           "Minuten auf. Kosten etwa 0,30 bis 0,60 Euro."
+           % ("Retell" if retell else "Vapi, Stimme %s" % config.VAPI_STIMME,
+              " und deine Rückrufnummer" if config.TELEFONAGENT_RUECKRUF else "",
+              telefon_max_sekunden() // 60))
+    if a.get("telefon_problem"):
+        wie = "Achtung, das geht so nicht: %s %s" % (a["telefon_problem"], wie)
+    return was, wie
+
+
+def _aufloesen_restaurant_anrufen(werkzeuge, argumente):
+    # Die Frage nennt die Nummer, die wirklich gewählt wird, und sagt vorab, was fehlt.
+    return werkzeuge.telefonagent.freigabe_zusatz(argumente)
+
+
+FREIGABE_ANGABEN["restaurant_anrufen"] = _angaben_restaurant_anrufen
+FREIGABE_AUFLOESEN["restaurant_anrufen"] = _aufloesen_restaurant_anrufen
 # [P3 Telefon] Ende
 # [P4 Büro] Anfang
 FREIGABE_PFLICHTIG |= {"mail_antworten"}
@@ -260,6 +310,7 @@ class Werkzeuge:
         # [P2 Weltlage] Ende
         # [P3 Telefon] Anfang
         self.lokale = Lokale(self.welt, anzeige=self)
+        self.telefonagent = Telefonagent(self.memory, anzeige=self.anzeige)
         # [P3 Telefon] Ende
         # [P4 Büro] Anfang
         self.vorschlaege = Vorschlaege(self.memory)
@@ -311,6 +362,7 @@ class Werkzeuge:
         # [P2 Weltlage] Anfang
         # [P2 Weltlage] Ende
         # [P3 Telefon] Anfang
+        self.telefonagent.agent = agent
         # [P3 Telefon] Ende
         # [P4 Büro] Anfang
         self.vorschlaege.agent = agent
@@ -669,7 +721,8 @@ class Werkzeuge:
             # -- Telefon --
             werkzeug("anrufen",
                      "Ruft eine Nummer an und sagt dort einen Satz an - zum Beispiel "
-                     "eine Terminbestätigung oder einen Rückruf. Braucht eine Freigabe.",
+                     "eine Terminbestätigung oder einen Rückruf. Braucht eine Freigabe. Für ein echtes "
+                     "Gespräch, etwa eine Reservierung, nimm restaurant_anrufen.",
                      {"nummer": text, "ansage": text, "begruendung": begruendung},
                      ["nummer", "ansage", "begruendung"]),
             werkzeug("sms_senden",
@@ -746,12 +799,27 @@ class Werkzeuge:
                      {"adresse": text}, ["adresse"]),
             # [P2 Weltlage] Ende
             # [P3 Telefon] Anfang
-            # -- Lokale in der Nähe --
+            # -- Telefonassistent --
             werkzeug("lokale_suchen",
-                     "Findet Restaurants in der Nähe (OpenStreetMap) mit Entfernung, Telefon und Öffnungszeiten "
-                     "laut Karte und zeigt sie auf der Zentrale. Küche: asiatisch, chinesisch, japanisch, thai, "
-                     "vietnamesisch, indisch, italienisch, griechisch, tuerkisch, oesterreichisch oder egal.",
-                     {"ort": text, "kueche": text, "radius": ganz}),
+                     "Sucht Restaurants und Lokale in der Nähe (OpenStreetMap) nach Küche, mit Entfernung, "
+                     "Telefon und Öffnungszeiten laut Karte, und zeigt sie auf der Zentrale. Legt keine "
+                     "Interessenten an.",
+                     {"ort": text, "kueche": {"type": "string", "enum": sorted(KUECHEN)}, "radius_m": ganz}),
+            werkzeug("restaurant_anrufen",
+                     "Lässt einen KI-Telefonassistenten ein Restaurant anrufen und einen Tisch reservieren. "
+                     "Er sagt im ersten Satz, dass er eine KI ist, nennt nur Name, Personen, Zeit und "
+                     "Rückrufnummer, zahlt nichts und legt nach höchstens %d Minuten auf. Braucht eine "
+                     "Freigabe. Danach erst den Termin vorschlagen, nie ungefragt eintragen."
+                     % (telefon_max_sekunden() // 60),
+                     {"restaurant": text, "nummer": text,
+                      "datum": {"type": "string", "description": "JJJJ-MM-TT, auch heute oder morgen"},
+                      "uhrzeit": {"type": "string", "description": "HH:MM"},
+                      "personen": ganz, "name": text, "spielraum_minuten": ganz, "hinweise": text,
+                      "begruendung": begruendung},
+                     ["restaurant", "nummer", "datum", "uhrzeit", "personen", "begruendung"]),
+            werkzeug("anruf_status",
+                     "Stand und Ergebnis des letzten Telefonassistenten-Anrufs, mit Mitschrift.", {}),
+            werkzeug("anruf_beenden", "Beendet den laufenden Anruf des Telefonassistenten sofort.", {}),
             # [P3 Telefon] Ende
             # [P4 Büro] Anfang
             # -- Post und Vorschläge --
@@ -1276,7 +1344,18 @@ class Werkzeuge:
         # [P3 Telefon] Anfang
         if name == "lokale_suchen":
             return self.lokale.suchen(a.get("ort") or "", a.get("kueche") or "asiatisch",
-                                      a.get("radius") or 2500)
+                                      a.get("radius_m") or a.get("radius") or 2500)
+        if name == "restaurant_anrufen":
+            return self.telefonagent.reservieren(
+                a.get("restaurant", ""), a.get("nummer", ""), a.get("datum", ""), a.get("uhrzeit", ""),
+                a.get("personen"), a.get("name", ""), a.get("spielraum_minuten") or 30,
+                a.get("hinweise", ""), a.get("begruendung", ""))
+        if name == "anruf_status":
+            return self.telefonagent.status()
+        if name == "anruf_beenden":
+            if self.im_hintergrund():
+                return {"ok": False, "fehler": "Im Hintergrund lege ich keinen Anruf auf."}
+            return self.telefonagent.beenden()
         # [P3 Telefon] Ende
         # [P4 Büro] Anfang
         if name == "mail_antworten":
@@ -1465,4 +1544,5 @@ class Werkzeuge:
             "bildschirm": self.bildschirm.zustand(),
             "browser": self.browser.zustand(),
             "versand": self.messenger.zustand(),
+            "telefonassistent": self.telefonagent.zustand(),
         }
