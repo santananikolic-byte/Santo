@@ -5014,6 +5014,707 @@ def pruefung_buero(agent):
         w.lauf_beginnen()
 # [P4 Büro] Ende
 # [P5 Sicht] Anfang
+SICHT_NODE_PRUEFUNG = r"""
+const fs=require('fs');
+let s=7;const rnd=()=>{s=(s*1103515245+12345)%2147483648;return s/2147483648};
+const gauss=()=>{let u=0;for(let i=0;i<6;i++)u+=rnd();return (u-3)/Math.sqrt(0.5)};
+// Proben: Sinus mit hz und amp (mm), Handlänge 95 mm, Rauschen in mm, n Bilder mit fps
+function proben(fps,amp,rausch,hz,sekunden){
+  const out=[],n=Math.round((sekunden||8)*fps);
+  for(let i=0;i<n;i++){
+    const t=i*1000/fps;
+    out.push({t,x:200/95+(amp*Math.sin(2*Math.PI*hz*t/1000)+rausch*gauss())/95,y:200/95+rausch*gauss()/95,ok:true});
+  }
+  return out;
+}
+const e={};
+e.a=handruhe(proben(30,0.3,0.05,10),95);
+e.b=handruhe(proben(15,0.3,0.05,10),95);
+e.c=handruhe(proben(30,0,0.05,10),95);
+e.d=handruhe(proben(60,0.3,0.05,10),95);
+e.nurWenig=handruhe(proben(30,0.3,0.05,10,0.2),95);
+e.leer=handruhe([],95);
+const ungueltig=proben(30,0.3,0.05,10);for(let i=0;i<ungueltig.length;i++)if(i%4===0)ungueltig[i].ok=false;
+e.ungueltig=handruhe(ungueltig,95);
+const luecken=proben(30,0.3,0.05,10);for(let i=0;i<luecken.length;i++)if(i%10===3)luecken[i].ok=false;
+e.luecken=handruhe(luecken,95);
+const gleiche=proben(30,0.3,0.05,10);
+e.mmProLaenge=[handruhe(gleiche,95).mm,handruhe(gleiche,190).mm];
+// Hand -> Probe
+const P=(x,y)=>({x,y,z:0});
+const daumenHoch=[P(.5,.8),P(.46,.72),P(.44,.62),P(.44,.54),P(.44,.46),
+ P(.5,.62),P(.56,.62),P(.54,.66),P(.51,.66), P(.5,.67),P(.56,.67),P(.54,.71),P(.51,.71),
+ P(.5,.72),P(.56,.72),P(.54,.75),P(.51,.75), P(.5,.76),P(.55,.76),P(.53,.79),P(.51,.79)];
+const klein=daumenHoch.map(p=>P(.5+(p.x-.5)*0.05,.8+(p.y-.8)*0.05));
+e.probe=[handProbe(daumenHoch,5,1280,720).ok,handProbe(null,5,1280,720).ok,handProbe(klein,5,1280,720).ok];
+// Daumen hoch
+const offen=daumenHoch.map((p,i)=>i>=5&&i%4===0?P(p.x+0.25,p.y-0.05):p);
+const hoch={categoryName:'Thumb_Up',score:0.92},runter={categoryName:'Thumb_Down',score:0.92};
+e.erkannt=[istDaumenHoch(daumenHoch,hoch,true),istDaumenHoch(offen,hoch,true),istDaumenHoch(daumenHoch,null,true),
+ istDaumenHoch(daumenHoch,{categoryName:'Open_Palm',score:0.99},true),istDaumenHoch(daumenHoch,{categoryName:'Thumb_Up',score:0.6},true),
+ istDaumenHoch(daumenHoch,{categoryName:'Thumb_Up',score:0.6},false)];
+function lauf(frei,halten,hand,geste,luecke){
+  const z=daumenNeu();let t=0;const g=[];
+  for(;t<frei;t+=33){const r=daumenSchritt(z,t,null,null);if(r.aktion)g.push([t,r.aktion])}
+  const t0=t;
+  for(;t<t0+halten;t+=33){
+    const rel=t-t0,weg=luecke&&rel>=luecke[0]&&rel<luecke[0]+luecke[1];
+    const r=daumenSchritt(z,t,weg?null:hand,weg?null:geste);if(r.aktion)g.push([t-t0,r.aktion]);
+  }
+  return g;
+}
+e.ja14=lauf(600,1400,daumenHoch,hoch);
+e.ja17=lauf(600,1700,daumenHoch,hoch);
+e.zuFrueh=lauf(300,1700,daumenHoch,hoch);
+e.luecke99=lauf(600,2600,daumenHoch,hoch,[600,99]);
+e.luecke200=lauf(600,2600,daumenHoch,hoch,[600,200]);
+e.nein06=lauf(600,600,daumenHoch,runter);
+e.nein09=lauf(600,900,daumenHoch,runter);
+e.ohneModell=lauf(600,3000,daumenHoch,null);
+(function(){const z=daumenNeu();const g=[];for(let t=0;t<4000;t+=33){const r=daumenSchritt(z,t,daumenHoch,hoch);if(r.aktion)g.push(t)}e.schonOben=g})();
+(function(){const z=daumenNeu();const g=[];let t=0;for(;t<600;t+=33)daumenSchritt(z,t,null,null);
+ for(;t<14000;t+=33){const r=daumenSchritt(z,t,daumenHoch,hoch);if(r.aktion)g.push(t)}e.dauerdaumen=g})();
+(function(){const z=daumenNeu();const g=[];let t=0;for(;t<600;t+=33)daumenSchritt(z,t,null,null);
+ // Daumen bis zum Feuern, dann Hand weg: nach 3 s Sperre und einer halben Sekunde ohne Daumen wieder scharf
+ for(;t<3000;t+=33){const r=daumenSchritt(z,t,daumenHoch,hoch);if(r.aktion)g.push(['a',t])}
+ for(;t<9000;t+=33){const r=daumenSchritt(z,t,null,null);if(r.aktion)g.push(['b',t])}
+ for(;t<12000;t+=33){const r=daumenSchritt(z,t,daumenHoch,hoch);if(r.aktion)g.push(['c',t])}
+ e.zweimal=g.map(x=>x[0])})();
+console.log(JSON.stringify(e));
+"""
+
+
+def pruefung_sicht(agent):
+    """Die Kamera-Seite: Dateien mit festen Prüfsummen, Messungen, Routen, Seite ohne Fremdes, Rechenblock."""
+    abschnitt("Sicht: Kamera-Seite, Handerkennung, Handruhe")
+    import base64
+    import hashlib
+    import socket
+    import urllib.error as _fehler
+    import urllib.request as _netz
+    import modules.sicht as sicht_modul
+    import modules.sehen as sehen_modul
+    import modules.webapp as webapp_modul
+    from modules.anzeige import Anzeige
+    from modules.memory import Memory
+
+    seite = sehen_modul.SEITE_SEHEN
+    sicht_ordner_echt, dateien_echt = config.MODELL_VERZEICHNIS, sicht_modul.SICHT_DATEIEN
+    flaggen_echt = (config.SICHT_AN, config.GESTEN_FREIGABE, config.ANZEIGE_DISKRET)
+    echt_env, echt_kanal = config.env_setzen, agent.tools.freigabe_kanal
+    config.env_setzen = lambda *a, **k: (_ for _ in ()).throw(AssertionError("echte .env angefasst"))
+    try:
+        _pruefung_sicht_innen(agent, sicht_modul, sehen_modul, webapp_modul, seite, Anzeige, Memory,
+                              base64, hashlib, socket, _netz, _fehler)
+    finally:
+        config.MODELL_VERZEICHNIS, sicht_modul.SICHT_DATEIEN = sicht_ordner_echt, dateien_echt
+        config.SICHT_AN, config.GESTEN_FREIGABE, config.ANZEIGE_DISKRET = flaggen_echt
+        config.env_setzen = echt_env
+        agent.tools.freigabe_kanal = echt_kanal
+
+
+def _pruefung_sicht_innen(agent, sicht_modul, sehen_modul, webapp_modul, seite, Anzeige, Memory,
+                          base64, hashlib, socket, _netz, _fehler):
+    # ---- Die Dateien: feste Prüfsummen ----------------------------------------------------------
+    echt = sicht_modul.SICHT_DATEIEN
+    namen = ("vision_bundle.mjs", "vision_wasm_internal.js", "vision_wasm_internal.wasm",
+             "vision_wasm_nosimd_internal.js", "vision_wasm_nosimd_internal.wasm", "gesture_recognizer.task")
+    fest = {n: sicht_modul._sicht_soll(echt[n]) for n in namen}
+    pruefen("Sicht: sechs Dateien, jede mit fester sha256-Prüfsumme, das Bündel zusätzlich mit sha384 (SRI)",
+            tuple(echt) == namen and all(
+                any(s.startswith("sha256-") and len(s) == 7 + 64 for s in fest[n]) for n in namen)
+            and any(s.startswith("sha384-") for s in fest["vision_bundle.mjs"]), "%d Dateien" % len(echt))
+    pruefen("Sicht: Version 0.10.35 in allen Adressen derselben Fassung, nichts 'latest'",
+            sicht_modul.SICHT_VERSION == "0.10.35"
+            and all(("@" + sicht_modul.SICHT_VERSION + "/") in echt[n][0] for n in namen[:5])
+            and not any("@latest" in echt[n][0] or "tasks-vision/" in echt[n][0].replace("tasks-vision@", "")
+                        for n in namen[:5]), "Bündel und WASM passen zusammen")
+    pruefen("Sicht: ein Terminal-Befehl und seine Hilfezeile direkt nach 'stimmen' (run.py und KOPF)",
+            all(
+                (lambda q: "stimmen     ElevenLabs-Stimme aussuchen\n    python3 jarvis.py sicht " in q)(
+                    open(os.path.join(WURZEL, d), encoding="utf-8").read())
+                for d in ("src/run.py", "build_single.py")), "")
+
+    # Laden mit einem falschen Holer: nichts Fremdes, nichts Falsches bleibt liegen
+    temp = pathlib.Path(tempfile.mkdtemp(prefix="sicht_", dir=ARBEITSVERZEICHNIS))
+    config.MODELL_VERZEICHNIS = temp
+    ordner = sicht_modul.sicht_ordner()
+    pruefen("Sicht: der Ordner heißt modelle/sicht-<Version> und liegt unter MODELL_VERZEICHNIS",
+            ordner == temp / "sicht-0.10.35" and str(config.MODELL_VERZEICHNIS) == str(temp), "")
+    echo = []
+    gut = b"export const x = 1;\n" * 10
+    sha256 = "sha256-" + hashlib.sha256(gut).hexdigest()
+    sha384 = "sha384-" + base64.b64encode(hashlib.sha384(gut).digest()).decode()
+    aufrufe = []
+
+    def holer(inhalte):
+        def holen(url):
+            aufrufe.append(url)
+            wert = inhalte[url]
+            if isinstance(wert, Exception):
+                raise wert
+            return wert
+        return holen
+
+    sicht_modul.SICHT_DATEIEN = {"vision_bundle.mjs": ("https://x.example/a.mjs", sha256, "text/javascript")}
+    falsch = sicht_modul.sicht_laden(holer({"https://x.example/a.mjs": b"boese"}), melden=echo.append)
+    vorhanden = [p.name for p in ordner.iterdir()] if ordner.exists() else []
+    pruefen("Sicht laden: falsche Bytes werden verworfen, der Satz nennt die Prüfsumme, nichts bleibt liegen",
+            falsch["ok"] is False and "stimmt nicht mit der erwarteten Prüfsumme überein" in falsch["text"]
+            and "nichts gespeichert" in falsch["text"] and "vision_bundle.mjs" not in vorhanden
+            and not any(n.endswith(".tmp") for n in vorhanden), falsch["text"][:60])
+    richtig = sicht_modul.sicht_laden(holer({"https://x.example/a.mjs": gut}), melden=echo.append)
+    pruefen("Sicht laden: die richtigen Bytes werden abgelegt und erreichbar",
+            richtig["ok"] is True and "Die Handerkennung ist geladen" in richtig["text"]
+            and (ordner / "vision_bundle.mjs").read_bytes() == gut
+            and sicht_modul.sicht_datei("vision_bundle.mjs") == (gut, "text/javascript")
+            and sicht_modul.sicht_bereit() is True, richtig["text"])
+    jetzt_n = len(aufrufe)
+    nochmal = sicht_modul.sicht_laden(holer({"https://x.example/a.mjs": gut}), melden=echo.append)
+    pruefen("Sicht laden: was schon da ist und stimmt, wird nicht noch einmal geladen",
+            nochmal["ok"] and len(aufrufe) == jetzt_n and nochmal["dateien"][0]["neu"] is False, "")
+    abgelehnt = sicht_modul.sicht_laden(holer({"https://x.example/a.mjs": b"anderes"}), melden=echo.append, neu=True)
+    pruefen("Sicht laden: eine abweichende neue Fassung wird abgelehnt, die gute Datei bleibt",
+            abgelehnt["ok"] is False and (ordner / "vision_bundle.mjs").read_bytes() == gut, "")
+    fehler_holen = sicht_modul.sicht_laden(
+        holer({"https://x.example/a.mjs": OSError("kein Netz")}), melden=echo.append, neu=True)
+    pruefen("Sicht laden: kein Netz gibt einen Satz, keine Ausnahme, und die Datei bleibt",
+            fehler_holen["ok"] is False and "kein Netz" in fehler_holen["text"]
+            and (ordner / "vision_bundle.mjs").read_bytes() == gut, "")
+
+    # Die sha384-Form (SRI) und mehrere Summen zugleich
+    temp2 = pathlib.Path(tempfile.mkdtemp(prefix="sicht_", dir=ARBEITSVERZEICHNIS))
+    config.MODELL_VERZEICHNIS = temp2
+    sicht_modul.SICHT_DATEIEN = {"vision_bundle.mjs": ("https://x.example/a.mjs", sha384, "text/javascript")}
+    r384 = sicht_modul.sicht_laden(holer({"https://x.example/a.mjs": gut}), melden=echo.append)
+    r384_falsch = sicht_modul.sicht_laden(holer({"https://x.example/a.mjs": gut + b"x"}), melden=echo.append, neu=True)
+    sicht_modul.SICHT_DATEIEN = {"vision_bundle.mjs": ("https://x.example/a.mjs", (sha256, sha384), "text/javascript")}
+    r_beide = sicht_modul.sicht_laden(holer({"https://x.example/a.mjs": gut}), melden=echo.append, neu=True)
+    sicht_modul.SICHT_DATEIEN = {"vision_bundle.mjs": ("https://x.example/a.mjs",
+                                                       (sha256, "sha384-" + "A" * 64), "text/javascript")}
+    r_eine_falsch = sicht_modul.sicht_laden(holer({"https://x.example/a.mjs": gut}), melden=echo.append, neu=True)
+    pruefen("Sicht laden: die sha384-Prüfsumme (SRI) gilt, und bei mehreren müssen alle stimmen",
+            r384["ok"] and not r384_falsch["ok"] and r_beide["ok"] and not r_eine_falsch["ok"], "")
+    pruefen("Sicht: Prüfsummen prüfen - sha256 hex, sha384 base64, Unsinn nie",
+            sicht_modul.sicht_pruefsumme_stimmt(gut, sha256) and sicht_modul.sicht_pruefsumme_stimmt(gut, sha384)
+            and not sicht_modul.sicht_pruefsumme_stimmt(gut, "sha256-" + "0" * 64)
+            and not sicht_modul.sicht_pruefsumme_stimmt(gut, "md5-abc")
+            and not sicht_modul.sicht_pruefsumme_stimmt(gut, "") and not sicht_modul.sicht_pruefsumme_stimmt(gut, "sha256-"),
+            "")
+
+    # Ohne feste Prüfsumme: beim ersten Laden notieren, danach vergleichen
+    temp3 = pathlib.Path(tempfile.mkdtemp(prefix="sicht_", dir=ARBEITSVERZEICHNIS))
+    config.MODELL_VERZEICHNIS = temp3
+    sicht_modul.SICHT_DATEIEN = {"vision_bundle.mjs": ("https://x.example/a.mjs", None, "text/javascript")}
+    erst = sicht_modul.sicht_laden(holer({"https://x.example/a.mjs": gut}), melden=echo.append)
+    summen = json.loads((temp3 / "sicht-0.10.35" / "pruefsummen.json").read_text(encoding="utf-8"))
+    zweit = sicht_modul.sicht_laden(holer({"https://x.example/a.mjs": gut + b"!"}), melden=echo.append, neu=True)
+    pruefen("Sicht laden: ohne feste Summe wird sie beim ersten Mal notiert, eine geänderte zweite Datei abgelehnt",
+            erst["ok"] and summen == {"vision_bundle.mjs": hashlib.sha256(gut).hexdigest()}
+            and not zweit["ok"] and (temp3 / "sicht-0.10.35" / "vision_bundle.mjs").read_bytes() == gut, "")
+
+    # Eine Datei, die nach dem Laden verändert wird, wird nicht mehr ausgeliefert
+    config.MODELL_VERZEICHNIS = temp
+    sicht_modul.SICHT_DATEIEN = {"vision_bundle.mjs": ("https://x.example/a.mjs", sha256, "text/javascript")}
+    (ordner / "vision_bundle.mjs").write_bytes(gut + b"// eingeschmuggelt\n")
+    verfaelscht = sicht_modul.sicht_datei("vision_bundle.mjs")
+    pruefen("Sicht: eine verfälschte Datei auf der Platte wird nicht ausgeliefert, bereit ist dann False",
+            verfaelscht[0] is None and "Prüfsumme" in verfaelscht[1] and sicht_modul.sicht_bereit() is False,
+            verfaelscht[1][:50])
+    (ordner / "vision_bundle.mjs").write_bytes(gut)
+
+    # Namen und Pfade
+    sicht_modul.SICHT_DATEIEN = {"vision_bundle.mjs": ("https://x.example/a.mjs", sha256, "text/javascript"),
+                                 "gesture_recognizer.task": ("https://x.example/m", sha256, "application/octet-stream")}
+    schlecht = ["../config/.env", "..", "../vision_bundle.mjs", "vision_bundle.mjs/../../x", "/etc/passwd",
+                "vision_bundle.mjs\x00.png", "VISION_BUNDLE.MJS", "", None, 7, "pruefsummen.json", "sub/vision_bundle.mjs"]
+    pruefen("Sicht: sicht_datei liefert nur weißgelistete Namen - Pfade, '..', Nullbyte, Großschrift nie",
+            all(sicht_modul.sicht_datei(n)[0] is None for n in schlecht)
+            and sicht_modul.sicht_datei("../config/.env")[0] is None, "%d Fälle" % len(schlecht))
+    fehlt = sicht_modul.sicht_datei("gesture_recognizer.task")
+    pruefen("Sicht: fehlt eine Datei, nennt die Meldung den Befehl zum Laden",
+            fehlt[0] is None and "python3 jarvis.py sicht laden" in fehlt[1], fehlt[1][:60])
+    pfade = {
+        "/sicht/dateien/0.10.35/vision_bundle.mjs": 200,
+        "/sicht/dateien/0.10.35/gesture_recognizer.task": 404,        # nicht da
+        "/sicht/dateien/0.10.34/vision_bundle.mjs": 404,               # falsche Version
+        "/sicht/dateien/vision_bundle.mjs": 404,                       # ohne Version
+        "/sicht/dateien/0.10.35/../vision_bundle.mjs": 404,
+        "/sicht/dateien/0.10.35/%2e%2e/config/.env": 404,
+        "/sicht/dateien/0.10.35/sub/vision_bundle.mjs": 404,
+        "/sicht/dateien/0.10.35/": 404, "/sicht/dateien/": 404, "/sicht/dateien/0.10.35": 404,
+    }
+    ergebnisse = {p: sicht_modul.sicht_ausliefern(p)[0] for p in pfade}
+    pruefen("Sicht: Auslieferung nur mit der Version im Pfad und einem weißgelisteten Namen",
+            ergebnisse == pfade, str({p: c for p, c in ergebnisse.items() if c != pfade[p]})[:60])
+    pruefen("Sicht: ohne Schlüssel gibt es nur die sechs Namen in der richtigen Version",
+            sicht_modul.sicht_pfad_oeffentlich("/sicht/dateien/0.10.35/vision_bundle.mjs")
+            and not sicht_modul.sicht_pfad_oeffentlich("/sicht/dateien/0.10.35/pruefsummen.json")
+            and not sicht_modul.sicht_pfad_oeffentlich("/sicht/dateien/0.9/vision_bundle.mjs")
+            and not sicht_modul.sicht_pfad_oeffentlich("/sicht/dateien/0.10.35/../x")
+            and not sicht_modul.sicht_pfad_oeffentlich("/api/zustand")
+            and not sicht_modul.sicht_pfad_oeffentlich(None), "")
+
+    # ---- Messungen ------------------------------------------------------------------------------
+    gueltig = {"art": "halten", "mm": 0.6, "rauschen_mm": 0.3, "rhythmus_hz": 8.5, "spitze_verhaeltnis": 31.0,
+               "fps": 30.0, "dauer_s": 8.0, "bilder": 240, "handlaenge_mm": 95}
+    schlecht = {
+        "mm als Text": dict(gueltig, mm="0.5"), "mm NaN": dict(gueltig, mm=float("nan")),
+        "mm unendlich": dict(gueltig, mm=float("inf")), "mm 50": dict(gueltig, mm=50),
+        "mm negativ": dict(gueltig, mm=-0.1), "mm Ja/Nein": dict(gueltig, mm=True), "fps 5": dict(gueltig, fps=5),
+        "fps 200": dict(gueltig, fps=200), "bilder Ja/Nein": dict(gueltig, bilder=True),
+        "bilder 3": dict(gueltig, bilder=3), "bilder Text": dict(gueltig, bilder="240"),
+        "art fehlt": {k: v for k, v in gueltig.items() if k != "art"}, "art falsch": dict(gueltig, art="liegen"),
+        "mm fehlt": {k: v for k, v in gueltig.items() if k != "mm"}, "dauer 2": dict(gueltig, dauer_s=2),
+        "Hz 20": dict(gueltig, rhythmus_hz=20), "Hz Text": dict(gueltig, rhythmus_hz="8"),
+        "Spitze negativ": dict(gueltig, spitze_verhaeltnis=-1), "Länge 20": dict(gueltig, handlaenge_mm=20),
+        "Liste": [gueltig], "None": None, "Text": "mm=1",
+    }
+    abgewiesen = {n: sicht_modul.messung_pruefen(d)[0] is None for n, d in schlecht.items()}
+    pruefen("Sicht: Messungen werden streng geprüft (Text, NaN, unendlich, Ja/Nein, Grenzen, fehlende Art)",
+            all(abgewiesen.values()), ", ".join(n for n, v in abgewiesen.items() if not v)[:60])
+    wenig_licht = sicht_modul.messung_pruefen(dict(gueltig, fps=20))
+    pruefen("Sicht: unter 25 Bildern pro Sekunde heißt es 'Mehr Licht, bitte'",
+            wenig_licht[0] is None and "Mehr Licht, bitte" in wenig_licht[1] and "25" in wenig_licht[1], wenig_licht[1][:50])
+    mit_extra = sicht_modul.messung_pruefen(dict(gueltig, bild="data:image/png;base64,AAAA", extra=[1], rhythmus_hz=None))
+    pruefen("Sicht: fremde Felder (auch ein Bild) werden nie gelesen, null bei Rhythmus und Rauschen darf sein",
+            mit_extra[0] is not None and set(mit_extra[0]) == {
+                "art", "mm", "rauschen_mm", "rhythmus_hz", "spitze_verhaeltnis", "fps", "dauer_s", "bilder", "handlaenge_mm"}
+            and mit_extra[0]["rhythmus_hz"] is None
+            and sicht_modul.messung_pruefen({k: v for k, v in gueltig.items() if k != "handlaenge_mm"})[0]["handlaenge_mm"]
+            == float(config.HANDLAENGE_MM), "")
+
+    # Speichern, Vergleichen, Anzeige
+    class FalscheAnzeige:
+        def __init__(self):
+            self.gemeldet, self.gezeigt = [], []
+
+        def melden(self, kanal, daten, dauer_s=0):
+            self.gemeldet.append((kanal, daten))
+            return len(self.gemeldet)
+
+        def zeigen(self, modus, daten=None, dauer_s=None, quelle=""):
+            self.gezeigt.append((modus, dauer_s))
+            return {"ok": True}
+
+    gedaechtnis = Memory(os.path.join(ARBEITSVERZEICHNIS, "sicht_handruhe.db"))
+    uhr = {"jetzt": datetime(2026, 10, 8, 9, 0, 0)}
+    fake = FalscheAnzeige()
+    hr = sicht_modul.Handruhe(gedaechtnis, anzeige=fake, uhr=lambda: uhr["jetzt"])
+    erste = hr.speichern(dict(gueltig, rhythmus_hz=None, extra="x"))
+    verboten = ("Diagnose", "Stress", "Parkinson", "Gesundheit")
+    pruefen("Handruhe: der Text sagt 'Schätzung' und 'kein Medizinprodukt' und nie Diagnose, Stress, Parkinson, Gesundheit",
+            erste["ok"] and "Schätzung" in erste["text"] and erste["text"].endswith("Selbstbeobachtung, kein Medizinprodukt.")
+            and not any(w in erste["text"] for w in verboten) and "0,6 mm" in erste["text"], erste["text"][:60])
+    pruefen("Handruhe: ohne genug frühere Messungen kein Vergleich, dafür der ehrliche Satz",
+            "Für einen Vergleich brauche ich noch ein paar Messungen." in erste["text"]
+            and "14-Tage-Mittel" not in erste["text"] and erste["vergleich"] == ""
+            and "Kein deutlicher Rhythmus." in erste["text"], "")
+    pruefen("Handruhe: die Anzeige bekommt den Kanal sicht und die Ansicht sicht für zwei Minuten",
+            fake.gemeldet and fake.gemeldet[-1][0] == "sicht" and fake.gemeldet[-1][1]["handruhe"]["mm"] == 0.6
+            and fake.gezeigt and fake.gezeigt[-1] == ("sicht", 120), "")
+    for tage_zurueck in (5, 4, 3, 2, 1):
+        uhr["jetzt"] = datetime(2026, 10, 8, 9, 0, 0) - timedelta(days=tage_zurueck)
+        hr.speichern(dict(gueltig, mm=0.4))
+    uhr["jetzt"] = datetime(2026, 10, 8, 9, 5, 0)
+    ruhe = hr.speichern(dict(gueltig, art="ruhe", mm=0.3, rhythmus_hz=None))
+    sechste = hr.speichern(dict(gueltig, mm=0.9, rhythmus_hz=8.5))
+    pruefen("Handruhe: nach fünf früheren Haltemessungen steht das 14-Tage-Mittel da, mit Rhythmus und Verhältnis",
+            "14-Tage-Mittel von 0,4 mm" in sechste["text"] and "unruhiger als" in sechste["text"]
+            and sechste["vergleich"] == "unruhiger" and "Rhythmus um 8,5 Hz." in sechste["text"]
+            and "Verhältnis zur Ruhemessung 3,0." in sechste["text"] and ruhe["ok"]
+            and "Grundrauschen" in ruhe["text"], sechste["text"][:70])
+    ruhiger = hr.speichern(dict(gueltig, mm=0.2, rhythmus_hz=None))
+    aehnlich = hr.speichern(dict(gueltig, mm=0.45, rhythmus_hz=None))
+    pruefen("Handruhe: ruhiger, ähnlich und unruhiger werden unterschieden",
+            ruhiger["vergleich"] == "ruhiger" and aehnlich["vergleich"] == "ähnlich"
+            and "ähnlich wie" in aehnlich["text"], "")
+    verlauf = hr.verlauf(14)
+    tage = {t["tag"]: t for t in verlauf["tageswerte"]}
+    pruefen("Handruhe: der Verlauf zählt die Messungen und gibt je Tag den letzten Wert",
+            verlauf["ok"] and len(verlauf["messungen"]) == 10 and tage["2026-10-08"]["ruhe_mm"] == 0.3
+            and tage["2026-10-08"]["halten_mm"] == 0.45 and "2026-10-03" in tage
+            and hr.verlauf("kaputt")["tage"] == 14 and hr.verlauf(1000)["tage"] == 90, "%d Messungen" % len(verlauf["messungen"]))
+    # Der Kanal sicht trägt auch Erholung und Zusammenhang: eine neue Messung löscht sie nicht
+    speicher = Anzeige()
+    hr2 = sicht_modul.Handruhe(gedaechtnis, anzeige=speicher, uhr=lambda: uhr["jetzt"])
+    speicher.melden("sicht", {"erholung": {"wert": 41, "band": "gelb", "quelle": "Test", "tag": "2026-10-08"}})
+    hr2.speichern(dict(gueltig))
+    stand_sicht = speicher.stand("sicht")["daten"]
+    pruefen("Handruhe: eine neue Messung lässt die Erholung im Kanal sicht stehen",
+            stand_sicht.get("erholung", {}).get("wert") == 41 and stand_sicht.get("handruhe", {}).get("mm") == 0.6
+            and "Medizinprodukt" in stand_sicht.get("hinweis", ""), str(sorted(stand_sicht)))
+    # Zu viele Messungen an einem Tag
+    uhr["jetzt"] = datetime(2026, 11, 1, 9, 0, 0)
+    stand_vorher = gedaechtnis._lesen("SELECT count(*) AS n FROM handruhe")[0]["n"]
+    for _ in range(sicht_modul.HANDRUHE_MAX_TAG):
+        hr.speichern(dict(gueltig))
+    zu_viel = hr.speichern(dict(gueltig))
+    pruefen("Handruhe: höchstens %d Messungen je Tag" % sicht_modul.HANDRUHE_MAX_TAG,
+            zu_viel["ok"] is False and gedaechtnis._lesen("SELECT count(*) AS n FROM handruhe")[0]["n"]
+            == stand_vorher + sicht_modul.HANDRUHE_MAX_TAG, zu_viel.get("fehler", "")[:50])
+    pruefen("Handruhe: eine eigene Tabelle 'handruhe', die Werte landen nicht in den allgemeinen Kennzahlen",
+            "CREATE TABLE IF NOT EXISTS handruhe" in sicht_modul.SCHEMA_HANDRUHE
+            and "kennzahl_setzen" not in open(os.path.join(WURZEL, "src/modules/sicht.py"), encoding="utf-8").read()
+            and not [k for k in agent.tools.memory.kennzahlen() if "handruhe" in k["name"]], "")
+
+    # Stand
+    config.SICHT_AN = True
+    config.MODELL_VERZEICHNIS = temp
+    sicht_modul.SICHT_DATEIEN = {"vision_bundle.mjs": ("https://x.example/a.mjs", sha256, "text/javascript")}
+    voll = hr.stand(erholung=None, schreiben=True, diskret=False, vorschlag={"id": 3, "text": "x"})
+    diskret = hr.stand(erholung=None, schreiben=True, diskret=True, vorschlag={"id": 3, "text": "x"})
+    dienst = hr.stand(erholung=None, schreiben=False, diskret=False, vorschlag={"id": 3, "text": "x"})
+
+    class FalscheErholung:
+        @staticmethod
+        def heute():
+            return {"ok": True, "tag": "2026-10-08", "wert": 28, "band": "rot", "quelle": "Test", "text": "geheim"}
+
+    mit_erholung = hr.stand(erholung=FalscheErholung())
+    pruefen("Handruhe: der Stand hat die Felder des Vertrags, zeigt im Diskretmodus keine Werte und gibt der Anzeige keine Vorschläge",
+            {"ok", "an", "dateien_da", "geste", "handlaenge_mm", "erholung", "handruhe_letzte", "hinweis"} <= set(voll)
+            and voll["an"] is True and voll["dateien_da"] is True and voll["handruhe_letzte"]["mm"] is not None
+            and voll["vorschlag"] == {"id": 3, "text": "x"} and "Medizinprodukt" in voll["hinweis"]
+            and diskret["handruhe_letzte"] is None and diskret["erholung"] is None and diskret["vorschlag"] is None
+            and dienst["vorschlag"] is None and dienst["schreiben"] is False
+            and mit_erholung["erholung"] == {"wert": 28, "band": "rot", "quelle": "Test", "tag": "2026-10-08"}
+            and "geheim" not in json.dumps(mit_erholung), "")
+    ergebnis_werkzeug = agent.tools.run("sicht_stand", {})
+    pruefen("Werkzeug sicht_stand: nur lesend, ohne Freigabe, kurz, mit dem ehrlichen Hinweis",
+            ergebnis_werkzeug["ok"] is True and "Live-Kamera" in ergebnis_werkzeug["text"]
+            and "Medizinprodukt" in ergebnis_werkzeug["text"] and len(json.dumps(ergebnis_werkzeug)) < 5500
+            and "sicht_stand" not in FREIGABE_PFLICHTIG and "sicht_stand" not in NETZ_SENDEND
+            and any(w["name"] == "sicht_stand" for w in agent.tools.katalog())
+            and len(next(w for w in agent.tools.katalog() if w["name"] == "sicht_stand")["description"]) < 260, "")
+    umschauen = next(w for w in agent.tools.katalog() if w["name"] == "umschauen")["description"]
+    pruefen("umschauen: nur ein Einzelbild, 'Kein Dauervideo auf dem Server', das Live-Bild nur im Browser",
+            "Kein Dauervideo auf dem Server" in umschauen and "Browser" in umschauen, umschauen[:50])
+
+    # ---- Befehle im Terminal --------------------------------------------------------------------
+    gesetzt = []
+    config.env_setzen = lambda name, wert: gesetzt.append((name, wert)) or True
+    echt_laden = sicht_modul.sicht_laden
+    sicht_modul.sicht_laden = lambda: {"ok": True, "dateien": [], "text": "geladen"}
+    try:
+        codes = [sicht_modul.sicht_befehl(a) for a in (["an"], ["aus"], [], ["status"], ["laden"], ["quatsch"])]
+    finally:
+        sicht_modul.sicht_laden = echt_laden
+    pruefen("Terminal: sicht an und aus schreiben SICHT_AN, laden und Stand gehen, Unbekanntes gibt 2",
+            gesetzt == [("SICHT_AN", "ja"), ("SICHT_AN", "nein")] and codes == [0, 0, 0, 0, 0, 2], str(codes))
+
+    # ---- Die Seite ------------------------------------------------------------------------------
+    ohne_ns = seite.replace("http://www.w3.org/2000/svg", "")
+    pruefen("Sicht: die Seite lädt nichts aus dem Netz (kein http, kein https) und nimmt den Schlüssel auf",
+            "http://" not in ohne_ns and "https://" not in ohne_ns and "{{SCHLUESSEL}}" in seite
+            and "{{SICHT_VERSION}}" not in seite and "requestAnimationFrame" in seite
+            and "prefers-reduced-motion" in seite, "")
+    verbotene_aufrufe = ("toDataURL", "toBlob", "MediaRecorder", "getImageData", "captureStream", "jsdelivr",
+                         "googleapis", "innerHTML", "insertAdjacentHTML", "document.write", "eval(", "new Function",
+                         "XMLHttpRequest", "sendBeacon", "WebSocket", "EventSource")
+    pruefen("Sicht: nichts, womit ein Bild die Seite verlassen oder aufgezeichnet werden könnte",
+            not [w for w in verbotene_aufrufe if w in seite], str([w for w in verbotene_aufrufe if w in seite]))
+    pruefen("Sicht: keine Heilversprechen auf der Seite (Diagnose, Stress, Parkinson, Gesundheit)",
+            not [w for w in verboten if w in seite] and "kein Medizinprodukt" in seite, "")
+    pruefen("Sicht: Kamera-Fehler, sichere Adresse, Dateien aus Jarvis selbst, Geste als Weg 'geste'",
+            "isSecureContext" in seite and "NotAllowedError" in seite and "NotFoundError" in seite
+            and "NotReadableError" in seite and "OverconstrainedError" in seite and "SecurityError" in seite
+            and "/sicht/dateien/0.10.35/gesture_recognizer.task" in seite
+            and "/sicht/dateien/0.10.35/vision_bundle.mjs" in seite and "kanal:'geste'" in seite
+            and "securitypolicyviolation" in seite and "/api/vorschlag/geste" in seite, "")
+    pruefen("Sicht: Version im Bündel gleich der Version der WASM-Dateien (alle Pfade eine Fassung)",
+            all(m.split("/")[0] == "0.10.35" for m in
+                re.findall(r"/sicht/dateien/([0-9][^\"']*)", seite)) and seite.count("/sicht/dateien/") >= 3, "")
+    pruefen("Sicht: Kamera aus bei pagehide und unsichtbarer Seite, deutlich 'Kamera an' mit 'Aus'",
+            "pagehide" in seite and "visibilitychange" in seite and "Kamera an" in seite
+            and 'id="aus"' in seite and "getTracks" in seite and "t.stop()" in seite and "close()" in seite, "")
+    pruefen("Sicht: Startfeld mit den Sätzen für 'aus', 'nicht geladen' und 'nur am Mac'",
+            "python3 jarvis.py sicht an" in seite and "python3 jarvis.py sicht laden" in seite
+            and "nicht über das WLAN" in seite and "Kamera einschalten" in seite
+            and "Das Bild bleibt in diesem Browser. Gespeichert werden nur Messzahlen, nie ein Bild." in seite
+            and "Selbstbeobachtung, kein Medizinprodukt." in seite
+            and "Speichern und Gesten gehen nur in der Web-App" in seite, "")
+    pruefen("Sicht: der Orb ist das iframe des Gehirns und bekommt Pegel und Sprechen per postMessage",
+            "/gehirn?eingebettet=1&form=kugel" in seite and "postMessage" in seite
+            and "location.origin" in seite and "sprechen" in seite and "pegel" in seite, "")
+    pruefen("Sicht: Sicherheitskopf nur zu sich selbst, Kamera nur für die Seite, Mikrofon nie",
+            "connect-src 'self'" in sehen_modul.SEHEN_CSP and "default-src 'self'" in sehen_modul.SEHEN_CSP
+            and "frame-src 'self'" in sehen_modul.SEHEN_CSP and "object-src 'none'" in sehen_modul.SEHEN_CSP
+            and "base-uri 'none'" in sehen_modul.SEHEN_CSP and "wasm-unsafe-eval" in sehen_modul.SEHEN_CSP
+            and not re.search(r"https?:|\*", sehen_modul.SEHEN_CSP)
+            and sehen_modul.SEHEN_ERLAUBNIS == "camera=(self), microphone=()"
+            and sehen_modul.SEHEN_ERLAUBNIS_AUS == "camera=(), microphone=()", "")
+    sys.path.insert(0, WURZEL)
+    try:
+        import build_single as bau
+    finally:
+        sys.path.remove(WURZEL)
+    reste = bau.config_reste_finden(bau.config_bezug_aufloesen(seite))
+    pruefen("Sicht: kein nacktes Wort config in der Seite (build_single bräche)", not reste, str(reste[:1]))
+
+    # ---- Die Routen über echtes HTTP ----------------------------------------------------------------
+    def freier_port():
+        s = socket.socket()
+        s.bind(("127.0.0.1", 0))
+        p = s.getsockname()[1]
+        s.close()
+        return p
+
+    def rufen(port, pfad, koerper=None, host=None, roh=None):
+        anfrage = _netz.Request("http://127.0.0.1:%d%s" % (port, pfad))
+        if host:
+            anfrage.add_header("Host", host)
+        if koerper is not None:
+            roh = json.dumps(koerper).encode("utf-8")
+        if roh is not None:
+            anfrage.data = roh
+            anfrage.add_header("Content-Type", "application/json")
+        try:
+            with _netz.urlopen(anfrage, timeout=15) as antwort:
+                return antwort.status, antwort.read(), antwort.headers
+        except _fehler.HTTPError as ausnahme:
+            return ausnahme.code, ausnahme.read(), ausnahme.headers
+
+    config.MODELL_VERZEICHNIS = temp
+    sicht_modul.SICHT_DATEIEN = {"vision_bundle.mjs": ("https://x.example/a.mjs", sha256, "text/javascript"),
+                                 "gesture_recognizer.task": ("https://x.example/m", sha256, "application/octet-stream")}
+    config.SICHT_AN = True
+    config.GESTEN_FREIGABE = False
+    port, port_dienst, port_schluessel = freier_port(), freier_port(), freier_port()
+    web = webapp_modul.JarvisWeb(agent, port=port)
+    web.starten(blockierend=False)
+    dienst_web = webapp_modul.JarvisWeb(agent, port=port_dienst, nur_anzeige=True)
+    dienst_web.starten(blockierend=False)
+    schluessel_web = webapp_modul.JarvisWeb(agent, port=port_schluessel, token="geheim-sicht")
+    schluessel_web.starten(blockierend=False)
+    time.sleep(0.4)
+    try:
+        code, roh, kopf = rufen(port, "/sehen")
+        text = roh.decode("utf-8")
+        pruefen("GET /sehen: die Seite mit Sicherheitskopf und Kamera-Erlaubnis nur für sich selbst",
+                code == 200 and "connect-src 'self'" in (kopf.get("Content-Security-Policy") or "")
+                and kopf.get("Permissions-Policy") == "camera=(self), microphone=()"
+                and "{{SCHLUESSEL}}" not in text and 'var SCHLUESSEL=""' in text and kopf.get("Cache-Control") == "no-store",
+                (kopf.get("Permissions-Policy") or "")[:40])
+        config.SICHT_AN = False
+        code_aus, _, kopf_aus = rufen(port, "/sehen")
+        config.SICHT_AN = True
+        pruefen("GET /sehen: solange SICHT_AN aus ist, gibt der Browser die Kamera gar nicht her",
+                code_aus == 200 and kopf_aus.get("Permissions-Policy") == "camera=(), microphone=()", "")
+        code, roh, kopf = rufen(port, "/sicht/dateien/0.10.35/vision_bundle.mjs")
+        pruefen("GET /sicht/dateien/<Version>/<Name>: die Datei mit Inhaltstyp und langer Haltbarkeit",
+                code == 200 and roh == gut and kopf.get("Content-Type") == "text/javascript"
+                and "immutable" in (kopf.get("Cache-Control") or "") and "max-age=31536000" in (kopf.get("Cache-Control") or "")
+                and kopf.get("X-Content-Type-Options") == "nosniff", kopf.get("Cache-Control", "")[:40])
+        codes = {p: rufen(port, p)[0] for p in (
+            "/sicht/dateien/0.10.35/gesture_recognizer.task", "/sicht/dateien/0.10.34/vision_bundle.mjs",
+            "/sicht/dateien/vision_bundle.mjs", "/sicht/dateien/0.10.35/pruefsummen.json",
+            "/sicht/dateien/0.10.35/%2e%2e%2fconfig%2f.env", "/sicht/dateien/0.10.35/..%2f..%2fconfig/.env")}
+        pruefen("GET /sicht/dateien: fehlende Datei, falsche Version, ohne Version, fremder Name und Pfade geben 404",
+                set(codes.values()) == {404}, str(codes)[:60])
+        code, roh, _ = rufen(port, "/sicht/dateien/0.10.35/gesture_recognizer.task")
+        pruefen("GET /sicht/dateien: die Meldung bei fehlender Datei nennt den Befehl",
+                "python3 jarvis.py sicht laden" in roh.decode("utf-8"), "")
+        code, roh, _ = rufen(port, "/api/sicht/stand")
+        stand_http = json.loads(roh.decode("utf-8"))
+        code_v, roh_v, _ = rufen(port, "/api/sicht/verlauf?tage=14")
+        pruefen("GET /api/sicht/stand und /verlauf antworten mit den Feldern des Vertrags",
+                code == 200 and stand_http["ok"] and stand_http["an"] is True and stand_http["schreiben"] is True
+                and code_v == 200 and json.loads(roh_v.decode("utf-8"))["ok"], "")
+        # Messung speichern
+        zeilen_vorher = agent.tools.memory._lesen("SELECT count(*) AS n FROM handruhe")[0]["n"]
+        gross = json.dumps(dict(gueltig, bild="x" * 3000)).encode("utf-8")
+        code_gross, roh_gross, _ = rufen(port, "/api/sicht/messung", roh=gross)
+        code_ok, roh_ok, _ = rufen(port, "/api/sicht/messung", koerper=gueltig)
+        code_schlecht, roh_schlecht, _ = rufen(port, "/api/sicht/messung", koerper=dict(gueltig, mm="viel"))
+        code_leer, _, _ = rufen(port, "/api/sicht/messung", roh=b"nur text")
+        antwort_ok = json.loads(roh_ok.decode("utf-8"))
+        pruefen("POST /api/sicht/messung: über 2 KB abgewiesen, eine gute Messung gespeichert, eine schlechte 400",
+                code_gross == 400 and "Zu viele Daten" in roh_gross.decode("utf-8")
+                and code_ok == 200 and antwort_ok["ok"] and "Schätzung" in antwort_ok["text"]
+                and code_schlecht == 400 and "mm" in json.loads(roh_schlecht.decode("utf-8"))["fehler"]
+                and code_leer == 400
+                and agent.tools.memory._lesen("SELECT count(*) AS n FROM handruhe")[0]["n"] == zeilen_vorher + 1,
+                "%d %d %d" % (code_gross, code_ok, code_schlecht))
+        code_fremd, _, _ = rufen(port, "/api/sicht/messung", koerper=gueltig, host="boese.example.com")
+        pruefen("Sicht: ein fremder Host-Kopf kommt an keine der Routen",
+                code_fremd == 403 and rufen(port, "/sehen", host="boese.example.com")[0] == 403
+                and rufen(port, "/sicht/dateien/0.10.35/vision_bundle.mjs", host="boese.example.com")[0] == 403, "")
+
+        # Daumen hoch beantwortet einen Vorschlag
+        class FalscheVorschlaege:
+            def __init__(self):
+                self.aufrufe, self.antwort = [], {"ok": True, "id": 7, "status": "angenommen"}
+                self.offen = {"id": 7, "text": "Soll ich morgen zwei Termine verschieben?",
+                              "angelegt": (datetime.now() - timedelta(seconds=30)).strftime("%Y-%m-%d %H:%M:%S")}
+
+            def letzter_offener(self):
+                return self.offen
+
+            def beantworten(self, id, angenommen):
+                self.aufrufe.append((id, angenommen))
+                return self.antwort
+
+        echt_vorschlaege = agent.tools.vorschlaege
+        echt_einsatz, echt_denken = agent.einsatzbereit, agent.denken
+        fv = FalscheVorschlaege()
+        agent.tools.vorschlaege = fv
+        gedacht = []
+        agent.einsatzbereit = lambda: True
+        agent.denken = lambda eingabe, protokollieren=True, anzeigen=True: gedacht.append(eingabe) or "Alles klar, ich kümmere mich."
+        try:
+            aus_code, aus_roh, _ = rufen(port, "/api/vorschlag/geste", koerper={"id": 7, "ja": True})
+            config.GESTEN_FREIGABE = True
+            code_stand, roh_stand, _ = rufen(port, "/api/sicht/stand")
+            stand_geste = json.loads(roh_stand.decode("utf-8"))
+            code_dienst_stand, roh_dienst_stand, _ = rufen(port_dienst, "/api/sicht/stand")
+            falsche_id, _, _ = rufen(port, "/api/vorschlag/geste", koerper={"id": 8, "ja": True})
+            ohne_ja, _, _ = rufen(port, "/api/vorschlag/geste", koerper={"id": 7, "ja": "ja"})
+            ohne_id, _, _ = rufen(port, "/api/vorschlag/geste", koerper={"id": "7", "ja": True})
+            fv.offen["angelegt"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            zu_frisch, roh_frisch, _ = rufen(port, "/api/vorschlag/geste", koerper={"id": 7, "ja": True})
+            fv.offen["angelegt"] = (datetime.now() - timedelta(seconds=30)).strftime("%Y-%m-%d %H:%M:%S")
+            # Ist eine Freigabefrage offen, gehört der Daumen ihr
+            web.freigabe.timeout = 4
+            wartend = threading.Thread(target=web.freigabe.anfordern, args=("mail_senden", "{}"), daemon=True)
+            wartend.start()
+            time.sleep(0.3)
+            mit_frage, roh_frage, _ = rufen(port, "/api/vorschlag/geste", koerper={"id": 7, "ja": True})
+            for eintrag in web.freigabe.offene():
+                web.freigabe.beantworten(eintrag["id"], False)
+            wartend.join(timeout=5)
+            nichts_bisher = fv.aufrufe[:]
+            gut_code, gut_roh, _ = rufen(port, "/api/vorschlag/geste", koerper={"id": 7, "ja": True})
+            ende = time.time() + 5
+            while time.time() < ende and not any("Alles klar" in m["text"] for m in web.meldungen):
+                time.sleep(0.05)
+            nein_code, _, _ = rufen(port, "/api/vorschlag/geste", koerper={"id": 7, "ja": False})
+            time.sleep(0.5)
+            dienst_geste, _, _ = rufen(port_dienst, "/api/vorschlag/geste", koerper={"id": 7, "ja": True})
+            fv.antwort = {"ok": False, "fehler": "Dieser Vorschlag ist schon beantwortet (angenommen)."}
+            beantwortet, roh_beantwortet, _ = rufen(port, "/api/vorschlag/geste", koerper={"id": 7, "ja": True})
+        finally:
+            agent.tools.vorschlaege = echt_vorschlaege
+            agent.einsatzbereit, agent.denken = echt_einsatz, echt_denken
+        pruefen("POST /api/vorschlag/geste: ohne GESTEN_FREIGABE 403, falsche Nummer, Text statt Ja/Nein, zu frisch, offene Frage: nie",
+                aus_code == 403 and falsche_id == 409 and ohne_ja == 400 and ohne_id == 400 and zu_frisch == 409
+                and "erst gerade" in roh_frisch.decode("utf-8") and mit_frage == 409
+                and "Freigabefrage" in roh_frage.decode("utf-8") and nichts_bisher == [],
+                "%s %s %s %s" % (aus_code, falsche_id, zu_frisch, mit_frage))
+        pruefen("POST /api/vorschlag/geste: Ja nimmt den Vorschlag an und sagt Claude 'Ja, mach das.', die Antwort wird gemeldet",
+                gut_code == 200 and json.loads(gut_roh.decode("utf-8"))["ok"] and fv.aufrufe[:1] == [(7, True)]
+                and gedacht[:1] == ["Ja, mach das."]
+                and any("Alles klar" in m["text"] for m in web.meldungen), str(fv.aufrufe)[:50])
+        pruefen("POST /api/vorschlag/geste: Nein lehnt ab, ein schon beantworteter Vorschlag gibt 409, die Anzeige des Dienstes 404",
+                nein_code == 200 and (7, False) in fv.aufrufe and "Nein, lass das." in gedacht
+                and beantwortet == 409 and "schon beantwortet" in roh_beantwortet.decode("utf-8")
+                and dienst_geste == 404, "")
+        pruefen("GET /api/sicht/stand: der jüngste Vorschlag nur in der Web-App, nie auf der Anzeige des Dienstes",
+                code_stand == 200 and stand_geste["geste"] is True
+                and code_dienst_stand == 200
+                and json.loads(roh_dienst_stand.decode("utf-8"))["vorschlag"] is None, "")
+        config.GESTEN_FREIGABE = False
+
+        # Die Anzeige des Dienstes: nur lesen
+        code_s, _, kopf_dienst = rufen(port_dienst, "/sehen")
+        code_d, roh_d, _ = rufen(port_dienst, "/sicht/dateien/0.10.35/vision_bundle.mjs")
+        code_dv, _, _ = rufen(port_dienst, "/api/sicht/verlauf")
+        sperren = {p: rufen(port_dienst, p, koerper=gueltig)[0] for p in (
+            "/api/sicht/messung", "/api/vorschlag/geste", "/api/freigabe", "/api/werkzeug")}
+        sperren["/api/freigaben"] = rufen(port_dienst, "/api/freigaben")[0]
+        sperren["/sicht/dateien/0.10.35/x.js"] = rufen(port_dienst, "/sicht/dateien/0.10.35/x.js")[0]
+        pruefen("Dienst-Anzeige: /sehen, die Dateien, Stand und Verlauf ja - Speichern, Gesten, Freigaben nie",
+                code_s == 200 and "connect-src 'self'" in (kopf_dienst.get("Content-Security-Policy") or "")
+                and code_d == 200 and roh_d == gut and code_dv == 200
+                and set(sperren.values()) == {404}, str(sperren)[:60])
+        pruefen("ANZEIGE_PFADE: nur lesen - Seite, Stand, Verlauf und die Dateien; Messung und Geste nie",
+                {"/sehen", "/api/sicht/stand", "/api/sicht/verlauf"} <= webapp_modul.ANZEIGE_PFADE
+                and "/api/sicht/messung" not in webapp_modul.ANZEIGE_PFADE
+                and "/api/vorschlag/geste" not in webapp_modul.ANZEIGE_PFADE
+                and webapp_modul.ANZEIGE_PRAEFIXE == ("/sicht/dateien/",), "")
+        # Diskret: auf der Anzeige keine Werte
+        config.ANZEIGE_DISKRET = True
+        try:
+            _, roh_dk, _ = rufen(port_dienst, "/api/sicht/stand")
+            _, roh_dv, _ = rufen(port_dienst, "/api/sicht/verlauf")
+            _, roh_wk, _ = rufen(port, "/api/sicht/stand")
+        finally:
+            config.ANZEIGE_DISKRET = False
+        dk, dv, wk = (json.loads(r.decode("utf-8")) for r in (roh_dk, roh_dv, roh_wk))
+        pruefen("Diskret: die Anzeige des Dienstes gibt weder Stand noch Verlauf der Handruhe heraus",
+                dk["handruhe_letzte"] is None and dk["erholung"] is None and dk["diskret"] is True
+                and dv["messungen"] == [] and dv["tageswerte"] == [] and wk["handruhe_letzte"] is not None, "")
+
+        # Mit Schlüssel: nur die Dateien sind frei, alles andere nicht
+        sk = "?schluessel=geheim-sicht"
+        pruefen("Mit Schlüssel: die Dateien gehen ohne (MediaPipe kann keinen anhängen), Seite und Daten nur mit",
+                rufen(port_schluessel, "/sicht/dateien/0.10.35/vision_bundle.mjs")[0] == 200
+                and rufen(port_schluessel, "/sehen")[0] == 403 and rufen(port_schluessel, "/sehen" + sk)[0] == 200
+                and rufen(port_schluessel, "/api/sicht/stand")[0] == 403
+                and rufen(port_schluessel, "/api/sicht/stand" + sk)[0] == 200
+                and rufen(port_schluessel, "/sicht/dateien/0.10.35/nichts.js")[0] == 403
+                and rufen(port_schluessel, "/sicht/dateien/0.10.35/vision_bundle.mjs", host="boese.example.com")[0] == 403
+                and 'var SCHLUESSEL="geheim-sicht"' in rufen(port_schluessel, "/sehen" + sk)[1].decode("utf-8"), "")
+    finally:
+        for w in (web, dienst_web, schluessel_web):
+            w.stoppen()
+        agent.tools.freigabe_kanal = None
+        config.GESTEN_FREIGABE = False
+
+    # ---- Der Rechenblock mit node -------------------------------------------------------------------
+    knoten = shutil.which("node")
+    if not knoten:
+        pruefen("Sicht: node-Prüfungen", True, "node fehlt - übersprungen")
+        return
+    pruefen("Sicht: genau ein Rechenblock, und er ist zuerst",
+            seite.count("// <rechnen>") == 1 and seite.count("// </rechnen>") == 1
+            and seite.index("// <rechnen>") < seite.index("// </rechnen>")
+            and seite.index("// </rechnen>") < seite.index("var SCHLUESSEL"), "")
+    skript = re.search(r"<script>(.*)</script>", seite.replace("{{SCHLUESSEL}}", ""), re.S).group(1)
+    skriptdatei = os.path.join(ARBEITSVERZEICHNIS, "sehen_skript.js")
+    with open(skriptdatei, "w", encoding="utf-8") as datei:
+        datei.write(skript)
+    lauf = subprocess.run([knoten, "--check", skriptdatei], capture_output=True, text=True, timeout=60)
+    pruefen("Sicht: das Skript der Seite hat gültige Syntax (node --check)", lauf.returncode == 0, (lauf.stderr or "")[:60])
+    block = seite[seite.index("// <rechnen>"):seite.index("// </rechnen>")]
+    lauf = subprocess.run([knoten, "-e", block + "\n" + SICHT_NODE_PRUEFUNG], capture_output=True, text=True, timeout=120)
+    try:
+        e = json.loads(lauf.stdout.strip().splitlines()[-1])
+    except (ValueError, IndexError):
+        e = None
+    pruefen("Sicht: der Rechenblock läuft unter node", e is not None, "" if e else (lauf.stderr or lauf.stdout)[-60:])
+    if e is None:
+        return
+    a, b = e["a"], e["b"]
+    pruefen("handruhe: 10-Hz-Zittern von 0,3 mm bei 30 Bildern pro Sekunde - Rhythmus um 10 Hz, Stärke passt",
+            a["ok"] and abs(a["rhythmus_hz"] - 10) <= 0.5 and 0.15 <= a["mm"] <= 0.35 and abs(a["fps"] - 30) < 0.5
+            and a["bilder"] == 240 and 7.5 < a["dauer_s"] < 8.5 and a["spitze_verhaeltnis"] > 20, str(a)[:70])
+    pruefen("handruhe: bei 15 Bildern pro Sekunde abgelehnt - 'Mehr Licht, bitte'",
+            b["ok"] is False and "Mehr Licht, bitte" in b["grund"] and "15" in b["grund"], b.get("grund", "")[:50])
+    pruefen("handruhe: ohne Zittern kein Rhythmus; 60 Bilder pro Sekunde gehen auch",
+            e["c"]["ok"] and e["c"]["rhythmus_hz"] is None and e["c"]["mm"] < 0.12
+            and e["d"]["ok"] and abs(e["d"]["rhythmus_hz"] - 10) <= 0.5, "%.2f mm" % e["c"]["mm"])
+    pruefen("handruhe: zu kurz, leer oder zu oft ohne Hand wird abgelehnt, 10 Prozent Aussetzer gehen",
+            e["nurWenig"]["ok"] is False and e["leer"]["ok"] is False and e["ungueltig"]["ok"] is False
+            and "75 %" in e["ungueltig"]["grund"] and e["luecken"]["ok"] and abs(e["luecken"]["rhythmus_hz"] - 10) <= 0.5, "")
+    pruefen("handruhe: die Handlänge skaliert die Millimeter, nichts sonst",
+            abs(e["mmProLaenge"][1] / e["mmProLaenge"][0] - 2) < 0.02, str(e["mmProLaenge"]))
+    pruefen("handProbe: ohne Hand und mit zu kleiner Hand ist die Probe ungültig, sonst gültig",
+            e["probe"] == [True, False, False], str(e["probe"]))
+    pruefen("istDaumenHoch: Daumen oben ja, offene Hand, fehlendes oder falsches Modell nie, lockerer beim Dabeibleiben",
+            e["erkannt"] == [True, False, False, False, False, True], str(e["erkannt"]))
+    pruefen("daumenSchritt: nach 1,4 Sekunden noch nichts, nach 1,7 Sekunden Ja",
+            e["ja14"] == [] and len(e["ja17"]) == 1 and e["ja17"][0][1] == "ja"
+            and 1400 <= e["ja17"][0][0] <= 1700, str(e["ja17"]))
+    pruefen("daumenSchritt: ein Daumen, der schon oben war, als die Frage kam, zählt nie - auch nach Sekunden nicht",
+            e["schonOben"] == [] and e["zuFrueh"] == [], str(e["zuFrueh"]))
+    pruefen("daumenSchritt: Lücken bis 120 ms werden verziehen, 200 ms beginnen von vorn",
+            len(e["luecke99"]) == 1 and len(e["luecke200"]) == 1
+            and e["luecke200"][0][0] > e["luecke99"][0][0] + 100, "%s %s" % (e["luecke99"], e["luecke200"]))
+    pruefen("daumenSchritt: Daumen runter braucht 0,8 Sekunden und heißt Nein; ohne das Modell passiert nichts",
+            e["nein06"] == [] and len(e["nein09"]) == 1 and e["nein09"][0][1] == "nein" and e["ohneModell"] == [], str(e["nein09"]))
+    pruefen("daumenSchritt: ein dauernd erhobener Daumen feuert nur einmal; nach Sperre und Pause ist er wieder scharf",
+            len(e["dauerdaumen"]) == 1 and e["zweimal"] == ["a", "c"], "%s %s" % (e["dauerdaumen"], e["zweimal"]))
 # [P5 Sicht] Ende
 # [P6 Stimme] Anfang
 # [P6 Stimme] Ende
@@ -6114,6 +6815,7 @@ def main() -> int:
     pruefung_buero(agent)
     # [P4 Büro] Ende
     # [P5 Sicht] Anfang
+    pruefung_sicht(agent)
     # [P5 Sicht] Ende
     # [P6 Stimme] Anfang
     # [P6 Stimme] Ende

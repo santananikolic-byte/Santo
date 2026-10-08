@@ -130,11 +130,13 @@ def sicht_pruefsumme_stimmt(daten: bytes, soll: str) -> bool:
     if not wert:
         return False
     if art == "sha256":
-        return hmac.compare_digest(hashlib.sha256(daten).hexdigest(), wert.lower())
-    if art == "sha384":
-        return hmac.compare_digest(base64.b64encode(hashlib.sha384(daten).digest()).decode("ascii"),
-                                   wert)
-    return False
+        echt = hashlib.sha256(daten).hexdigest()
+        wert = wert.lower()
+    elif art == "sha384":
+        echt = base64.b64encode(hashlib.sha384(daten).digest()).decode("ascii")
+    else:
+        return False
+    return hmac.compare_digest(echt.encode("ascii"), wert.encode("utf-8"))
 
 
 def _sicht_pruefsummen_lesen(ordner: Path) -> dict:
@@ -551,8 +553,8 @@ class Handruhe:
     def _frueher(self, art: str) -> list:
         """mm-Werte der bisherigen Messungen dieser Art aus den letzten 14 Tagen."""
         zeilen = self.memory._lesen(
-            "SELECT mm FROM handruhe WHERE art=? AND tag>? ORDER BY id",
-            (art, self._tag(HANDRUHE_VERGLEICHSTAGE)))
+            "SELECT mm FROM handruhe WHERE art=? AND tag>? AND tag<=? ORDER BY id",
+            (art, self._tag(HANDRUHE_VERGLEICHSTAGE), self._tag()))
         return [z["mm"] for z in zeilen if z["mm"] is not None]
 
     # -- Speichern --------------------------------------------------------------
