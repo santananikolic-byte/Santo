@@ -84,6 +84,8 @@ a{color:var(--glut)}
 .hud{position:absolute;left:10px;right:10px;top:8px;display:flex;justify-content:space-between;gap:10px;pointer-events:none;
  font:500 11px var(--mono);letter-spacing:.14em;color:var(--hell);text-transform:uppercase;text-shadow:0 1px 3px #000}
 .hud b{color:var(--gruen);font-weight:600}
+.hud span:last-child{text-align:right;white-space:nowrap}
+@media (max-width:600px){.hud{flex-direction:column;gap:2px;font-size:10px;letter-spacing:.08em}.hud span:last-child{text-align:left}}
 .start{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:18px;
  text-align:center;background:rgba(7,4,3,.82)}
 .start[hidden]{display:none}
@@ -154,7 +156,9 @@ input[type=number]{width:72px;padding:6px 8px;border-radius:6px;border:1px solid
 <button class="knopf" id="mhalten" type="button" disabled>Haltemessung (Arm ausgestreckt, 8 s)</button></div>
 <div class="zeile"><label for="handlaenge">Handlänge Handgelenk bis Mittelfingerwurzel, mm
 <input id="handlaenge" type="number" min="60" max="130" step="1" value="95"></label></div>
+<p class="klein">Ruhemessung: Hand flach auf den Tisch - das ist das Grundrauschen von Kamera und Licht. Haltemessung: Arm ausstrecken und die Hand ruhig halten. Verglichen wird nur mit deinen eigenen letzten 14 Tagen.</p>
 <div class="balken" id="balken" hidden><i id="balkenfuell"></i></div>
+<p class="statuszeile" id="erholungszeile"></p>
 <p class="statuszeile" id="messstatus"></p>
 <p class="ergebnis" id="messergebnis" aria-live="polite"></p>
 <div class="verlauf" id="verlauf"></div>
@@ -349,9 +353,13 @@ function modusHinweis(){
 async function standHolen(){
  try{
   var r=await holenJson("/api/sicht/stand");
-  if(r.status===200&&r.daten&&r.daten.ok){STAND=r.daten;SCHREIBEN=r.daten.schreiben!==false;VORSCHLAG=r.daten.vorschlag||null;return true}
+  if(r.status===200&&r.daten&&r.daten.ok){STAND=r.daten;SCHREIBEN=r.daten.schreiben!==false;VORSCHLAG=r.daten.vorschlag||null;erholungZeigen();return true}
  }catch(f){}
  return false;
+}
+function erholungZeigen(){
+ var e=STAND&&STAND.erholung,z=$("#erholungszeile");
+ z.textContent=e&&typeof e.wert==="number"?"Erholung heute: "+Math.round(e.wert)+" von 100"+(e.quelle?" ("+e.quelle+")":"")+" - Schätzung, kein Medizinprodukt.":"";
 }
 async function startPruefen(vorspann){
  var ok=await standHolen();
@@ -403,6 +411,8 @@ async function kameraAn(){
  catch(f){STARTET=false;startZeigen(kameraFehler(f),true);return}
  if(meine!==SITZUNG){strom.getTracks().forEach(function(t){t.stop()});return}
  VIDEO.srcObject=strom;AN=true;
+ var spur=strom.getVideoTracks()[0];
+ if(spur)spur.addEventListener("ended",function(){if(meine===SITZUNG&&AN)kameraAus("Die Kamera wurde getrennt oder der Zugriff entzogen.")});
  $("#kameraan").hidden=false;$("#start").hidden=true;
  meldungOben("Handerkennung wird geladen …");
  try{await VIDEO.play()}catch(f){}
