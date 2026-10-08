@@ -258,6 +258,23 @@ BRIEFING_WELTLAGE = _wahrheit("BRIEFING_WELTLAGE", False)
 BRIEFING_MAERKTE = _wahrheit("BRIEFING_MAERKTE", False)
 # [P2 Weltlage] Ende
 # [P3 Telefon] Anfang
+# Telefonassistent: ein KI-Assistent ruft ein Restaurant an und reserviert (Vapi, optional Retell).
+# Der Schlüssel (Private Key) steht unter dashboard.vapi.ai -> API Keys. Angerufen wird von einer in
+# Vapi importierten Nummer (VAPI_TELEFON_ID) - Twilio-Zugangsdaten gehen nie an Vapi.
+VAPI_SCHLUESSEL = _text("VAPI_SCHLUESSEL")
+# Konto in der EU-Region: https://api.eu.vapi.ai (Schlüssel und Adresse müssen zusammenpassen).
+VAPI_BASIS = _text("VAPI_BASIS", "https://api.vapi.ai")
+VAPI_TELEFON_ID = _text("VAPI_TELEFON_ID")
+VAPI_MODELL = _text("VAPI_MODELL", "claude-haiku-4-5-20251001")
+# Azure-Stimme; für Österreich zum Beispiel de-AT-IngridNeural oder de-AT-JonasNeural.
+VAPI_STIMME = _text("VAPI_STIMME", "de-DE-KatjaNeural")
+TELEFONAGENT_ANBIETER = _text("TELEFONAGENT_ANBIETER", "vapi")
+TELEFONAGENT_MAX_MINUTEN = _ganzzahl("TELEFONAGENT_MAX_MINUTEN", 4)
+# Die Nummer, die der Assistent auf Nachfrage nennt. Leer: Er sagt, dass du dich selbst meldest.
+TELEFONAGENT_RUECKRUF = _text("TELEFONAGENT_RUECKRUF")
+RETELL_SCHLUESSEL = _text("RETELL_SCHLUESSEL")
+RETELL_AGENT_ID = _text("RETELL_AGENT_ID")
+RETELL_NUMMER = _text("RETELL_NUMMER")
 # [P3 Telefon] Ende
 # [P4 Büro] Anfang
 # Gesten als zweiter Weg für ein Ja (nur in der Web-App, nur bei genau einer offenen Frage).
@@ -356,6 +373,7 @@ def konfig_uebersicht() -> dict:
         # [P2 Weltlage] Anfang
         # [P2 Weltlage] Ende
         # [P3 Telefon] Anfang
+        "Telefonassistent": bool(VAPI_SCHLUESSEL or RETELL_SCHLUESSEL),
         # [P3 Telefon] Ende
         # [P4 Büro] Anfang
         # [P4 Büro] Ende
