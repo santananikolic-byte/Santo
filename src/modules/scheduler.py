@@ -87,6 +87,14 @@ class Scheduler:
         if config.BRIEFING_ABENDS:
             self.job_anlegen("abendrueckblick", config.BRIEFING_ABENDS,
                              self._abendrueckblick, "Abendrückblick")
+        # [P5 Sicht] Anfang
+        # Abends: Erholung heute niedrig, morgen voll? Dann kommt ein Vorschlag - sonst bleibt Jarvis still
+        # (ein leerer Text wird nicht ausgegeben). Die Uhrzeit "aus" schaltet die Prüfung ab.
+        if (":" in str(config.BELASTUNG_PRUEFEN_UM or "")
+                and getattr(getattr(self.agent, "tools", None), "leistung", None) is not None):
+            self.job_anlegen("belastung", config.BELASTUNG_PRUEFEN_UM,
+                             lambda: self.agent.tools.leistung.belastung_job(), "Belastung für morgen prüfen")
+        # [P5 Sicht] Ende
 
     def routinen_einhaengen(self):
         """Hängt alle Routinen mit Uhrzeit in den Zeitplan."""

@@ -201,6 +201,8 @@ ZUSATZREGELN = (
         "ohne vorher alle Themen aufzuzählen. Nenne nur Zahlen, die das Werkzeug geliefert hat.",
     # [P2 Weltlage] Ende
     # [P3 Telefon] Anfang
+    "Nach restaurant_anrufen sagst du über den Ausgang des Gesprächs nichts, bevor anruf_status "
+    "ihn meldet; einen Kalendereintrag schlägst du nur vor.",
     # [P3 Telefon] Ende
     # [P4 Büro] Anfang
     "Bei allem, was eine Freigabe braucht, schreibst du in begruendung in einem Satz, "
@@ -210,6 +212,8 @@ ZUSATZREGELN = (
     "fragen trotzdem einzeln nach Freigabe.",
     # [P4 Büro] Ende
     # [P5 Sicht] Anfang
+    "Erholung und Handruhe sind Selbstbeobachtung, kein Medizinprodukt: nenne nur Zahlen aus "
+    "erholung_lesen oder sicht_stand, mit Quelle, und stell keine Diagnose.",
     # [P5 Sicht] Ende
     # [P6 Stimme] Anfang
     # [P6 Stimme] Ende
@@ -889,6 +893,14 @@ class JarvisAgent:
         # [P4 Büro] Anfang
         # [P4 Büro] Ende
         # [P5 Sicht] Anfang
+        if morgens:
+            # Eine Zeile zur Erholung - nur, wenn es für heute einen echten Wert gibt (sonst gar nichts).
+            try:
+                erholung = self.tools.erholung.heute(abrufen=True)
+                if erholung.get("ok"):
+                    teile.append("Erholung: %s" % erholung["text"])
+            except Exception as fehler:
+                print("[briefing] Erholung nicht abrufbar: %s" % fehler)
         # [P5 Sicht] Ende
         # [P6 Stimme] Anfang
         # [P6 Stimme] Ende

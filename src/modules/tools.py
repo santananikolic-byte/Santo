@@ -67,6 +67,8 @@ from modules.vorschlaege import Vorschlaege
 # [P4 Büro] Ende
 # [P5 Sicht] Anfang
 from modules.sicht import Handruhe, sicht_stand_bauen, sicht_stand_text
+from modules.erholung import Erholung
+from modules.leistung import Leistung
 # [P5 Sicht] Ende
 # [P6 Stimme] Anfang
 from modules.dolmetscher import SPRACHEN, dolmetscher_starten
@@ -316,6 +318,11 @@ FREIGABE_AUFLOESEN["termin_verschieben"] = _aufloesen_termin_verschieben
 FREIGABE_AUFLOESEN["termin_wiederherstellen"] = _aufloesen_termin_wiederherstellen
 # [P4 Büro] Ende
 # [P5 Sicht] Anfang
+# Erholung und Leistung: lesen, rechnen, vorschlagen - nichts davon wirkt nach außen (der Abruf bei Oura und
+# Whoop geht an feste Adressen), darum ohne Freigabe. Ein Vorschlag führt nie etwas aus; Termine absagen oder
+# verschieben fragen einzeln nach Freigabe.
+ERHOLUNG_WERKZEUGE = {"erholung_lesen", "erholung_eintragen", "erholung_abrufen", "gesundheit_importieren",
+                      "leistung_zusammenhang", "belastung_pruefen"}
 # [P5 Sicht] Ende
 # [P6 Stimme] Anfang
 # [P6 Stimme] Ende
@@ -450,6 +457,11 @@ class Werkzeuge:
         # [P4 Büro] Ende
         # [P5 Sicht] Anfang
         self.handruhe = Handruhe(self.memory, anzeige=self)
+        # Gesundheitsdaten: nur lokal, der Import liest nur im Benutzerordner und nichts Gesperrtes.
+        self.erholung = Erholung(self.memory, zugriff=self.mac, anzeige=self)
+        self.leistung = Leistung(self.memory, self.kalender, self.erholung, self.call_analysis, anzeige=self)
+        # Die Vorschläge werden erst beim Prüfen gesucht, nicht hier - die Reihenfolge im Aufbau darf egal sein.
+        self.leistung.vorschlaege_suche = lambda: getattr(self, "vorschlaege", None)
         # [P5 Sicht] Ende
         # [P6 Stimme] Anfang
         # Die laufende Web-App setzt sich hier ein (nur sie hat die Dolmetscher-Seite).
@@ -1006,6 +1018,25 @@ class Werkzeuge:
             werkzeug("sicht_stand",
                      "Stand der Kamera-Seite Sicht: ob die Live-Kamera an ist, die Handerkennung geladen ist "
                      "und die letzte Handruhe-Messung. Nur lesend; Selbstbeobachtung, kein Medizinprodukt.", {}),
+            # -- Erholung und Leistung --
+            werkzeug("erholung_lesen",
+                     "Erholungswert heute und der letzten Tage aus dem verbundenen Wearable oder dem "
+                     "Apple-Health-Export, mit Quelle. Zeigt ihn auf der Zentrale. Kein Medizinprodukt.",
+                     {"tage": ganz}),
+            werkzeug("erholung_eintragen",
+                     "Trägt einen Erholungswert (0 bis 100) von Hand ein, etwa aus der Oura- oder Whoop-App.",
+                     {"wert": zahl, "tag": text}, ["wert"]),
+            werkzeug("erholung_abrufen", "Holt die neuesten Werte von Oura oder Whoop.",
+                     {"dienst": {"type": "string", "enum": ["oura", "whoop"]}}, ["dienst"]),
+            werkzeug("gesundheit_importieren",
+                     "Liest einen Apple-Health-Export (export.zip oder export.xml) aus dem Benutzerordner und "
+                     "berechnet die Erholung je Tag.", {"pfad": text}, ["pfad"]),
+            werkzeug("leistung_zusammenhang",
+                     "Wie Erholung, Terminlast und Abschlussquote zusammenhängen, mit Fallzahlen. "
+                     "Zusammenhang, keine Ursache.", {"tage": ganz}),
+            werkzeug("belastung_pruefen",
+                     "Prüft jetzt, ob der morgige Tag bei der heutigen Erholung zu voll ist, und schlägt "
+                     "gegebenenfalls Entlastung vor. Ändert selbst nichts.", {}),
             # [P5 Sicht] Ende
             # [P6 Stimme] Anfang
             # -- Dolmetscher --
@@ -1579,6 +1610,8 @@ class Werkzeuge:
             stand = sicht_stand_bauen(self, schreiben=True, diskret=False)
             return dict({"ok": True, "text": sicht_stand_text(stand)},
                         **{k: stand[k] for k in ("an", "dateien_da", "geste", "handruhe_letzte", "erholung", "hinweis")})
+        if name in ERHOLUNG_WERKZEUGE:
+            return self._erholung_ausfuehren(name, a)
         # [P5 Sicht] Ende
         # [P6 Stimme] Anfang
         if name == "dolmetscher_starten":
@@ -1688,6 +1721,57 @@ class Werkzeuge:
     # [P4 Büro] Anfang
     # [P4 Büro] Ende
     # [P5 Sicht] Anfang
+    def _erholung_ausfuehren(self, name: str, a: dict) -> dict:
+        """Die Werkzeuge zu Erholung und Leistung. Gesundheitswerte gehen nur an Claude und die eigene Zentrale."""
+        if name == "erholung_lesen":
+            try:
+                tage = max(1, min(30, int(a.get("tage") or 7)))
+            except (TypeError, ValueError):
+                tage = 7
+            heute = self.erholung.heute()
+            verlauf = self.erholung.verlauf(tage)
+            if not heute.get("ok") and not verlauf:
+                return {"ok": False, "fehler": heute.get("fehler", "Es gibt keine Erholungswerte."),
+                        "hinweis": "Kein Medizinprodukt."}
+            self.erholung.anzeigen(heute if heute.get("ok") else (verlauf[-1] if verlauf else None))
+            ergebnis = {"ok": True, "hinweis": "Kein Medizinprodukt; bei Apple Health ist es eine eigene Schätzung.",
+                        "verlauf": [{"tag": e["tag"], "wert": e["wert"], "band": e["band"], "quelle": e["quelle"]}
+                                    for e in verlauf]}
+            if heute.get("ok"):
+                ergebnis["heute"] = {k: heute[k] for k in ("tag", "wert", "band", "quelle")}
+                ergebnis["text"] = heute["text"]
+            else:
+                ergebnis["text"] = heute.get("fehler", "")
+            return ergebnis
+        if name == "erholung_eintragen":
+            ergebnis = self.erholung.manuell(a.get("tag"), a.get("wert"))
+            if ergebnis.get("ok"):
+                self.erholung.anzeigen()
+            return ergebnis
+        if name == "erholung_abrufen":
+            ergebnis = self.erholung.abrufen(a.get("dienst"))
+            if ergebnis.get("ok"):
+                self.erholung.anzeigen()
+            return ergebnis
+        if name == "gesundheit_importieren":
+            ergebnis = self.erholung.importieren(a.get("pfad"))
+            if ergebnis.get("ok") and not ergebnis.get("hintergrund"):
+                self.erholung.anzeigen()
+            return ergebnis
+        if name == "leistung_zusammenhang":
+            try:
+                tage = max(7, min(90, int(a.get("tage") or 60)))
+            except (TypeError, ValueError):
+                tage = 60
+            z = self.leistung.zusammenhang(tage, anzeigen=True)
+            return {"ok": True, "text": z["text"], "n": z["n"], "ausreichend": z["ausreichend"], "r": z["r"],
+                    "tabelle": z["tabelle"], "gesamt": z["gesamt"], "hinweis": z["hinweis"]}
+        # belastung_pruefen: nur ein Vorschlag als Text - ändern tut dieses Werkzeug nichts
+        text = self.leistung.belastung_pruefen()
+        if text:
+            return {"ok": True, "vorschlag": True, "text": text}
+        return {"ok": True, "vorschlag": False,
+                "text": "Ich schlage heute nichts vor. %s" % self.leistung.letzter_grund}
     # [P5 Sicht] Ende
     # [P6 Stimme] Anfang
     # [P6 Stimme] Ende

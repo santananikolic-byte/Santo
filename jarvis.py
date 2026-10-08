@@ -20,14 +20,19 @@ Betriebsarten:
     python3 jarvis.py export      Buchhaltung als CSV
     python3 jarvis.py stimme      Stimmprofil einlernen
     python3 jarvis.py stimmen     ElevenLabs-Stimme aussuchen
+    python3 jarvis.py sicht       Kamera-Seite: laden (Handerkennung holen), an oder aus
     python3 jarvis.py test        Selbsttest
+    python3 jarvis.py sprechprobe Stimmkette prüfen und einen Probesatz sprechen
     python3 jarvis.py einrichten  geführte Ersteinrichtung
     python3 jarvis.py hardware    den Mac prüfen: Last, Speicher, Platte, Netz, Wärme
+    python3 jarvis.py gesundheit  Apple-Health-Export einlesen (Datei) oder alle Gesundheitswerte vergessen
+    python3 jarvis.py zugang oura Oura Ring verbinden (ebenso: zugang whoop) für den Erholungswert
 
 Alle Daten bleiben lokal auf diesem Rechner.
 """
 
 
+import array
 import ast
 import base64
 import calendar
@@ -39,6 +44,7 @@ import email.header
 import email.utils
 import getpass
 import hashlib
+import hmac
 import html
 import html.parser
 import http.client
@@ -62,6 +68,7 @@ import smtplib
 import socket
 import sqlite3
 import ssl
+import string
 import struct
 import subprocess
 import sys
@@ -81,10 +88,12 @@ import zipfile
 from base64 import b64encode
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
 from datetime import date, datetime, timedelta, timezone
 from email.headerregistry import Address
 from email.message import EmailMessage
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from operator import mul
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
@@ -137,6 +146,11 @@ try:
     from PIL import Image
 except ImportError:
     Image = None
+
+try:
+    import fcntl
+except ImportError:  # kein Unix: dann gilt nur die Sperre innerhalb des Prozesses
+    fcntl = None
 
 
 
@@ -428,8 +442,48 @@ VORSCHLAEGE_AN = _wahrheit("VORSCHLAEGE_AN", True)
 CALDAV_ZEITZONE = _text("CALDAV_ZEITZONE", "Europe/Vienna")
 # [P4 Büro] Ende
 # [P5 Sicht] Anfang
+# Wo geladene Modelle liegen (die Handerkennung, etwa 31 MB). Der Ordner ist nicht im Repository.
+MODELL_VERZEICHNIS = BASIS / "modelle"
+# Live-Kamera auf der Seite Sicht (/sehen). Voreingestellt aus; das Bild bleibt im Browser.
+SICHT_AN = _wahrheit("SICHT_AN", False)
+# Länge von Handgelenk bis Mittelfingerwurzel in Millimetern - Grundlage der Handruhe-Schätzung.
+HANDLAENGE_MM = _zahl("HANDLAENGE_MM", 95)
+# Erholung aus Oura oder Whoop. Beide verlangen eine eigene App (OAuth): Client-ID und Client-Secret trägt
+# `python3 jarvis.py zugang oura` (oder whoop) ein; den Refresh-Token schreibt Jarvis selbst nach config/.env
+# und erneuert ihn bei jedem Abruf (er gilt nur einmal).
+OURA_CLIENT_ID = _text("OURA_CLIENT_ID")
+OURA_CLIENT_SECRET = _text("OURA_CLIENT_SECRET")
+OURA_REFRESH_TOKEN = _text("OURA_REFRESH_TOKEN")
+WHOOP_CLIENT_ID = _text("WHOOP_CLIENT_ID")
+WHOOP_CLIENT_SECRET = _text("WHOOP_CLIENT_SECRET")
+WHOOP_REFRESH_TOKEN = _text("WHOOP_REFRESH_TOKEN")
+# Woran Jarvis im Kalender einen Verkaufstermin erkennt (Stichwörter im Titel, kommagetrennt).
+VERKAUFS_STICHWOERTER = _text("VERKAUFS_STICHWOERTER", "besichtigung,angebot,erstgespräch,beratung,vor ort,akquise,objektbegehung")
+# Belastungsprüfung am Abend: Liegt die Erholung unter der Schwelle und stehen morgen mindestens so viele Termine an,
+# macht Jarvis (bei genug Zahlen) einen Vorschlag - ändern tut er nichts. Die Uhrzeit "aus" schaltet sie ab.
+BELASTUNG_SCHWELLE = _ganzzahl("BELASTUNG_SCHWELLE", 34)
+BELASTUNG_MIN_TERMINE = _ganzzahl("BELASTUNG_MIN_TERMINE", 4)
+BELASTUNG_PRUEFEN_UM = _text("BELASTUNG_PRUEFEN_UM", "18:25")
 # [P5 Sicht] Ende
 # [P6 Stimme] Anfang
+# Welche Stimme spricht: auto (Fish Audio nur mit Schlüssel UND Stimmen-ID, sonst ElevenLabs,
+# sonst die Mac-Stimme), fish, elevenlabs oder mac.
+STIMME_ANBIETER = _text("STIMME_ANBIETER", "auto")
+FISH_API_KEY = _text("FISH_API_KEY")
+# Die Kennung der Fish-Stimme (fish.audio -> Stimme öffnen -> Adresse oder "Copy ID").
+FISH_STIMME_ID = _text("FISH_STIMME_ID")
+FISH_MODELL = _text("FISH_MODELL", "s2.1-pro")
+# normal (beste Qualität), balanced (weniger Wartezeit) oder low (am schnellsten).
+FISH_LATENZ = _text("FISH_LATENZ", "balanced")
+# Die Web-App spricht mit der Serverstimme (Fish/ElevenLabs) statt mit der Browserstimme.
+# Standardmäßig aus: das kostet bei jedem Satz Guthaben beim Stimmen-Anbieter.
+STIMME_IM_BROWSER = _wahrheit("STIMME_IM_BROWSER", False)
+# So viele Millisekunden vergehen vom Anzeigen des Pegels bis der Ton wirklich zu hören ist.
+STIMME_VORLAUF_MS = _ganzzahl("STIMME_VORLAUF_MS", 60)
+# Dolmetscher: welches Gehirn übersetzt (auto = Gemini wenn vorhanden, sonst Claude; gemini; claude).
+DOLMETSCHER_GEHIRN = _text("DOLMETSCHER_GEHIRN", "auto")
+# Welche Gastsprachen der Dolmetscher anbietet (Kürzel, kommagetrennt).
+DOLMETSCHER_SPRACHEN = _text("DOLMETSCHER_SPRACHEN", "tr,hr,sr,bs,sq,pl,ro,hu,en,uk,ru,ar")
 # [P6 Stimme] Ende
 # [P7 Start] Anfang
 # Für welche Plattformen die Inhalte-Planung Beiträge schreibt.
@@ -521,8 +575,10 @@ def konfig_uebersicht() -> dict:
         # [P4 Büro] Anfang
         # [P4 Büro] Ende
         # [P5 Sicht] Anfang
+        "Wearable": bool(OURA_REFRESH_TOKEN or WHOOP_REFRESH_TOKEN),
         # [P5 Sicht] Ende
         # [P6 Stimme] Anfang
+        "Fish Audio": bool(FISH_API_KEY),
         # [P6 Stimme] Ende
         # [P7 Start] Anfang
         # [P7 Start] Ende
@@ -963,11 +1019,13 @@ def gehirn_waehlen(frage: str, gemini_da: bool = None, vorher: str = None) -> tu
 # -- Gemini -----------------------------------------------------------------
 
 def gemini_fragen(frage: str, systemtext: str, verlauf: list = None,
-                  timeout: int = 30) -> dict:
+                  timeout: int = 30, max_tokens: int = None) -> dict:
     """Fragt Gemini. Rückgabe: ``{"ok", "text", "tokens_ein", "tokens_aus"}``.
 
     Der Verlauf ist die Claude-Liste; übernommen wird nur Text - auch der
     Text aus Claudes Antworten. Werkzeugaufrufe und Ergebnisse bleiben draußen.
+    ``max_tokens`` hebt die Antwortgrenze für diesen Aufruf (etwa beim Übersetzen langer
+    Sätze); ohne Angabe gilt ``GEMINI_MAX_TOKENS``.
     """
     if not GEMINI_API_KEY:
         return {"ok": False, "fehler": "Kein Gemini-Schlüssel hinterlegt."}
@@ -991,7 +1049,7 @@ def gemini_fragen(frage: str, systemtext: str, verlauf: list = None,
 
     koerper = {"systemInstruction": {"parts": [{"text": systemtext}]},
                "contents": inhalte,
-               "generationConfig": {"maxOutputTokens": GEMINI_MAX_TOKENS}}
+               "generationConfig": {"maxOutputTokens": int(max_tokens or GEMINI_MAX_TOKENS)}}
     anfrage = urllib.request.Request(
         GEMINI_URL % GEMINI_MODELL, data=json.dumps(koerper).encode("utf-8"),
         method="POST", headers={"x-goog-api-key": GEMINI_API_KEY,
@@ -1728,6 +1786,41 @@ def sprechtext(text: str) -> str:
 def sprechstuecke(text: str, ziel: int = 170) -> list:
     """Der Text, zum Sprechen vorbereitet und in Atemabschnitte geteilt."""
     return abschnitte(sprechtext(text), ziel)
+
+
+# Satzzeichen anderer Schriften, die ``abschnitte`` sonst nicht als Satzende erkennt.
+_FREMDE_SATZZEICHEN = {"؟": "?", "؛": ";", "،": ",", "۔": ".",
+                       "。": ".", "！": "!", "？": "?"}
+_DEZIMALPUNKT = "․"  # sieht aus wie ein Punkt, trennt aber keinen Satz
+
+
+def abschnitte_ziffernsicher(text: str, ziel: int = 170) -> list:
+    """Wie :func:`abschnitte`, aber ein Punkt zwischen zwei Ziffern ist kein Satzende.
+
+    Nötig für Text, dessen Zahlen nicht ausgeschrieben sind ("12.50 EUR"): sonst risse
+    ``abschnitte`` mitten in der Zahl.
+    """
+    geschuetzt = re.sub(r"(?<=\d)\.(?=\d)", _DEZIMALPUNKT, str(text or ""))
+    return [stueck.replace(_DEZIMALPUNKT, ".") for stueck in abschnitte(geschuetzt, ziel)]
+
+
+def sprechstuecke_fremd(text: str, ziel: int = 220) -> list:
+    """Wie :func:`sprechstuecke`, aber für Text in einer anderen Sprache als Deutsch.
+
+    Zahlen, Beträge und Daten bleiben, wie sie sind: Die deutsche Zahlenschreibung
+    (``schreiben_zu_sprechen``) würde "12.50" zu "zwölf Komma fünfzig" machen, mitten
+    in einem türkischen oder englischen Satz. Es fallen nur Markdown-Zeichen,
+    Schleifen und Steuerzeichen weg, dann wird in Atemabschnitte geteilt.
+    """
+    t = re.sub(r"[\x00-\x08\x0b-\x1f\x7f]", " ", str(text or ""))
+    t = t.translate({ord(k): v for k, v in _FREMDE_SATZZEICHEN.items()})
+    t = re.sub(r"```.*?```", " ", t, flags=re.S)
+    t = re.sub(r"[*_`~]{1,3}", "", t)
+    t = re.sub(r"(?m)^\s*#{1,6}\s*", "", t)
+    t = re.sub(r"\s+", " ", t).strip()
+    if not t:
+        return []
+    return abschnitte_ziffernsicher(schleifen_entfernen(t), ziel)
 
 
 # =========================================================================
@@ -3278,11 +3371,339 @@ def netzsocket_selbsttest():
 
 
 # =========================================================================
-# stimmanbieter  -  Die Anbieterkette der Sprachausgabe mit Pegel für den Orb – wird in Paket P6 gebaut.
+# stimmanbieter  -  Die Anbieterkette der Sprachausgabe – mit Pegelkurve für den Orb.
+# 
+# Wer spricht, entscheidet ``STIMME_ANBIETER``:
+# 
+#     auto        Fish Audio (nur mit Schlüssel UND Stimmen-ID), dann ElevenLabs
+#     fish        nur Fish Audio (die Stimmen-ID ist dann freiwillig)
+#     elevenlabs  nur ElevenLabs
+#     mac         keiner dieser Dienste – es spricht die Systemstimme
+# 
+# Die Mac-Stimme ist immer der letzte Rückfall und steht deshalb nicht in der Liste
+# (:func:`anbieter_reihenfolge`); sie gehört zu ``voice.Stimme``.
+# 
+# Alle Netzaufrufe haben eine einspeisbare ``holen``-Funktion (Prüfungen laufen ohne
+# Netz). Sie hat die Form von ``urllib.request.urlopen``: ``holen(anfrage, timeout)``
+# liefert etwas mit ``read()`` und ``headers``.
+# 
+# Die **Pegelkurve** ist die Lautstärke der gesprochenen Datei in Schritten von 20
+# Millisekunden, 0 bis 255 (:func:`pegel_aus_wav`). Der Orb liest daraus, wie laut
+# Jarvis gerade ist – echt, nicht nachempfunden. Nur Standardbibliothek.
 # =========================================================================
 
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+
+
+
+FISH_URL = "https://api.fish.audio/v1/tts"
+ELEVENLABS_TTS = "https://api.elevenlabs.io/v1/text-to-speech/%s"
+
+# Die Abtastrate, in der Jarvis Sprache für Pegel und Wiedergabe holt.
+PEGEL_ABTASTRATE = 22050
+# Mehr als 9000 Werte (drei Minuten) trägt der Anzeige-Speicher nicht.
+PEGEL_MAX_WERTE = 9000
+# Wie lange ein Anbieter für einen Abschnitt höchstens braucht.
+ANBIETER_TIMEOUT = 45
+
+FORMAT_TYPEN = {"mp3": "audio/mpeg", "wav": "audio/wav"}
+
+
+def anbieter_reihenfolge() -> list:
+    """Welche Dienste sprechen dürfen, in der Reihenfolge, in der sie es versuchen.
+
+    ``auto``: Fish nur, wenn Schlüssel UND Stimmen-ID da sind – ohne ID spräche
+    Fish mit einer Standardstimme, die kaum Deutsch kann. Dann ElevenLabs.
+    ``fish`` / ``elevenlabs``: nur der gewählte, wenn sein Schlüssel da ist.
+    ``mac`` (und alles Unbekannte außer ``auto``): leer – es spricht die Systemstimme.
+    """
+    wahl = (STIMME_ANBIETER or "auto").strip().lower()
+    fish = bool(FISH_API_KEY)
+    eleven = bool(ELEVENLABS_API_KEY)
+    if wahl == "fish":
+        return ["fish"] if fish else []
+    if wahl == "elevenlabs":
+        return ["elevenlabs"] if eleven else []
+    if wahl != "auto":
+        return []
+    reihe = []
+    if fish and FISH_STIMME_ID:
+        reihe.append("fish")
+    if eleven:
+        reihe.append("elevenlabs")
+    return reihe
+
+
+def _oeffnen(anfrage, timeout=ANBIETER_TIMEOUT):
+    """Der echte Netzaufruf. Wird erst beim Aufruf nachgeschlagen, damit
+    Prüfungen ``urllib.request.urlopen`` austauschen können."""
+    return urllib.request.urlopen(anfrage, timeout=timeout)
+
+
+def pcm_als_wav(pcm: bytes, rate: int = PEGEL_ABTASTRATE) -> bytes:
+    """Verpackt rohe 16-Bit-Töne (ein Kanal, little endian) als WAV-Datei."""
+    puffer = io.BytesIO()
+    with wave.open(puffer, "wb") as datei:
+        datei.setnchannels(1)
+        datei.setsampwidth(2)
+        datei.setframerate(int(rate))
+        datei.writeframes(pcm or b"")
+    return puffer.getvalue()
+
+
+# -- Fish Audio ------------------------------------------------------------------------------
+
+def fish_holen(text: str, format: str = "mp3", rate: int = PEGEL_ABTASTRATE, holen=None) -> tuple:
+    """Holt einen Text als Sprache von Fish Audio. Gibt ``(bytes oder None, fehler)`` zurück.
+
+    Das Modell steht im Kopf der Anfrage (``model``), nicht im Körper. ``normalize``
+    bleibt aus: Fish normalisiert nur Englisch und Chinesisch, und Jarvis schreibt
+    Zahlen und Beträge selbst aus (``sprechtext``). Für wav und pcm gehört die
+    Abtastrate in den Körper.
+    """
+    if not FISH_API_KEY:
+        return None, "Für Fish Audio ist kein Schlüssel hinterlegt."
+    inhalt = {"text": str(text or "")[:2500], "format": format,
+              "latency": FISH_LATENZ or "balanced", "normalize": False}
+    if FISH_STIMME_ID:
+        inhalt["reference_id"] = FISH_STIMME_ID
+    if format in ("wav", "pcm"):
+        inhalt["sample_rate"] = int(rate)
+    anfrage = urllib.request.Request(
+        FISH_URL, data=json.dumps(inhalt).encode("utf-8"), method="POST", headers={
+            "Authorization": "Bearer %s" % FISH_API_KEY,
+            "Content-Type": "application/json",
+            "model": FISH_MODELL or "s2.1-pro",
+        })
+    try:
+        with (holen or _oeffnen)(anfrage, ANBIETER_TIMEOUT) as antwort:
+            daten = antwort.read()
+    except urllib.error.HTTPError as fehler:
+        meldungen = {401: "Fish Audio lehnt den Schlüssel ab.",
+                     402: "Bei Fish Audio ist kein Guthaben mehr.",
+                     503: "Fish Audio ist gerade überlastet."}
+        return None, meldungen.get(fehler.code, "Fish Audio meldet Fehler %d." % fehler.code)
+    except (urllib.error.URLError, OSError, ValueError) as fehler:
+        return None, "Fish Audio nicht erreichbar: %s" % fehler
+    except Exception as fehler:  # http.client.HTTPException und Verwandte
+        return None, "Fish Audio nicht erreichbar: %s" % fehler
+    if not daten:
+        return None, "Fish Audio hat keinen Ton geschickt."
+    return daten, ""
+
+
+# -- ElevenLabs ------------------------------------------------------------------------------
+
+def elevenlabs_holen(text: str, format: str = "mp3", vorher: str = "", nachher: str = "",
+                     vorige=None, sprache: str = "", holen=None) -> tuple:
+    """Holt einen Text als Sprache von ElevenLabs. Gibt ``(bytes oder None, anfrage_id, fehler)`` zurück.
+
+    ``format`` ``pcm`` liefert rohe 16-Bit-Töne bei 22,05 kHz (daraus macht
+    :func:`pcm_als_wav` eine WAV-Datei), ``mp3`` die gewohnte MP3. ``vorher`` und
+    ``nachher`` sind die Sätze davor und danach, ``vorige`` die Kennungen der
+    Abschnitte davor – so klingt eine Antwort in Stücken wie ein Atemzug.
+    ``sprache`` wirkt nur bei den schnellen Modellen (flash, turbo).
+    """
+    if not ELEVENLABS_API_KEY:
+        return None, None, "Für ElevenLabs ist kein Schlüssel hinterlegt."
+    ziel = ELEVENLABS_TTS % ELEVENLABS_VOICE_ID
+    kopf = {"xi-api-key": ELEVENLABS_API_KEY, "Content-Type": "application/json"}
+    if format == "pcm":
+        ziel += "?output_format=pcm_%d" % PEGEL_ABTASTRATE
+    else:
+        kopf["Accept"] = "audio/mpeg"
+    modell = ELEVENLABS_MODEL
+    inhalt = {
+        "text": str(text or "")[:2500],
+        "model_id": modell,
+        "voice_settings": {
+            "stability": ELEVENLABS_STABILITY,
+            "similarity_boost": ELEVENLABS_SIMILARITY,
+            "style": ELEVENLABS_STYLE,
+            "use_speaker_boost": True,
+        },
+    }
+    if vorher:
+        inhalt["previous_text"] = vorher[-300:]
+    if nachher:
+        inhalt["next_text"] = nachher[:300]
+    if vorige:
+        inhalt["previous_request_ids"] = list(vorige)[-3:]
+    if sprache and ("flash" in modell or "turbo" in modell):
+        inhalt["language_code"] = sprache
+    anfrage = urllib.request.Request(
+        ziel, data=json.dumps(inhalt).encode("utf-8"), method="POST", headers=kopf)
+    try:
+        with (holen or _oeffnen)(anfrage, ANBIETER_TIMEOUT) as antwort:
+            daten = antwort.read()
+            kennung = antwort.headers.get("request-id") or None
+    except urllib.error.HTTPError as fehler:
+        meldungen = {401: "ElevenLabs lehnt den Schlüssel ab.",
+                     402: "Bei ElevenLabs ist das Guthaben aufgebraucht.",
+                     429: "ElevenLabs ist gerade überlastet."}
+        return None, None, meldungen.get(fehler.code, "ElevenLabs meldet Fehler %d." % fehler.code)
+    except Exception as fehler:
+        return None, None, "ElevenLabs nicht erreichbar: %s" % fehler
+    if not daten:
+        return None, kennung, "ElevenLabs hat keinen Ton geschickt."
+    return daten, kennung, ""
+
+
+# -- Die ganze Kette ---------------------------------------------------------------------------
+
+def sprachaudio(text: str, format: str = "mp3", sprache: str = "de", holen=None) -> dict:
+    """Spricht einen Text über die Kette der Anbieter und gibt die Datei zurück.
+
+    ``format`` ist ``mp3`` oder ``wav``. Ergebnis:
+    ``{"ok", "daten", "typ", "anbieter", "fehler"}``. Ohne eingerichteten Anbieter
+    (oder wenn alle scheitern) ist ``ok`` falsch und ``fehler`` sagt warum; die
+    Systemstimme gehört nicht in diese Kette, sie liefert keine Datei an den Browser.
+    """
+    format = "wav" if format == "wav" else "mp3"
+    typ = FORMAT_TYPEN[format]
+    fehler = ""
+    for anbieter in anbieter_reihenfolge():
+        if anbieter == "fish":
+            daten, grund = fish_holen(text, format, PEGEL_ABTASTRATE, holen)
+        else:
+            if format == "wav":
+                daten, _, grund = elevenlabs_holen(text, "pcm", sprache=sprache, holen=holen)
+                if daten:
+                    daten = pcm_als_wav(daten)
+            else:
+                daten, _, grund = elevenlabs_holen(text, "mp3", sprache=sprache, holen=holen)
+        if daten:
+            return {"ok": True, "daten": daten, "typ": typ, "anbieter": anbieter, "fehler": ""}
+        fehler = grund or fehler
+    return {"ok": False, "daten": None, "typ": typ, "anbieter": "",
+            "fehler": fehler or "Keine Sprachausgabe eingerichtet."}
+
+
+# -- Pegel ------------------------------------------------------------------------------------
+
+def _wav_nachsichtig(daten: bytes):
+    """Liest Kopf und Töne einer WAV-Datei, auch wenn die Längenangaben nicht stimmen.
+
+    Ein Dienst, der die Datei beim Erzeugen schon verschickt, kennt die Länge noch nicht
+    und schreibt 0 oder 0xFFFFFFFF in den Kopf; ``wave`` weist das ab. Gibt
+    ``(kanaele, breite, rate, rohdaten)`` zurück oder ``None``.
+    """
+    if len(daten) < 12 or daten[:4] != b"RIFF" or daten[8:12] != b"WAVE":
+        return None
+    stelle, format_ = 12, None
+    while stelle + 8 <= len(daten):
+        kennung, groesse = struct.unpack("<4sI", daten[stelle:stelle + 8])
+        inhalt = stelle + 8
+        if kennung == b"fmt " and inhalt + 16 <= len(daten):
+            tag, kanaele, rate, _, _, bits = struct.unpack("<HHIIHH", daten[inhalt:inhalt + 16])
+            format_ = (tag, kanaele, rate, bits)
+        elif kennung == b"data":
+            if format_ is None or format_[0] not in (1, 0xFFFE):
+                return None
+            ende = len(daten) if groesse in (0, 0xFFFFFFFF) else min(len(daten), inhalt + groesse)
+            return format_[1], format_[3] // 8, format_[2], daten[inhalt:ende]
+        stelle = inhalt + groesse + (groesse & 1)
+    return None
+
+
+def wav_reparieren(daten: bytes) -> bytes:
+    """Macht aus einer WAV mit falschen Längenangaben im Kopf eine saubere Datei.
+
+    ``afplay`` und ``wave`` mögen keine Datei, die 0 oder 0xFFFFFFFF als Länge angibt
+    (ein Dienst, der beim Erzeugen schon verschickt). Eine gültige oder unlesbare Datei
+    kommt unverändert zurück; nur Mono mit 16 Bit wird neu verpackt.
+    """
+    try:
+        with wave.open(io.BytesIO(daten), "rb") as datei:
+            gesagt = datei.getnframes() * datei.getsampwidth() * datei.getnchannels()
+            if gesagt > 0 and len(datei.readframes(datei.getnframes())) == gesagt:
+                return daten  # der Kopf stimmt mit dem Inhalt überein
+    except (wave.Error, EOFError):
+        pass
+    gelesen = _wav_nachsichtig(daten)
+    if gelesen is None or gelesen[0] != 1 or gelesen[1] != 2 or not gelesen[3]:
+        return daten
+    return pcm_als_wav(gelesen[3][:len(gelesen[3]) - (len(gelesen[3]) % 2)], gelesen[2])
+
+
+def pegel_aus_wav(quelle, rahmen_ms: int = 20) -> list:
+    """Die Lautstärke einer WAV-Datei als Hüllkurve: ein Wert von 0 bis 255 je Rahmen.
+
+    ``quelle`` sind WAV-Bytes, ein Dateipfad oder ein geöffnetes Dateiobjekt.
+    Je Rahmen: Effektivwert, daraus dBFS, dann ``(dB + 50) / 50 * 255`` auf 0 bis 255
+    begrenzt – also Stille ab minus 50 dB, Vollaussteuerung bei 0 dB. Gelesen werden
+    nur 16-Bit-Töne (mehrere Kanäle werden gemittelt). Alles andere – eine MP3, ein
+    abgeschnittener Kopf, 8 oder 24 Bit – ergibt eine leere Liste, nie eine
+    Ausnahme: ohne Kurve spielt Jarvis trotzdem, nur der Orb bleibt dann beim Zustand.
+    """
+    geoeffnet = None
+    try:
+        if isinstance(quelle, (bytes, bytearray, memoryview)):
+            quelle = io.BytesIO(bytes(quelle))
+        elif isinstance(quelle, (str, os.PathLike)):
+            quelle = geoeffnet = open(quelle, "rb")
+        rohbytes = quelle.read() if hasattr(quelle, "read") else b""
+        try:
+            with wave.open(io.BytesIO(rohbytes), "rb") as datei:
+                kanaele, breite, rate = datei.getnchannels(), datei.getsampwidth(), datei.getframerate()
+                rohdaten = datei.readframes(datei.getnframes())
+        except (wave.Error, EOFError):
+            rohdaten = b""
+        if not rohdaten:
+            gelesen = _wav_nachsichtig(rohbytes)
+            if gelesen is None:
+                return []
+            kanaele, breite, rate, rohdaten = gelesen
+        if breite != 2 or kanaele < 1 or rate <= 0:
+            return []
+    except (OSError, ValueError, TypeError, AttributeError, struct.error):
+        return []
+    finally:
+        if geoeffnet is not None:
+            geoeffnet.close()
+    try:
+        toene = array.array("h")
+        toene.frombytes(rohdaten[:len(rohdaten) - (len(rohdaten) % 2)])
+        if sys.byteorder == "big":
+            toene.byteswap()
+        if kanaele > 1:
+            toene = array.array("h", (int(sum(toene[i:i + kanaele]) / kanaele)
+                                      for i in range(0, len(toene) - kanaele + 1, kanaele)))
+        rahmen = max(1, int(rate * max(1, int(rahmen_ms)) / 1000.0))
+        werte = []
+        for start in range(0, len(toene), rahmen):
+            stueck = toene[start:start + rahmen]
+            if not stueck:
+                break
+            effektiv = math.sqrt(sum(map(mul, stueck, stueck)) / float(len(stueck)))
+            if effektiv <= 0:
+                werte.append(0)
+                continue
+            dezibel = 20.0 * math.log10(effektiv / 32768.0)
+            werte.append(int(max(0.0, min(255.0, (dezibel + 50.0) / 50.0 * 255.0))))
+            if len(werte) >= PEGEL_MAX_WERTE:
+                break
+        return werte
+    except (ValueError, OverflowError, MemoryError):
+        return []
+
+
+# -- Mac-Stimme ---------------------------------------------------------------------------------
+
+def say_befehl(text: str, ziel_wav: str, stimme: str, rate) -> list:
+    """Der Befehl, der einen Text mit ``say`` als WAV-Datei (16 Bit, 22,05 kHz) ablegt.
+
+    Ohne ``stimme`` entfällt ``-v`` – dann spricht die Systemstimme der Einstellungen.
+    Ein Text, der mit einem Strich beginnt, würde ``say`` für eine Option halten;
+    führende Striche und Leerzeichen fallen deshalb weg.
+    """
+    befehl = ["say", "-r", str(int(rate))]
+    if stimme:
+        befehl += ["-v", stimme]
+    befehl += ["-o", ziel_wav, "--data-format=LEI16@%d" % PEGEL_ABTASTRATE,
+               str(text or "").lstrip("- ")]
+    return befehl
 
 
 # =========================================================================
@@ -3290,7 +3711,8 @@ def netzsocket_selbsttest():
 # 
 # Beides ist mehrstufig aufgebaut, damit **ein einziger Schlüssel** genügt:
 # 
-#     Stimme raus:  ElevenLabs (falls Schlüssel) -> macOS ``say`` (immer da, gratis)
+#     Stimme raus:  Fish Audio / ElevenLabs (falls Schlüssel, Reihenfolge nach
+#                   ``STIMME_ANBIETER``) -> macOS ``say`` (immer da, gratis)
 #     Sprache rein: faster-whisper lokal (gratis) -> Whisper-API (falls Schlüssel)
 # 
 # Aufgenommen wird bis zur Sprechpause, nicht in festen Blöcken. Feste Blöcke
@@ -3334,6 +3756,46 @@ def beste_deutsche_stimme(liste: str) -> str:
         return (guete, wunsch)
 
     return sorted(deutsch, key=rang)[0]
+
+# Die Systemstimmen je Sprache, einmal aus ``say -v ?`` gelesen.
+_SYSTEMSTIMMEN = {}
+
+
+def stimme_fuer_sprache(code: str, liste: str = None) -> str:
+    """Die Mac-Stimme für eine Sprache (``tr``, ``en``, ``hr`` ...) – leer, wenn es keine gibt.
+
+    Gelesen werden die Zeilen von ``say -v ?`` (``Name  xx_YY  # Beispielsatz``). Genommen
+    wird die erste Stimme, deren Sprachraum mit dem Kürzel beginnt; hochwertige
+    (Premium, Erweitert, Enhanced) kommen vor den einfachen. Das Ergebnis wird
+    gemerkt, damit ``say`` nicht bei jedem Satz gefragt wird. ``liste`` ist der
+    Text von ``say -v ?`` (für Prüfungen) – dann wird nichts gemerkt.
+    """
+    code = (code or "").strip().lower().replace("-", "_")[:3]
+    if not code:
+        return ""
+    if liste is None and code in _SYSTEMSTIMMEN:
+        return _SYSTEMSTIMMEN[code]
+    quelle = liste
+    if quelle is None:
+        try:
+            ergebnis = subprocess.run(["say", "-v", "?"], capture_output=True, text=True,
+                                      timeout=10, shell=False)
+            quelle = ergebnis.stdout if ergebnis.returncode == 0 else ""
+        except (OSError, subprocess.SubprocessError):
+            quelle = ""
+    kandidaten = []
+    for zeile in (quelle or "").splitlines():
+        treffer = re.match(r"^(.+?)\s+([A-Za-z]{2,3}[_-][A-Za-z0-9]{2,4})\s+#", zeile)
+        if treffer and treffer.group(2).lower().replace("-", "_").split("_")[0] == code:
+            name = treffer.group(1).strip()
+            klein = name.lower()
+            guete = 0 if "premium" in klein else 1 if ("erweitert" in klein or "enhanced" in klein) else 2
+            kandidaten.append((guete, len(kandidaten), name))
+    name = sorted(kandidaten)[0][2] if kandidaten else ""
+    if liste is None:
+        _SYSTEMSTIMMEN[code] = name
+    return name
+
 
 # Kurze Signaltöne - der Nutzer hört so, in welchem Zustand Jarvis ist.
 SIGNALTOENE = {
@@ -3412,10 +3874,23 @@ class Stimme:
         self._whisper_modell = None
         self._temp = tempfile.mkdtemp(prefix="jarvis_audio_")
         self.letzter_fehler = ""
+        # Wer zuletzt einen Abschnitt gesprochen hat: fish, elevenlabs oder say.
+        self.letzter_anbieter = ""
         self._stopp = threading.Event()
         self._abspiel_prozess = None
         # Nur die Aufnahme setzt das: Mikrofon fehlt oder lässt sich nicht öffnen.
         self.mikro_fehler = ""
+        # Der Anzeige-Speicher (setzt ``Werkzeuge.stimme_setzen``): dorthin geht der Pegel
+        # der Stimme für den Orb. Ohne ihn spricht Jarvis wie bisher, nur ohne Pegel.
+        self.anzeige = None
+        # Das Tonformat der Anbieter: mp3 (Standard) oder wav. Mit Anzeige gilt wav,
+        # denn nur aus einer WAV-Datei lässt sich der Pegel berechnen.
+        self.audioformat = "mp3"
+        # Format und Sprache des laufenden Holens – je Faden, denn Telegram und Stimme
+        # können gleichzeitig holen.
+        self._lokal = threading.local()
+        # Austauschbarer Ausführer für ``say``/``afconvert`` (Prüfungen): (befehl, timeout) -> Rückgabewert.
+        self.ausfuehren = None
         if self.ist_macos():
             self.macos_stimme = MACOS_STIMME or self.deutsche_stimme_suchen()
 
@@ -3449,6 +3924,8 @@ class Stimme:
             "macos_say": self.ist_macos(),
             "macos_stimme": self.macos_stimme or "keine deutsche gefunden",
             "elevenlabs": bool(ELEVENLABS_API_KEY),
+            "fish": bool(FISH_API_KEY),
+            "anbieter": anbieter_reihenfolge(),
             "mikrofon": sd is not None and np is not None,
             "mikrofon_grund": mikrofon_fehlermeldung(),
             "whisper_lokal": WhisperModel is not None,
@@ -3457,31 +3934,39 @@ class Stimme:
 
     # -- Ausgabe ------------------------------------------------------------
 
-    def sprich(self, text: str) -> bool:
+    ANBIETER_NAMEN = {"fish": "Fish Audio", "elevenlabs": "ElevenLabs", "say": "Systemstimme"}
+
+    def sprich(self, text: str, sprache: str = "de") -> bool:
         """Spricht einen Text so, wie ein Mensch ihn sagen würde.
 
-        Der Text wird zuerst ins Gesprochene übersetzt (Zahlen, Beträge, Daten
-        ausgeschrieben, kein Markdown) und in Atemabschnitte geteilt. Mit
-        ElevenLabs wird der nächste Abschnitt schon geholt, während der
-        vorige läuft: kein Warten dazwischen, und jeder Abschnitt kennt den
-        Satz davor und danach, damit die Betonung durchläuft. Ohne ElevenLabs
-        spricht die Systemstimme.
+        Deutscher Text wird zuerst ins Gesprochene übersetzt (Zahlen, Beträge, Daten
+        ausgeschrieben, kein Markdown), anderer nur gesäubert (``sprechstuecke_fremd``),
+        dann in Atemabschnitte geteilt. Die Anbieter aus ``STIMME_ANBIETER`` kommen der
+        Reihe nach dran; der nächste Abschnitt wird schon geholt, während der vorige
+        läuft: kein Warten dazwischen, und jeder Abschnitt kennt den Satz davor und
+        danach, damit die Betonung durchläuft. Was kein Anbieter schafft, spricht die
+        Systemstimme. Vor jedem Abschnitt geht der Pegel an die Anzeige (der Orb).
         """
-        stuecke = sprechstuecke(text)
+        sprache = (sprache or "de").strip().lower() or "de"
+        stuecke = sprechstuecke(text) if sprache == "de" else sprechstuecke_fremd(text)
         if not stuecke:
             return False
         print("Jarvis: %s" % " ".join(stuecke))
         self._stopp.clear()
+        self._lokal.sprache = sprache
         gesprochen = 0
-        if ELEVENLABS_API_KEY:
-            gesprochen = self._elevenlabs_sprechen(stuecke)
-            if gesprochen >= len(stuecke):
-                return True
-            if self._stopp.is_set():
-                return True
-        # Was ElevenLabs nicht geschafft hat, übernimmt die Systemstimme: der
-        # Satz, bei dem es abbrach, wird nicht noch einmal von vorn gesprochen.
-        return self._systemstimme_sprechen(" ".join(stuecke[gesprochen:]))
+        try:
+            for anbieter in anbieter_reihenfolge():
+                gesprochen += self._anbieter_sprechen(stuecke[gesprochen:], anbieter, sprache)
+                if gesprochen >= len(stuecke):
+                    return True
+                if self._stopp.is_set():
+                    return True
+            # Was die Anbieter nicht geschafft haben, übernimmt die Systemstimme: der
+            # Satz, bei dem es abbrach, wird nicht noch einmal von vorn gesprochen.
+            return self._systemstimme_sprechen(" ".join(stuecke[gesprochen:]))
+        finally:
+            self._anzeige_melden({"art": "aus"})
 
     def stoppen(self):
         """Hält die Sprachausgabe sofort an - etwa wenn der Nutzer dazwischenredet."""
@@ -3492,6 +3977,24 @@ class Stimme:
                 prozess.terminate()
             except OSError:
                 pass
+        self._anzeige_melden({"art": "aus"})
+
+    def _anzeige_melden(self, daten: dict):
+        """Schreibt in den Kanal 'stimme' der Anzeige. Nie eine Ausnahme: der Orb darf
+        das Sprechen nicht kaputt machen."""
+        try:
+            if self.anzeige is not None:
+                self.anzeige.melden("stimme", daten)
+        except Exception as fehler:
+            print("[stimme] Anzeige: %s" % fehler)
+
+    def _sprech_format(self) -> str:
+        """Das Format, in dem beim Sprechen geholt wird: wav, wenn ein Pegel gebraucht wird."""
+        return "wav" if (self.audioformat == "wav" or self.anzeige is not None) else "mp3"
+
+    def _format_jetzt(self) -> str:
+        """Das Format für den Abruf in diesem Faden (sonst der Standard der Stimme)."""
+        return getattr(self._lokal, "format", None) or self.audioformat or "mp3"
 
     def _elevenlabs_holen(self, text: str, vorher: str = "", nachher: str = "", vorige=None):
         """Holt die Sprachdatei für einen Abschnitt. ``None`` bei Fehler.
@@ -3499,47 +4002,122 @@ class Stimme:
         ``vorige`` sind die Kennungen der Abschnitte davor (höchstens drei). Damit
         setzt ElevenLabs Tonfall und Tempo nahtlos fort - die Antwort klingt wie
         in einem Atemzug gesprochen statt wie aneinandergereihte Ansagen.
+        Das Format (mp3 oder wav) steht in ``audioformat``; bei wav kommen rohe
+        Töne vom Dienst und werden hier zur WAV-Datei verpackt. Lehnt der Dienst das
+        Format ab, wird einmal als MP3 gefragt: lieber ohne Pegelkurve sprechen als gar nicht.
         """
         self._anfrage_id = None
-        ziel = "%s/text-to-speech/%s" % (ELEVENLABS_URL, ELEVENLABS_VOICE_ID)
-        inhalt = {
-            "text": text[:2500],
-            "model_id": ELEVENLABS_MODEL,
-            "voice_settings": {
-                "stability": ELEVENLABS_STABILITY,
-                "similarity_boost": ELEVENLABS_SIMILARITY,
-                "style": ELEVENLABS_STYLE,
-                "use_speaker_boost": True,
-            },
-        }
-        # Der Satz davor und danach: so wird eine Stimme, die in Stücken
-        # spricht, nicht zu lauter einzelnen Ansagen.
-        if vorher:
-            inhalt["previous_text"] = vorher[-300:]
-        if nachher:
-            inhalt["next_text"] = nachher[:300]
-        if vorige:
-            inhalt["previous_request_ids"] = list(vorige)[-3:]
-        anfrage = urllib.request.Request(
-            ziel, data=json.dumps(inhalt).encode("utf-8"), method="POST", headers={
-                "xi-api-key": ELEVENLABS_API_KEY,
-                "Content-Type": "application/json",
-                "Accept": "audio/mpeg",
-            })
-        try:
-            with urllib.request.urlopen(anfrage, timeout=45) as antwort:
-                daten = antwort.read()
-                self._anfrage_id = antwort.headers.get("request-id") or None
-                return daten
-        except (urllib.error.URLError, OSError, http.client.HTTPException, ValueError) as fehler:
-            self.letzter_fehler = "ElevenLabs nicht erreichbar: %s" % fehler
-            print("[stimme] %s - ich nehme die Systemstimme." % self.letzter_fehler)
+        wav = self._format_jetzt() == "wav"
+        sprache = getattr(self._lokal, "sprache", "") or ""
+        daten, kennung, fehler = elevenlabs_holen(
+            text, "pcm" if wav else "mp3", vorher, nachher, vorige, sprache=sprache)
+        if daten is None and wav and "meldet Fehler" in fehler:
+            wav = False
+            daten, kennung, fehler = elevenlabs_holen(text, "mp3", vorher, nachher, vorige, sprache=sprache)
+        self._anfrage_id = kennung
+        if daten is None:
+            self.letzter_fehler = fehler
+            print("[stimme] %s" % fehler)
             return None
+        return pcm_als_wav(daten, PEGEL_ABTASTRATE) if wav else daten
 
-    def _elevenlabs_sprechen(self, stuecke: list) -> int:
-        """Spricht Abschnitt für Abschnitt. Gibt zurück, wie viele gesprochen wurden."""
+    def _fish_holen(self, text: str, vorher: str = "", nachher: str = "", vorige=None):
+        """Holt die Sprachdatei für einen Abschnitt von Fish Audio. ``None`` bei Fehler.
+
+        Fish kennt weder den Satz davor noch Kennungen früherer Abschnitte; die
+        Parameter stehen nur da, damit beide Anbieter gleich aufgerufen werden.
+        """
+        del vorher, nachher, vorige
+        wav = self._format_jetzt() == "wav"
+        daten, fehler = fish_holen(text, "wav" if wav else "mp3", PEGEL_ABTASTRATE)
+        if daten is None and wav and "meldet Fehler" in fehler:
+            daten, fehler = fish_holen(text, "mp3", PEGEL_ABTASTRATE)
+        if daten is None:
+            self.letzter_fehler = fehler
+            print("[stimme] %s" % fehler)
+            return None
+        return wav_reparieren(daten) if wav and daten[:4] == b"RIFF" else daten
+
+    def _say_holen(self, text: str, vorher: str = "", nachher: str = "", vorige=None):
+        """Lässt die Systemstimme einen Abschnitt als WAV-Datei sprechen. ``None`` bei Fehler."""
+        del vorher, nachher, vorige
+        ziel = os.path.join(self._temp, "say_%d_%d.wav" % (int(time.time() * 1000),
+                                                              threading.get_ident() % 1000))
+        try:
+            if not self._say_als_wav(text, ziel):
+                return None
+            with open(ziel, "rb") as datei:
+                return datei.read()
+        except OSError:
+            return None
+        finally:
+            for pfad in (ziel, ziel[:-4] + ".aiff"):
+                try:
+                    os.remove(pfad)
+                except OSError:
+                    pass
+
+    def _befehl_ausfuehren(self, befehl: list, timeout: int = 120) -> bool:
+        """Führt einen Befehl aus (ohne Shell). Prüfungen tauschen ``self.ausfuehren`` aus."""
+        try:
+            if self.ausfuehren is not None:
+                return self.ausfuehren(befehl, timeout) in (0, True, None)
+            lauf = subprocess.run(befehl, timeout=timeout, shell=False,
+                                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            return lauf.returncode == 0
+        except (OSError, subprocess.SubprocessError):
+            return False
+
+    def _mac_stimme(self, sprache: str = "de") -> str:
+        """Die Systemstimme für eine Sprache: für Deutsch die gewählte, sonst die erste passende."""
+        if sprache == "de":
+            return self.macos_stimme
+        return stimme_fuer_sprache(sprache)
+
+    def _say_als_wav(self, text: str, ziel_wav: str) -> bool:
+        """Legt einen Text mit ``say`` als WAV ab. Erst direkt, sonst über AIFF und afconvert.
+
+        Gibt zurück, ob danach eine WAV-Datei mit Inhalt da ist.
+        """
+        sprache = getattr(self._lokal, "sprache", "de") or "de"
+        stimme = self._mac_stimme(sprache)
+        rate = SPEECH_RATE
+
+        def da():
+            try:
+                return os.path.getsize(ziel_wav) > 44
+            except OSError:
+                return False
+
+        self._befehl_ausfuehren(say_befehl(text, ziel_wav, stimme, rate), 120)
+        if da():
+            return True
+        # Manche Mac-Fassungen schreiben nur AIFF: erst sprechen lassen, dann umwandeln.
+        aiff = ziel_wav[:-4] + ".aiff"
+        befehl = ["say", "-r", str(int(rate))]
+        if stimme:
+            befehl += ["-v", stimme]
+        befehl += ["-o", aiff, str(text or "").lstrip("- ")]
+        if self._befehl_ausfuehren(befehl, 120):
+            self._befehl_ausfuehren(["afconvert", "-f", "WAVE", "-d",
+                                     "LEI16@%d" % PEGEL_ABTASTRATE, aiff, ziel_wav], 60)
+        return da()
+
+    def _anbieter_sprechen(self, stuecke: list, anbieter: str, sprache: str = "de") -> int:
+        """Spricht Abschnitt für Abschnitt mit einem Anbieter. Gibt zurück, wie viele gesprochen wurden.
+
+        Ein Faden holt die Dateien (höchstens zwei im Voraus), die Wiedergabe spielt sie
+        in der Reihenfolge. Ist die Datei eine WAV, wird ihre Pegelkurve berechnet und
+        UNMITTELBAR vor dem Abspielen an die Anzeige gemeldet; ``start_ms`` sagt dem
+        Orb, wann der Ton einsetzt. Bei einer MP3 gibt es keine Kurve – der Abschnitt
+        wird trotzdem gemeldet (mit leerem Pegel), denn die Anzeige folgt seinem Text.
+        """
+        name = self.ANBIETER_NAMEN.get(anbieter, anbieter)
+        holfunktion = {"fish": self._fish_holen, "say": self._say_holen}.get(
+            anbieter, self._elevenlabs_holen)
         fertig = queue.Queue(maxsize=2)
         ende = threading.Event()
+        format_ = "wav" if anbieter == "say" else self._sprech_format()
 
         def ablegen(eintrag):
             while not ende.is_set():
@@ -3552,14 +4130,16 @@ class Stimme:
         def holer():
             # Was auch passiert: am Ende liegt immer ein Abschluss in der Warteschlange,
             # sonst wartet die Wiedergabe für immer.
+            self._lokal.format = format_
+            self._lokal.sprache = sprache
             try:
                 kennungen = []
                 for nummer, stueck in enumerate(stuecke):
                     if ende.is_set() or self._stopp.is_set():
                         break
                     self._anfrage_id = None
-                    zusatz = {"vorige": kennungen[-3:]} if kennungen else {}
-                    daten = self._elevenlabs_holen(
+                    zusatz = {"vorige": kennungen[-3:]} if (kennungen and anbieter == "elevenlabs") else {}
+                    daten = holfunktion(
                         stueck, stuecke[nummer - 1] if nummer else "",
                         stuecke[nummer + 1] if nummer + 1 < len(stuecke) else "", **zusatz)
                     if getattr(self, "_anfrage_id", None):
@@ -3568,7 +4148,7 @@ class Stimme:
                     if daten is None:
                         return
             except Exception as fehler:
-                self.letzter_fehler = "ElevenLabs: %s" % fehler
+                self.letzter_fehler = "%s: %s" % (name, fehler)
                 ablegen((-1, None))
                 return
             finally:
@@ -3592,13 +4172,21 @@ class Stimme:
                 nummer, daten = eintrag
                 if daten is None or self._stopp.is_set():
                     break
-                pfad = os.path.join(self._temp, "antwort_%d_%d.mp3"
-                                    % (int(time.time() * 1000), nummer))
+                ist_wav = daten[:4] == b"RIFF"
+                pfad = os.path.join(self._temp, "antwort_%d_%d.%s"
+                                    % (int(time.time() * 1000), nummer, "wav" if ist_wav else "mp3"))
                 try:
                     with open(pfad, "wb") as datei:
                         datei.write(daten)
                 except OSError:
                     break
+                if self.anzeige is not None:
+                    self._anzeige_melden({
+                        "art": "pegel",
+                        "start_ms": time.time() * 1000 + STIMME_VORLAUF_MS,
+                        "rahmen_ms": 20,
+                        "pegel": pegel_aus_wav(daten) if ist_wav else [],
+                        "text": stuecke[nummer], "quelle": anbieter})
                 erfolg = self.abspielen(pfad)
                 try:
                     os.remove(pfad)
@@ -3607,17 +4195,46 @@ class Stimme:
                 if not erfolg:
                     break
                 gesprochen += 1
+                self.letzter_anbieter = anbieter
         finally:
             ende.set()
         return gesprochen
 
+    def _elevenlabs_sprechen(self, stuecke: list) -> int:
+        """Spricht Abschnitt für Abschnitt mit ElevenLabs (siehe ``_anbieter_sprechen``)."""
+        return self._anbieter_sprechen(stuecke, "elevenlabs", "de")
+
     def _systemstimme_sprechen(self, text: str) -> bool:
-        """Sprachausgabe über das eingebaute ``say`` von macOS."""
+        """Sprachausgabe über das eingebaute ``say`` von macOS – der letzte Rückfall.
+
+        Der Rest wird in Abschnitte geteilt, jeder als WAV gesprochen und über ``afplay``
+        abgespielt: so hört das Sprechen sofort auf, wenn jemand dazwischenredet, und der
+        Orb bekommt den echten Pegel. Gelingt das nicht (kein ``afplay``, keine WAV),
+        spricht das einfache ``say`` den Rest in einem Zug; der Orb bekommt dann
+        'aus' und zeigt nur den Zustand.
+        """
         if not shutil.which("say"):
             return False
+        text = (text or "").strip()
+        if not text:
+            return True
+        sprache = getattr(self._lokal, "sprache", "de") or "de"
+        stuecke = abschnitte_ziffernsicher(text) or [text]
+        gesprochen = 0
+        if shutil.which("afplay"):
+            gesprochen = self._anbieter_sprechen(stuecke, "say", sprache)
+            if gesprochen >= len(stuecke) or self._stopp.is_set():
+                return True
+        # Der Orb folgt jetzt nur dem Zustand, nicht mehr einem Pegel.
+        self._anzeige_melden({"art": "aus"})
+        return self._systemstimme_einfach(" ".join(stuecke[gesprochen:]), sprache)
+
+    def _systemstimme_einfach(self, text: str, sprache: str = "de") -> bool:
+        """Das alte, einfache ``say``: ein Aufruf, kein Pegel."""
         befehl = ["say", "-r", str(int(SPEECH_RATE))]
-        if self.macos_stimme:
-            befehl += ["-v", self.macos_stimme]
+        stimme = self._mac_stimme(sprache)
+        if stimme:
+            befehl += ["-v", stimme]
         befehl.append(text[:6000])
         try:
             subprocess.run(befehl, timeout=180, shell=False,
@@ -3659,21 +4276,27 @@ class Stimme:
         except (OSError, subprocess.SubprocessError):
             pass
 
-    def _elevenlabs_datei(self, text: str) -> str:
-        """Die ganze Antwort mit ElevenLabs als eine MP3-Datei - Abschnitt für Abschnitt,
+    def _anbieter_datei(self, text: str, anbieter: str) -> str:
+        """Die ganze Antwort mit einem Anbieter als eine MP3-Datei - Abschnitt für Abschnitt,
         nahtlos verbunden. Leer, wenn es nicht klappt."""
         stuecke = sprechstuecke(text)
         teile, kennungen = [], []
-        for nummer, stueck in enumerate(stuecke):
-            zusatz = {"vorige": kennungen[-3:]} if kennungen else {}
-            daten = self._elevenlabs_holen(
-                stueck, stuecke[nummer - 1] if nummer else "",
-                stuecke[nummer + 1] if nummer + 1 < len(stuecke) else "", **zusatz)
-            if not daten:
-                return ""
-            teile.append(daten)
-            if getattr(self, "_anfrage_id", None):
-                kennungen.append(self._anfrage_id)
+        holfunktion = self._fish_holen if anbieter == "fish" else self._elevenlabs_holen
+        alt = getattr(self._lokal, "format", None)
+        self._lokal.format = "mp3"  # Telegram nimmt MP3; Pegel braucht hier niemand
+        try:
+            for nummer, stueck in enumerate(stuecke):
+                zusatz = {"vorige": kennungen[-3:]} if (kennungen and anbieter == "elevenlabs") else {}
+                daten = holfunktion(
+                    stueck, stuecke[nummer - 1] if nummer else "",
+                    stuecke[nummer + 1] if nummer + 1 < len(stuecke) else "", **zusatz)
+                if not daten:
+                    return ""
+                teile.append(daten)
+                if getattr(self, "_anfrage_id", None):
+                    kennungen.append(self._anfrage_id)
+        finally:
+            self._lokal.format = alt
         if not teile:
             return ""
         ziel = os.path.join(self._temp, "nachricht_%d.mp3" % int(time.time() * 1000))
@@ -3684,16 +4307,22 @@ class Stimme:
             return ""
         return ziel
 
+    def _elevenlabs_datei(self, text: str) -> str:
+        """Die ganze Antwort mit ElevenLabs als eine MP3-Datei (siehe ``_anbieter_datei``)."""
+        return self._anbieter_datei(text, "elevenlabs")
+
     def sprachdatei_erzeugen(self, text: str, ziel: str = "") -> str:
         """Erzeugt eine Audiodatei aus Text - für Sprachnachrichten per Telegram.
 
-        Mit ElevenLabs klingt auch die Sprachnachricht wie ein Mensch (Telegram
-        nimmt MP3 an). Sonst spricht die beste deutsche Mac-Stimme.
+        Mit Fish Audio oder ElevenLabs (Reihenfolge wie beim Sprechen) klingt auch die
+        Sprachnachricht wie ein Mensch (Telegram nimmt MP3 an). Sonst spricht die beste
+        deutsche Mac-Stimme.
         """
-        if ELEVENLABS_API_KEY and not ziel:
-            datei = self._elevenlabs_datei(text)
-            if datei:
-                return datei
+        if not ziel:
+            for anbieter in anbieter_reihenfolge():
+                datei = self._anbieter_datei(text, anbieter)
+                if datei:
+                    return datei
         sauber = text_fuers_sprechen(text)
         if not sauber or not shutil.which("say"):
             return ""
@@ -3883,6 +4512,44 @@ class Stimme:
         if text:
             print("Du: %s" % text)
         return text
+
+
+def sprechprobe(argumente=None) -> int:
+    """``python3 jarvis.py sprechprobe [Satz]``: zeigt, wer spricht, und spricht einen Probesatz.
+
+    Sagt ehrlich, was eingerichtet ist und was fehlt (etwa Fish ohne Stimmen-ID), spricht
+    den Satz über die Kette und nennt, wer ihn gesprochen hat und wie lange es gedauert hat.
+    Die Probe kostet bei Fish und ElevenLabs ein paar Zeichen Guthaben.
+    """
+    satz = " ".join(argumente or []).strip() or "Guten Tag, hier ist Jarvis. Das ist die Probe meiner Stimme."
+    wahl = (STIMME_ANBIETER or "auto").strip().lower()
+    print("Stimme: Modus %s" % wahl)
+    if FISH_API_KEY:
+        if wahl == "auto" and not FISH_STIMME_ID:
+            print("  Fish Audio: Schlüssel da, aber FISH_STIMME_ID fehlt – im Modus auto spricht Fish deshalb nicht.")
+        else:
+            print("  Fish Audio: eingerichtet (Modell %s, Latenz %s)" % (FISH_MODELL, FISH_LATENZ))
+    else:
+        print("  Fish Audio: nicht eingerichtet (python3 jarvis.py zugang fish)")
+    print("  ElevenLabs: %s" % ("eingerichtet" if ELEVENLABS_API_KEY else "nicht eingerichtet"))
+    stimme = Stimme()
+    kette = anbieter_reihenfolge()
+    print("  Reihenfolge: %s" % (", ".join(stimme.ANBIETER_NAMEN[a] for a in kette + ["say"])
+                                 if kette else "nur die Mac-Stimme"))
+    if not stimme.ist_macos() and not kette:
+        print("Hier ist weder ein Stimmen-Dienst eingerichtet noch läuft das auf einem Mac – es gibt nichts zu sprechen.")
+        return 1
+    beginn = time.time()
+    ok = stimme.sprich(satz)
+    dauer = time.time() - beginn
+    if ok and stimme.letzter_anbieter:
+        print("Gesprochen hat: %s (%.1f Sekunden)." % (stimme.ANBIETER_NAMEN.get(
+            stimme.letzter_anbieter, stimme.letzter_anbieter), dauer))
+    else:
+        print("Es hat nichts gesprochen.%s" % (" " + stimme.letzter_fehler if stimme.letzter_fehler else ""))
+    if stimme.letzter_fehler:
+        print("Letzte Fehlermeldung: %s" % stimme.letzter_fehler)
+    return 0 if ok else 1
 
 
 # =========================================================================
@@ -9356,6 +10023,10 @@ class Vorschlaege:
 # **Ehrliche Grenze:** Das ist ein Einzelbild auf Zuruf. Kein Dauervideo, keine
 # Überwachung, keine Aufzeichnung im Hintergrund. Das Bild wird nach der
 # Auswertung gelöscht, außer der Nutzer will es ausdrücklich behalten.
+# 
+# Der Server nimmt nur Einzelbilder auf (umschauen, Belege). Ein Live-Bild gibt es
+# nur im Browser auf der Seite Sicht, nur nach Einschalten (SICHT_AN); es verlässt
+# den Browser nie und wird nicht aufgezeichnet - gespeichert werden nur Messzahlen.
 # 
 # Das Kamera-Recht muss dem Terminal unter Systemeinstellungen, Datenschutz,
 # Kamera erteilt sein. Die Ersteinrichtung weist darauf hin.
@@ -18922,27 +19593,2524 @@ class Telefonagent:
 
 
 # =========================================================================
-# sicht  -  Dateien der Handerkennung und gespeicherte Handruhe-Messungen – wird in Paket P5 gebaut.
+# sicht  -  Dateien der Handerkennung und gespeicherte Handruhe-Messungen.
+# 
+# Die Seite ``/sehen`` erkennt die Hand im Browser (MediaPipe, 21 Punkte). Dieses
+# Modul hat zwei Aufgaben:
+# 
+# **1. Die Dateien der Handerkennung.** MediaPipe besteht aus sechs Dateien (ein
+# JavaScript-Bündel, zwei WASM-Lader mit ihren Binärdateien, das Handmodell). Sie
+# werden **einmal** geladen (``python3 jarvis.py sicht laden``) und danach von
+# Jarvis selbst ausgeliefert - die Seite fragt nie bei jsDelivr oder Google an,
+# und ihr Sicherheitskopf erlaubt gar keine fremde Adresse.
+# 
+# * **Feste Prüfsummen.** Für jede Datei steht ihre sha256-Summe fest im Code
+#   (``SICHT_DATEIEN``). Eine abweichende Datei wird verworfen, nichts bleibt
+#   liegen. Die Summen der fünf jsDelivr-Dateien stimmen mit denen überein, die
+#   das npm-Paket selbst ausweist; das Handmodell hat nur Google - seine Summe ist
+#   die der Datei, die beim Einrichten geprüft wurde. Das Bündel trägt zusätzlich
+#   die sha384-Summe, die jsDelivr als Teilressourcen-Prüfsumme (SRI) nennt.
+# * **Die Version steht im Pfad** (``/sicht/dateien/0.10.35/...``). Damit darf der
+#   Browser die Dateien ein Jahr behalten, und nach einer neuen Version passen
+#   JavaScript und WASM nie aus Versehen aus zwei Fassungen zusammen.
+# * **Ausgeliefert werden nur diese sechs Namen.** Kein Pfad, kein ``..``.
+# 
+# **2. Handruhe-Messungen.** Die Seite misst im Browser, wie ruhig die Hand ist,
+# und schickt nur Zahlen - nie ein Bild. Hier werden sie streng geprüft,
+# gespeichert und mit den eigenen letzten 14 Tagen verglichen.
+# 
+# **Ehrliche Grenze.** Eine Webcam sieht Bewegungen ab etwa einem halben
+# Millimeter. Das ist "Handruhe" im Vergleich zu den eigenen Werten - Selbst-
+# beobachtung, kein Medizinprodukt, und keine Aussage über irgendeine Ursache.
 # =========================================================================
 
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
 
+
+# ---------------------------------------------------------------------------
+# Die Dateien der Handerkennung
+# ---------------------------------------------------------------------------
+
+SICHT_VERSION = "0.10.35"
+
+# Wohin im Netz der Browser die Dateien holt: nirgends. Ausgeliefert werden sie von hier.
+SICHT_DATEIEN_PRAEFIX = "/sicht/dateien/"
+
+_SICHT_NPM = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@" + SICHT_VERSION
+_SICHT_MODELL = ("https://storage.googleapis.com/mediapipe-models/gesture_recognizer/"
+                 "gesture_recognizer/float16/1/gesture_recognizer.task")
+
+# Name -> (Adresse, feste Prüfsumme, Inhaltstyp).
+# Die Prüfsumme ist "sha256-<hex>" oder "sha384-<base64>" (so schreibt sie jsDelivr als SRI);
+# mehrere gelten alle zugleich. ``None`` heißt: beim ersten Laden merken (pruefsummen.json).
+SICHT_DATEIEN = {
+    "vision_bundle.mjs": (
+        _SICHT_NPM + "/vision_bundle.mjs",
+        ("sha256-55d7ab624fbb70dcc5adc4ae6d7ea9cfcb569139d3dbfbf2b1deafcb966bc0fe",
+         "sha384-Ll1OFMb+0geb9fpvYvxFbnpB/UjqBeQ2iVta6EtAGmIW2s0Oed/AhFDe+32PXnKs"),
+        "text/javascript"),
+    "vision_wasm_internal.js": (
+        _SICHT_NPM + "/wasm/vision_wasm_internal.js",
+        "sha256-e7fd9858e8e8f221d9b96eddc11f8e077f263e0b7bbd79d3cbe882b134274f8c",
+        "text/javascript"),
+    "vision_wasm_internal.wasm": (
+        _SICHT_NPM + "/wasm/vision_wasm_internal.wasm",
+        "sha256-6a5c64584c2ab61c763b6e204afbdbc7ce1caf7f5216187322bca8df94f646bc",
+        "application/wasm"),
+    "vision_wasm_nosimd_internal.js": (
+        _SICHT_NPM + "/wasm/vision_wasm_nosimd_internal.js",
+        "sha256-438d1fe8ff7f4d946025bc211c291543c037d8a3785ed4eee60f1f521b236296",
+        "text/javascript"),
+    "vision_wasm_nosimd_internal.wasm": (
+        _SICHT_NPM + "/wasm/vision_wasm_nosimd_internal.wasm",
+        "sha256-8a3092d34c79d3f57e6ba8592105e8a90f6b07c27891ffecd14cca428bfd3e31",
+        "application/wasm"),
+    "gesture_recognizer.task": (
+        _SICHT_MODELL,
+        "sha256-97952348cf6a6a4915c2ea1496b4b37ebabc50cbbf80571435643c455f2b0482",
+        "application/octet-stream"),
+}
+
+SICHT_MAX_BYTES = 40 * 1024 * 1024      # keine Datei ist größer; mehr ist ein Fehler
+SICHT_TIMEOUT = 120                      # Sekunden je Datei
+SICHT_NICHT_GELADEN = ("Die Handerkennung ist noch nicht geladen. "
+                       "Im Terminal: python3 jarvis.py sicht laden")
+SICHT_HINWEIS = ("Selbstbeobachtung, kein Medizinprodukt. "
+                 "Eine Webcam sieht nur Bewegungen ab etwa einem halben Millimeter.")
+
+_SICHT_PRUEFSUMMEN = "pruefsummen.json"
+# Datei -> (Pfad, Änderungszeit, Größe, Sollwerte), die in diesem Prozess schon geprüft wurde.
+_SICHT_GEPRUEFT = {}
+_SICHT_SPERRE = threading.Lock()
+
+
+def sicht_ordner() -> Path:
+    """Wo die Dateien liegen: ``modelle/sicht-<Version>`` (der Ordner ist nicht im Repository)."""
+    return Path(MODELL_VERZEICHNIS) / ("sicht-" + SICHT_VERSION)
+
+
+def sicht_an() -> bool:
+    """Ist die Live-Kamera eingeschaltet? Ohne ``SICHT_AN`` bleibt die Seite zu."""
+    return bool(SICHT_AN)
+
+
+def _sicht_soll(eintrag) -> tuple:
+    """Die festen Prüfsummen eines Eintrags als Tupel (leer: keine)."""
+    soll = eintrag[1] if isinstance(eintrag, (tuple, list)) and len(eintrag) > 1 else None
+    if not soll:
+        return ()
+    if isinstance(soll, str):
+        return (soll,)
+    return tuple(s for s in soll if isinstance(s, str) and s)
+
+
+def sicht_pruefsumme_stimmt(daten: bytes, soll: str) -> bool:
+    """Passt die Datei zu ``sha256-<hex>`` oder ``sha384-<base64>``? Andere Formen: nein."""
+    art, _, wert = str(soll or "").strip().partition("-")
+    if not wert:
+        return False
+    if art == "sha256":
+        echt = hashlib.sha256(daten).hexdigest()
+        wert = wert.lower()
+    elif art == "sha384":
+        echt = base64.b64encode(hashlib.sha384(daten).digest()).decode("ascii")
+    else:
+        return False
+    return hmac.compare_digest(echt.encode("ascii"), wert.encode("utf-8"))
+
+
+def _sicht_pruefsummen_lesen(ordner: Path) -> dict:
+    """Was beim Laden notiert wurde: Name -> sha256 (hex). Fehlt die Datei: leer."""
+    try:
+        roh = json.loads((ordner / _SICHT_PRUEFSUMMEN).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return {str(k): str(v) for k, v in roh.items()} if isinstance(roh, dict) else {}
+
+
+def _sicht_pruefsummen_schreiben(ordner: Path, summen: dict):
+    ziel = ordner / _SICHT_PRUEFSUMMEN
+    temp = ziel.with_name(ziel.name + ".tmp")
+    temp.write_text(json.dumps(summen, indent=2, sort_keys=True), encoding="utf-8")
+    os.replace(str(temp), str(ziel))
+
+
+def _sicht_abweichung(name: str, daten: bytes, eintrag, summen: dict) -> str:
+    """Leer, wenn die Datei stimmt - sonst der Satz, warum nicht.
+
+    Mit fester Prüfsumme zählt nur sie (alle genannten). Ohne feste Prüfsumme gilt
+    die beim ersten Laden notierte; gibt es noch keine, ist die Datei neu und wird
+    notiert (aufrufender Code).
+    """
+    falsch = ("Die Datei %s stimmt nicht mit der erwarteten Prüfsumme überein – "
+              "nichts gespeichert." % name)
+    fest = _sicht_soll(eintrag)
+    if fest:
+        return "" if all(sicht_pruefsumme_stimmt(daten, s) for s in fest) else falsch
+    notiert = summen.get(name)
+    if notiert and not sicht_pruefsumme_stimmt(daten, "sha256-" + notiert):
+        return falsch
+    return ""
+
+
+def _sicht_holen(url: str) -> bytes:
+    """Lädt eine Adresse, höchstens ``SICHT_MAX_BYTES`` und ``SICHT_TIMEOUT`` Sekunden lang."""
+    anfrage = urllib.request.Request(
+        url, headers={"User-Agent": "Jarvis/1.0 (Handerkennung laden)"})
+    ende = time.monotonic() + SICHT_TIMEOUT
+    teile, gesamt = [], 0
+    with urllib.request.urlopen(anfrage, timeout=SICHT_TIMEOUT) as antwort:
+        try:
+            angekuendigt = int(antwort.headers.get("Content-Length") or 0)
+        except (TypeError, ValueError):
+            angekuendigt = 0
+        if angekuendigt > SICHT_MAX_BYTES:
+            raise ValueError("die Datei ist größer als erlaubt")
+        while True:
+            stueck = antwort.read(1 << 16)
+            if not stueck:
+                break
+            gesamt += len(stueck)
+            if gesamt > SICHT_MAX_BYTES:
+                raise ValueError("die Datei ist größer als erlaubt")
+            if time.monotonic() > ende:
+                raise TimeoutError("das Laden dauert zu lange")
+            teile.append(stueck)
+    return b"".join(teile)
+
+
+def _sicht_mb(byte: int) -> str:
+    return ("%.1f" % (byte / 1e6)).replace(".", ",")
+
+
+def sicht_laden(holen=None, melden=print, neu: bool = False) -> dict:
+    """Lädt die Dateien der Handerkennung, prüft sie und legt sie ab.
+
+    ``holen(url) -> bytes`` ist austauschbar (Prüfungen). Eine Datei wird nur
+    behalten, wenn sie zu ihrer festen Prüfsumme passt - sonst bleibt nichts
+    liegen. Was schon da ist und stimmt, wird nicht noch einmal geladen
+    (``neu=True`` erzwingt es). Gibt ``{"ok", "dateien", "text"}`` zurück.
+    """
+    holen = holen or _sicht_holen
+    melden = melden or (lambda text: None)
+    ordner = sicht_ordner()
+    try:
+        ordner.mkdir(parents=True, exist_ok=True)
+    except OSError as fehler:
+        return {"ok": False, "dateien": [],
+                "text": "Ich kann den Ordner %s nicht anlegen (%s)." % (ordner, fehler)}
+    summen = _sicht_pruefsummen_lesen(ordner)
+    dateien, fehler_liste, gesamt = [], [], 0
+
+    for name, eintrag in list(SICHT_DATEIEN.items()):
+        url = eintrag[0]
+        ziel = ordner / name
+        if not neu and ziel.is_file():
+            try:
+                vorhanden = ziel.read_bytes()
+            except OSError:
+                vorhanden = b""
+            fest = _sicht_soll(eintrag)
+            if vorhanden and (fest or name in summen) \
+                    and not _sicht_abweichung(name, vorhanden, eintrag, summen):
+                melden("%s ist schon da und stimmt." % name)
+                dateien.append({"name": name, "bytes": len(vorhanden), "neu": False})
+                gesamt += len(vorhanden)
+                summen[name] = hashlib.sha256(vorhanden).hexdigest()
+                continue
+        melden("Lade %s ..." % name)
+        try:
+            roh = holen(url)
+        except Exception as fehler:
+            text = "%s konnte ich nicht laden (%s)." % (name, str(fehler)[:120] or type(fehler).__name__)
+            melden(text)
+            fehler_liste.append(text)
+            continue
+        if not isinstance(roh, (bytes, bytearray)) or not roh:
+            text = "%s kam leer an." % name
+            melden(text)
+            fehler_liste.append(text)
+            continue
+        roh = bytes(roh)
+        if len(roh) > SICHT_MAX_BYTES:
+            text = "%s ist größer als erlaubt – nichts gespeichert." % name
+            melden(text)
+            fehler_liste.append(text)
+            continue
+        abweichung = _sicht_abweichung(name, roh, eintrag, summen)
+        if abweichung:
+            melden(abweichung)
+            fehler_liste.append(abweichung)
+            continue
+        try:
+            handle, temp = tempfile.mkstemp(prefix=name + ".", suffix=".tmp", dir=str(ordner))
+            try:
+                with os.fdopen(handle, "wb") as datei:
+                    datei.write(roh)
+                os.replace(temp, str(ziel))
+            except BaseException:
+                try:
+                    os.unlink(temp)
+                except OSError:
+                    pass
+                raise
+        except OSError as fehler:
+            text = "%s konnte ich nicht speichern (%s)." % (name, fehler)
+            melden(text)
+            fehler_liste.append(text)
+            continue
+        summen[name] = hashlib.sha256(roh).hexdigest()
+        dateien.append({"name": name, "bytes": len(roh), "neu": True})
+        gesamt += len(roh)
+        melden("  %s MB, Prüfsumme stimmt." % _sicht_mb(len(roh)))
+
+    try:
+        _sicht_pruefsummen_schreiben(ordner, summen)
+    except OSError as fehler:
+        fehler_liste.append("Die Prüfsummen konnte ich nicht notieren (%s)." % fehler)
+    with _SICHT_SPERRE:
+        _SICHT_GEPRUEFT.clear()
+    if fehler_liste:
+        return {"ok": False, "dateien": dateien,
+                "text": "Die Handerkennung ist nicht vollständig geladen. " + " ".join(fehler_liste)}
+    return {"ok": True, "dateien": dateien,
+            "text": "Die Handerkennung ist geladen (%s MB)." % _sicht_mb(gesamt)}
+
+
+def _sicht_pruefen(name: str, eintrag, roh: bytes) -> str:
+    """Prüft eine gelesene Datei gegen ihre Sollwerte - einmal je Prozess und Dateistand.
+
+    Leer, wenn sie stimmt, sonst der Satz, warum nicht.
+    """
+    pfad = sicht_ordner() / name
+    try:
+        stat = pfad.stat()
+    except OSError:
+        return SICHT_NICHT_GELADEN
+    fest = _sicht_soll(eintrag)
+    schluessel = (str(pfad), stat.st_mtime_ns, stat.st_size, fest)
+    with _SICHT_SPERRE:
+        if _SICHT_GEPRUEFT.get(name) == schluessel:
+            return ""
+    summen = {} if fest else _sicht_pruefsummen_lesen(pfad.parent)
+    if not fest and name not in summen:
+        return ("Zu %s fehlt die Prüfsumme. Bitte neu laden: python3 jarvis.py sicht laden" % name)
+    if _sicht_abweichung(name, roh, eintrag, summen):
+        return ("Die Datei %s stimmt nicht mit der erwarteten Prüfsumme überein. "
+                "Bitte neu laden: python3 jarvis.py sicht laden" % name)
+    with _SICHT_SPERRE:
+        _SICHT_GEPRUEFT[name] = schluessel
+    return ""
+
+
+def sicht_datei(name) -> tuple:
+    """Eine Datei der Handerkennung: ``(bytes, inhaltstyp)`` oder ``(None, fehlertext)``.
+
+    Es gibt nur die Namen aus ``SICHT_DATEIEN`` - kein Pfad, kein ``..``. Die
+    Prüfsumme wird einmal je Prozess geprüft (und neu, wenn sich die Datei ändert).
+    """
+    eintrag = SICHT_DATEIEN.get(name) if isinstance(name, str) else None
+    if eintrag is None:
+        return None, "Diese Datei gibt es nicht."
+    try:
+        roh = (sicht_ordner() / name).read_bytes()
+    except OSError:
+        return None, SICHT_NICHT_GELADEN
+    if not roh:
+        return None, SICHT_NICHT_GELADEN
+    fehler = _sicht_pruefen(name, eintrag, roh)
+    if fehler:
+        return None, fehler
+    return roh, eintrag[2]
+
+
+def sicht_bereit() -> bool:
+    """Sind alle Dateien da und unverändert? (Gelesen wird nur, was noch nicht geprüft ist.)"""
+    for name, eintrag in list(SICHT_DATEIEN.items()):
+        try:
+            stat = (sicht_ordner() / name).stat()
+        except OSError:
+            return False
+        schluessel = (str(sicht_ordner() / name), stat.st_mtime_ns, stat.st_size, _sicht_soll(eintrag))
+        with _SICHT_SPERRE:
+            if _SICHT_GEPRUEFT.get(name) == schluessel:
+                continue
+        if sicht_datei(name)[0] is None:
+            return False
+    return True
+
+
+def _sicht_pfad_lesen(pfad: str):
+    """``/sicht/dateien/<Version>/<Name>`` -> ``(version, name)``, sonst ``None``."""
+    pfad = str(pfad or "")
+    if not pfad.startswith(SICHT_DATEIEN_PRAEFIX):
+        return None
+    teile = pfad[len(SICHT_DATEIEN_PRAEFIX):].split("/")
+    if len(teile) != 2 or not teile[0] or not teile[1]:
+        return None
+    return teile[0], teile[1]
+
+
+def sicht_pfad_oeffentlich(pfad: str) -> bool:
+    """Ist das einer der Dateipfade, die ohne Schlüssel ausgeliefert werden?
+
+    Nur die Version dieser Fassung und die sechs weißgelisteten Namen. Es sind
+    öffentliche Bibliotheken, keine Daten; die Seite lädt sie per ``import`` und
+    über MediaPipe selbst - dabei lässt sich kein Schlüssel anhängen. Die
+    Prüfung des Host-Kopfes bleibt bestehen.
+    """
+    teile = _sicht_pfad_lesen(pfad)
+    return bool(teile) and teile[0] == SICHT_VERSION and teile[1] in SICHT_DATEIEN
+
+
+def sicht_ausliefern(pfad: str) -> tuple:
+    """Antwort für ``GET /sicht/dateien/<Version>/<Name>``: ``(code, inhalt, typ_oder_fehler)``."""
+    teile = _sicht_pfad_lesen(pfad)
+    if teile is None:
+        return 404, None, "Diese Datei gibt es nicht."
+    version, name = teile
+    if version != SICHT_VERSION:
+        return 404, None, "Diese Version gibt es nicht. Hier liegt %s." % SICHT_VERSION
+    roh, typ = sicht_datei(name)
+    if roh is None:
+        return 404, None, typ
+    return 200, roh, typ
+
+
+# ---------------------------------------------------------------------------
+# Handruhe
+# ---------------------------------------------------------------------------
+
+SCHEMA_HANDRUHE = """
+CREATE TABLE IF NOT EXISTS handruhe (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tag TEXT,
+    zeit TEXT,
+    art TEXT,
+    mm REAL,
+    rauschen_mm REAL,
+    rhythmus_hz REAL,
+    spitze REAL,
+    fps REAL,
+    dauer_s REAL,
+    bilder INTEGER,
+    handlaenge_mm REAL
+);
+CREATE INDEX IF NOT EXISTS idx_handruhe_tag ON handruhe(tag, art);
+"""
+
+HANDRUHE_ARTEN = ("ruhe", "halten")
+# Mehr Messungen als das am Tag sind ein Fehler der Seite, keine Selbstbeobachtung.
+HANDRUHE_MAX_TAG = 100
+# Ab so vielen früheren Haltemessungen vergleiche ich.
+HANDRUHE_VERGLEICH_AB = 5
+HANDRUHE_VERGLEICHSTAGE = 14
+HANDRUHE_MIN_FPS = 25
+
+# Name -> (kleinster Wert, größter Wert, darf fehlen)
+_HANDRUHE_ZAHLEN = (
+    ("mm", 0.0, 20.0, False),
+    ("rauschen_mm", 0.0, 20.0, True),
+    ("rhythmus_hz", 3.0, 14.0, True),
+    ("spitze_verhaeltnis", 0.0, 1e6, True),
+    ("fps", 10.0, 120.0, False),
+    ("dauer_s", 4.0, 30.0, False),
+)
+
+
+def _sicht_echte_zahl(wert) -> bool:
+    """Eine endliche Zahl - kein Text, kein Ja/Nein, kein NaN."""
+    return (isinstance(wert, (int, float)) and not isinstance(wert, bool)
+            and math.isfinite(wert))
+
+
+def _sicht_komma(wert, stellen: int = 1) -> str:
+    return ("%.*f" % (stellen, wert)).replace(".", ",")
+
+
+def messung_pruefen(daten) -> tuple:
+    """Prüft eine Messung der Seite streng: ``(sauberes Wörterbuch, "")`` oder ``(None, Fehler)``.
+
+    Gelesen werden nur die Felder des Vertrags. Zahlen müssen endlich und echte
+    Zahlen sein (kein Text, kein Ja/Nein, kein NaN) und im erlaubten Bereich liegen.
+    Unter 25 Bildern pro Sekunde sieht die Kamera ein 10-Hz-Zittern nicht richtig
+    (es faltet sich auf eine falsche Frequenz) - dann kommt "Mehr Licht, bitte".
+    """
+    if not isinstance(daten, dict):
+        return None, "Die Messung ist kein gültiges Wörterbuch."
+    art = daten.get("art")
+    if not isinstance(art, str) or art not in HANDRUHE_ARTEN:
+        return None, "Die Art der Messung fehlt (ruhe oder halten)."
+    sauber = {"art": art}
+    for name, klein, gross, darf_fehlen in _HANDRUHE_ZAHLEN:
+        wert = daten.get(name)
+        if wert is None and darf_fehlen:
+            sauber[name] = None
+            continue
+        if not _sicht_echte_zahl(wert):
+            return None, "Der Wert '%s' fehlt oder ist keine Zahl." % name
+        if wert < klein or wert > gross:
+            return None, "Der Wert '%s' liegt außerhalb von %g bis %g." % (name, klein, gross)
+        sauber[name] = float(wert)
+    bilder = daten.get("bilder")
+    if isinstance(bilder, float) and bilder.is_integer():
+        bilder = int(bilder)
+    if not isinstance(bilder, int) or isinstance(bilder, bool):
+        return None, "Der Wert 'bilder' fehlt oder ist keine ganze Zahl."
+    if bilder < 40 or bilder > 4000:
+        return None, "Der Wert 'bilder' liegt außerhalb von 40 bis 4000."
+    sauber["bilder"] = bilder
+    laenge = daten.get("handlaenge_mm")
+    if laenge is None:
+        laenge = HANDLAENGE_MM
+    if not _sicht_echte_zahl(laenge):
+        return None, "Der Wert 'handlaenge_mm' ist keine Zahl."
+    if laenge < 60 or laenge > 130:
+        return None, "Der Wert 'handlaenge_mm' liegt außerhalb von 60 bis 130."
+    sauber["handlaenge_mm"] = float(laenge)
+    if sauber["fps"] < HANDRUHE_MIN_FPS:
+        return None, ("Mehr Licht, bitte – die Messung braucht mindestens %d Bilder pro Sekunde."
+                      % HANDRUHE_MIN_FPS)
+    return sauber, ""
+
+
+def sicht_kanal_schreiben(anzeige, teile: dict, dauer_s: float = 120):
+    """Schreibt Teile in den Anzeige-Kanal ``sicht`` und lässt die anderen Teile stehen.
+
+    Der Kanal trägt ``handruhe``, ``erholung`` und ``zusammenhang`` - jedes Modul
+    liefert nur seinen Teil. Ein einfaches ``melden`` würde die anderen löschen,
+    darum wird mit dem bisherigen Stand gemischt. ``anzeige`` ist der Speicher oder
+    die Werkzeuge (die ihn ``anzeige`` nennen). Schluckt jeden Fehler: die Anzeige
+    darf nie etwas kaputt machen. Gibt die neue Version zurück oder ``None``.
+    """
+    if anzeige is None:
+        return None
+    try:
+        speicher = getattr(anzeige, "anzeige", anzeige)
+        bisher = {}
+        lesen = getattr(speicher, "stand", None)
+        if callable(lesen):
+            stand = lesen("sicht")
+            if isinstance(stand, dict) and isinstance(stand.get("daten"), dict):
+                bisher = stand["daten"]
+        neu = dict(bisher)
+        neu.update(teile)
+        neu.setdefault("hinweis", "Selbstbeobachtung, kein Medizinprodukt.")
+        version = anzeige.melden("sicht", neu)
+        anzeige.zeigen("sicht", {}, dauer_s)
+        return version
+    except Exception as fehler:
+        print("[sicht] Anzeige: %s" % fehler)
+        return None
+
+
+class Handruhe:
+    """Speichert die Handruhe-Messungen der Seite ``/sehen`` und vergleicht sie.
+
+    ``anzeige`` ist der Anzeige-Speicher oder die Werkzeuge (beide haben ``melden``
+    und ``zeigen``). ``uhr`` liefert ein ``datetime`` (für Prüfungen austauschbar).
+    """
+
+    def __init__(self, memory, anzeige=None, uhr=None):
+        self.memory = memory
+        self.anzeige = anzeige
+        self._uhr = uhr or datetime.now
+        self._sperre = threading.Lock()
+        db_schema_anlegen(SCHEMA_HANDRUHE, self.memory.db_pfad)
+
+    # -- Hilfen ---------------------------------------------------------------
+
+    def _tag(self, vor_tagen: int = 0) -> str:
+        return (self._uhr() - timedelta(days=vor_tagen)).strftime("%Y-%m-%d")
+
+    @staticmethod
+    def _zeile(z: dict) -> dict:
+        return {"id": z["id"], "tag": z["tag"], "zeit": z["zeit"], "art": z["art"],
+                "mm": z["mm"], "rauschen_mm": z["rauschen_mm"], "rhythmus_hz": z["rhythmus_hz"],
+                "spitze_verhaeltnis": z["spitze"], "fps": z["fps"], "dauer_s": z["dauer_s"],
+                "bilder": z["bilder"], "handlaenge_mm": z["handlaenge_mm"]}
+
+    def _frueher(self, art: str) -> list:
+        """mm-Werte der bisherigen Messungen dieser Art aus den letzten 14 Tagen."""
+        zeilen = self.memory._lesen(
+            "SELECT mm FROM handruhe WHERE art=? AND tag>? AND tag<=? ORDER BY id",
+            (art, self._tag(HANDRUHE_VERGLEICHSTAGE), self._tag()))
+        return [z["mm"] for z in zeilen if z["mm"] is not None]
+
+    # -- Speichern --------------------------------------------------------------
+
+    def speichern(self, daten) -> dict:
+        """Prüft und speichert eine Messung und gibt den Text zurück, der gesagt wird.
+
+        ``{"ok", "text", "vergleich", ...}``; bei Ungültigem ``{"ok": False, "fehler"}``.
+        """
+        m, fehler = messung_pruefen(daten)
+        if m is None:
+            return {"ok": False, "fehler": fehler}
+        jetzt = self._uhr()
+        tag = jetzt.strftime("%Y-%m-%d")
+        with self._sperre:
+            heute_n = self.memory._lesen("SELECT count(*) AS n FROM handruhe WHERE tag=?", (tag,))
+            if heute_n and heute_n[0]["n"] >= HANDRUHE_MAX_TAG:
+                return {"ok": False, "fehler": "Für heute sind genug Messungen gespeichert."}
+            frueher = self._frueher(m["art"])
+            ruhe_heute = self.memory._lesen(
+                "SELECT mm FROM handruhe WHERE art='ruhe' AND tag=? ORDER BY id DESC LIMIT 1", (tag,))
+            nummer = self.memory._schreiben(
+                "INSERT INTO handruhe (tag, zeit, art, mm, rauschen_mm, rhythmus_hz, spitze, fps, "
+                "dauer_s, bilder, handlaenge_mm) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                (tag, jetzt.strftime("%Y-%m-%d %H:%M:%S"), m["art"], m["mm"], m["rauschen_mm"],
+                 m["rhythmus_hz"], m["spitze_verhaeltnis"], m["fps"], m["dauer_s"], m["bilder"],
+                 m["handlaenge_mm"]))
+        ruhe_mm = ruhe_heute[0]["mm"] if ruhe_heute else m["rauschen_mm"]
+        text, vergleich = self._text(m, frueher, ruhe_mm)
+        sicht_kanal_schreiben(self.anzeige, {"handruhe": {
+            "mm": round(m["mm"], 2),
+            "rauschen_mm": round(ruhe_mm, 2) if _sicht_echte_zahl(ruhe_mm) else None,
+            "rhythmus_hz": round(m["rhythmus_hz"], 2) if m["rhythmus_hz"] is not None else None,
+            "fps": round(m["fps"], 1), "vergleich": vergleich, "tag": tag}})
+        return {"ok": True, "id": nummer, "text": text, "vergleich": vergleich}
+
+    @staticmethod
+    def _text(m: dict, frueher: list, ruhe_mm) -> tuple:
+        """Der Satz zur Messung und das Wort für den Vergleich ("unruhiger", "ruhiger", "ähnlich")."""
+        mm = _sicht_komma(m["mm"])
+        vergleich = ""
+        if m["art"] == "ruhe":
+            teile = ["Ruhemessung heute: %s mm (Schätzung) – das ist das Grundrauschen von "
+                     "Kamera und Licht." % mm]
+        elif len(frueher) >= HANDRUHE_VERGLEICH_AB:
+            mittel = sum(frueher) / len(frueher)
+            if m["mm"] > mittel * 1.15:
+                vergleich = "unruhiger"
+            elif m["mm"] < mittel * 0.85:
+                vergleich = "ruhiger"
+            else:
+                vergleich = "ähnlich"
+            wie = {"unruhiger": "unruhiger als", "ruhiger": "ruhiger als", "ähnlich": "ähnlich wie"}
+            teile = ["Handruhe heute: %s mm (Schätzung) – %s dein 14-Tage-Mittel von %s mm."
+                     % (mm, wie[vergleich], _sicht_komma(mittel))]
+        else:
+            teile = ["Handruhe heute: %s mm (Schätzung). Für einen Vergleich brauche ich noch "
+                     "ein paar Messungen." % mm]
+        if m["rhythmus_hz"] is not None:
+            teile.append("Rhythmus um %s Hz." % _sicht_komma(m["rhythmus_hz"]))
+        else:
+            teile.append("Kein deutlicher Rhythmus.")
+        if m["art"] == "halten" and _sicht_echte_zahl(ruhe_mm) and ruhe_mm > 0:
+            verhaeltnis = m["mm"] / ruhe_mm
+            teile.append("Verhältnis zur Ruhemessung %s." % _sicht_komma(verhaeltnis))
+            if verhaeltnis < 1.3:
+                teile.append("Das liegt nahe am Grundrauschen der Kamera.")
+        teile.append("Selbstbeobachtung, kein Medizinprodukt.")
+        return " ".join(teile), vergleich
+
+    # -- Lesen ------------------------------------------------------------------
+
+    def letzte(self):
+        """Die jüngste Messung oder ``None``."""
+        zeilen = self.memory._lesen("SELECT * FROM handruhe ORDER BY id DESC LIMIT 1")
+        return self._zeile(zeilen[0]) if zeilen else None
+
+    def verlauf(self, tage=14) -> dict:
+        """Die Messungen der letzten ``tage`` Tage (alt zuerst) und je Tag der letzte Wert."""
+        try:
+            tage = max(1, min(90, int(tage)))
+        except (TypeError, ValueError):
+            tage = 14
+        zeilen = self.memory._lesen(
+            "SELECT * FROM handruhe WHERE tag>? ORDER BY id", (self._tag(tage),))
+        messungen = [self._zeile(z) for z in zeilen]
+        je_tag = {}
+        for z in messungen:
+            tageswerte = je_tag.setdefault(z["tag"], {"tag": z["tag"], "halten_mm": None,
+                                                     "ruhe_mm": None, "anzahl": 0})
+            tageswerte["halten_mm" if z["art"] == "halten" else "ruhe_mm"] = z["mm"]
+            tageswerte["anzahl"] += 1
+        return {"ok": True, "tage": tage, "messungen": messungen,
+                "tageswerte": [je_tag[t] for t in sorted(je_tag)]}
+
+    def stand(self, erholung=None, schreiben: bool = True, diskret: bool = False,
+              vorschlag=None) -> dict:
+        """Der Stand für ``GET /api/sicht/stand`` (und das Werkzeug ``sicht_stand``).
+
+        ``erholung``: das Erholungsmodul (oder ``None``), ``schreiben``: ob hier
+        gespeichert werden darf (Web-App, nicht die Anzeige des Dienstes),
+        ``diskret``: dann gibt es keine Gesundheitswerte. ``vorschlag``:
+        ``{"id", "text"}`` des Vorschlags, auf den eine Geste antworten dürfte.
+        """
+        letzte, erholung_stand = None, None
+        if not diskret:
+            letzte = self.letzte()
+            heute = getattr(erholung, "heute", None)
+            if callable(heute):
+                try:
+                    antwort = heute()
+                except Exception as fehler:
+                    print("[sicht] Erholung: %s" % fehler)
+                    antwort = None
+                if isinstance(antwort, dict) and antwort.get("ok"):
+                    erholung_stand = {"wert": antwort.get("wert"), "band": antwort.get("band"),
+                                      "quelle": antwort.get("quelle"), "tag": antwort.get("tag")}
+        try:
+            laenge = float(HANDLAENGE_MM)
+        except (TypeError, ValueError):
+            laenge = 95.0
+        return {"ok": True, "an": sicht_an(), "dateien_da": sicht_bereit(),
+                "geste": bool(GESTEN_FREIGABE),
+                "handlaenge_mm": laenge, "schreiben": bool(schreiben), "diskret": bool(diskret),
+                "erholung": erholung_stand, "handruhe_letzte": letzte,
+                "vorschlag": vorschlag if (schreiben and not diskret) else None,
+                "hinweis": SICHT_HINWEIS}
+
+
+def sicht_stand_bauen(werkzeuge, schreiben: bool = True, diskret: bool = False) -> dict:
+    """Der Stand der Sicht aus den Werkzeugen heraus - für die Route und das Werkzeug.
+
+    Erholung und Vorschläge (Pakete P5 und P4) werden erst jetzt gesucht, nicht beim Import.
+    """
+    vorschlag = None
+    vorschlaege = getattr(werkzeuge, "vorschlaege", None)
+    if schreiben and not diskret and GESTEN_FREIGABE \
+            and callable(getattr(vorschlaege, "letzter_offener", None)):
+        try:
+            letzter = vorschlaege.letzter_offener()
+        except Exception as fehler:
+            print("[sicht] Vorschlag: %s" % fehler)
+            letzter = None
+        if isinstance(letzter, dict) and letzter.get("id") is not None:
+            vorschlag = {"id": letzter["id"], "text": str(letzter.get("text") or "")[:400]}
+    return werkzeuge.handruhe.stand(erholung=getattr(werkzeuge, "erholung", None),
+                                    schreiben=schreiben, diskret=diskret, vorschlag=vorschlag)
+
+
+def sicht_stand_text(stand: dict) -> str:
+    """Der Stand in zwei, drei Sätzen für das Werkzeug ``sicht_stand``."""
+    if not stand.get("an"):
+        teile = ["Die Live-Kamera ist ausgeschaltet (Einschalten: python3 jarvis.py sicht an)."]
+    else:
+        teile = ["Die Live-Kamera ist eingeschaltet - das Bild bleibt im Browser auf der Seite Sicht."]
+    teile.append("Die Handerkennung ist geladen." if stand.get("dateien_da")
+                 else "Die Handerkennung ist noch nicht geladen (python3 jarvis.py sicht laden).")
+    letzte = stand.get("handruhe_letzte")
+    if letzte:
+        teile.append("Letzte Handruhe-Messung: %s mm (Schätzung) am %s." % (_sicht_komma(letzte["mm"]), letzte["tag"]))
+    elif not stand.get("diskret"):
+        teile.append("Es gibt noch keine Handruhe-Messung.")
+    teile.append("Selbstbeobachtung, kein Medizinprodukt.")
+    return " ".join(teile)
+
+
+# ---------------------------------------------------------------------------
+# Daumen hoch beantwortet einen Vorschlag
+# ---------------------------------------------------------------------------
+
+# So alt muss ein Vorschlag sein, bevor eine Geste ihn beantworten darf (wie bei Freigaben).
+VORSCHLAG_GESTE_MINDESTALTER = 2.0
+
+
+def _sicht_vorschlag_antworten(web, ja: bool):
+    """Im eigenen Faden: Claude sagen, was der Daumen bedeutet, und die Antwort melden."""
+    satz = "Ja, mach das." if ja else "Nein, lass das."
+    try:
+        agent = web.agent
+        if not agent.einsatzbereit():
+            web.melden("Vermerkt. Ohne Anthropic-Schlüssel kann ich dazu nichts weiter tun.")
+            return
+        agent.memory.verlauf_anhaengen("user", satz + " (per Daumen)")
+        with web._denkt:
+            antwort = agent.denken(satz, protokollieren=False)
+        if antwort:
+            web.melden(antwort)
+    except Exception as fehler:
+        print("[sicht] Antwort auf die Geste: %s" % fehler)
+
+
+def vorschlag_per_geste(web, daten) -> tuple:
+    """``POST /api/vorschlag/geste {id, ja}``: Daumen hoch (oder runter) zu einem Vorschlag.
+
+    Gilt nur in der Web-App, nur mit ``GESTEN_FREIGABE``, nur für den jüngsten
+    offenen Vorschlag (höchstens 15 Minuten alt, mindestens 2 Sekunden) und nur,
+    wenn keine Freigabefrage offen ist - dann gehört der Daumen der Freigabe. Ein
+    "Ja" nimmt den Vorschlag nur an; alles, was danach nach außen wirkt, fragt
+    einzeln nach Freigabe. Der Herkunftskopf ist schon von der Web-App geprüft.
+    Gibt ``(Statuscode, Antwort)`` zurück.
+    """
+    if not GESTEN_FREIGABE:
+        return 403, {"ok": False, "text": "Die Gesten-Freigabe ist ausgeschaltet."}
+    vorschlaege = getattr(web.agent.tools, "vorschlaege", None)
+    if not callable(getattr(vorschlaege, "letzter_offener", None)):
+        return 404, {"ok": False, "text": "Vorschläge gibt es hier nicht."}
+    daten = daten if isinstance(daten, dict) else {}
+    kennung = daten.get("id")
+    if isinstance(kennung, bool) or not isinstance(kennung, int):
+        return 400, {"ok": False, "text": "Mir fehlt die Nummer des Vorschlags."}
+    if not isinstance(daten.get("ja"), bool):
+        return 400, {"ok": False, "text": "Mir fehlt, ob Ja oder Nein gemeint ist."}
+    ja = daten["ja"]
+    try:
+        if web.freigabe.offene():
+            return 409, {"ok": False, "text": "Die Geste zählt hier nicht: Es ist eine "
+                                             "Freigabefrage offen, und die geht zuerst."}
+        letzter = vorschlaege.letzter_offener()
+    except Exception as fehler:
+        print("[sicht] Vorschlag: %s" % fehler)
+        return 500, {"ok": False, "text": "Das konnte ich gerade nicht prüfen."}
+    if not isinstance(letzter, dict) or letzter.get("id") != kennung:
+        return 409, {"ok": False, "text": "Dieser Vorschlag ist nicht mehr der jüngste offene."}
+    try:
+        alter = (datetime.now() - datetime.strptime(str(letzter.get("angelegt")), "%Y-%m-%d %H:%M:%S")
+                 ).total_seconds()
+    except (TypeError, ValueError):
+        alter = None
+    if alter is not None and alter < VORSCHLAG_GESTE_MINDESTALTER:
+        return 409, {"ok": False, "text": "Die Geste zählt hier nicht: Der Vorschlag ist erst "
+                                         "gerade gemacht. Lies ihn in Ruhe und zeige die Geste "
+                                         "dann noch einmal."}
+    ergebnis = vorschlaege.beantworten(kennung, ja)
+    if not isinstance(ergebnis, dict) or not ergebnis.get("ok"):
+        fehler = (ergebnis or {}).get("fehler") if isinstance(ergebnis, dict) else ""
+        return 409, {"ok": False, "text": fehler or "Der Vorschlag ist nicht mehr offen."}
+    threading.Thread(target=_sicht_vorschlag_antworten, args=(web, ja), daemon=True,
+                     name="sicht-geste").start()
+    return 200, {"ok": True, "text": ("Angenommen. Ich kümmere mich darum und frage bei allem "
+                                      "Weiteren einzeln nach." if ja else "Abgelehnt.")}
+
+
+# ---------------------------------------------------------------------------
+# Terminal: python3 jarvis.py sicht laden | an | aus
+# ---------------------------------------------------------------------------
+
+def sicht_befehl(argumente) -> int:
+    """``python3 jarvis.py sicht laden|an|aus`` - ohne Angabe der Stand. Gibt den Exit-Code zurück."""
+    was = (argumente[0] if argumente else "").strip().lower()
+    if was == "laden":
+        ergebnis = sicht_laden()
+        print(ergebnis["text"])
+        return 0 if ergebnis["ok"] else 1
+    if was in ("an", "ein"):
+        env_setzen("SICHT_AN", "ja")
+        print("Die Live-Kamera ist eingeschaltet (SICHT_AN=ja). Jarvis einmal neu starten, "
+              "dann geht die Seite Sicht (/sehen) auf.")
+        print("Das Bild bleibt im Browser; gespeichert werden nur Messzahlen, nie ein Bild.")
+        if not sicht_bereit():
+            print("Die Handerkennung fehlt noch: python3 jarvis.py sicht laden")
+        return 0
+    if was in ("aus", "ab"):
+        env_setzen("SICHT_AN", "nein")
+        print("Die Live-Kamera ist ausgeschaltet. Jarvis einmal neu starten, damit die Seite zugeht.")
+        return 0
+    if was in ("", "status"):
+        print("Live-Kamera: %s" % ("an" if sicht_an() else "aus (python3 jarvis.py sicht an)"))
+        print("Handerkennung: %s" % ("geladen" if sicht_bereit()
+                                     else "nicht geladen (python3 jarvis.py sicht laden)"))
+        return 0
+    print("Das kenne ich nicht: sicht %s. Möglich sind: laden, an, aus." % was)
+    return 2
+
+
 # =========================================================================
-# erholung  -  Erholung aus Apple Health, Oura, Whoop oder von Hand – wird in Paket P5 gebaut.
+# erholung  -  Erholung aus Apple Health, Oura, Whoop oder von Hand.
+# 
+# Jeder Tag bekommt einen Erholungswert von 0 bis 100 - aus der besten Quelle, die
+# für diesen Tag etwas hat: Oura, dann Whoop, dann Apple Health, dann von Hand
+# eingetragen. Gerechnet wird nur mit echten Messwerten; wo sie fehlen, sagt
+# Jarvis das. Es ist Selbstbeobachtung, kein Medizinprodukt.
+# 
+# **Apple Health** kommt als Export (``export.zip`` aus der Health-App, Datei im
+# Benutzerordner). Der Erholungswert ist eine eigene Schätzung: Herzratenvariabilität
+# der Nacht und Ruhepuls gegen die eigenen letzten 30 Tage, dazu der Schlaf.
+# 
+# **Oura und Whoop** laufen über OAuth. Die Zugangs-Schlüssel (Refresh-Token) wechseln
+# bei jedem Abruf und gelten nur einmal. Deshalb gilt:
+# 
+# * Der ``state`` der Anmeldung liegt in der Datenbank, nicht im Speicher - die
+#   Anmeldung wird im Terminal gestartet und von der Web-App beendet.
+# * Vor jedem Abruf wird die Einstellungsdatei (.env) neu gelesen und eine Dateisperre genommen,
+#   damit der Dienst und die Web-App nie denselben Token gleichzeitig verbrauchen.
+#   Der neue Token wird sofort gespeichert.
+# 
+# **Gesundheitsdaten bleiben lokal**: nur in der Datenbank dieses Rechners, nie in
+# der Cloud-Spiegelung. ``vergessen`` löscht sie.
 # =========================================================================
 
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
 
+
+
+# ---------------------------------------------------------------------------
+# Tabellen
+# ---------------------------------------------------------------------------
+
+SCHEMA_ERHOLUNG = """
+CREATE TABLE IF NOT EXISTS erholung_tage (
+    tag TEXT NOT NULL,
+    quelle TEXT NOT NULL,
+    wert REAL,
+    hrv REAL,
+    ruhepuls REAL,
+    schlaf_h REAL,
+    roh TEXT DEFAULT '{}',
+    geholt TEXT,
+    PRIMARY KEY (tag, quelle)
+);
+CREATE TABLE IF NOT EXISTS erholung_oauth (
+    zustand TEXT PRIMARY KEY,
+    dienst TEXT NOT NULL,
+    redirect TEXT DEFAULT '',
+    erstellt REAL NOT NULL,
+    benutzt INTEGER DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS erholung_abruf (
+    dienst TEXT PRIMARY KEY,
+    zeit REAL DEFAULT 0,
+    warten_bis REAL DEFAULT 0,
+    status TEXT DEFAULT ''
+);
+"""
+
+# ---------------------------------------------------------------------------
+# Konstanten
+# ---------------------------------------------------------------------------
+
+HK_HRV = "HKQuantityTypeIdentifierHeartRateVariabilitySDNN"
+HK_RUHEPULS = "HKQuantityTypeIdentifierRestingHeartRate"
+HK_SCHLAF = "HKCategoryTypeIdentifierSleepAnalysis"
+# Awake und InBed zählen nicht als Schlaf.
+SCHLAF_WERTE = frozenset({
+    "HKCategoryValueSleepAnalysisAsleep",
+    "HKCategoryValueSleepAnalysisAsleepUnspecified",
+    "HKCategoryValueSleepAnalysisAsleepCore",
+    "HKCategoryValueSleepAnalysisAsleepDeep",
+    "HKCategoryValueSleepAnalysisAsleepREM",
+})
+
+QUELLE_OURA = "Oura (Readiness)"
+QUELLE_WHOOP = "Whoop (Recovery)"
+QUELLE_APPLE = "Apple Health (eigene Schätzung)"
+QUELLE_HAND = "von Hand"
+QUELLEN_REIHENFOLGE = (QUELLE_OURA, QUELLE_WHOOP, QUELLE_APPLE, QUELLE_HAND)
+
+ERHOLUNG_HINWEIS = "Selbstbeobachtung, kein Medizinprodukt."
+BAND_WORTE = {"gruen": "gut erholt", "gelb": "mittel erholt", "rot": "wenig erholt"}
+ERHOLUNG_WOCHENTAGE = ("Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag", "Sonntag")
+
+# Apple Health: so viele Tage zurück wird gerechnet; dazu kommen 30 Tage Vergleich davor.
+IMPORT_RECHENTAGE = 90
+IMPORT_BASIS_TAGE = 30
+# Ab dieser Größe (Bytes der Datei) liest Jarvis im Hintergrund und meldet sich danach.
+IMPORT_HINTERGRUND_BYTES = 300 * 1024 * 1024
+# Größer als das (entpackt) ist kein Gesundheitsexport, sondern eine Zip-Bombe.
+IMPORT_MAX_ENTPACKT = 24 * 1024 * 1024 * 1024
+# Die Anmeldung bei Oura oder Whoop gilt so lange - und nur einmal.
+OAUTH_GUELTIG_SEKUNDEN = 600
+# Nach einem Abruf wird frühestens nach so vielen Stunden von selbst neu geholt.
+ABRUF_MIN_STUNDEN = 3.0
+
+WEARABLE_DIENSTE = {
+    "oura": {
+        "name": "Oura", "quelle": QUELLE_OURA, "token_name": "OURA_REFRESH_TOKEN",
+        "id_name": "OURA_CLIENT_ID", "geheim_name": "OURA_CLIENT_SECRET",
+        "autorisieren": "https://cloud.ouraring.com/oauth/authorize",
+        "token": "https://api.ouraring.com/oauth/token",
+        "scope": "daily heartrate personal", "state_laenge": 24,
+        "app_seite": "https://cloud.ouraring.com/oauth/applications",
+    },
+    "whoop": {
+        "name": "Whoop", "quelle": QUELLE_WHOOP, "token_name": "WHOOP_REFRESH_TOKEN",
+        "id_name": "WHOOP_CLIENT_ID", "geheim_name": "WHOOP_CLIENT_SECRET",
+        "autorisieren": "https://api.prod.whoop.com/oauth/oauth2/auth",
+        "token": "https://api.prod.whoop.com/oauth/oauth2/token",
+        "scope": "read:recovery read:sleep offline", "state_laenge": 8,
+        "app_seite": "https://developer-dashboard.whoop.com/",
+    },
+}
+OURA_DATEN_URL = "https://api.ouraring.com/v2/usercollection/"
+WHOOP_RECOVERY_URL = "https://api.prod.whoop.com/developer/v2/recovery"
+
+KEINE_QUELLE_TEXT = ("Es ist keine Erholungsquelle verbunden. Möglich: Apple-Health-Export "
+                     "(python3 jarvis.py gesundheit <Datei>), Oura oder Whoop "
+                     "(python3 jarvis.py zugang oura), oder du sagst mir den Wert.")
+
+# Werkzeuge, deren Protokolleinträge Gesundheitswerte tragen - "gesundheit vergessen" löscht sie mit.
+GESUNDHEITS_WERKZEUGE = ("erholung_lesen", "erholung_eintragen", "erholung_abrufen",
+                         "gesundheit_importieren", "leistung_zusammenhang", "belastung_pruefen",
+                         "handruhe_verlauf")
+
+
+# ---------------------------------------------------------------------------
+# Kleine Hilfen
+# ---------------------------------------------------------------------------
+
+def erholung_tag_text(tag) -> str:
+    """``date``, ``datetime`` oder ``JJJJ-MM-TT...`` als ``JJJJ-MM-TT`` - sonst leer."""
+    if isinstance(tag, datetime):
+        return tag.date().isoformat()
+    if isinstance(tag, date):
+        return tag.isoformat()
+    roh = str(tag or "").strip()[:10]
+    if re.match(r"^\d{4}-\d{2}-\d{2}$", roh):
+        try:
+            return date(int(roh[:4]), int(roh[5:7]), int(roh[8:10])).isoformat()
+        except ValueError:
+            return ""
+    return ""
+
+
+def erholung_tag_datum(tag):
+    """Wie :func:`erholung_tag_text`, aber als ``date`` (oder ``None``)."""
+    text = erholung_tag_text(tag)
+    return date(int(text[:4]), int(text[5:7]), int(text[8:10])) if text else None
+
+
+def erholung_datum_text(tag) -> str:
+    """``Montag, 5.10.`` - für Sätze, die Jarvis sagt."""
+    datum = erholung_tag_datum(tag)
+    if datum is None:
+        return str(tag or "")
+    return "%s, %d.%d." % (ERHOLUNG_WOCHENTAGE[datum.weekday()], datum.day, datum.month)
+
+
+def erholung_band(wert) -> str:
+    """Grün ab 67, gelb von 34 bis 66, rot darunter."""
+    if wert >= 67:
+        return "gruen"
+    if wert >= 34:
+        return "gelb"
+    return "rot"
+
+
+def _erh_zahl(wert):
+    """Eine echte, endliche Zahl - Texte, Wahrheitswerte und NaN sind keine."""
+    if isinstance(wert, bool) or not isinstance(wert, (int, float)):
+        return None
+    wert = float(wert)
+    return wert if math.isfinite(wert) else None
+
+
+def _erh_klemme(wert, tief=0.0, hoch=100.0):
+    return max(tief, min(hoch, wert))
+
+
+def _erh_mittel(werte):
+    return sum(werte) / float(len(werte))
+
+
+def _erh_streuung(werte):
+    """Stichproben-Standardabweichung, von Hand gerechnet (n - 1)."""
+    if len(werte) < 2:
+        return 0.0
+    mittel = _erh_mittel(werte)
+    return math.sqrt(sum((w - mittel) ** 2 for w in werte) / float(len(werte) - 1))
+
+
+def _erh_median(werte):
+    ordnung = sorted(werte)
+    mitte = len(ordnung) // 2
+    if len(ordnung) % 2:
+        return ordnung[mitte]
+    return (ordnung[mitte - 1] + ordnung[mitte]) / 2.0
+
+
+def _erh_tage_dict(daten) -> dict:
+    """Schlüssel (``date`` oder Text) zu ``JJJJ-MM-TT``; nur echte Zahlen als Werte."""
+    ergebnis = {}
+    for tag, wert in (daten or {}).items():
+        schluessel = erholung_tag_text(tag)
+        zahl = _erh_zahl(wert)
+        if schluessel and zahl is not None:
+            ergebnis[schluessel] = zahl
+    return ergebnis
+
+
+def _erh_iso_lesen(text):
+    """ISO-Zeit mit ``Z`` oder Zeitzone als aware ``datetime`` - ``None`` bei Unlesbarem (auch Python 3.9)."""
+    roh = str(text or "").strip().replace("Z", "+00:00")
+    treffer = re.match(r"^(\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2})(\.\d+)?(.*)$", roh)
+    if not treffer:
+        return None
+    bruch = (treffer.group(2) or "")[1:7].ljust(6, "0") if treffer.group(2) else ""
+    rest = treffer.group(3) or ""
+    try:
+        return datetime.fromisoformat(treffer.group(1).replace(" ", "T") + ("." + bruch if bruch else "") + rest)
+    except ValueError:
+        return None
+
+
+# ---------------------------------------------------------------------------
+# Apple Health: Export lesen und Erholung schätzen
+# ---------------------------------------------------------------------------
+
+def _apple_zeit(text):
+    return datetime.strptime(str(text), "%Y-%m-%d %H:%M:%S %z")
+
+
+def schlaf_stunden(intervalle) -> float:
+    """Summe der Schlafintervalle in Stunden - überlappende (Uhr und iPhone) zählen einmal."""
+    gueltig = sorted((s, e) for s, e in intervalle if e > s)
+    if not gueltig:
+        return 0.0
+    summe = 0.0
+    anfang, ende = gueltig[0]
+    for s, e in gueltig[1:]:
+        if s <= ende:
+            ende = max(ende, e)
+        else:
+            summe += (ende - anfang).total_seconds()
+            anfang, ende = s, e
+    summe += (ende - anfang).total_seconds()
+    return summe / 3600.0
+
+
+def _schlaf_tag(ende) -> str:
+    """Zu welchem Tag ein Schlafintervall gehört: dem, an dem man aufwacht.
+
+    Schlafphasen, die vor Mitternacht enden, gehören zur Nacht des Folgetages -
+    sonst fehlte jeder Nacht ihr Anfang. Ab 18 Uhr gilt als "Abend".
+    """
+    tag = ende.date()
+    if ende.hour >= 18:
+        tag = tag + timedelta(days=1)
+    return tag.isoformat()
+
+
+def _export_mitglied(archiv):
+    """Das ``export.xml`` in der Zip (die Health-App legt es nach apple_health_export/). ``None``, wenn keines da ist."""
+    kandidaten = [i for i in archiv.infolist()
+                  if i.filename.lower().endswith(".xml") and not i.is_dir()
+                  and not any(w in i.filename.lower() for w in ("cda", "electrocardiogram", "clinical", "workout-routes"))]
+    wahl = [i for i in kandidaten if i.filename.lower().rsplit("/", 1)[-1] in ("export.xml", "exportieren.xml")]
+    if not wahl and kandidaten:
+        wahl = [max(kandidaten, key=lambda i: i.file_size)]
+    return wahl[0] if wahl else None
+
+
+def erholung_export_groesse(pfad) -> int:
+    """Wie viele Bytes der Export entpackt hat - bei einer Zip die des ``export.xml``, sonst die Dateigröße."""
+    groesse = os.path.getsize(str(pfad))
+    if str(pfad).lower().endswith(".zip"):
+        try:
+            with zipfile.ZipFile(str(pfad)) as archiv:
+                info = _export_mitglied(archiv)
+                if info is not None:
+                    groesse = max(groesse, info.file_size)
+        except (zipfile.BadZipFile, OSError):
+            pass
+    return groesse
+
+
+@contextmanager
+def _export_oeffnen(pfad):
+    """Öffnet ``export.xml`` zum Lesen: aus der Zip, ohne sie zu entpacken, oder direkt."""
+    pfad = str(pfad)
+    if pfad.lower().endswith(".zip"):
+        try:
+            archiv = zipfile.ZipFile(pfad)
+        except zipfile.BadZipFile:
+            raise ValueError("Das ist keine lesbare Zip-Datei.")
+        with archiv:
+            info = _export_mitglied(archiv)
+            if info is None:
+                raise ValueError("In der Zip-Datei steckt kein export.xml - ist das der Export aus der Health-App?")
+            # Ein echter Export schrumpft auf etwa ein Zehntel; ein Vielfaches davon ist eine Zip-Bombe.
+            if info.file_size > IMPORT_MAX_ENTPACKT or info.file_size > 100 * max(info.compress_size, 1) + 67108864:
+                raise ValueError("Die Datei ist entpackt unglaublich groß - das lese ich nicht.")
+            _export_kopf_pruefen(archiv.open(info))
+            with archiv.open(info) as datei:
+                yield datei
+    else:
+        with open(pfad, "rb") as kopf:
+            _export_kopf_pruefen(kopf)
+        with open(pfad, "rb") as datei:
+            yield datei
+
+
+def _export_kopf_pruefen(datei):
+    """Ein Apple-Export definiert keine eigenen Entitäten - wer welche mitbringt, will etwas anderes."""
+    try:
+        kopf = datei.read(262144)
+    finally:
+        datei.close()
+    if b"<!ENTITY" in kopf:
+        raise ValueError("Die Datei definiert eigene XML-Entitäten - das ist kein Apple-Health-Export.")
+
+
+def apple_export_lesen(pfad, ab_tag=None) -> dict:
+    """Liest den Apple-Health-Export streamend.
+
+    Gibt ``{tag: {"hrv": [...], "ruhepuls": [...], "schlaf": [(start, ende), ...]}}`` zurück,
+    ``tag`` als ``JJJJ-MM-TT``. Nur Daten ab ``ab_tag``. Angenommen wird eine ``.zip``
+    (das ``export.xml`` darin wird direkt gelesen) oder eine ``.xml``.
+
+    * HRV zählt nur, wenn die Messung zwischen 0 und 8 Uhr (Ortszeit der Aufzeichnung) beginnt.
+    * Ein Tag ist der des ``endDate``; Schlaf gehört zum Tag des Aufwachens.
+    * Schlafphasen ``Awake`` und ``InBed`` fehlen.
+    """
+    ab = erholung_tag_text(ab_tag)
+    tage = {}
+    schlaf = []
+    with _export_oeffnen(pfad) as datei:
+        wurzel = None
+        for ereignis, element in ET.iterparse(datei, events=("start", "end")):
+            if wurzel is None:
+                wurzel = element
+                continue
+            if ereignis != "end" or element.tag != "Record":
+                continue
+            typ = element.get("type")
+            if typ in (HK_HRV, HK_RUHEPULS, HK_SCHLAF):
+                try:
+                    ende = _apple_zeit(element.get("endDate"))
+                    if typ == HK_SCHLAF:
+                        if element.get("value") in SCHLAF_WERTE:
+                            schlaf.append((_apple_zeit(element.get("startDate")), ende))
+                    else:
+                        tag = ende.date().isoformat()
+                        if tag >= ab:
+                            wert = float(element.get("value"))
+                            if math.isfinite(wert):
+                                eintrag = tage.setdefault(tag, {"hrv": [], "ruhepuls": [], "schlaf": []})
+                                if typ == HK_HRV:
+                                    if _apple_zeit(element.get("startDate")).hour < 8:
+                                        eintrag["hrv"].append(wert)
+                                else:
+                                    eintrag["ruhepuls"].append(wert)
+                except (TypeError, ValueError):
+                    pass  # eine kaputte Zeile im Export wirft nicht den ganzen Export weg
+            element.clear()
+            wurzel.clear()
+    for start, ende in schlaf:
+        tag = _schlaf_tag(ende)
+        if tag >= ab:
+            tage.setdefault(tag, {"hrv": [], "ruhepuls": [], "schlaf": []})["schlaf"].append((start, ende))
+    for eintrag in tage.values():
+        eintrag["schlaf"].sort()
+    return tage
+
+
+def erholung_schaetzen(tag, hrv_tage, puls_tage, schlaf_tage, basis_tage=30, ziel_schlaf=7.5):
+    """Schätzt die Erholung eines Tages gegen die eigenen letzten ``basis_tage`` Tage.
+
+    ``hrv_tage``, ``puls_tage``, ``schlaf_tage``: ``{tag: Wert}`` (HRV in ms, Ruhepuls,
+    Schlaf in Stunden). Gibt ``None`` zurück, wenn weniger als 14 Vergleichstage mit HRV oder
+    mit Ruhepuls da sind oder der Tag selbst keine HRV hat - dann gibt es keine Zahl.
+
+    HRV: z-Wert auf ln(HRV); Ruhepuls: ein höherer Puls als sonst senkt. Jeder Teil ist
+    ``50 + 20 * z`` (0 bis 100), der Schlafteil ``100 * Stunden / 7,5``. Gewichte 45/30/25;
+    ohne Schlafdaten 60/40. Heuristik, nicht medizinisch geprüft.
+    """
+    heute = erholung_tag_datum(tag)
+    if heute is None:
+        return None
+    hrv, puls, schlaf = _erh_tage_dict(hrv_tage), _erh_tage_dict(puls_tage), _erh_tage_dict(schlaf_tage)
+    heute_text = heute.isoformat()
+    basis = [(heute - timedelta(days=i)).isoformat() for i in range(1, int(basis_tage) + 1)]
+    log_hrv = [math.log(hrv[t]) for t in basis if t in hrv and hrv[t] > 0]
+    ruhe = [puls[t] for t in basis if t in puls]
+    if len(log_hrv) < 14 or len(ruhe) < 14 or hrv.get(heute_text, 0) <= 0:
+        return None
+    # Eine Streuung nahe null (fast gleiche Werte) machte aus jeder Abweichung einen Ausreißer.
+    streuung_hrv = max(_erh_streuung(log_hrv), 0.05)
+    streuung_puls = max(_erh_streuung(ruhe), 1.0)
+    z_hrv = (math.log(hrv[heute_text]) - _erh_mittel(log_hrv)) / streuung_hrv
+    puls_heute = puls.get(heute_text, _erh_mittel(ruhe))
+    z_puls = -(puls_heute - _erh_mittel(ruhe)) / streuung_puls
+    teil_hrv = _erh_klemme(50 + 20 * z_hrv)
+    teil_puls = _erh_klemme(50 + 20 * z_puls)
+    teil_schlaf = _erh_klemme(100.0 * schlaf[heute_text] / float(ziel_schlaf)) if heute_text in schlaf else None
+    if teil_schlaf is None:
+        wert = 0.6 * teil_hrv + 0.4 * teil_puls
+    else:
+        wert = 0.45 * teil_hrv + 0.30 * teil_puls + 0.25 * teil_schlaf
+    wert = int(round(wert))
+    return {"wert": wert, "band": erholung_band(wert), "hrv": int(round(teil_hrv)),
+            "puls": int(round(teil_puls)),
+            "schlaf": None if teil_schlaf is None else int(round(teil_schlaf)),
+            "basis_hrv": len(log_hrv), "basis_puls": len(ruhe)}
+
+
+# ---------------------------------------------------------------------------
+# Netz und Sperre
+# ---------------------------------------------------------------------------
+
+class ErholungOhneWeiterleitung(urllib.request.HTTPRedirectHandler):
+    """Folgt keiner Weiterleitung - ein Zugangs-Token darf nie zu einem anderen Rechner wandern."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+def erholung_http_holen(methode, url, kopf=None, formular=None, timeout=20):
+    """Ein HTTP-Aufruf. Gibt ``(status, text, kopfzeilen)`` zurück, ``status`` 0 bei Netzfehlern.
+
+    Das ist die einspeisbare Stelle: Prüfungen ersetzen sie durch eine Funktion mit
+    derselben Form ``holen(methode, url, kopf, formular)``.
+    """
+    kopfzeilen = {"User-Agent": "Jarvis/1.0", "Accept": "application/json"}
+    kopfzeilen.update(kopf or {})
+    daten = None
+    if formular is not None:
+        daten = urllib.parse.urlencode(formular).encode("utf-8")
+        kopfzeilen.setdefault("Content-Type", "application/x-www-form-urlencoded")
+    anfrage = urllib.request.Request(url, data=daten, headers=kopfzeilen, method=methode)
+    oeffner = urllib.request.build_opener(ErholungOhneWeiterleitung)
+    try:
+        with oeffner.open(anfrage, timeout=timeout) as antwort:
+            text = antwort.read(4000000).decode("utf-8", "replace")
+            return antwort.status, text, {k.lower(): v for k, v in antwort.headers.items()}
+    except urllib.error.HTTPError as fehler:
+        try:
+            text = fehler.read(200000).decode("utf-8", "replace")
+        except Exception:
+            text = ""
+        return fehler.code, text, {k.lower(): v for k, v in (fehler.headers or {}).items()}
+    except (urllib.error.URLError, OSError, ValueError) as fehler:
+        return 0, str(getattr(fehler, "reason", fehler)), {}
+
+
+def _erh_json(text):
+    try:
+        daten = json.loads(text)
+    except (TypeError, ValueError):
+        return None
+    return daten if isinstance(daten, dict) else None
+
+
+def _erh_env_datei_wert(name) -> str:
+    """Liest einen Wert frisch aus ``config/.env`` - ohne das Wörterbuch der Konfiguration anzufassen."""
+    try:
+        for zeile in ENV_DATEI.read_text(encoding="utf-8").splitlines():
+            zeile = zeile.strip()
+            if not zeile or zeile.startswith("#") or "=" not in zeile:
+                continue
+            schluessel, _, wert = zeile.partition("=")
+            if schluessel.strip() == name:
+                wert = wert.strip()
+                if len(wert) >= 2 and wert[0] == wert[-1] and wert[0] in "\"'":
+                    wert = wert[1:-1]
+                return wert
+    except OSError:
+        pass
+    return ""
+
+
+def _erh_config_wert(name) -> str:
+    """Der Wert, mit dem dieser Prozess gestartet ist (``NAME``)."""
+    werte = {"OURA_CLIENT_ID": OURA_CLIENT_ID, "OURA_CLIENT_SECRET": OURA_CLIENT_SECRET,
+             "OURA_REFRESH_TOKEN": OURA_REFRESH_TOKEN,
+             "WHOOP_CLIENT_ID": WHOOP_CLIENT_ID, "WHOOP_CLIENT_SECRET": WHOOP_CLIENT_SECRET,
+             "WHOOP_REFRESH_TOKEN": WHOOP_REFRESH_TOKEN}
+    return str(werte.get(name) or "")
+
+
+# ---------------------------------------------------------------------------
+# Erholung
+# ---------------------------------------------------------------------------
+
+class Erholung:
+    """Erholungswerte aus allen Quellen - speichern, zusammenführen, abrufen.
+
+    ``memory``: das Gedächtnis (die Tabellen liegen in dessen Datenbank).
+    ``holen``: Ersatz für den HTTP-Aufruf ``(methode, url, kopf, formular) -> (status, text, kopfzeilen)``.
+    ``uhr``: liefert die lokale Zeit als ``datetime`` - für Prüfungen.
+    ``zugriff``: der Dateizugriff (``MacZugriff``) für den Import: nur Benutzerordner, nichts Gesperrtes.
+    ``anzeige``: wohin Werte auf die Zentrale gehen (``zeigen``/``melden``), ``ausgabe``: Funktion für
+    Meldungen, die später kommen (ein langer Import im Hintergrund).
+    ``env_lesen`` / ``env_setzen`` / ``sperrdatei``: für Prüfungen austauschbar.
+    """
+
+    def __init__(self, memory, holen=None, uhr=None, zugriff=None, anzeige=None, sperrdatei=None,
+                 env_lesen=None, env_setzen=None, sperr_wartezeit=5.0):
+        self.memory = memory
+        self._holen = holen or erholung_http_holen
+        self._uhr = uhr or datetime.now
+        self.zugriff = zugriff
+        self.anzeige = anzeige
+        self.ausgabe = None
+        self.sperrdatei = sperrdatei
+        self.sperr_wartezeit = sperr_wartezeit
+        self._env_lesen_fn = env_lesen
+        self._env_setzen_fn = env_setzen
+        self._fadensperre = threading.Lock()
+        self._import_sperre = threading.Lock()
+        self._import_faden = None
+        self.letzter_import = None
+        db_schema_anlegen(SCHEMA_ERHOLUNG, self.memory.db_pfad)
+
+    # -- Hilfen ---------------------------------------------------------------
+
+    def _heute_text(self) -> str:
+        return self._uhr().date().isoformat()
+
+    def _jetzt_s(self) -> float:
+        return self._uhr().timestamp()
+
+    def _aendern(self, sql: str, werte: tuple = ()) -> int:
+        """Schreibt und gibt die Zahl der betroffenen Zeilen zurück (die Datenbank selbst serialisiert)."""
+        verbindung = db_verbindung(self.memory.db_pfad)
+        try:
+            zeiger = verbindung.execute(sql, werte)
+            verbindung.commit()
+            return zeiger.rowcount
+        finally:
+            verbindung.close()
+
+    def _viele(self, sql: str, zeilen: list):
+        verbindung = db_verbindung(self.memory.db_pfad)
+        try:
+            verbindung.executemany(sql, zeilen)
+            verbindung.commit()
+        finally:
+            verbindung.close()
+
+    def _tage_speichern(self, quelle: str, zeilen: list):
+        """``zeilen``: ``[(tag, wert, hrv, ruhepuls, schlaf_h, roh_dict), ...]`` - ersetzt gleiche Tage."""
+        geholt = self._uhr().strftime("%Y-%m-%d %H:%M:%S")
+        daten = []
+        for tag, wert, hrv, puls, schlaf, roh in zeilen:
+            daten.append((tag, quelle, wert, hrv, puls, schlaf, json.dumps(roh or {}, ensure_ascii=False), geholt))
+        if daten:
+            self._viele("INSERT OR REPLACE INTO erholung_tage "
+                        "(tag, quelle, wert, hrv, ruhepuls, schlaf_h, roh, geholt) VALUES (?,?,?,?,?,?,?,?)", daten)
+
+    def _beste_pro_tag(self, ab_tag: str) -> dict:
+        """``{tag: Zeile}`` - je Tag die Quelle, die in der Reihenfolge Oura, Whoop, Apple, Hand zuerst kommt."""
+        zeilen = self.memory._lesen(
+            "SELECT * FROM erholung_tage WHERE tag>=? AND wert IS NOT NULL ORDER BY tag", (ab_tag,))
+        beste = {}
+        for zeile in zeilen:
+            rang = QUELLEN_REIHENFOLGE.index(zeile["quelle"]) if zeile["quelle"] in QUELLEN_REIHENFOLGE else 99
+            if zeile["tag"] not in beste or rang < beste[zeile["tag"]][0]:
+                beste[zeile["tag"]] = (rang, zeile)
+        return {tag: zeile for tag, (rang, zeile) in beste.items()}
+
+    @staticmethod
+    def _eintrag(zeile: dict) -> dict:
+        wert = int(round(zeile["wert"]))
+        eintrag = {"tag": zeile["tag"], "wert": wert, "band": erholung_band(wert), "quelle": zeile["quelle"]}
+        for feld, name in (("hrv", "hrv"), ("ruhepuls", "ruhepuls"), ("schlaf_h", "schlaf_h")):
+            if zeile.get(feld) is not None:
+                eintrag[name] = round(zeile[feld], 1)
+        return eintrag
+
+    # -- Lesen ------------------------------------------------------------------
+
+    def verlauf(self, tage: int = 14) -> list:
+        """Die Erholungswerte der letzten ``tage`` Tage (einer je Tag, älteste zuerst)."""
+        try:
+            tage = max(1, min(120, int(tage)))
+        except (TypeError, ValueError):
+            tage = 14
+        heute = self._uhr().date()
+        ab = (heute - timedelta(days=tage - 1)).isoformat()
+        beste = self._beste_pro_tag(ab)
+        return [self._eintrag(beste[t]) for t in sorted(beste) if t <= heute.isoformat()]
+
+    def werte_je_tag(self, tage: int = 60) -> dict:
+        """``{tag: Wert}`` der letzten ``tage`` Tage - für den Zusammenhang mit der Arbeit."""
+        return {e["tag"]: e["wert"] for e in self.verlauf(tage)}
+
+    def verbunden(self) -> dict:
+        """Welche Wearables einen Zugangsschlüssel haben (ohne Netz, ohne den Schlüssel zu zeigen)."""
+        return {dienst: bool(self._einstellung(info["token_name"])) for dienst, info in WEARABLE_DIENSTE.items()}
+
+    def heute(self, abrufen: bool = False) -> dict:
+        """Der Erholungswert von heute: ``{"ok", "tag", "wert", "band", "quelle", "text"}``.
+
+        Gibt es für heute keinen, ist ``ok`` falsch und ``fehler`` sagt ehrlich, warum - und was
+        der letzte bekannte Wert war. ``abrufen`` holt vorher (höchstens alle paar Stunden) neue
+        Werte von Oura und Whoop; Fehler dabei bleiben ohne Folgen.
+        """
+        if abrufen:
+            try:
+                self.aktualisieren()
+            except Exception as fehler:
+                print("[erholung] Abruf nicht möglich: %s" % fehler)
+        tag = self._heute_text()
+        zeile = self._beste_pro_tag(tag).get(tag)
+        if zeile is not None:
+            eintrag = self._eintrag(zeile)
+            eintrag["ok"] = True
+            eintrag["text"] = self._satz(eintrag, "heute")
+            return eintrag
+        return self._ohne_wert(tag)
+
+    def _satz(self, eintrag: dict, wann: str) -> str:
+        text = "Erholung %s: %d von 100, %s (Quelle: %s)." % (
+            wann, eintrag["wert"], BAND_WORTE[eintrag["band"]], eintrag["quelle"])
+        if eintrag["quelle"] == QUELLE_APPLE:
+            text += " Das ist eine eigene Schätzung aus Apple Health, kein Medizinprodukt."
+        return text
+
+    def _ohne_wert(self, tag: str) -> dict:
+        verbunden = [WEARABLE_DIENSTE[d]["name"] for d, ja in self.verbunden().items() if ja]
+        letzte = self.memory._lesen("SELECT * FROM erholung_tage WHERE wert IS NOT NULL AND tag<=? "
+                                    "ORDER BY tag DESC LIMIT 1", (tag,))
+        if not letzte and not verbunden:
+            return {"ok": False, "fehler": KEINE_QUELLE_TEXT}
+        if letzte:
+            eintrag = self._beste_pro_tag(letzte[0]["tag"])[letzte[0]["tag"]]
+            eintrag = self._eintrag(eintrag)
+            fehler = ("Für heute habe ich noch keinen Erholungswert. Der letzte ist von %s: %d von 100 (%s)."
+                      % (erholung_datum_text(eintrag["tag"]), eintrag["wert"], eintrag["quelle"]))
+            letzter = eintrag
+        else:
+            fehler = "%s ist verbunden, aber es liegen noch keine Werte vor." % " und ".join(verbunden)
+            letzter = None
+        if verbunden:
+            fehler += " Neue Werte holt erholung_abrufen."
+        return {"ok": False, "fehler": fehler, "letzter": letzter}
+
+    def status(self) -> dict:
+        """Wie viele Tage aus welcher Quelle da sind - für ``jarvis.py gesundheit``."""
+        zeilen = self.memory._lesen("SELECT quelle, COUNT(*) AS n, MIN(tag) AS von, MAX(tag) AS bis "
+                                    "FROM erholung_tage GROUP BY quelle")
+        return {"quellen": zeilen, "verbunden": self.verbunden()}
+
+    # -- Anzeige ----------------------------------------------------------------
+
+    def anzeigen(self, eintrag: dict = None, dauer_s: float = 120):
+        """Zeigt einen Erholungswert (Standard: den von heute) auf der Zentrale - Kanal ``sicht`` und Ansicht ``sicht``."""
+        eintrag = eintrag or self.heute()
+        if "wert" not in eintrag:
+            return  # nichts da, nichts gezeigt (auch ein älterer Wert mit seinem Tag darf erscheinen)
+        sicht_teil_schreiben(self.anzeige, {"erholung": {
+            "wert": eintrag["wert"], "band": eintrag["band"], "quelle": eintrag["quelle"], "tag": eintrag["tag"]}},
+            dauer_s)
+
+    # -- Von Hand ---------------------------------------------------------------
+
+    def manuell(self, tag, wert) -> dict:
+        """Trägt einen Erholungswert (0 bis 100) von Hand ein - etwa aus der Oura- oder Whoop-App."""
+        zahl = _erh_zahl(wert)
+        if zahl is None and isinstance(wert, str):
+            try:
+                zahl = _erh_zahl(float(wert.strip().replace(",", ".")))
+            except ValueError:
+                zahl = None
+        if zahl is None or not 0 <= zahl <= 100:
+            return {"ok": False, "fehler": "Der Erholungswert muss eine Zahl von 0 bis 100 sein."}
+        text = erholung_tag_text(tag) if tag else self._heute_text()
+        if not text:
+            return {"ok": False, "fehler": "Das Datum verstehe ich nicht. Gebraucht wird JJJJ-MM-TT."}
+        if text > self._heute_text():
+            return {"ok": False, "fehler": "Für die Zukunft trage ich keine Erholung ein."}
+        self._tage_speichern(QUELLE_HAND, [(text, float(zahl), None, None, None, {})])
+        eintrag = {"tag": text, "wert": int(round(zahl)), "band": erholung_band(int(round(zahl))),
+                   "quelle": QUELLE_HAND}
+        return {"ok": True, "tag": text, "wert": eintrag["wert"], "band": eintrag["band"],
+                "text": "Eingetragen: Erholung %s %d von 100." % (erholung_datum_text(text), eintrag["wert"])}
+
+    # -- Apple Health -----------------------------------------------------------
+
+    def _import_pfad(self, pfad):
+        """Prüft den Pfad: im Benutzerordner, ``.zip`` oder ``.xml``, nichts Gesperrtes. ``(Pfad, Fehler)``."""
+        roh = os.path.expanduser(str(pfad or "").strip())
+        nein = "Diese Datei lese ich nicht."
+        if not roh:
+            return None, "Sag mir, wo der Apple-Health-Export liegt (export.zip)."
+        home = Path(getattr(self.zugriff, "home", None) or Path.home())
+        try:
+            home = home.resolve()
+            ziel = Path(roh if os.path.isabs(roh) else str(home / roh)).resolve()
+        except (OSError, RuntimeError):
+            return None, nein
+        if ziel.suffix.lower() not in (".zip", ".xml"):
+            return None, "%s Gebraucht wird die export.zip (oder export.xml) aus der Health-App." % nein
+        if not str(ziel).lower().startswith(str(home).lower().rstrip(os.sep) + os.sep):
+            return None, ("%s Lege den Export in deinen Benutzerordner, zum Beispiel nach Downloads." % nein)
+        gesperrt = getattr(self.zugriff, "gesperrt", None)
+        if callable(gesperrt):
+            grund = gesperrt(ziel)
+            if grund:
+                return None, "%s %s" % (nein, grund)
+        if not ziel.is_file():
+            return None, "Die Datei '%s' gibt es nicht." % ziel.name
+        return ziel, ""
+
+    def importieren(self, pfad, hintergrund: bool = True) -> dict:
+        """Liest einen Apple-Health-Export und rechnet die Erholung je Tag.
+
+        Große Exporte (entpackt über 300 MB) liest ein Hintergrundfaden; das Ergebnis kommt dann über
+        ``ausgabe`` und steht in ``letzter_import``.
+        """
+        ziel, fehler = self._import_pfad(pfad)
+        if fehler:
+            return {"ok": False, "fehler": fehler}
+        groesse = erholung_export_groesse(ziel)
+        if hintergrund and groesse > IMPORT_HINTERGRUND_BYTES:
+            if not self._import_sperre.acquire(False):
+                return {"ok": False, "fehler": "Ein Export wird gerade gelesen. Ich melde mich, wenn er fertig ist."}
+            faden = threading.Thread(target=self._import_im_hintergrund, args=(ziel,), daemon=True,
+                                     name="jarvis-gesundheit")
+            self._import_faden = faden
+            faden.start()
+            return {"ok": True, "hintergrund": True,
+                    "text": "Der Export ist groß (%d MB). Ich lese ihn im Hintergrund und melde mich, "
+                            "wenn ich fertig bin." % (groesse // (1024 * 1024))}
+        return self._import_ausfuehren(ziel)
+
+    def _import_im_hintergrund(self, ziel):
+        try:
+            ergebnis = self._import_ausfuehren(ziel)
+        finally:
+            self._import_sperre.release()
+        self.letzter_import = ergebnis
+        if self.ausgabe is not None:
+            try:
+                self.ausgabe(ergebnis.get("text") or ergebnis.get("fehler") or "")
+            except Exception as fehler:
+                print("[erholung] Ausgabe fehlgeschlagen: %s" % fehler)
+
+    def _import_ausfuehren(self, ziel) -> dict:
+        heute = self._uhr().date()
+        ab = (heute - timedelta(days=IMPORT_RECHENTAGE + IMPORT_BASIS_TAGE + 5)).isoformat()
+        try:
+            daten = apple_export_lesen(str(ziel), ab)
+        except zipfile.BadZipFile:
+            return {"ok": False, "fehler": "Das ist keine lesbare Zip-Datei."}
+        except ET.ParseError as fehler:
+            return {"ok": False, "fehler": "Der Export lässt sich nicht lesen (XML-Fehler: %s)." % fehler}
+        except (OSError, ValueError) as fehler:
+            return {"ok": False, "fehler": "Der Export lässt sich nicht lesen: %s" % fehler}
+        hrv = {t: _erh_median(d["hrv"]) for t, d in daten.items() if d["hrv"]}
+        puls = {t: _erh_median(d["ruhepuls"]) for t, d in daten.items() if d["ruhepuls"]}
+        schlaf = {t: schlaf_stunden(d["schlaf"]) for t, d in daten.items() if d["schlaf"]}
+        if not hrv:
+            return {"ok": False, "tage": 0,
+                    "fehler": "Im Export stehen keine HRV-Messungen aus den Nächten (0 bis 8 Uhr). "
+                              "Ohne sie rechne ich keine Erholung."}
+        ende = max(hrv)
+        rechenende = erholung_tag_datum(ende)
+        zeilen = []
+        for i in range(IMPORT_RECHENTAGE):
+            tag = (rechenende - timedelta(days=i)).isoformat()
+            if tag not in hrv:
+                continue
+            schaetzung = erholung_schaetzen(tag, hrv, puls, schlaf)
+            if schaetzung is None:
+                continue
+            zeilen.append((tag, float(schaetzung["wert"]), hrv[tag], puls.get(tag), schlaf.get(tag),
+                           {"teile": {"hrv": schaetzung["hrv"], "puls": schaetzung["puls"],
+                                      "schlaf": schaetzung["schlaf"]},
+                            "basis": {"hrv": schaetzung["basis_hrv"], "puls": schaetzung["basis_puls"]}}))
+        if not zeilen:
+            return {"ok": False, "tage": 0, "tage_hrv": len(hrv), "tage_puls": len(puls),
+                    "fehler": "Aus dem Export lässt sich noch keine Erholung berechnen: Es braucht mindestens "
+                              "14 Tage mit HRV und 14 mit Ruhepuls vor dem Tag, ich habe %d Tage mit HRV und %d "
+                              "mit Ruhepuls." % (len(hrv), len(puls))}
+        self._tage_speichern(QUELLE_APPLE, zeilen)
+        zeilen.sort()
+        letzter = zeilen[-1]
+        wert = int(round(letzter[1]))
+        text = ("Apple Health gelesen: %d Tage mit Erholungswert, der letzte von %s: %d von 100. "
+                "Das ist eine eigene Schätzung, kein Medizinprodukt." % (
+                    len(zeilen), erholung_datum_text(letzter[0]), wert))
+        if letzter[0] < heute.isoformat():
+            text += " Für heute gilt er nicht - der Export endet am %s." % erholung_datum_text(ende)
+        return {"ok": True, "tage": len(zeilen), "letzter_tag": letzter[0], "wert": wert,
+                "band": erholung_band(wert), "text": text}
+
+    # -- Zugang zu Oura und Whoop -----------------------------------------------
+
+    @staticmethod
+    def _dienst(dienst):
+        name = str(dienst or "").strip().lower()
+        return (name, WEARABLE_DIENSTE[name]) if name in WEARABLE_DIENSTE else (None, None)
+
+    def _einstellung(self, name: str) -> str:
+        """Ein Wert aus ``config/.env`` (frisch gelesen) oder, wenn dort nichts steht, aus dem Start."""
+        wert = self._env_lesen_fn(name) if self._env_lesen_fn is not None else _erh_env_datei_wert(name)
+        return str(wert or _erh_config_wert(name) or "").strip()
+
+    def _einstellung_speichern(self, name: str, wert: str) -> bool:
+        """Schreibt einen Wert nach ``config/.env`` (``env_setzen``); nie eine Ausnahme."""
+        try:
+            if self._env_setzen_fn is not None:
+                return bool(self._env_setzen_fn(name, wert))
+            # env_setzen schreibt den ganzen Stand dieses Prozesses zurück. Der kann Stunden alt sein - hat
+            # ein anderer Prozess inzwischen etwas eingetragen (Token, Client-ID), ginge es verloren.
+            env_neu_laden()
+            return bool(env_setzen(name, wert))
+        except Exception as fehler:
+            print("[erholung] %s ließ sich nicht speichern: %s" % (name, fehler))
+            return False
+
+    def _token_speichern(self, dienst: str, wert: str) -> bool:
+        """Schreibt den neuen Refresh-Token sofort nach ``config/.env``."""
+        return self._einstellung_speichern(WEARABLE_DIENSTE[dienst]["token_name"], wert)
+
+    @contextmanager
+    def _sperre_nehmen(self):
+        """Die Dateisperre über alle Jarvis-Prozesse. Liefert ``True``, wenn sie genommen wurde, sonst ``False``."""
+        ende = time.monotonic() + max(0.0, float(self.sperr_wartezeit))
+        while not self._fadensperre.acquire(False):
+            if time.monotonic() >= ende:
+                yield False
+                return
+            time.sleep(0.05)
+        datei = None
+        try:
+            if fcntl is not None:
+                pfad = Path(self.sperrdatei or (LOG_VERZEICHNIS / "erholung.lock"))
+                try:
+                    pfad.parent.mkdir(parents=True, exist_ok=True)
+                    datei = open(str(pfad), "a")
+                except OSError:
+                    datei = None
+                if datei is not None:
+                    while True:
+                        try:
+                            fcntl.flock(datei.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                            break
+                        except (BlockingIOError, OSError):
+                            if time.monotonic() >= ende:
+                                datei.close()
+                                datei = None
+                                yield False
+                                return
+                            time.sleep(0.05)
+            yield True
+        finally:
+            if datei is not None:
+                try:
+                    fcntl.flock(datei.fileno(), fcntl.LOCK_UN)
+                except OSError:
+                    pass
+                datei.close()
+            self._fadensperre.release()
+
+    # -- Abruf ------------------------------------------------------------------
+
+    def _abruf_stempel(self, dienst: str) -> dict:
+        zeilen = self.memory._lesen("SELECT * FROM erholung_abruf WHERE dienst=?", (dienst,))
+        return zeilen[0] if zeilen else {"dienst": dienst, "zeit": 0.0, "warten_bis": 0.0, "status": ""}
+
+    def _abruf_vermerken(self, dienst: str, gelungen: bool, warten_s: float = 0.0, status: str = ""):
+        alt = self._abruf_stempel(dienst)
+        jetzt = self._jetzt_s()
+        self._aendern("INSERT OR REPLACE INTO erholung_abruf (dienst, zeit, warten_bis, status) VALUES (?,?,?,?)",
+                      (dienst, jetzt if gelungen else alt["zeit"], jetzt + warten_s if warten_s else 0.0,
+                       status[:200]))
+
+    def _http_fehler(self, dienst: str, status: int, text: str, kopf: dict, token: bool = False) -> dict:
+        """Aus einem fehlgeschlagenen Aufruf eine ehrliche Meldung machen (nie mit Schlüsseln darin).
+
+        ``token``: der Aufruf ging an den Token-Dienst - dort heißt 400 "Schlüssel ungültig".
+        """
+        info = WEARABLE_DIENSTE[dienst]
+        name = info["name"]
+        if status == 0:
+            return {"ok": False, "fehler": "%s ist gerade nicht erreichbar (%s)." % (name, str(text)[:80])}
+        if status == 429:
+            try:
+                warten = max(60, min(86400, int(float((kopf or {}).get("retry-after", "3600")))))
+            except (TypeError, ValueError):
+                warten = 3600
+            return {"ok": False, "warten_s": warten,
+                    "fehler": "%s bittet um Geduld (zu viele Anfragen). Ich versuche es später wieder." % name}
+        if status in (401, 403) or (token and status == 400):
+            return {"ok": False, "neu_verbinden": True,
+                    "fehler": "Der Zugang zu %s wird abgelehnt - er ist abgelaufen oder wurde widerrufen. "
+                              "Bitte neu verbinden: python3 jarvis.py zugang %s" % (name, dienst)}
+        return {"ok": False, "fehler": "%s antwortet mit Fehler %d." % (name, status)}
+
+    def _token_holen(self, dienst: str, formular: dict) -> dict:
+        """Ruft den Token-Dienst auf. ``{"ok", "access", "refresh"}`` oder ein Fehler."""
+        info = WEARABLE_DIENSTE[dienst]
+        status, text, kopf = self._holen("POST", info["token"], {}, formular)
+        if status != 200:
+            return self._http_fehler(dienst, status, text, kopf, token=True)
+        antwort = _erh_json(text)
+        if not antwort or not antwort.get("access_token"):
+            return {"ok": False, "fehler": "%s hat keinen Zugangsschlüssel geliefert." % info["name"]}
+        return {"ok": True, "access": str(antwort["access_token"]), "refresh": str(antwort.get("refresh_token") or "")}
+
+    def abrufen(self, dienst, tage: int = 14, max_alter_h=None) -> dict:
+        """Holt die neuesten Werte von Oura oder Whoop.
+
+        Nimmt die Dateisperre, liest die .env neu, tauscht den Refresh-Token (er gilt nur
+        einmal) und speichert den neuen sofort. Läuft der Abruf schon in einem anderen Jarvis-Fenster,
+        oder bittet der Dienst um Geduld, wird sanft aufgegeben. ``max_alter_h``: nichts tun, wenn
+        schon vor weniger Stunden geholt wurde.
+        """
+        dienst, info = self._dienst(dienst)
+        if dienst is None:
+            return {"ok": False, "fehler": "Das kenne ich nicht. Möglich sind oura und whoop."}
+        kennung, geheim = self._einstellung(info["id_name"]), self._einstellung(info["geheim_name"])
+        if not (kennung and geheim and self._einstellung(info["token_name"])):
+            return {"ok": False, "fehler": "%s ist nicht verbunden. Einmalig: python3 jarvis.py zugang %s"
+                                           % (info["name"], dienst)}
+        stempel = self._abruf_stempel(dienst)
+        if stempel["warten_bis"] > self._jetzt_s():
+            return {"ok": False, "warten_s": int(stempel["warten_bis"] - self._jetzt_s()),
+                    "fehler": "%s bittet um Geduld. Ich versuche es später wieder." % info["name"]}
+        with self._sperre_nehmen() as bekommen:
+            if not bekommen:
+                return {"ok": False, "gesperrt": True,
+                        "fehler": "%s wird gerade in einem anderen Jarvis-Fenster abgerufen. Ich warte nicht darauf."
+                                  % info["name"]}
+            if max_alter_h is not None:
+                zuletzt = self._abruf_stempel(dienst)["zeit"]
+                if zuletzt and self._jetzt_s() - zuletzt < float(max_alter_h) * 3600:
+                    return {"ok": True, "uebersprungen": True, "text": "%s ist aktuell." % info["name"]}
+            return self._abrufen_gesperrt(dienst, tage)
+
+    def _abrufen_gesperrt(self, dienst: str, tage: int, zugang: str = None) -> dict:
+        """Der Abruf selbst - nur unter der Sperre aufrufen."""
+        info = WEARABLE_DIENSTE[dienst]
+        warnung = ""
+        if zugang is None:
+            if self._env_lesen_fn is None:
+                try:
+                    env_neu_laden()  # nur hier, unter der Sperre: ein anderer Prozess hat evtl. rotiert
+                except Exception as fehler:
+                    print("[erholung] .env nicht neu gelesen: %s" % fehler)
+            refresh = self._einstellung(info["token_name"])
+            if not refresh:
+                return {"ok": False, "fehler": "%s ist nicht verbunden. python3 jarvis.py zugang %s"
+                                               % (info["name"], dienst)}
+            formular = {"grant_type": "refresh_token", "refresh_token": refresh,
+                        "client_id": self._einstellung(info["id_name"]),
+                        "client_secret": self._einstellung(info["geheim_name"])}
+            if dienst == "whoop":
+                formular["scope"] = "offline"  # laut Whoop-Beschreibung beim Erneuern; zu prüfen
+            antwort = self._token_holen(dienst, formular)
+            if not antwort.get("ok"):
+                self._abruf_vermerken(dienst, False, antwort.get("warten_s") or 0, antwort.get("fehler", ""))
+                return antwort
+            if antwort["refresh"] and antwort["refresh"] != refresh:
+                if not self._token_speichern(dienst, antwort["refresh"]):
+                    warnung = ("Der neue Zugangsschlüssel für %s ließ sich nicht speichern - beim nächsten Mal "
+                               "muss ich neu verbunden werden: python3 jarvis.py zugang %s" % (info["name"], dienst))
+            zugang = antwort["access"]
+        try:
+            ergebnis = self._oura_holen(zugang, tage) if dienst == "oura" else self._whoop_holen(zugang, tage)
+        except Exception as fehler:  # eine unerwartete Antwort darf den Abruf nicht sprengen
+            ergebnis = {"ok": False, "fehler": "%s: die Antwort ließ sich nicht lesen (%s)." % (info["name"], fehler)}
+        self._abruf_vermerken(dienst, bool(ergebnis.get("ok")), ergebnis.get("warten_s") or 0,
+                              "" if ergebnis.get("ok") else ergebnis.get("fehler", ""))
+        if warnung:
+            ergebnis["warnung"] = warnung
+            if ergebnis.get("ok"):
+                ergebnis["text"] = ergebnis.get("text", "") + " " + warnung
+        return ergebnis
+
+    def oura_holen(self, tage: int = 14) -> dict:
+        """Die Readiness-Werte der letzten Tage von Oura."""
+        return self.abrufen("oura", tage)
+
+    def whoop_holen(self, tage: int = 14) -> dict:
+        """Die Recovery-Werte der letzten Tage von Whoop."""
+        return self.abrufen("whoop", tage)
+
+    def aktualisieren(self, max_alter_h: float = ABRUF_MIN_STUNDEN) -> list:
+        """Holt von jedem verbundenen Wearable, wenn der letzte Abruf länger her ist. Ergebnisse als Liste."""
+        ergebnisse = []
+        for dienst, verbunden in self.verbunden().items():
+            if verbunden:
+                ergebnisse.append(dict(self.abrufen(dienst, 14, max_alter_h=max_alter_h), dienst=dienst))
+        return ergebnisse
+
+    def _oura_seiten(self, pfad: str, von: str, bis: str, kopf: dict):
+        """Alle Seiten einer Oura-Liste. ``(Liste, Fehler)``."""
+        eintraege, nach = [], None
+        for _seite in range(6):
+            adresse = OURA_DATEN_URL + pfad + "?" + urllib.parse.urlencode(
+                dict({"start_date": von, "end_date": bis}, **({"next_token": nach} if nach else {})))
+            status, text, antwortkopf = self._holen("GET", adresse, kopf, None)
+            if status != 200:
+                return None, self._http_fehler("oura", status, text, antwortkopf)
+            antwort = _erh_json(text)
+            if antwort is None or not isinstance(antwort.get("data"), list):
+                return None, {"ok": False, "fehler": "Oura: die Antwort ließ sich nicht lesen."}
+            eintraege += [e for e in antwort["data"] if isinstance(e, dict)]
+            nach = antwort.get("next_token")
+            if not nach:
+                break
+        return eintraege, None
+
+    def _oura_holen(self, zugang: str, tage: int) -> dict:
+        heute = self._uhr().date()
+        von = (heute - timedelta(days=max(1, int(tage)))).isoformat()
+        bis = (heute + timedelta(days=1)).isoformat()  # ob end_date einschließt, ist zu prüfen
+        kopf = {"Authorization": "Bearer " + zugang}
+        bereitschaft, fehler = self._oura_seiten("daily_readiness", von, bis, kopf)
+        if fehler:
+            return fehler
+        schlaf_wert, _ = self._oura_seiten("daily_sleep", von, bis, kopf)
+        perioden, _ = self._oura_seiten("sleep", von, bis, kopf)  # beides darf fehlen, Readiness reicht
+        je_tag = {}
+        for periode in perioden or []:
+            tag = erholung_tag_text(periode.get("day"))
+            if not tag:
+                continue
+            dauer = _erh_zahl(periode.get("total_sleep_duration"))
+            neu = {"lang": periode.get("type") == "long_sleep", "dauer": dauer,
+                   "hrv": _erh_zahl(periode.get("average_hrv")), "puls": _erh_zahl(periode.get("lowest_heart_rate"))}
+            alt = je_tag.get(tag)
+            # Die lange Nachtschlafperiode zählt; unter mehreren gleichen die längste.
+            if alt is None or (neu["lang"], dauer or 0) > (alt["lang"], alt["dauer"] or 0):
+                je_tag[tag] = neu
+        schlafwerte = {erholung_tag_text(e.get("day")): _erh_zahl(e.get("score")) for e in schlaf_wert or []}
+        zeilen = []
+        for eintrag in bereitschaft:
+            tag = erholung_tag_text(eintrag.get("day"))
+            wert = _erh_zahl(eintrag.get("score"))
+            if not tag or wert is None or not 0 <= wert <= 100:
+                continue
+            periode = je_tag.get(tag) or {}
+            schlaf_h = periode["dauer"] / 3600.0 if periode.get("dauer") else None
+            zeilen.append((tag, wert, periode.get("hrv"), periode.get("puls"), schlaf_h,
+                           {"schlafwert": schlafwerte.get(tag)}))
+        return self._abruf_ergebnis("oura", zeilen)
+
+    def _whoop_holen(self, zugang: str, tage: int) -> dict:
+        jetzt = self._uhr().astimezone(timezone.utc).replace(tzinfo=None)
+        von = (jetzt - timedelta(days=max(1, int(tage)))).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+        bis = (jetzt + timedelta(days=1)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+        kopf = {"Authorization": "Bearer " + zugang}
+        eintraege, nach = [], None
+        for _seite in range(5):  # Seitenaufbau (records, next_token) ist zu prüfen
+            parameter = {"start": von, "end": bis, "limit": 25}
+            if nach:
+                parameter["nextToken"] = nach
+            status, text, antwortkopf = self._holen("GET", WHOOP_RECOVERY_URL + "?" + urllib.parse.urlencode(parameter),
+                                                    kopf, None)
+            if status != 200:
+                return self._http_fehler("whoop", status, text, antwortkopf)
+            antwort = _erh_json(text)
+            if antwort is None or not isinstance(antwort.get("records"), list):
+                return {"ok": False, "fehler": "Whoop: die Antwort ließ sich nicht lesen."}
+            eintraege += [e for e in antwort["records"] if isinstance(e, dict)]
+            nach = antwort.get("next_token")
+            if not nach:
+                break
+        zeilen = {}
+        for eintrag in eintraege:
+            punkte = eintrag.get("score") if isinstance(eintrag.get("score"), dict) else {}
+            wert = _erh_zahl(punkte.get("recovery_score"))
+            if str(eintrag.get("score_state") or "SCORED").upper() != "SCORED" or wert is None or not 0 <= wert <= 100:
+                continue
+            zeit = _erh_iso_lesen(eintrag.get("created_at") or eintrag.get("updated_at"))
+            if zeit is None:
+                continue
+            tag = (zeit.astimezone() if zeit.tzinfo else zeit).date().isoformat()
+            zeilen[tag] = (tag, wert, _erh_zahl(punkte.get("hrv_rmssd_milli")),
+                           _erh_zahl(punkte.get("resting_heart_rate")), None, {"hrv_art": "RMSSD"})
+        return self._abruf_ergebnis("whoop", list(zeilen.values()))
+
+    def _abruf_ergebnis(self, dienst: str, zeilen: list) -> dict:
+        info = WEARABLE_DIENSTE[dienst]
+        if not zeilen:
+            return {"ok": True, "tage": 0, "text": "%s hat für diese Tage keine Erholungswerte geliefert." % info["name"]}
+        self._tage_speichern(info["quelle"], zeilen)
+        letzter = sorted(zeilen)[-1]
+        wert = int(round(letzter[1]))
+        return {"ok": True, "tage": len(zeilen), "letzter_tag": letzter[0], "wert": wert,
+                "text": "%s: %d Tage geholt, der letzte (%s) mit %d von 100." % (
+                    info["name"], len(zeilen), erholung_datum_text(letzter[0]), wert)}
+
+    # -- Anmeldung (OAuth) ------------------------------------------------------
+
+    def oauth_start(self, dienst, port: int = 8765) -> dict:
+        """Beginnt die Anmeldung. Gibt ``{"ok", "url", "zustand", "redirect"}`` zurück.
+
+        Der ``state`` (bei Oura 24 Zeichen, bei Whoop genau 8) steht in der Datenbank, gilt zehn
+        Minuten und genau einmal - egal, in welchem Prozess die Anmeldung endet.
+        """
+        dienst, info = self._dienst(dienst)
+        if dienst is None:
+            return {"ok": False, "fehler": "Das kenne ich nicht. Möglich sind oura und whoop."}
+        kennung = self._einstellung(info["id_name"])
+        if not kennung:
+            return {"ok": False, "fehler": "Es fehlt die Client-ID von %s (%s). python3 jarvis.py zugang %s"
+                                           % (info["name"], info["id_name"], dienst)}
+        alphabet = string.ascii_letters + string.digits
+        zustand = "".join(secrets.choice(alphabet) for _ in range(info["state_laenge"]))
+        redirect = "http://localhost:%d/%s/rueckruf" % (int(port), dienst)
+        jetzt = self._jetzt_s()
+        self._aendern("DELETE FROM erholung_oauth WHERE erstellt<?", (jetzt - 86400,))
+        self._aendern("INSERT INTO erholung_oauth (zustand, dienst, redirect, erstellt, benutzt) VALUES (?,?,?,?,0)",
+                      (zustand, dienst, redirect, jetzt))
+        url = "%s?response_type=code&client_id=%s&redirect_uri=%s&scope=%s&state=%s" % (
+            info["autorisieren"], urllib.parse.quote(kennung, safe=""), urllib.parse.quote(redirect, safe=""),
+            urllib.parse.quote(info["scope"], safe=":"), zustand)
+        return {"ok": True, "url": url, "zustand": zustand, "redirect": redirect}
+
+    def oauth_abschluss(self, dienst, code, zustand) -> dict:
+        """Beendet die Anmeldung: prüft den ``state``, tauscht den Code gegen die Schlüssel, holt erste Werte.
+
+        Die Web-Adresse ``/oura/rueckruf`` und ``/whoop/rueckruf`` ruft das auf. Ein falscher,
+        schon benutzter oder abgelaufener ``state`` wird abgewiesen.
+        """
+        dienst, info = self._dienst(dienst)
+        passt_nicht = {"ok": False, "fehler": "Die Anmeldung passt nicht zu der, die ich gestartet habe. "
+                                              "Bitte noch einmal: python3 jarvis.py zugang %s" % (dienst or "oura")}
+        code, zustand = str(code or "").strip(), str(zustand or "").strip()
+        if dienst is None or not code or not zustand or len(zustand) > 64 or len(code) > 2000:
+            return passt_nicht
+        zeilen = self.memory._lesen("SELECT * FROM erholung_oauth WHERE zustand=? AND dienst=?", (zustand, dienst))
+        if not zeilen:
+            return passt_nicht
+        # Einmalig und befristet: nur wer die Zeile von "ungenutzt" auf "benutzt" setzt, darf weiter.
+        genommen = self._aendern("UPDATE erholung_oauth SET benutzt=1 WHERE zustand=? AND dienst=? "
+                                 "AND benutzt=0 AND erstellt>=?",
+                                 (zustand, dienst, self._jetzt_s() - OAUTH_GUELTIG_SEKUNDEN))
+        if genommen != 1:
+            return passt_nicht
+        kennung, geheim = self._einstellung(info["id_name"]), self._einstellung(info["geheim_name"])
+        if not (kennung and geheim):
+            return {"ok": False, "fehler": "Client-ID oder Client-Secret von %s fehlen. python3 jarvis.py zugang %s"
+                                           % (info["name"], dienst)}
+        with self._sperre_nehmen() as bekommen:
+            if not bekommen:
+                return {"ok": False, "fehler": "%s wird gerade in einem anderen Jarvis-Fenster bearbeitet. "
+                                               "Bitte gleich noch einmal." % info["name"]}
+            antwort = self._token_holen(dienst, {
+                "grant_type": "authorization_code", "code": code, "redirect_uri": zeilen[0]["redirect"],
+                "client_id": kennung, "client_secret": geheim})
+            if not antwort.get("ok"):
+                return antwort
+            if not antwort["refresh"]:
+                return {"ok": False, "fehler": "%s hat keinen dauerhaften Zugang geliefert. Bei Whoop muss der "
+                                               "Bereich 'offline' freigegeben sein." % info["name"]}
+            if not self._token_speichern(dienst, antwort["refresh"]):
+                return {"ok": False, "fehler": "Der Zugangsschlüssel für %s ließ sich nicht in config/.env speichern."
+                                               % info["name"]}
+            ersten = self._abrufen_gesperrt(dienst, 14, zugang=antwort["access"])
+        text = "%s ist verbunden. Du kannst dieses Fenster schließen." % info["name"]
+        if ersten.get("ok") and ersten.get("text"):
+            text += " " + ersten["text"]
+        elif ersten.get("fehler"):
+            text += " Die ersten Werte konnte ich noch nicht holen: %s" % ersten["fehler"]
+        return {"ok": True, "dienst": dienst, "text": text}
+
+    def oauth_im_terminal(self, dienst, fragen=None, fragen_geheim=None, ausgabe=None, oeffnen=None, port: int = 8765) -> bool:
+        """Verbindet Oura oder Whoop im Terminal: ``python3 jarvis.py zugang oura``.
+
+        Fragt, was fehlt (Client-ID, Client-Secret), druckt die Anmeldeadresse und liest die Adresse
+        zurück, auf der der Browser gelandet ist - der Ausweg, wenn der Dienst eine localhost-Weiterleitung
+        ablehnt oder die Web-App gerade nicht läuft.
+        """
+        fragen = fragen or input
+        fragen_geheim = fragen_geheim or getpass.getpass
+        sagen = ausgabe or print
+        dienst, info = self._dienst(dienst)
+        if dienst is None:
+            sagen("Das kenne ich nicht. Möglich sind oura und whoop.")
+            return False
+        sagen("%s verbinden. Dafür brauchst du einmalig eine eigene App im Entwicklerbereich von %s:\n"
+              "  %s\n"
+              "Als Weiterleitungsadresse (Redirect URI) trägst du dort genau ein:\n"
+              "  http://localhost:%d/%s/rueckruf" % (info["name"], info["name"], info["app_seite"], port, dienst))
+        kennung = self._einstellung(info["id_name"])
+        if not kennung:
+            kennung = str(fragen("Client-ID: ")).strip()
+            if not kennung:
+                sagen("Ohne Client-ID geht es nicht. Es wurde nichts geändert.")
+                return False
+            self._einstellung_speichern(info["id_name"], kennung)
+        if not self._einstellung(info["geheim_name"]):
+            geheim = str(fragen_geheim("Client-Secret (wird nicht angezeigt): ")).strip()
+            if not geheim:
+                sagen("Ohne Client-Secret geht es nicht. Es wurde nichts geändert.")
+                return False
+            self._einstellung_speichern(info["geheim_name"], geheim)
+        vorher = self._einstellung(info["token_name"])
+        start = self.oauth_start(dienst, port)
+        if not start.get("ok"):
+            sagen(start["fehler"])
+            return False
+        sagen("\nÖffne diese Adresse im Browser, melde dich an und erlaube den Zugriff:\n\n  %s\n" % start["url"])
+        if oeffnen is not None:
+            oeffnen(start["url"])
+        sagen("Läuft Jarvis gerade in der Web-App und der Browser zeigt '%s ist verbunden', dann drück hier nur "
+              "Enter. Sonst zeigt der Browser einen Fehler, weil unter localhost nichts antwortet - kopiere dann "
+              "die ganze Adresse aus der Adresszeile (sie beginnt mit http://localhost:%d/%s/rueckruf?code=...) "
+              "und füge sie hier ein." % (info["name"], port, dienst))
+        eingabe = str(fragen("Adresse (oder nur Enter): ")).strip()
+        if not eingabe:
+            nachher = self._einstellung(info["token_name"])
+            if nachher and nachher != vorher:
+                sagen("%s ist verbunden." % info["name"])
+                return True
+            sagen("Es ist noch nichts angekommen. Starte noch einmal: python3 jarvis.py zugang %s" % dienst)
+            return False
+        abfrage = urllib.parse.parse_qs(urllib.parse.urlsplit(eingabe).query)
+        code, zustand = (abfrage.get("code") or [""])[0], (abfrage.get("state") or [""])[0]
+        if not code or not zustand:
+            sagen("In der Adresse fehlen code und state. Ich brauche die ganze Adresse aus dem Browser.")
+            return False
+        ergebnis = self.oauth_abschluss(dienst, code, zustand)
+        sagen(ergebnis.get("text") or ergebnis.get("fehler") or "")
+        return bool(ergebnis.get("ok"))
+
+    # -- Vergessen --------------------------------------------------------------
+
+    def vergessen(self) -> dict:
+        """Löscht alle Erholungs- und Handruhe-Werte (und was sonst davon im Protokoll steht)."""
+        geloescht = {}
+        for tabelle in ("erholung_tage", "handruhe", "erholung_oauth", "erholung_abruf"):
+            try:
+                geloescht[tabelle] = self._aendern("DELETE FROM %s" % tabelle)
+            except sqlite3.Error:
+                pass  # die Tabelle gibt es (noch) nicht
+        platz = ",".join("?" for _ in GESUNDHEITS_WERKZEUGE)
+        for sql, werte in (("DELETE FROM aktionen WHERE werkzeug IN (%s)" % platz, GESUNDHEITS_WERKZEUGE),
+                           ("DELETE FROM kennzahlen WHERE name=?", ("handruhe_mm",))):
+            try:
+                self._aendern(sql, tuple(werte))
+            except sqlite3.Error:
+                pass
+        if self.anzeige is not None:
+            try:
+                self.anzeige.melden("sicht", {})
+            except Exception as fehler:
+                print("[erholung] Anzeige nicht geleert: %s" % fehler)
+        tage = geloescht.get("erholung_tage", 0) or 0
+        return {"ok": True, "geloescht": geloescht,
+                "text": "Gelöscht: %d Erholungstage und alle Handruhe-Messungen. Die Verbindung zu Oura oder "
+                        "Whoop bleibt; getrennt wird sie, indem du die Schlüssel aus config/.env entfernst. "
+                        "Was wir im Gespräch darüber besprochen haben, steht im Gesprächsverlauf." % tage}
+
+
+# ---------------------------------------------------------------------------
+# Anzeige: der Kanal "sicht" gehört mehreren (Erholung, Handruhe, Zusammenhang)
+# ---------------------------------------------------------------------------
+
+def sicht_teil_schreiben(anzeige, teil: dict, dauer_s: float = 120):
+    """Ergänzt den Kanal ``sicht`` um ``teil`` (``erholung`` oder ``zusammenhang``) und zeigt die Ansicht.
+
+    Der Kanal wird als Ganzes ersetzt, deshalb wird erst gelesen, was schon drinsteht - die
+    Handruhe-Werte bleiben also stehen. Im Diskretmodus liest das nichts zurück (der Speicher
+    gäbe nur Leeres her). ``anzeige`` braucht ``melden`` und ``zeigen``; ohne Anzeige tut das nichts.
+    """
+    if anzeige is None:
+        return
+    try:
+        aktuell = {}
+        speicher = getattr(anzeige, "anzeige", None) or anzeige
+        lesen = getattr(speicher, "stand", None)
+        if callable(lesen) and not ANZEIGE_DISKRET:
+            stand = lesen("sicht") or {}
+            if isinstance(stand.get("daten"), dict):
+                aktuell = dict(stand["daten"])
+        aktuell.update(teil)
+        aktuell["hinweis"] = ERHOLUNG_HINWEIS
+        anzeige.melden("sicht", aktuell)
+        anzeige.zeigen("sicht", {}, dauer_s, "erholung")
+    except Exception as fehler:  # die Anzeige darf nie etwas kaputt machen
+        print("[erholung] Anzeige: %s" % fehler)
+
+
+# ---------------------------------------------------------------------------
+# Terminal: python3 jarvis.py gesundheit ... und zugang oura|whoop
+# ---------------------------------------------------------------------------
+
+def gesundheit_im_terminal(argumente=None, memory=None, fragen=None, ausgabe=None) -> int:
+    """``jarvis.py gesundheit [Datei | vergessen]`` - Export einlesen, Stand zeigen oder alles löschen."""
+    sagen = ausgabe or print
+    fragen = fragen or input
+    erholung = Erholung(memory or Memory())
+    argumente = [a for a in (argumente or []) if str(a).strip()]
+    if argumente and argumente[0].strip().lower() == "vergessen":
+        antwort = str(fragen("Alle Erholungs- und Handruhe-Werte löschen? (ja/nein) ")).strip().lower()
+        if antwort not in ("ja", "j"):
+            sagen("Nichts gelöscht.")
+            return 1
+        sagen(erholung.vergessen()["text"])
+        return 0
+    if argumente:
+        ergebnis = erholung.importieren(" ".join(argumente), hintergrund=False)
+        sagen(ergebnis.get("text") or ergebnis.get("fehler") or "")
+        return 0 if ergebnis.get("ok") else 1
+    stand = erholung.status()
+    sagen("Gesundheit und Erholung (%s)" % ERHOLUNG_HINWEIS)
+    if stand["quellen"]:
+        for zeile in stand["quellen"]:
+            sagen("  %s: %d Tage, %s bis %s" % (zeile["quelle"], zeile["n"], zeile["von"], zeile["bis"]))
+    else:
+        sagen("  Noch keine Erholungswerte gespeichert.")
+    for dienst, ja in stand["verbunden"].items():
+        sagen("  %s: %s" % (WEARABLE_DIENSTE[dienst]["name"],
+                            "verbunden" if ja else "nicht verbunden (python3 jarvis.py zugang %s)" % dienst))
+    sagen("\nExport einlesen:  python3 jarvis.py gesundheit ~/Downloads/export.zip\n"
+          "Alles löschen:    python3 jarvis.py gesundheit vergessen")
+    return 0
+
+
+def wearable_zugang_im_terminal(dienst: str) -> int:
+    """``jarvis.py zugang oura|whoop`` - die Anmeldung im Terminal."""
+    erholung = Erholung(Memory())
+
+    def browser_oeffnen(adresse):
+        try:
+            subprocess.run(["open", adresse], shell=False, timeout=15,
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except (OSError, subprocess.SubprocessError):
+            pass
+
+    return 0 if erholung.oauth_im_terminal(dienst, oeffnen=browser_oeffnen) else 1
+
+
 # =========================================================================
-# leistung  -  Zusammenhang zwischen Erholung und Arbeit – wird in Paket P5 gebaut.
+# leistung  -  Zusammenhang zwischen Erholung und Arbeit - und die tägliche Belastungsprüfung.
+# 
+# Zwei Dinge, beide ehrlich:
+# 
+# * **Zusammenhang.** Wie viele Gespräche an Tagen mit niedriger, mittlerer und guter Erholung
+#   gewonnen wurden. Die Abschlussquote ist wie bei ``verkaufsmuster`` gewonnen geteilt durch
+#   (gewonnen + verloren) - offene und unklare Gespräche zählen nicht. Die Fallzahl steht immer
+#   dabei, bei zu wenig Tagen sagt Jarvis nur das. Es ist ein Zusammenhang, keine Ursache.
+# * **Belastungsprüfung.** Ist die Erholung heute niedrig, der morgige Tag voll, und hat sich bei
+#   dir niedrige Erholung bisher wirklich in schlechteren Abschlüssen gezeigt, macht Jarvis einen
+#   Vorschlag ("Soll ich morgen zwei Termine verschieben?"). Er schlägt nur vor: Termine ändert
+#   er nie selbst, absagen und verschieben fragen einzeln nach Freigabe.
 # =========================================================================
 
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+
+
+
+# So viele Tage braucht ein Vergleich mindestens - sonst sagt Jarvis nur, dass es zu wenig ist.
+ZUSAMMENHANG_MIN_TAGE = 10
+ZUSAMMENHANG_MIN_STUFE = 3
+# Für einen Vorschlag müssen niedrige und gute Erholungstage je so oft vorgekommen sein ...
+BELASTUNG_MIN_STUFE = 5
+# ... und die Abschlussquote an niedrigen Tagen mindestens so weit (als Anteil) darunter liegen.
+BELASTUNG_MIN_ABSTAND = 0.15
+# Die Kalender-Abfrage in Stücken dieser Größe (Tage) - ein langer Zeitraum würde gekürzt.
+KALENDER_STUECK_TAGE = 14
+
+STUFEN_NAMEN = (("rot", "niedrig"), ("gelb", "mittel"), ("gruen", "gut"))
+
+
+def pearson(xs, ys):
+    """Korrelationskoeffizient nach Pearson, von Hand. ``None`` bei weniger als drei Paaren oder ohne Streuung."""
+    if len(xs) != len(ys) or len(xs) < 3:
+        return None
+    n = float(len(xs))
+    mx, my = sum(xs) / n, sum(ys) / n
+    sxx = sum((x - mx) ** 2 for x in xs)
+    syy = sum((y - my) ** 2 for y in ys)
+    if sxx < 1e-12 or syy < 1e-12:
+        return None
+    sxy = sum((x - mx) * (y - my) for x, y in zip(xs, ys))
+    return max(-1.0, min(1.0, sxy / math.sqrt(sxx * syy)))
+
+
+def verkaufstermin(titel, stichwoerter, firmen) -> bool:
+    """Ist das ein Verkaufstermin? Ein Stichwort steht im Titel, oder der Titel nennt einen Interessenten."""
+    text = str(titel or "").lower()
+    if not text:
+        return False
+    for wort in stichwoerter or []:
+        wort = str(wort or "").strip().lower()
+        if wort and wort in text:
+            return True
+    for firma in firmen or []:
+        firma = str(firma or "").strip().lower()
+        if len(firma) >= 4 and firma in text:
+            return True
+    return False
+
+
+def _leis_prozent(anteil) -> str:
+    return "%d Prozent" % int(round(anteil * 100))
+
+
+class Leistung:
+    """Verbindet Erholung, Kalender und Gespräche.
+
+    ``vorschlaege``: der Vorschlags-Speicher; ``vorschlaege_suche``: Funktion, die ihn erst zur Laufzeit
+    liefert (er wird beim Aufbau der Werkzeuge nach diesem Objekt angelegt). ``anzeige``: wohin der Zusammenhang
+    auf die Zentrale geht. ``uhr``: liefert die lokale Zeit als ``datetime``.
+    """
+
+    def __init__(self, memory, kalender, erholung, call_analysis, vorschlaege=None, anzeige=None, uhr=None):
+        self.memory = memory
+        self.kalender = kalender
+        self.erholung = erholung
+        self.call_analysis = call_analysis
+        self.vorschlaege = vorschlaege
+        self.vorschlaege_suche = None
+        self.anzeige = anzeige
+        self._uhr = uhr or datetime.now
+        # Warum die letzte Prüfung nichts vorgeschlagen hat - für das Werkzeug, damit es ehrlich antwortet.
+        self.letzter_grund = ""
+
+    # -- Hilfen ---------------------------------------------------------------
+
+    def _heute(self):
+        return self._uhr().date()
+
+    def _vorschlaege_holen(self):
+        if self.vorschlaege is not None:
+            return self.vorschlaege
+        suche = self.vorschlaege_suche
+        if callable(suche):
+            try:
+                return suche()
+            except Exception:
+                return None
+        return None
+
+    @staticmethod
+    def _stichwoerter() -> list:
+        return [w.strip().lower() for w in str(VERKAUFS_STICHWOERTER or "").split(",") if w.strip()]
+
+    def _firmen(self) -> list:
+        """Namen der Interessenten (Akquise) - ein Termin mit ihnen im Titel ist ein Verkaufstermin."""
+        try:
+            return [z["firma"] for z in self.memory._lesen("SELECT firma FROM leads WHERE firma != ''")]
+        except Exception:
+            return []
+
+    # -- Kalender -------------------------------------------------------------
+
+    def _kalender_stueck(self, ab, tage: int):
+        """Termine ab ``ab`` für ``tage`` Tage. Wird ein Ergebnis gekürzt, halbiert sich das Stück."""
+        ergebnis = self.kalender.termine(tage, ab=datetime(ab.year, ab.month, ab.day))
+        if not ergebnis.get("ok"):
+            return None, ergebnis.get("fehler") or "Der Kalender antwortet nicht."
+        if ergebnis.get("gekuerzt") and tage > 1:
+            halb = tage // 2
+            erste, fehler = self._kalender_stueck(ab, halb)
+            zweite, fehler2 = self._kalender_stueck(ab + timedelta(days=halb), tage - halb)
+            if erste is None or zweite is None:
+                return None, fehler or fehler2
+            return erste + zweite, ""
+        return list(ergebnis.get("termine") or []), ""
+
+    def _kalender_termine(self, ab, tage: int):
+        """Alle Termine von ``ab`` an für ``tage`` Tage. ``(Liste, Fehler)``; ohne Kalender ``(None, Grund)``."""
+        verfuegbar = getattr(self.kalender, "verfuegbar", None)
+        if callable(verfuegbar) and not verfuegbar():
+            return None, "Es ist kein Kalender eingerichtet."
+        alle, rest, start = [], tage, ab
+        while rest > 0:
+            stueck = min(KALENDER_STUECK_TAGE, rest)
+            termine, fehler = self._kalender_stueck(start, stueck)
+            if termine is None:
+                return None, fehler
+            alle += termine
+            start += timedelta(days=stueck)
+            rest -= stueck
+        return alle, ""
+
+    def _tageslast(self, termine) -> dict:
+        """``{tag: (Termine, Verkaufstermine)}`` - ganztägige Einträge zählen nicht als Termin."""
+        stichwoerter, firmen = self._stichwoerter(), self._firmen()
+        last = {}
+        for termin in termine or []:
+            if termin.get("ganztaegig"):
+                continue
+            tag = erholung_tag_text(termin.get("beginn"))
+            if not tag:
+                continue
+            anzahl, verkauf = last.get(tag, (0, 0))
+            last[tag] = (anzahl + 1, verkauf + (1 if verkaufstermin(termin.get("titel"), stichwoerter, firmen) else 0))
+        return last
+
+    # -- Zusammenstellen ------------------------------------------------------
+
+    def tage_zusammenstellen(self, tage: int = 60) -> list:
+        """Eine Zeile je Tag der letzten ``tage`` Tage (bis heute): Erholung, Termine, Gespräche, Quote.
+
+        ``erholung`` und ``termine`` sind ``None``, wo es keine Daten gibt - nie eine erfundene Null.
+        ``quote`` ist gewonnen geteilt durch (gewonnen + verloren), ``None`` ohne entschiedenes Gespräch.
+        ``gespraeche`` zählt alle Gespräche des Tages, ``entschieden`` nur gewonnene und verlorene.
+        """
+        try:
+            tage = max(1, min(90, int(tage)))
+        except (TypeError, ValueError):
+            tage = 60
+        heute = self._heute()
+        ab = heute - timedelta(days=tage)
+        termine, _fehler = self._kalender_termine(ab, tage + 1)
+        last = self._tageslast(termine) if termine is not None else None
+        erholung = {e["tag"]: e["wert"] for e in self.erholung.verlauf(tage + 1)}
+        gespraeche = {}
+        try:
+            zeilen = self.memory._lesen("SELECT datum, ergebnis FROM gespraeche WHERE datum>=? AND datum<=?",
+                                        (ab.isoformat(), heute.isoformat()))
+        except sqlite3.Error:
+            zeilen = []  # noch keine Gespräche festgehalten
+        for zeile in zeilen:
+            tag = erholung_tag_text(zeile["datum"])
+            eintrag = gespraeche.setdefault(tag, {"alle": 0, "gewonnen": 0, "verloren": 0})
+            eintrag["alle"] += 1
+            if zeile["ergebnis"] in ("gewonnen", "verloren"):
+                eintrag[zeile["ergebnis"]] += 1
+        liste = []
+        for i in range(tage + 1):
+            tag = (ab + timedelta(days=i)).isoformat()
+            g = gespraeche.get(tag, {"alle": 0, "gewonnen": 0, "verloren": 0})
+            entschieden = g["gewonnen"] + g["verloren"]
+            wert = erholung.get(tag)
+            liste.append({
+                "tag": tag,
+                "erholung": wert,
+                "band": erholung_band(wert) if wert is not None else None,
+                "termine": last.get(tag, (0, 0))[0] if last is not None else None,
+                "verkaufstermine": last.get(tag, (0, 0))[1] if last is not None else None,
+                "gespraeche": g["alle"], "gewonnen": g["gewonnen"], "verloren": g["verloren"],
+                "entschieden": entschieden,
+                "quote": (g["gewonnen"] / float(entschieden)) if entschieden else None})
+        return liste
+
+    # -- Zusammenhang ---------------------------------------------------------
+
+    @staticmethod
+    def _stufe_rechnen(tage: list) -> dict:
+        entschieden = sum(t["entschieden"] for t in tage)
+        gewonnen = sum(t["gewonnen"] for t in tage)
+        termine = [t["termine"] for t in tage if t["termine"] is not None]
+        verkauf = [t["verkaufstermine"] for t in tage if t["verkaufstermine"] is not None]
+        genug = len(tage) >= ZUSAMMENHANG_MIN_STUFE
+        return {"tage": len(tage),
+                "termine": round(sum(termine) / float(len(termine)), 1) if termine else None,
+                "verkaufstermine": round(sum(verkauf) / float(len(verkauf)), 1) if verkauf else None,
+                "gespraeche": entschieden, "gewonnen": gewonnen,
+                "abschlussquote": round(gewonnen / float(entschieden), 3) if entschieden and genug else None,
+                "zu_wenig": not genug}
+
+    def zusammenhang(self, tage: int = 60, anzeigen: bool = False) -> dict:
+        """Wie Erholung und Abschlussquote zusammenhängen - mit Fallzahlen, nie mit einer Ursache.
+
+        ``anzeigen`` schreibt das Ergebnis auf die Zentrale (nur wenn ein Mensch gefragt hat).
+        """
+        liste = self.tage_zusammenstellen(tage)
+        mit_erholung = [t for t in liste if t["erholung"] is not None]
+        paare = [t for t in mit_erholung if t["quote"] is not None]
+        n = len(paare)
+        eimer = {"rot": [], "gelb": [], "gruen": []}
+        for t in paare:
+            eimer[t["band"]].append(t)
+        stufen = {name: self._stufe_rechnen(eimer[name]) for name in eimer}
+        tabelle = [dict(stufe=name, tage=s["tage"], termine=s["termine"], gespraeche=s["gespraeche"],
+                        abschlussquote=s["abschlussquote"]) for name, s in stufen.items()]
+        gesamt_g = sum(t["gewonnen"] for t in liste)
+        gesamt_v = sum(t["verloren"] for t in liste)
+        gesamt = {"gewonnen": gesamt_g, "verloren": gesamt_v,
+                  "abschlussquote": round(gesamt_g / float(gesamt_g + gesamt_v), 3) if gesamt_g + gesamt_v else None}
+        r = pearson([t["erholung"] for t in paare], [t["quote"] for t in paare]) if n >= ZUSAMMENHANG_MIN_TAGE else None
+        rot, gruen = stufen["rot"], stufen["gruen"]
+        genug = False
+        if not mit_erholung:
+            text = ("Für diese Tage habe ich noch keine Erholungswerte - zu wenig für eine Aussage. Möglich: "
+                    "Apple-Health-Export, Oura oder Whoop verbinden.")
+        elif n < ZUSAMMENHANG_MIN_TAGE:
+            text = "%d Tage mit Erholungswert und entschiedenem Gespräch - zu wenig für eine Aussage." % n
+        elif rot["zu_wenig"] or gruen["zu_wenig"]:
+            text = ("%d Tage, davon %d mit niedriger und %d mit guter Erholung - zu wenig für eine Aussage "
+                    "(je Gruppe mindestens %d Tage nötig)." % (n, rot["tage"], gruen["tage"], ZUSAMMENHANG_MIN_STUFE))
+        else:
+            genug = True
+            text = ("An %d Tagen mit niedriger Erholung hast du %d von %d entschiedenen Gesprächen gewonnen, "
+                    "an %d Tagen mit guter Erholung %d von %d (%d Tage insgesamt)."
+                    % (rot["tage"], rot["gewonnen"], rot["gespraeche"], gruen["tage"], gruen["gewonnen"],
+                       gruen["gespraeche"], n))
+            if r is not None:
+                text += " Korrelation r = %s." % ("%.2f" % r).replace(".", ",")
+            text += " Zusammenhang, keine Ursache."
+        ergebnis = {"ok": True, "n": n, "tage_mit_erholung": len(mit_erholung), "ausreichend": genug,
+                    "stufen": stufen, "tabelle": tabelle, "r": None if r is None else round(r, 2),
+                    "gesamt": gesamt, "text": text, "hinweis": "Zusammenhang, keine Ursache."}
+        if anzeigen:
+            sicht_teil_schreiben(self.anzeige, {"zusammenhang": {"text": text, "n": n, "tabelle": tabelle}})
+        return ergebnis
+
+    # -- Belastung ------------------------------------------------------------
+
+    def belastung_pruefen(self, heute=None) -> str:
+        """Prüft, ob der morgige Tag bei der heutigen Erholung zu voll ist. Gibt einen Vorschlag zurück - oder ``''``.
+
+        Vorgeschlagen wird nur, wenn alles zutrifft: Die Erholung von heute liegt unter ``BELASTUNG_SCHWELLE``,
+        morgen stehen mindestens ``BELASTUNG_MIN_TERMINE`` Termine an, und deine Zahlen zeigen einen Unterschied
+        (an mindestens fünf niedrigen und fünf guten Tagen, Abschlussquote niedrig mindestens 15 Punkte darunter).
+        Der Vorschlag geht über ``vorschlaege.einbringen`` - einmal je Tag. Geändert wird nichts.
+        ``letzter_grund`` sagt, warum nichts kam.
+        """
+        self.letzter_grund = ""
+        if not VORSCHLAEGE_AN:
+            self.letzter_grund = "Vorschläge sind ausgeschaltet (VORSCHLAEGE_AN)."
+            return ""
+        vorschlaege = self._vorschlaege_holen()
+        if vorschlaege is None:
+            self.letzter_grund = "Es gibt keinen Vorschlags-Speicher."
+            return ""
+        heute_datum = erholung_tag_datum(heute) or self._heute()
+        tag = heute_datum.isoformat()
+        # Frische Werte von Oura oder Whoop, wenn die letzten länger her sind - Fehler bleiben ohne Folgen.
+        aktualisieren = getattr(self.erholung, "aktualisieren", None)
+        if callable(aktualisieren):
+            try:
+                aktualisieren()
+            except Exception as fehler:
+                print("[leistung] Abruf nicht möglich: %s" % fehler)
+        erholung = self.erholung.heute()
+        if not erholung.get("ok") or erholung.get("tag") != tag:
+            self.letzter_grund = "Ich kenne die Erholung von heute nicht."
+            return ""
+        wert = erholung["wert"]
+        if wert >= BELASTUNG_SCHWELLE:
+            self.letzter_grund = ("Die Erholung liegt heute bei %d von 100 - nicht unter der Schwelle von %d."
+                                  % (wert, BELASTUNG_SCHWELLE))
+            return ""
+        morgen = heute_datum + timedelta(days=1)
+        termine, fehler = self._kalender_termine(morgen, 1)
+        if termine is None:
+            self.letzter_grund = "Den Kalender von morgen kann ich nicht lesen: %s" % fehler
+            return ""
+        last = self._tageslast(termine).get(morgen.isoformat(), (0, 0))
+        anzahl, verkauf = last
+        if anzahl < BELASTUNG_MIN_TERMINE:
+            self.letzter_grund = "Morgen stehen nur %d Termine an (ab %d wird geprüft)." % (anzahl, BELASTUNG_MIN_TERMINE)
+            return ""
+        zusammenhang = self.zusammenhang(60)
+        stufen = zusammenhang.get("stufen") or {}
+        rot, gruen = stufen.get("rot") or {}, stufen.get("gruen") or {}
+        if (rot.get("tage", 0) < BELASTUNG_MIN_STUFE or gruen.get("tage", 0) < BELASTUNG_MIN_STUFE
+                or rot.get("abschlussquote") is None or gruen.get("abschlussquote") is None):
+            self.letzter_grund = ("Meine Zahlen reichen noch nicht: %d Tage mit niedriger und %d mit guter Erholung "
+                                  "(je mindestens %d nötig)." % (rot.get("tage", 0), gruen.get("tage", 0), BELASTUNG_MIN_STUFE))
+            return ""
+        if gruen["abschlussquote"] - rot["abschlussquote"] < BELASTUNG_MIN_ABSTAND:
+            self.letzter_grund = "An erholten Tagen schließt du nicht deutlich besser ab als an müden."
+            return ""
+        zahl = "zwei Termine" if anzahl >= 4 else "einen Termin"
+        text = ("Deine Erholung liegt heute bei %d von 100. Morgen hast du %d Termine%s. An Tagen mit so niedriger "
+                "Erholung hast du bisher %d von %d entschiedenen Gesprächen gewonnen, an guten Tagen %d von %d. "
+                "Soll ich morgen %s verschieben oder absagen? Welche, sage ich dir vorher."
+                % (wert, anzahl, (", davon %d Verkaufstermine" % verkauf) if verkauf else "",
+                   rot["gewonnen"], rot["gespraeche"], gruen["gewonnen"], gruen["gespraeche"], zahl))
+        ergebnis = vorschlaege.einbringen("belastung:" + tag, text, "erholung")
+        if not ergebnis.get("ok"):
+            self.letzter_grund = ("Vorschläge sind ausgeschaltet." if ergebnis.get("aus")
+                                  else ergebnis.get("fehler", "Der Vorschlag ließ sich nicht festhalten."))
+            return ""
+        if ergebnis.get("doppelt"):
+            self.letzter_grund = "Den Vorschlag für heute habe ich schon gemacht."
+            return ""
+        return text
+
+    def belastung_job(self) -> str:
+        """Für den Zeitplan: wie ``belastung_pruefen``, aber leer, wenn der Vorschlag schon laut gesagt wurde.
+
+        Hat der Vorschlags-Speicher eine eigene Ausgabe, sagt ``einbringen`` den Text selbst - dann bliebe er
+        sonst doppelt.
+        """
+        text = self.belastung_pruefen()
+        if text and getattr(self._vorschlaege_holen(), "ausgabe", None) is not None:
+            return ""
+        return text
 
 
 # =========================================================================
@@ -22540,19 +25708,1368 @@ main:has(~ .tippen.zeigen){padding-bottom:84px}
 
 
 # =========================================================================
-# sehen  -  Die Kamera-Seite /sehen – wird in Paket P5 gebaut.
+# sehen  -  Die Kamera-Seite ``/sehen``: Webcam, 21 Punkte der Hand, Handruhe, Daumen hoch, Orb.
+# 
+# Alles läuft im Browser. **Das Bild verlässt die Seite nie** - es wird weder hochgeladen
+# noch aufgezeichnet noch zwischengespeichert; an Jarvis gehen nur Messzahlen. Die
+# Seite darf dafür gar nichts nach außen: Ihr Sicherheitskopf (``SEHEN_CSP``) erlaubt
+# Verbindungen nur zu Jarvis selbst, und die Erkennung (MediaPipe) wird von Jarvis
+# ausgeliefert, nicht von jsDelivr oder Google (siehe ``sicht.py``).
+# 
+# **Was die Seite kann**
+# 
+# * Startfeld mit der ersten Meldung, die zutrifft: Kamera aus (``SICHT_AN``), Dateien
+#   nicht geladen, keine sichere Adresse - sonst der Knopf "Kamera einschalten".
+# * Webcam mit den 21 Punkten der Hand, Bildrate und Rechenzeit; ein deutliches
+#   "Kamera an" mit "Aus"-Knopf. Bei ``pagehide`` oder unsichtbarer Seite geht die
+#   Kamera aus.
+# * **Handruhe** (``handruhe``): acht Sekunden Fingerspitzen messen, mit der Handlänge
+#   in Millimeter schätzen, nach dem Rhythmus suchen. Unter 25 Bildern pro Sekunde
+#   wird abgelehnt ("Mehr Licht, bitte"), weil sich ein schnelles Zittern sonst auf
+#   eine falsche Frequenz faltet. Ehrlich: Selbstbeobachtung gegen die eigenen
+#   Werte, kein Medizinprodukt, eine Webcam sieht nur Bewegungen ab etwa einem
+#   halben Millimeter.
+# * **Daumen hoch** beantwortet genau eine offene Freigabe oder den jüngsten
+#   Vorschlag - bewusst schwer auszulösen (``istDaumenHoch``, ``daumenSchritt``):
+#   Geometrie und Modell müssen sich einig sein, 1,5 Sekunden halten, erst scharf
+#   nach einer halben Sekunde ohne Daumen, danach drei Sekunden Sperre. Daumen
+#   runter (0,8 Sekunden) heißt Nein.
+# * Der Orb (``/gehirn?eingebettet=1&form=kugel``) bekommt Pegel und Sprechen per
+#   ``postMessage`` von dieser Seite weitergereicht.
+# 
+# **Zwei Betriebsarten.** In der Web-App (Anschluss 8765) geht alles. Auf der
+# Anzeige des Dienstes (8766, nur lesen) laufen Kamera, Punkte und Handruhe live,
+# aber Speichern und Gesten gehen nicht - die Seite sagt das und schickt dort keine
+# POST-Anfragen.
+# 
+# Rechenteile (``// <rechnen>``) sind reine Funktionen ohne Seitenzugriff; die
+# Prüfungen führen sie mit node aus.
 # =========================================================================
 
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
 
+# Was die Seite darf: nur zu sich selbst sprechen. 'unsafe-inline' für das eine Skript der
+# Seite, 'wasm-unsafe-eval' damit der Browser die Erkennung (WASM) übersetzen darf.
+SEHEN_CSP = ("default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'; "
+             "connect-src 'self'; img-src 'self' data: blob:; media-src 'self' blob: mediastream:; "
+             "worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; frame-src 'self'; "
+             "object-src 'none'; base-uri 'none'")
+# Kamera nur für diese Seite selbst, Mikrofon nie.
+SEHEN_ERLAUBNIS = "camera=(self), microphone=()"
+# Solange die Live-Kamera ausgeschaltet ist (SICHT_AN), gibt der Browser die Kamera gar nicht her.
+SEHEN_ERLAUBNIS_AUS = "camera=(), microphone=()"
+
+_SEITE_KOPF = r"""<!DOCTYPE html>
+<html lang="de"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="/symbol.svg" type="image/svg+xml">
+<title>Jarvis – Sicht</title>
+<style>
+""" + BASIS_STIL + r"""
+html,body{overflow:auto;height:auto;min-height:100%}
+body{padding:0 16px 32px}
+a{color:var(--glut)}
+.kopf{display:flex;align-items:center;gap:18px;padding:14px 0;min-height:64px;flex-wrap:wrap;max-width:1280px;margin:0 auto}
+.kopf h1{font:600 13px var(--mono);letter-spacing:.42em;color:var(--glut);text-transform:uppercase}
+.kopf .zurueck{font:500 11px var(--mono);letter-spacing:.2em;color:var(--leise);text-transform:uppercase;text-decoration:none}
+.kopf .zurueck:hover{color:var(--hell)}
+.an{display:flex;align-items:center;gap:10px;margin-left:auto;padding:5px 6px 5px 12px;border:1px solid var(--rot);
+ border-radius:6px;background:rgba(255,90,77,.16);color:#fff;font:600 12px var(--mono);letter-spacing:.16em;text-transform:uppercase}
+.an[hidden]{display:none}
+.an i{width:10px;height:10px;border-radius:50%;background:var(--rot);box-shadow:0 0 12px var(--rot);animation:atmen 1.4s ease-in-out infinite}
+@keyframes atmen{50%{transform:scale(1.5);opacity:.5}}
+.knopf{font:600 13px var(--sans);min-height:40px;padding:8px 14px;border-radius:6px;border:1px solid var(--orange);
+ background:rgba(255,106,31,.14);color:var(--hell);cursor:pointer}
+.knopf:hover:not(:disabled){background:rgba(255,106,31,.28)}
+.knopf:disabled{opacity:.45;cursor:not-allowed}
+.knopf.klein{min-height:30px;padding:3px 10px;font-size:12px}
+.knopf:focus-visible,input:focus-visible,a:focus-visible{outline:2px solid var(--hell);outline-offset:2px}
+.raster{display:grid;grid-template-columns:minmax(0,1.6fr) minmax(280px,1fr);gap:18px;max-width:1280px;margin:0 auto;align-items:start}
+@media (max-width:900px){.raster{grid-template-columns:minmax(0,1fr)}}
+.bild{position:relative;aspect-ratio:16/9;background:#000;border:1px solid var(--linie);border-radius:8px;overflow:hidden}
+.bild video,.bild canvas{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;transform:scaleX(-1)}
+.hud{position:absolute;left:10px;right:10px;top:8px;display:flex;justify-content:space-between;gap:10px;pointer-events:none;
+ font:500 11px var(--mono);letter-spacing:.14em;color:var(--hell);text-transform:uppercase;text-shadow:0 1px 3px #000}
+.hud b{color:var(--gruen);font-weight:600}
+.hud span:last-child{text-align:right;white-space:nowrap}
+@media (max-width:600px){.hud{flex-direction:column;gap:2px;font-size:10px;letter-spacing:.08em}.hud span:last-child{text-align:left}}
+.start{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:18px;
+ text-align:center;background:rgba(7,4,3,.82)}
+.start[hidden]{display:none}
+.start p{max-width:46ch;line-height:1.45}
+.klein{font-size:12px;color:var(--leise)}
+.ring{position:absolute;left:50%;bottom:14px;width:64px;height:64px;transform:translateX(-50%) rotate(-90deg);display:none}
+.ring.sichtbar{display:block}
+.ring circle{fill:rgba(7,4,3,.6);stroke-width:4}
+.ring .spur{stroke:rgba(255,255,255,.18)}
+.ring .fuell{stroke:var(--gruen);fill:none;stroke-linecap:round}
+.ring.nein .fuell{stroke:var(--rot)}
+.hinweisbox{margin:10px 0 0;padding:9px 12px;border:1px solid var(--linie);border-radius:6px;background:rgba(255,154,82,.08);
+ color:var(--hell);line-height:1.45;font-size:13px}
+.hinweisbox[hidden]{display:none}
+.seite{display:flex;flex-direction:column;gap:14px;min-width:0}
+.karte{border:1px solid var(--linie);border-radius:8px;padding:14px;background:rgba(13,7,5,.7);min-width:0}
+.karte h2{font:600 11px var(--mono);letter-spacing:.3em;color:var(--glut);text-transform:uppercase;margin-bottom:10px}
+.orb{padding:0;overflow:hidden}
+.orb iframe{display:block;width:100%;height:230px;border:0;background:transparent}
+.orb .etikett{padding:6px 12px 8px;font:500 10px var(--mono);letter-spacing:.2em;color:var(--leise);text-transform:uppercase}
+.karte dl{display:grid;grid-template-columns:auto 1fr;gap:4px 12px;font-size:13px;line-height:1.4}
+.karte dt{font:500 10px var(--mono);letter-spacing:.2em;color:var(--leise);text-transform:uppercase;padding-top:2px}
+.karte dd{overflow-wrap:anywhere}
+.zeile{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:6px 0}
+.zeile label{font-size:12px;color:var(--leise);display:flex;align-items:center;gap:8px}
+input[type=number]{width:72px;padding:6px 8px;border-radius:6px;border:1px solid var(--linie);background:#120b08;color:var(--text);font:500 13px var(--mono)}
+.balken{height:6px;border-radius:3px;background:rgba(255,255,255,.12);overflow:hidden;margin:8px 0}
+.balken[hidden]{display:none}
+.balken i{display:block;height:100%;width:0;background:var(--orange)}
+.ergebnis{margin-top:8px;line-height:1.45;font-size:13px}
+.ergebnis.gut{color:var(--hell)}
+.ergebnis.schlecht{color:var(--rot)}
+.statuszeile{font-size:12px;color:var(--leise);min-height:1.4em}
+.verlauf svg{display:block;width:100%;height:auto;margin-top:8px}
+.verlauf text{font:10px var(--mono);fill:var(--leise)}
+.fuss{max-width:1280px;margin:18px auto 0;font-size:12px;color:var(--leise);line-height:1.5}
+@media (prefers-reduced-motion: reduce){.an i{animation:none}}
+</style></head><body>
+<header class="kopf">
+<a class="zurueck" id="zurueck" href="/">Jarvis</a>
+<h1>Sicht</h1>
+<div class="an" id="kameraan" role="status" hidden><i></i><span>Kamera an</span>
+<button class="knopf klein" id="aus" type="button">Aus</button></div>
+</header>
+<main class="raster">
+<section aria-label="Kamerabild">
+<div class="bild" id="bild">
+<video id="video" playsinline muted></video>
+<canvas id="leinwand"></canvas>
+<div class="hud"><span id="hudhand"></span><span id="hudfps"></span></div>
+<svg class="ring" id="ring" viewBox="0 0 44 44" aria-hidden="true"><circle class="spur" cx="22" cy="22" r="18"/><circle class="fuell" id="ringfuell" cx="22" cy="22" r="18"/></svg>
+<div class="start" id="start"><p id="startmeldung">Einen Moment …</p>
+<button class="knopf" id="startknopf" type="button" hidden>Kamera einschalten</button>
+<p class="klein" id="startdatenschutz" hidden>Das Bild bleibt in diesem Browser. Gespeichert werden nur Messzahlen, nie ein Bild.</p></div>
+</div>
+<p class="hinweisbox" id="modushinweis" hidden></p>
+</section>
+<aside class="seite">
+<section class="karte orb" aria-label="Orb"><iframe id="orb" title="Orb, der mitspricht" tabindex="-1"></iframe>
+<div class="etikett" id="orbetikett">Orb · ruhig</div></section>
+<section class="karte" id="gestenkarte" aria-live="polite"><h2 id="gestenkopf">Geste</h2>
+<dl id="gestenzeilen"></dl>
+<p class="statuszeile" id="gestenstatus"></p>
+<p class="ergebnis" id="gestentext"></p></section>
+<section class="karte" aria-label="Handruhe"><h2>Handruhe</h2>
+<div class="zeile">
+<button class="knopf" id="mruhe" type="button" disabled>Ruhemessung (Hand flach auf den Tisch, 8 s)</button>
+<button class="knopf" id="mhalten" type="button" disabled>Haltemessung (Arm ausgestreckt, 8 s)</button></div>
+<div class="zeile"><label for="handlaenge">Handlänge Handgelenk bis Mittelfingerwurzel, mm
+<input id="handlaenge" type="number" min="60" max="130" step="1" value="95"></label></div>
+<p class="klein">Ruhemessung: Hand flach auf den Tisch - das ist das Grundrauschen von Kamera und Licht. Haltemessung: Arm ausstrecken und die Hand ruhig halten. Verglichen wird nur mit deinen eigenen letzten 14 Tagen.</p>
+<div class="balken" id="balken" hidden><i id="balkenfuell"></i></div>
+<p class="statuszeile" id="erholungszeile"></p>
+<p class="statuszeile" id="messstatus"></p>
+<p class="ergebnis" id="messergebnis" aria-live="polite"></p>
+<div class="verlauf" id="verlauf"></div>
+</section>
+</aside>
+</main>
+<p class="fuss">Selbstbeobachtung, kein Medizinprodukt. Eine Webcam sieht nur Bewegungen ab etwa einem halben Millimeter.
+Das Bild bleibt in diesem Browser: Es wird weder hochgeladen noch aufgezeichnet. Gespeichert werden nur Messzahlen.</p>
+<script>
+"""
+
+_SEITE_RECHNEN = r"""
+// <rechnen>
+// Reine Funktionen: kein Seitenzugriff, damit sie sich mit node prüfen lassen.
+var SPITZEN=[4,8,12,16,20];
+var MIN_FPS=25;
+
+// Eine Probe für die Handruhe aus einer erkannten Hand. hand: 21 Punkte mit x, y in 0..1;
+// b, h: Breite und Höhe des Bildes in Pixeln. x und y sind der Mittelpunkt der fünf
+// Fingerspitzen in Pixeln, geteilt durch die Handflächenlänge |0 -> 9| - so zählt der Abstand
+// zur Kamera nicht. Fehlt die Hand oder ist die Handfläche kürzer als 8 % der Bildhöhe: ok=false.
+function handProbe(hand,t,b,h){
+ if(!hand||hand.length<21)return {t:t,x:0,y:0,ok:false};
+ var p=Math.hypot((hand[9].x-hand[0].x)*b,(hand[9].y-hand[0].y)*h);
+ if(!(p>=0.08*h))return {t:t,x:0,y:0,ok:false};
+ var x=0,y=0;
+ for(var i=0;i<SPITZEN.length;i++){x+=hand[SPITZEN[i]].x*b;y+=hand[SPITZEN[i]].y*h}
+ return {t:t,x:x/SPITZEN.length/p,y:y/SPITZEN.length/p,ok:true};
+}
+
+// Die Hand in Pixel umrechnen, damit Längen und Winkel in x und y gleich zählen.
+function handPixel(hand,b,h){
+ var aus=[];
+ for(var i=0;i<hand.length;i++)aus.push({x:hand[i].x*b,y:hand[i].y*h});
+ return aus;
+}
+
+// Wie ruhig ist die Hand? proben: [{t (ms), x, y, ok}] über etwa acht Sekunden.
+function handruhe(proben,handlaengeMm){
+ var n=proben?proben.length:0;
+ if(n<2)return {ok:false,grund:"Zu wenige Bilder für eine Messung."};
+ var dauerS=(proben[n-1].t-proben[0].t)/1000;
+ var fps=(n-1)/Math.max(dauerS,1e-6);
+ if(!(fps>=MIN_FPS))return {ok:false,fps:fps,bilder:n,dauer_s:dauerS,
+  grund:"Mehr Licht, bitte – die Kamera liefert nur "+Math.round(fps)+" Bilder pro Sekunde."};
+ var gut=[];
+ for(var i=0;i<n;i++)if(proben[i].ok)gut.push(proben[i]);
+ if(gut.length<0.85*n)return {ok:false,fps:fps,bilder:n,dauer_s:dauerS,
+  grund:"Die Hand war nur in "+Math.round(100*gut.length/n)+" % der Bilder zu sehen. Bitte die Hand ruhig und ganz ins Bild halten."};
+ // 1) Auf ein gleichmäßiges 30-Hz-Raster bringen (linear, nur aus gültigen Proben)
+ var FS=30,t0=gut[0].t,t1=gut[gut.length-1].t;
+ var m=Math.floor((t1-t0)/1000*FS)+1;
+ if(m<32)return {ok:false,fps:fps,bilder:n,dauer_s:dauerS,grund:"Zu wenige gültige Bilder für eine Messung."};
+ var xs=new Float64Array(m),ys=new Float64Array(m),j=0;
+ for(var i=0;i<m;i++){
+  var tz=t0+i*1000/FS;
+  while(j<gut.length-2&&gut[j+1].t<tz)j++;
+  var a=gut[j].t,e=gut[j+1].t;
+  var w=e>a?Math.min(1,Math.max(0,(tz-a)/(e-a))):0;
+  xs[i]=gut[j].x*(1-w)+gut[j+1].x*w;
+  ys[i]=gut[j].y*(1-w)+gut[j+1].y*w;
+ }
+ // 2) Hochpass: den gleitenden Mittelwert über 9 Bilder (0,3 s) abziehen - das nimmt das langsame Treiben weg
+ var K=4,hx=[],hy=[];
+ for(var i=K;i<m-K;i++){
+  var sx=0,sy=0;
+  for(var q=-K;q<=K;q++){sx+=xs[i+q];sy+=ys[i+q]}
+  hx.push(xs[i]-sx/(2*K+1));hy.push(ys[i]-sy/(2*K+1));
+ }
+ // 3) Stärke: Effektivwert in Handlängen, mit der Handlänge in Millimeter
+ var L=hx.length,quad=0;
+ for(var i=0;i<L;i++)quad+=hx[i]*hx[i]+hy[i]*hy[i];
+ var mm=Math.sqrt(quad/L)*handlaengeMm;
+ // 4) Rhythmus: Hann-Fenster, kleine DFT von 3 bis 14 Hz in 0,25-Hz-Schritten
+ var freq=[],leist=[];
+ for(var f=3;f<=14.0001;f+=0.25){
+  var rx=0,ix=0,ry=0,iy=0;
+  for(var i=0;i<L;i++){
+   var fen=0.5-0.5*Math.cos(2*Math.PI*i/(L-1)),ph=2*Math.PI*f*i/FS,c=Math.cos(ph),s=Math.sin(ph);
+   rx+=hx[i]*fen*c;ix+=hx[i]*fen*s;ry+=hy[i]*fen*c;iy+=hy[i]*fen*s;
+  }
+  freq.push(f);leist.push(rx*rx+ix*ix+ry*ry+iy*iy);
+ }
+ var sortiert=leist.slice().sort(function(u,v){return u-v});
+ var median=Math.max(sortiert[sortiert.length>>1],1e-18);
+ var top=0;
+ for(var i=1;i<leist.length;i++)if(leist[i]>leist[top])top=i;
+ var verhaeltnis=Math.min(1e6,leist[top]/median);
+ return {ok:true,mm:mm,rhythmus_hz:verhaeltnis>20?freq[top]:null,spitze_verhaeltnis:verhaeltnis,
+  fps:fps,bilder:n,dauer_s:dauerS};
+}
+
+function abst(p,q){return Math.hypot(p.x-q.x,p.y-q.y)}
+// Winkel der Strecke p -> q zur Senkrechten in Grad (0 = zeigt nach oben; y wächst nach unten)
+function winkelSenkrecht(p,q){return Math.abs(Math.atan2(q.x-p.x,-(q.y-p.y))*180/Math.PI)}
+
+// Zeigt die Hand "Daumen hoch"? hand: 21 Punkte in Pixeln, geste: {categoryName, score} des Modells.
+// streng=true gilt zum Einstieg, streng=false zum Dabeibleiben (Hysterese).
+function istDaumenHoch(hand,geste,streng){
+ if(!hand||hand.length<21)return false;
+ var P=abst(hand[0],hand[9]);
+ if(!(P>0))return false;
+ var lang=abst(hand[2],hand[4])>0.55*P;
+ var oben=hand[4].y<hand[3].y&&hand[3].y<hand[2].y&&winkelSenkrecht(hand[2],hand[4])<(streng?35:50);
+ var abstand=(streng?0.15:0.05)*P,hoechster=true;
+ for(var i=0;i<21;i++)if(i!==4&&!(hand[4].y<hand[i].y-abstand))hoechster=false;
+ var spitzen=[[6,8],[10,12],[14,16],[18,20]],eingerollt=true;
+ for(var i=0;i<4;i++)if(!(abst(hand[spitzen[i][1]],hand[0])<abst(hand[spitzen[i][0]],hand[0])*(streng?1:1.1)))eingerollt=false;
+ var modell=!!geste&&geste.categoryName==="Thumb_Up"&&geste.score>(streng?0.7:0.5);
+ return lang&&oben&&hoechster&&eingerollt&&modell;
+}
+function istDaumenRunter(geste){return !!geste&&geste.categoryName==="Thumb_Down"&&geste.score>0.7}
+
+var DAUMEN_HALTEN_MS=1500,DAUMEN_NEIN_MS=800,DAUMEN_LUECKE_MS=120,DAUMEN_FREI_MS=500,DAUMEN_SPERRE_MS=3000;
+// Der Zustand der Geste. -1 heißt: läuft nicht.
+function daumenNeu(){return {scharf:false,ohneSeit:-1,seit:-1,zuletzt:-1,runterSeit:-1,runterZuletzt:-1,gesperrtBis:-1}}
+
+// Ein Bild weiter. t: Zeit in ms, hand: 21 Punkte in Pixeln oder null, geste: Modellergebnis oder null.
+// Gibt {aktion: "" | "ja" | "nein", fortschritt: 0..1, scharf, art: "" | "ja" | "nein"} zurück und
+// verändert z. Scharf wird die Geste erst, wenn eine halbe Sekunde lang kein Daumen zu sehen war -
+// ein Daumen, der schon oben war, als die Frage kam, zählt nicht.
+function daumenSchritt(z,t,hand,geste){
+ var erg={aktion:"",fortschritt:0,scharf:!!z.scharf,art:""};
+ if(z.gesperrtBis>=0&&t<z.gesperrtBis){
+  z.scharf=false;z.ohneSeit=-1;z.seit=-1;z.runterSeit=-1;erg.scharf=false;return erg;
+ }
+ var runter=istDaumenRunter(geste);
+ if(!z.scharf){
+  if(istDaumenHoch(hand,geste,false)||runter)z.ohneSeit=-1;
+  else{
+   if(z.ohneSeit<0)z.ohneSeit=t;
+   if(t-z.ohneSeit>=DAUMEN_FREI_MS)z.scharf=true;
+  }
+  erg.scharf=z.scharf;
+  return erg;
+ }
+ var hoch=istDaumenHoch(hand,geste,z.seit<0);   // streng nur zum Einstieg
+ if(hoch){z.zuletzt=t;if(z.seit<0)z.seit=t;z.runterSeit=-1}
+ else if(z.seit>=0&&t-z.zuletzt>DAUMEN_LUECKE_MS)z.seit=-1;
+ if(runter&&!hoch){z.runterZuletzt=t;if(z.runterSeit<0)z.runterSeit=t;z.seit=-1}
+ else if(z.runterSeit>=0&&t-z.runterZuletzt>DAUMEN_LUECKE_MS)z.runterSeit=-1;
+ var fh=z.seit>=0?Math.min(1,(t-z.seit)/DAUMEN_HALTEN_MS):0;
+ var fn=z.runterSeit>=0?Math.min(1,(t-z.runterSeit)/DAUMEN_NEIN_MS):0;
+ if(fh>=1||fn>=1){
+  erg.aktion=fh>=1?"ja":"nein";
+  z.scharf=false;z.ohneSeit=-1;z.seit=-1;z.runterSeit=-1;z.gesperrtBis=t+DAUMEN_SPERRE_MS;
+  erg.scharf=false;erg.fortschritt=1;erg.art=erg.aktion;
+  return erg;
+ }
+ erg.fortschritt=Math.max(fh,fn);erg.art=fh>=fn?(fh>0?"ja":""):"nein";
+ return erg;
+}
+// </rechnen>
+"""
+
+_SEITE_SKRIPT = r"""
+var SCHLUESSEL="{{SCHLUESSEL}}";
+function url(p){return SCHLUESSEL?p+(p.indexOf("?")<0?"?":"&")+"schluessel="+encodeURIComponent(SCHLUESSEL):p}
+function $(s){return document.querySelector(s)}
+var REDUZIERT=matchMedia("(prefers-reduced-motion: reduce)").matches;
+var SVGNS="http://www.w3.org/2000/svg";
+function el(tag,attr,text){var e=document.createElement(tag);if(attr)for(var k in attr)e.setAttribute(k,attr[k]);if(text!=null)e.textContent=text;return e}
+function svg(tag,attr){var e=document.createElementNS(SVGNS,tag);if(attr)for(var k in attr)e.setAttribute(k,attr[k]);return e}
+function leeren(e){while(e.firstChild)e.removeChild(e.firstChild)}
+function komma(x,n){return Number(x).toFixed(n==null?1:n).replace(".",",")}
+async function holenJson(pfad,koerper){
+ var opt={cache:"no-store"};
+ if(koerper!==undefined){opt.method="POST";opt.headers={"Content-Type":"application/json"};opt.body=JSON.stringify(koerper)}
+ var r=await fetch(url(pfad),opt),d={};
+ try{d=await r.json()}catch(f){}
+ return {status:r.status,daten:d};
+}
+
+var VERBINDUNGEN=[[0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],[5,9],[9,10],[10,11],[11,12],[9,13],[13,14],[14,15],[15,16],[13,17],[0,17],[17,18],[18,19],[19,20]];
+var MESSDAUER=8000;
+var VIDEO=$("#video"),LEINWAND=$("#leinwand"),G=LEINWAND.getContext("2d");
+var STAND=null,SCHREIBEN=true,AN=false,STARTET=false,SITZUNG=0,ERKENNER=null;
+var LETZTE_ZEIT=-1,LETZTES_VIDEO=-1,FEHLERZAHL=0,ZEITEN=[],RECHENMS=0;
+var MESS=null,RUHE_MM=null;
+var FREIGABEN=[],VORSCHLAG=null,AKTIV=null,GESTE=daumenNeu(),GESTENZEILE="";
+
+// ---- Startfeld ------------------------------------------------------------------------------
+function startZeigen(text,knopf){
+ $("#startmeldung").textContent=text;$("#startknopf").hidden=!knopf;$("#startdatenschutz").hidden=!knopf;$("#start").hidden=false;
+}
+function modusHinweis(){
+ var b=$("#modushinweis");
+ if(SCHREIBEN){b.hidden=true;return}
+ b.textContent="Das ist die Anzeige des Dienstes: Kamera, Punkte und Handruhe laufen live, aber Speichern und Gesten gehen nur in der Web-App.";
+ b.hidden=false;
+}
+async function standHolen(){
+ try{
+  var r=await holenJson("/api/sicht/stand");
+  if(r.status===200&&r.daten&&r.daten.ok){STAND=r.daten;SCHREIBEN=r.daten.schreiben!==false;VORSCHLAG=r.daten.vorschlag||null;erholungZeigen();return true}
+ }catch(f){}
+ return false;
+}
+function erholungZeigen(){
+ var e=STAND&&STAND.erholung,z=$("#erholungszeile");
+ z.textContent=e&&typeof e.wert==="number"?"Erholung heute: "+Math.round(e.wert)+" von 100"+(e.quelle?" ("+e.quelle+")":"")+" - Schätzung, kein Medizinprodukt.":"";
+}
+async function startPruefen(vorspann){
+ var ok=await standHolen();
+ var pre=vorspann?vorspann+" ":"";
+ if(!ok){startZeigen(pre+"Ich erreiche Jarvis gerade nicht. Bitte die Seite neu laden.",false);return}
+ modusHinweis();
+ if(!STAND.an){startZeigen(pre+"Die Live-Kamera ist ausgeschaltet. Einschalten: python3 jarvis.py sicht an – danach Jarvis einmal neu starten.",false);return}
+ if(!STAND.dateien_da){startZeigen(pre+"Die Handerkennung ist noch nicht geladen. Einmal im Terminal: python3 jarvis.py sicht laden (etwa 31 MB, von jsDelivr und Google).",false);return}
+ if(!window.isSecureContext||!navigator.mediaDevices){startZeigen(pre+"Die Kamera geht nur direkt am Mac (localhost), nicht über das WLAN.",false);return}
+ var h=Number(STAND.handlaenge_mm);
+ if(!handlaengeGesetzt&&h>=60&&h<=130)$("#handlaenge").value=String(Math.round(h));
+ startZeigen(vorspann?vorspann:"Die Kamera ist aus.",true);
+}
+var handlaengeGesetzt=false;
+try{var gespeichert=Number(localStorage.getItem("sicht_handlaenge"));if(gespeichert>=60&&gespeichert<=130){$("#handlaenge").value=String(gespeichert);handlaengeGesetzt=true}}catch(f){}
+function handlaenge(){var v=Number($("#handlaenge").value);return v>=60&&v<=130?v:95}
+$("#handlaenge").addEventListener("change",function(){handlaengeGesetzt=true;try{localStorage.setItem("sicht_handlaenge",String(handlaenge()))}catch(f){}});
+
+// ---- Kamera ----------------------------------------------------------------------------------
+function kameraFehler(f){
+ var n=f&&f.name;
+ if(n==="NotAllowedError")return "Der Browser oder macOS lässt mich nicht an die Kamera (Systemeinstellungen > Datenschutz & Sicherheit > Kamera).";
+ if(n==="NotFoundError")return "Ich finde keine Kamera.";
+ if(n==="NotReadableError")return "Die Kamera wird gerade von einem anderen Programm benutzt.";
+ if(n==="OverconstrainedError")return "Die Kamera kann dieses Format nicht.";
+ if(n==="SecurityError")return "Diese Adresse ist nicht sicher genug für die Kamera.";
+ return "Die Kamera ging nicht an"+(f&&f.message?" ("+f.message+")":"")+".";
+}
+document.addEventListener("securitypolicyviolation",function(e){
+ meldungOben("Der Sicherheitskopf blockiert die Handerkennung ("+e.violatedDirective+").");
+});
+function meldungOben(text){$("#hudhand").textContent=text}
+
+async function modellLaden(){
+ var m=await import("/sicht/dateien/{{SICHT_VERSION}}/vision_bundle.mjs");
+ var fileset=await m.FilesetResolver.forVisionTasks(location.origin+"/sicht/dateien/{{SICHT_VERSION}}");
+ var opt=function(d){return {baseOptions:{modelAssetPath:"/sicht/dateien/{{SICHT_VERSION}}/gesture_recognizer.task",delegate:d},
+  runningMode:"VIDEO",numHands:1,minHandDetectionConfidence:0.6,minHandPresenceConfidence:0.6,minTrackingConfidence:0.6}};
+ try{return await m.GestureRecognizer.createFromOptions(fileset,opt("GPU"))}
+ catch(f){return await m.GestureRecognizer.createFromOptions(fileset,opt("CPU"))}
+}
+
+async function kameraAn(){
+ if(AN||STARTET)return;
+ STARTET=true;var meine=++SITZUNG;
+ startZeigen("Die Kamera wird gestartet …",false);
+ var strom=null;
+ try{strom=await navigator.mediaDevices.getUserMedia({video:{width:{ideal:1280},height:{ideal:720},frameRate:{ideal:60}},audio:false})}
+ catch(f){STARTET=false;startZeigen(kameraFehler(f),true);return}
+ if(meine!==SITZUNG){strom.getTracks().forEach(function(t){t.stop()});return}
+ VIDEO.srcObject=strom;AN=true;
+ var spur=strom.getVideoTracks()[0];
+ if(spur)spur.addEventListener("ended",function(){if(meine===SITZUNG&&AN)kameraAus("Die Kamera wurde getrennt oder der Zugriff entzogen.")});
+ $("#kameraan").hidden=false;$("#start").hidden=true;
+ meldungOben("Handerkennung wird geladen …");
+ try{await VIDEO.play()}catch(f){}
+ var erk=null;
+ try{erk=await modellLaden()}
+ catch(f){
+  if(meine===SITZUNG){kameraAus("Die Handerkennung ließ sich nicht starten ("+(f&&f.message?f.message:f)+").")}
+  return;
+ }
+ if(meine!==SITZUNG){try{erk.close()}catch(f){}return}
+ ERKENNER=erk;STARTET=false;FEHLERZAHL=0;LETZTE_ZEIT=-1;LETZTES_VIDEO=-1;ZEITEN=[];
+ knoepfeSetzen();
+ naechstesBild();
+}
+
+function kameraAus(grund){
+ SITZUNG++;STARTET=false;
+ var s=VIDEO.srcObject;
+ if(s&&s.getTracks)s.getTracks().forEach(function(t){t.stop()});
+ VIDEO.srcObject=null;
+ if(ERKENNER){try{ERKENNER.close()}catch(f){}ERKENNER=null}
+ AN=false;MESS=null;GESTE=daumenNeu();
+ G.clearRect(0,0,LEINWAND.width,LEINWAND.height);
+ meldungOben("");$("#hudfps").textContent="";$("#kameraan").hidden=true;$("#balken").hidden=true;
+ ringSetzen(0,"");knoepfeSetzen();
+ if(grund)startPruefen(grund);else startPruefen("");
+}
+
+function naechstesBild(){
+ if(!AN||!VIDEO.srcObject)return;
+ if("requestVideoFrameCallback" in VIDEO)VIDEO.requestVideoFrameCallback(bildSchritt);
+ else requestAnimationFrame(function(t){bildSchritt(t,null)});
+}
+
+function bildSchritt(jetzt,meta){
+ if(!AN||!ERKENNER)return;
+ // Ohne requestVideoFrameCallback kann dasselbe Bild zweimal kommen.
+ if(!meta){if(VIDEO.currentTime===LETZTES_VIDEO){naechstesBild();return}LETZTES_VIDEO=VIDEO.currentTime}
+ var b=VIDEO.videoWidth,h=VIDEO.videoHeight;
+ if(!b||!h){naechstesBild();return}
+ // MediaPipe verlangt streng steigende Zeitstempel - eine einzige Zeitbasis.
+ var tErk=Math.max(performance.now(),LETZTE_ZEIT+1);LETZTE_ZEIT=tErk;
+ var t=(meta&&typeof meta.captureTime==="number"&&meta.captureTime>0)?meta.captureTime:jetzt;
+ var r=null;
+ try{var a0=performance.now();r=ERKENNER.recognizeForVideo(VIDEO,tErk);RECHENMS=RECHENMS*0.9+(performance.now()-a0)*0.1}
+ catch(f){FEHLERZAHL++;if(FEHLERZAHL>30){kameraAus("Die Handerkennung ist ausgestiegen ("+(f&&f.message?f.message:f)+").");return}}
+ var hand=r&&r.landmarks&&r.landmarks[0]?r.landmarks[0]:null;
+ var geste=r&&r.gestures&&r.gestures[0]&&r.gestures[0][0]?r.gestures[0][0]:null;
+ zeichnen(hand,b,h);
+ hudSetzen(t,!!hand);
+ if(MESS)messungSchritt(handProbe(hand,t,b,h),t);
+ if(AKTIV&&document.visibilityState==="visible")gesteSchritt(t,hand?handPixel(hand,b,h):null,geste);
+ naechstesBild();
+}
+
+function zeichnen(hand,b,h){
+ if(LEINWAND.width!==b||LEINWAND.height!==h){LEINWAND.width=b;LEINWAND.height=h;$("#bild").style.aspectRatio=b+" / "+h}
+ G.clearRect(0,0,b,h);
+ if(!hand)return;
+ var d=Math.max(2,b/320);
+ G.lineWidth=d;G.strokeStyle="rgba(255,106,31,.92)";G.lineCap="round";
+ for(var i=0;i<VERBINDUNGEN.length;i++){
+  var v=VERBINDUNGEN[i];G.beginPath();G.moveTo(hand[v[0]].x*b,hand[v[0]].y*h);G.lineTo(hand[v[1]].x*b,hand[v[1]].y*h);G.stroke();
+ }
+ for(var i=0;i<hand.length;i++){
+  var spitze=SPITZEN.indexOf(i)>=0;
+  G.shadowColor=spitze?"rgba(255,154,82,.95)":"transparent";G.shadowBlur=spitze?d*5:0;
+  G.fillStyle=spitze?"#ffd9b8":"#ffffff";
+  G.beginPath();G.arc(hand[i].x*b,hand[i].y*h,spitze?d*2.2:d*1.4,0,6.2832);G.fill();
+ }
+ G.shadowBlur=0;
+}
+function hudSetzen(t,hand){
+ ZEITEN.push(t);if(ZEITEN.length>30)ZEITEN.shift();
+ var fps=ZEITEN.length>1?(ZEITEN.length-1)*1000/(ZEITEN[ZEITEN.length-1]-ZEITEN[0]):0;
+ $("#hudhand").textContent=hand?"HAND ERKANNT · 21 PUNKTE":"KEINE HAND";
+ $("#hudfps").textContent=Math.round(fps)+" Bilder/s · "+RECHENMS.toFixed(0)+" ms";
+}
+
+addEventListener("pagehide",function(){if(AN||STARTET)kameraAus("")});
+document.addEventListener("visibilitychange",function(){
+ if(document.visibilityState==="hidden"&&(AN||STARTET))kameraAus("Die Kamera ist aus, weil die Seite nicht mehr zu sehen war.");
+});
+$("#startknopf").addEventListener("click",kameraAn);
+$("#aus").addEventListener("click",function(){kameraAus("Die Kamera ist aus.")});
+
+// ---- Handruhe messen ---------------------------------------------------------------------------
+function knoepfeSetzen(){
+ var frei=AN&&!!ERKENNER&&!MESS;
+ $("#mruhe").disabled=!frei;$("#mhalten").disabled=!frei;
+}
+function ergebnisSetzen(text,gut){var e=$("#messergebnis");e.textContent=text;e.className="ergebnis "+(gut?"gut":"schlecht")}
+function messungStarten(art){
+ if(!AN||!ERKENNER||MESS)return;
+ MESS={art:art,proben:[],t0:null};
+ $("#messergebnis").textContent="";$("#balken").hidden=false;$("#balkenfuell").style.width="0%";
+ $("#messstatus").textContent="Messung läuft – Hand ruhig ins Bild halten.";
+ knoepfeSetzen();
+}
+function messungSchritt(probe,t){
+ if(MESS.t0===null)MESS.t0=t;
+ MESS.proben.push(probe);
+ var vorbei=t-MESS.t0;
+ $("#balkenfuell").style.width=Math.min(100,100*vorbei/MESSDAUER)+"%";
+ $("#messstatus").textContent="Messung läuft – noch "+Math.max(0,Math.ceil((MESSDAUER-vorbei)/1000))+" s. Hand ruhig im Bild halten.";
+ if(vorbei>=MESSDAUER)messungBeenden();
+}
+async function messungBeenden(){
+ var m=MESS;MESS=null;knoepfeSetzen();
+ $("#balken").hidden=true;$("#messstatus").textContent="";
+ var laenge=handlaenge(),e=handruhe(m.proben,laenge);
+ if(!e.ok){ergebnisSetzen(e.grund||"Die Messung hat nicht geklappt.",false);return}
+ if(m.art==="ruhe")RUHE_MM=e.mm;
+ var koerper={art:m.art,mm:e.mm,rauschen_mm:(m.art==="halten"&&RUHE_MM!==null)?RUHE_MM:null,rhythmus_hz:e.rhythmus_hz,
+  spitze_verhaeltnis:e.spitze_verhaeltnis,fps:e.fps,dauer_s:e.dauer_s,bilder:e.bilder,handlaenge_mm:laenge};
+ if(!SCHREIBEN){
+  ergebnisSetzen(komma(e.mm)+" mm (Schätzung)"+(e.rhythmus_hz!==null?", Rhythmus um "+komma(e.rhythmus_hz)+" Hz":", kein deutlicher Rhythmus")+
+   ". Nicht gespeichert: Speichern geht nur in der Web-App. Selbstbeobachtung, kein Medizinprodukt.",true);
+  return;
+ }
+ try{
+  var r=await holenJson("/api/sicht/messung",koerper);
+  if(r.status===200&&r.daten&&r.daten.ok){ergebnisSetzen(r.daten.text,true);verlaufLaden()}
+  else ergebnisSetzen((r.daten&&(r.daten.fehler||r.daten.text))||("Das Speichern hat nicht geklappt ("+r.status+")."),false);
+ }catch(f){ergebnisSetzen("Ich erreiche Jarvis gerade nicht – die Messung ist nicht gespeichert.",false)}
+}
+$("#mruhe").addEventListener("click",function(){messungStarten("ruhe")});
+$("#mhalten").addEventListener("click",function(){messungStarten("halten")});
+
+// Die letzten 14 Tage: je Tag der letzte Wert der Haltemessung (Punkte) und der Ruhemessung (Ring).
+async function verlaufLaden(){
+ var box=$("#verlauf");
+ try{
+  var r=await holenJson("/api/sicht/verlauf?tage=14");
+  var tage=(r.status===200&&r.daten&&r.daten.tageswerte)||[];
+  leeren(box);
+  if(!tage.length){box.appendChild(el("p","","Noch keine Messungen."));box.lastChild.className="statuszeile";return}
+  var B=320,H=120,L=26,R=8,O=14,U=22,max=0.5;
+  tage.forEach(function(t){max=Math.max(max,t.halten_mm||0,t.ruhe_mm||0)});
+  max=max*1.15;
+  var s=svg("svg",{viewBox:"0 0 "+B+" "+H,role:"img","aria-label":"Handruhe der letzten Tage in Millimeter"});
+  var x=function(i){return tage.length===1?(L+(B-L-R)/2):L+(B-L-R)*i/(tage.length-1)};
+  var y=function(v){return H-U-(H-U-O)*v/max};
+  s.appendChild(svg("line",{x1:L,y1:y(0),x2:B-R,y2:y(0),stroke:"rgba(255,255,255,.2)"}));
+  var t1=svg("text",{x:2,y:y(max)+4});t1.textContent=komma(max,1);s.appendChild(t1);
+  var t0=svg("text",{x:2,y:y(0)+4});t0.textContent="0";s.appendChild(t0);
+  var pfad="";
+  tage.forEach(function(t,i){if(t.halten_mm!=null)pfad+=(pfad?"L":"M")+x(i).toFixed(1)+" "+y(t.halten_mm).toFixed(1)});
+  if(pfad)s.appendChild(svg("path",{d:pfad,fill:"none",stroke:"#ff6a1f","stroke-width":2}));
+  tage.forEach(function(t,i){
+   if(t.ruhe_mm!=null)s.appendChild(svg("circle",{cx:x(i),cy:y(t.ruhe_mm),r:3.5,fill:"none",stroke:"#9a8678","stroke-width":1.5}));
+   if(t.halten_mm!=null)s.appendChild(svg("circle",{cx:x(i),cy:y(t.halten_mm),r:3.5,fill:"#ffd9b8"}));
+   if(i===0||i===tage.length-1||tage.length<=7){var tx=svg("text",{x:x(i),y:H-6,"text-anchor":"middle"});tx.textContent=t.tag.slice(8,10)+"."+t.tag.slice(5,7)+".";s.appendChild(tx)}
+  });
+  box.appendChild(s);
+  var legende=el("p","","Punkt: Haltemessung, Ring: Ruhemessung (Grundrauschen) – je Tag der letzte Wert, in Millimeter (Schätzung).");
+  legende.className="statuszeile";box.appendChild(legende);
+ }catch(f){}
+}
+
+// ---- Daumen hoch / runter -----------------------------------------------------------------------
+function ringSetzen(anteil,art){
+ var r=$("#ring"),umfang=2*Math.PI*18;
+ if(!(anteil>0)){r.classList.remove("sichtbar");return}
+ r.classList.add("sichtbar");r.classList.toggle("nein",art==="nein");
+ var f=$("#ringfuell");f.setAttribute("stroke-dasharray",umfang.toFixed(1));f.setAttribute("stroke-dashoffset",(umfang*(1-anteil)).toFixed(1));
+}
+function gesteSchritt(t,handPx,geste){
+ var s=daumenSchritt(GESTE,t,handPx,geste);
+ ringSetzen(s.fortschritt,s.art);
+ var zeile=s.scharf?"Bereit: Daumen hoch 1,5 Sekunden halten heißt Ja, Daumen runter heißt Nein.":
+  "Noch nicht scharf: Hand erst einen Moment aus dem Bild nehmen.";
+ if(zeile!==GESTENZEILE){GESTENZEILE=zeile;$("#gestenstatus").textContent=zeile}
+ if(s.aktion)gesteSenden(s.aktion);
+}
+async function gesteSenden(aktion){
+ var a=AKTIV;if(!a)return;
+ AKTIV=null;ringSetzen(0,"");
+ var ja=aktion==="ja";
+ try{
+  var r=a.art==="freigabe"?await holenJson("/api/freigabe",{id:a.id,ja:ja,kanal:'geste'}):await holenJson("/api/vorschlag/geste",{id:a.id,ja:ja});
+  $("#gestentext").textContent=(r.daten&&(r.daten.text||r.daten.fehler))||"Keine Antwort von Jarvis.";
+ }catch(f){$("#gestentext").textContent="Ich erreiche Jarvis gerade nicht."}
+ FREIGABEN=[];VORSCHLAG=null;karteSetzen();
+}
+function karteSetzen(){
+ GESTENZEILE="";
+ var kopf="Geste",zeilen=[],hinweis="",neu=null;
+ if(!SCHREIBEN){hinweis="Gesten gehen nur in der Web-App."}
+ else if(FREIGABEN.length>1){kopf="Freigabe";hinweis="Mehrere Fragen sind offen, deshalb ist die Geste aus. Bitte auf der Hauptseite per Klick oder Stimme antworten."}
+ else if(FREIGABEN.length===1){
+  var f=FREIGABEN[0];kopf="Freigabe";
+  zeilen=[["Was",f.was],["Warum",f.warum],["Wie",f.wie]].filter(function(z){return z[1]});
+  if(f.rest!=null)zeilen.push(["Noch",f.rest+" s"]);
+  if(f.geste_erlaubt)neu={art:"freigabe",id:f.id};
+  else hinweis=STAND&&!STAND.geste?"Die Gesten-Freigabe ist ausgeschaltet (GESTEN_FREIGABE=ja in der .env).":"Diese Frage gibt nur ein Klick oder die Stimme frei.";
+ }
+ else if(VORSCHLAG&&STAND&&STAND.geste){kopf="Vorschlag";zeilen=[["Jarvis schlägt vor",VORSCHLAG.text]];neu={art:"vorschlag",id:VORSCHLAG.id}}
+ else hinweis=STAND&&!STAND.geste?"Die Gesten-Freigabe ist ausgeschaltet (GESTEN_FREIGABE=ja in der .env).":"Gerade ist nichts offen, worauf eine Geste antworten könnte.";
+ var gleich=AKTIV&&neu&&AKTIV.art===neu.art&&AKTIV.id===neu.id;
+ if(!gleich){GESTE=daumenNeu();ringSetzen(0,"")}
+ AKTIV=neu;
+ $("#gestenkopf").textContent=kopf;
+ var dl=$("#gestenzeilen");leeren(dl);
+ zeilen.forEach(function(z){dl.appendChild(el("dt","",z[0]));dl.appendChild(el("dd","",z[1]))});
+ if(neu){
+  $("#gestenstatus").textContent=AN?"Daumen hoch zeigen heißt Ja, Daumen runter heißt Nein. Oder auf der Hauptseite antworten.":
+   "Die Kamera ist aus – mit eingeschalteter Kamera geht Daumen hoch als Ja. Oder auf der Hauptseite antworten.";
+ }else $("#gestenstatus").textContent=hinweis;
+}
+async function freigabenSchleife(){
+ for(;;){
+  if(SCHREIBEN&&document.visibilityState==="visible"){
+   try{
+    var r=await holenJson("/api/freigaben");
+    if(r.status===200&&r.daten&&Array.isArray(r.daten.offen)){FREIGABEN=r.daten.offen;karteSetzen()}
+   }catch(f){}
+  }
+  await new Promise(function(ok){setTimeout(ok,1000)});
+ }
+}
+async function vorschlagSchleife(){
+ for(;;){
+  await new Promise(function(ok){setTimeout(ok,3000)});
+  if(SCHREIBEN&&STAND&&STAND.geste&&document.visibilityState==="visible"){
+   var davor=VORSCHLAG&&VORSCHLAG.id;
+   if(await standHolen()&&(VORSCHLAG&&VORSCHLAG.id)!==davor)karteSetzen();
+  }
+ }
+}
+
+// ---- Orb ----------------------------------------------------------------------------------------
+var ORB=$("#orb"),SPUR=null,SATZ=null,STIMME_V=-1,ANZ_START=0,VERSATZ=0,ORB_ZUSTAND="",ORB_LAEUFT=false;
+function orbSenden(nachricht){try{ORB.contentWindow.postMessage(nachricht,location.origin)}catch(f){}}
+var ORBTEXT="";
+function orbEtikett(text){if(text!==ORBTEXT){ORBTEXT=text;$("#orbetikett").textContent="Orb · "+text}}
+function stimmeAnwenden(d){
+ if(!d||typeof d!=="object")return;
+ if(d.art==="pegel"&&Array.isArray(d.pegel)&&d.pegel.length){SPUR={start:Number(d.start_ms)||0,rahmen:Number(d.rahmen_ms)||20,pegel:d.pegel};SATZ=null;orbSchleife()}
+ else if(d.art==="satz"&&typeof d.text==="string"){
+  SPUR=null;var worte=d.text.trim().split(/\s+/).slice(0,80);
+  SATZ={t0:Date.now(),worte:worte.length,geschickt:0,gestartet:false};orbSchleife();
+ }
+ else if(d.art==="aus"){SPUR=null;SATZ=null;orbSenden({pegel:0});orbSenden({sprechen:"ende"});orbEtikett("ruhig")}
+}
+function orbSchleife(){
+ if(ORB_LAEUFT)return;
+ ORB_LAEUFT=true;
+ var schritt=function(){
+  var jetzt=Date.now();
+  if(SPUR){
+   var i=Math.floor((jetzt+VERSATZ-SPUR.start)/SPUR.rahmen);
+   if(i>=SPUR.pegel.length+5){SPUR=null;orbSenden({pegel:0});orbEtikett("ruhig")}
+   else if(i>=0){orbSenden({pegel:Math.max(0,Math.min(1,Number(SPUR.pegel[Math.min(i,SPUR.pegel.length-1)])/255))});orbEtikett("Pegel echt")}
+  }else if(SATZ){
+   // Der Browser spricht selbst: kein Pegel zu haben, nur Wörter. Darum "nachempfunden".
+   var vergangen=jetzt-SATZ.t0,soll=Math.floor(vergangen/380);
+   if(!SATZ.gestartet){SATZ.gestartet=true;orbSenden({sprechen:"start"})}
+   while(SATZ.geschickt<Math.min(soll,SATZ.worte)){SATZ.geschickt++;orbSenden({sprechen:"wort"})}
+   orbEtikett("Pegel nachempfunden");
+   if(vergangen>SATZ.worte*380+400){SATZ=null;orbSenden({sprechen:"ende"});orbEtikett("ruhig")}
+  }
+  if(SPUR||SATZ)(REDUZIERT?setTimeout(schritt,100):requestAnimationFrame(schritt));else ORB_LAEUFT=false;
+ };
+ requestAnimationFrame(schritt);
+}
+async function stimmeSchleife(){
+ for(;;){
+  try{
+   var r=await holenJson("/api/anzeige?nach=stimme:"+STIMME_V+"&warten=20");
+   if(r.status!==200||!r.daten||!r.daten.ok)throw new Error("Antwort");
+   if(r.daten.start!==ANZ_START){ANZ_START=r.daten.start;STIMME_V=-1}
+   VERSATZ=r.daten.jetzt*1000-Date.now();
+   var k=r.daten.kanaele&&r.daten.kanaele.stimme;
+   if(k){STIMME_V=k.version;if(k.daten&&k.daten.art)stimmeAnwenden(k.daten)}
+  }catch(f){await new Promise(function(ok){setTimeout(ok,3000)})}
+ }
+}
+async function zustandSchleife(){
+ for(;;){
+  try{
+   var r=await holenJson("/api/status");
+   var z=r.status===200&&r.daten&&r.daten.zustand;
+   if(typeof z==="string"&&/^(bereit|hoert|denkt|spricht)$/.test(z)&&z!==ORB_ZUSTAND){ORB_ZUSTAND=z;orbSenden({zustand:z})}
+  }catch(f){}
+  await new Promise(function(ok){setTimeout(ok,2000)});
+ }
+}
+
+// ---- Start --------------------------------------------------------------------------------------
+$("#zurueck").setAttribute("href",url("/"));
+ORB.addEventListener("load",function(){if(ORB_ZUSTAND)orbSenden({zustand:ORB_ZUSTAND})});
+ORB.setAttribute("src",url("/gehirn?eingebettet=1&form=kugel"));
+startPruefen("").then(function(){karteSetzen();verlaufLaden()});
+freigabenSchleife();vorschlagSchleife();stimmeSchleife();zustandSchleife();
+"""
+
+SEITE_SEHEN = (_SEITE_KOPF + FEHLERFANG + _SEITE_RECHNEN + _SEITE_SKRIPT
+               + "\n</script></body></html>\n").replace("{{SICHT_VERSION}}", SICHT_VERSION)
+
+
 # =========================================================================
-# dolmetscher  -  Der Dolmetscher mit Untertiteln – wird in Paket P6 gebaut.
+# dolmetscher  -  Der Dolmetscher mit Untertiteln.
+# 
+# Du sprichst Deutsch, der Gast seine Sprache; Jarvis übersetzt hin und her, liest die
+# Übersetzung vor und zeigt beide Sprachen als Untertitel – auf der Seite ``/dolmetscher``
+# und auf der Zentrale (Kanal ``untertitel`` der Anzeige).
+# 
+# **Rundenweise, nicht gleichzeitig.** Die Spracherkennung des Browsers liefert einen
+# Satz erst nach einer kurzen Pause; dann wird übersetzt, dann vorgelesen. Das dauert
+# pro Satz grob 1,5 bis 3 Sekunden (Schätzung – die Seite zeigt die gemessene Zeit).
+# Wirklich gleichzeitiges Übersetzen wäre ein anderes Verfahren und ist hier nicht gebaut.
+# 
+# **Wer übersetzt.** Gemini, wenn ein Schlüssel da ist (schnell, im Free Tier gratis),
+# sonst Claude über ``text_anfrage`` mit niedriger Denktiefe – das zählt zum Monatslimit.
+# ``DOLMETSCHER_GEHIRN`` legt es fest.
+# 
+# **Datenschutz.** Die Seite speichert nichts auf dem Server; der Verlauf lebt nur im
+# Fenster. Der erkannte Text geht zum Übersetzen an Gemini oder Claude, der Ton der
+# Spracherkennung an den Hersteller des Browsers (siehe Hinweis auf der Seite).
 # =========================================================================
 
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+
+
+
+# Kürzel -> (Name auf Deutsch, Sprachkennung des Browsers)
+SPRACHEN = {
+    "de": ("Deutsch", "de-DE"),
+    "en": ("Englisch", "en-GB"),
+    "tr": ("Türkisch", "tr-TR"),
+    "hr": ("Kroatisch", "hr-HR"),
+    "sr": ("Serbisch", "sr-RS"),
+    "bs": ("Bosnisch", "bs-BA"),
+    "sq": ("Albanisch", "sq-AL"),
+    "pl": ("Polnisch", "pl-PL"),
+    "ro": ("Rumänisch", "ro-RO"),
+    "hu": ("Ungarisch", "hu-HU"),
+    "sk": ("Slowakisch", "sk-SK"),
+    "cs": ("Tschechisch", "cs-CZ"),
+    "bg": ("Bulgarisch", "bg-BG"),
+    "uk": ("Ukrainisch", "uk-UA"),
+    "ru": ("Russisch", "ru-RU"),
+    "ar": ("Arabisch", "ar-SA"),
+    "fa": ("Persisch", "fa-IR"),
+    "it": ("Italienisch", "it-IT"),
+    "fr": ("Französisch", "fr-FR"),
+    "es": ("Spanisch", "es-ES"),
+}
+
+UEBERSETZER_SYSTEM = (
+    "Du bist Dolmetscher zwischen {von_name} und {nach_name}. Übersetze nur die letzte "
+    "Äußerung. Gib ausschließlich die Übersetzung aus – ohne Anführungszeichen, ohne "
+    "Erklärung. Fachbegriffe der Gebäudereinigung (Unterhaltsreinigung, Grundreinigung, "
+    "Baureinigung, Bauendreinigung, Glasreinigung, Leistungsverzeichnis) korrekt "
+    "übertragen. Namen, Zahlen, Uhrzeiten und Beträge unverändert.")
+
+# So lang darf eine Äußerung sein, und so viele Zeichen der Vorgeschichte sind erlaubt.
+DOLMETSCHER_MAX_ZEICHEN = 1500
+MAX_KONTEXT_ZEICHEN = 300
+KONTEXT_RUNDEN = 4
+# Antwortgrenze für die Übersetzung (das Denken zählt bei Gemini mit).
+UEBERSETZEN_MAX_TOKENS = 3000
+# Der Untertitel steht fünf Minuten auf der Zentrale.
+UNTERTITEL_DAUER_S = 300
+
+DOLMETSCHER_NUR_WEBAPP = ("Der Dolmetscher läuft in der Web-App – öffne Jarvis über das "
+                    "Dock-Symbol.")
+
+
+def sprachen_aktiv() -> list:
+    """Die Gastsprachen, die der Dolmetscher anbietet (``DOLMETSCHER_SPRACHEN``), ohne Deutsch."""
+    gesehen = []
+    for teil in str(DOLMETSCHER_SPRACHEN or "").split(","):
+        code = teil.strip().lower()
+        if code in SPRACHEN and code != "de" and code not in gesehen:
+            gesehen.append(code)
+    return gesehen or [c for c in SPRACHEN if c != "de"]
+
+
+def _unbekannte_sprache(code: str) -> str:
+    moeglich = ", ".join("%s (%s)" % (name, kuerzel) for kuerzel, (name, _) in SPRACHEN.items())
+    return "Die Sprache '%s' kenne ich nicht. Möglich: %s." % (str(code)[:12], moeglich)
+
+
+def _kontext(verlauf) -> str:
+    """Die letzten Äußerungen als Zeilen – nur zum Verständnis des Zusammenhangs."""
+    zeilen = []
+    for eintrag in list(verlauf or [])[-KONTEXT_RUNDEN:]:
+        if isinstance(eintrag, dict):
+            original = eintrag.get("original") or eintrag.get("text") or ""
+            uebersetzung = eintrag.get("uebersetzung") or ""
+        else:
+            original, uebersetzung = eintrag, ""
+        original = " ".join(str(original).split())[:MAX_KONTEXT_ZEICHEN]
+        uebersetzung = " ".join(str(uebersetzung).split())[:MAX_KONTEXT_ZEICHEN]
+        if original:
+            zeilen.append("- %s%s" % (original, " → %s" % uebersetzung if uebersetzung else ""))
+    return "\n".join(zeilen)
+
+
+def _bereinigen(text: str) -> str:
+    """Nimmt Anführungszeichen weg, die das Modell trotz Anweisung um die Übersetzung setzt."""
+    text = str(text or "").strip()
+    paare = (("\"", "\""), ("„", "“"), ("“", "”"), ("»", "«"), ("«", "»"), ("'", "'"))
+    for auf, zu in paare:
+        if len(text) > 1 and text.startswith(auf) and text.endswith(zu) \
+                and auf not in text[1:-1] and zu not in text[1:-1]:
+            return text[1:-1].strip()
+    return text
+
+
+def _gehirne(gehirn: str, agent) -> list:
+    """Welche Übersetzer in welcher Reihenfolge in Frage kommen."""
+    gehirn = (gehirn or "auto").strip().lower()
+    gemini = bool(GEMINI_API_KEY)
+    claude = False
+    if agent is not None:
+        einsatzbereit = getattr(agent, "einsatzbereit", None)
+        claude = bool(einsatzbereit()) if callable(einsatzbereit) else bool(ANTHROPIC_API_KEY)
+    if gehirn == "gemini":
+        reihe = ["gemini"]
+    elif gehirn == "claude":
+        reihe = ["claude"]
+    else:
+        reihe = ["gemini", "claude"]
+    return [g for g in reihe if (g == "gemini" and gemini) or (g == "claude" and claude)]
+
+
+def uebersetzen(text: str, von: str, nach: str, verlauf=None, agent=None) -> dict:
+    """Übersetzt eine Äußerung von einer Sprache in eine andere.
+
+    ``verlauf`` sind die letzten Äußerungen (Zeichenketten oder Wörterbücher mit
+    ``original`` und ``uebersetzung``); sie helfen bei Bezügen wie "das" oder "dort".
+    Ergebnis: ``{"ok", "uebersetzung", "von", "nach", "sprechstuecke", "zeit"}`` oder
+    ``{"ok": False, "fehler"}``. Gemini zuerst, sonst Claude (``text_anfrage``, niedrige
+    Denktiefe – zählt zum Monatslimit).
+    """
+    von = str(von or "").strip().lower()
+    nach = str(nach or "").strip().lower()
+    for code in (von, nach):
+        if code not in SPRACHEN:
+            return {"ok": False, "fehler": _unbekannte_sprache(code)}
+    if von == nach:
+        return {"ok": False, "fehler": "Ausgangs- und Zielsprache sind gleich – es gibt nichts zu übersetzen."}
+    text = str(text or "").strip()
+    if not text:
+        return {"ok": False, "fehler": "Es kam kein Text an."}
+    if len(text) > DOLMETSCHER_MAX_ZEICHEN:
+        return {"ok": False, "fehler": "Der Text ist zu lang (höchstens %d Zeichen)." % DOLMETSCHER_MAX_ZEICHEN}
+
+    gehirne = _gehirne(DOLMETSCHER_GEHIRN, agent)
+    if not gehirne:
+        return {"ok": False, "fehler": "Zum Übersetzen brauche ich Gemini oder Claude – "
+                                       "es ist kein Schlüssel hinterlegt."}
+    system = UEBERSETZER_SYSTEM.format(von_name=SPRACHEN[von][0], nach_name=SPRACHEN[nach][0])
+    kontext = _kontext(verlauf)
+    beginn = time.time()
+    fehler = ""
+    antwort = ""
+    benutzt = ""
+    for gehirn in gehirne:
+        try:
+            if gehirn == "gemini":
+                hinweis = ("\n\nLetzte Äußerungen (nur zum Verständnis des Zusammenhangs, nicht "
+                           "übersetzen):\n%s" % kontext) if kontext else ""
+                ergebnis = gemini_fragen(text, system + hinweis, verlauf=[],
+                                         max_tokens=UEBERSETZEN_MAX_TOKENS)
+            else:
+                auftrag = system
+                if kontext:
+                    auftrag += "\n\nLetzte Äußerungen:\n%s" % kontext
+                auftrag += "\n\nZu übersetzen:\n%s" % text
+                ergebnis = agent.text_anfrage(auftrag, effort="low", max_tokens=2000)
+        except Exception as ausnahme:
+            ergebnis = {"ok": False, "fehler": str(ausnahme)}
+        if isinstance(ergebnis, dict) and ergebnis.get("ok") and str(ergebnis.get("text") or "").strip():
+            antwort = _bereinigen(ergebnis["text"])
+            benutzt = gehirn
+            break
+        fehler = (ergebnis or {}).get("fehler") if isinstance(ergebnis, dict) else ""
+        fehler = fehler or "Die Übersetzung ist leer geblieben."
+    if not antwort:
+        return {"ok": False, "fehler": "Die Übersetzung hat nicht geklappt: %s" % fehler}
+    stuecke = sprechstuecke(antwort) if nach == "de" else sprechstuecke_fremd(antwort)
+    return {"ok": True, "uebersetzung": antwort, "von": von, "nach": nach,
+            "sprechstuecke": stuecke, "gehirn": benutzt,
+            "dauer_ms": int((time.time() - beginn) * 1000),
+            "zeit": datetime.now().isoformat(timespec="seconds")}
+
+
+def untertitel_veroeffentlichen(tools, original: str, ergebnis: dict, sprecher: str = "gast",
+                                von: str = "", nach: str = "") -> bool:
+    """Schreibt die Runde in den Kanal 'untertitel' und schaltet die Zentrale darauf um.
+
+    ``von`` und ``nach`` gelten, wenn das Ergebnis sie nicht selbst nennt. Nie eine
+    Ausnahme: die Anzeige darf das Übersetzen nicht kaputt machen. Gibt zurück, ob der
+    Untertitel angenommen wurde.
+    """
+    try:
+        sprecher = sprecher if sprecher in ("ich", "gast") else "gast"
+        version = tools.anzeige.melden("untertitel", {
+            "von": str(ergebnis.get("von") or von), "nach": str(ergebnis.get("nach") or nach),
+            "original": str(original or "")[:DOLMETSCHER_MAX_ZEICHEN],
+            "uebersetzung": str(ergebnis.get("uebersetzung") or ""),
+            "sprecher": sprecher,
+            "zeit": str(ergebnis.get("zeit") or datetime.now().isoformat(timespec="seconds"))})
+        tools.anzeige.zeigen("untertitel", {}, UNTERTITEL_DAUER_S, quelle="dolmetscher")
+        return version is not None and version >= 0
+    except Exception as fehler:
+        print("[dolmetscher] Untertitel: %s" % fehler)
+        return False
+
+
+# -- Werkzeug dolmetscher_starten ---------------------------------------------------------
+
+def _mac_oeffnen(adresse: str):
+    """Öffnet eine Adresse im Standardbrowser des Macs. ``None``, wenn es hier kein ``open`` gibt."""
+    if not shutil.which("open"):
+        return None
+    try:
+        lauf = subprocess.run(["open", adresse], shell=False, timeout=15,
+                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return lauf.returncode == 0
+
+
+def dolmetscher_adresse(web, nach: str) -> str:
+    """Die Adresse der Dolmetscher-Seite der laufenden Web-App, mit Schlüssel falls nötig."""
+    kopf, _, anhang = str(web.adresse()).partition("?")
+    adresse = kopf.rstrip("/") + "/dolmetscher?nach=" + nach
+    return adresse + ("&" + anhang if anhang else "")
+
+
+def dolmetscher_starten(nach: str, web=None, oeffnen=None) -> dict:
+    """Öffnet die Dolmetscher-Seite – nur möglich, wenn die Web-App läuft.
+
+    ``web`` ist die laufende Web-App (``JarvisWeb``), ``oeffnen(adresse)`` der Öffner
+    (Standard: ``open`` auf dem Mac; Prüfungen speisen einen Fälscher ein und öffnen nie
+    ein Fenster). Im Dienst gibt es die Seite nicht – das wird ehrlich gesagt.
+    """
+    nach = str(nach or "").strip().lower()
+    if nach not in SPRACHEN or nach == "de":
+        return {"ok": False, "fehler": _unbekannte_sprache(nach)}
+    if web is None or getattr(web, "server", None) is None:
+        return {"ok": False, "fehler": DOLMETSCHER_NUR_WEBAPP}
+    name = SPRACHEN[nach][0]
+    adresse = dolmetscher_adresse(web, nach)
+    ohne_schluessel = adresse.partition("&schluessel=")[0]
+    try:
+        geoeffnet = (oeffnen or _mac_oeffnen)(adresse)
+    except Exception as fehler:
+        return {"ok": False, "fehler": "Ich konnte die Seite nicht öffnen: %s" % fehler}
+    if geoeffnet is None:
+        return {"ok": True, "adresse": ohne_schluessel,
+                "text": "Öffne diese Adresse im Browser: %s (Du sprichst Deutsch, der Gast %s.)"
+                        % (ohne_schluessel, name)}
+    if not geoeffnet:
+        return {"ok": False, "fehler": "Der Browser ließ sich nicht öffnen. Adresse: %s" % ohne_schluessel}
+    return {"ok": True, "adresse": ohne_schluessel,
+            "text": "Der Dolmetscher ist offen: Du sprichst Deutsch, der Gast %s." % name}
+
+
+# -- Die Seite ------------------------------------------------------------------------------
+
+SEITE_DOLMETSCHER = r"""<!DOCTYPE html>
+<html lang="de"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<link rel="icon" href="/symbol.svg" type="image/svg+xml">
+<title>Jarvis – Dolmetscher</title>
+<style>
+""" + BASIS_STIL + r"""
+html,body{height:auto;min-height:100%;overflow:auto}
+body{display:flex;flex-direction:column;
+ background:radial-gradient(ellipse 120% 70% at 50% 120%,#1a0d07 0%,var(--grund) 62%)}
+button,select,input{font:inherit;color:inherit}
+button{cursor:pointer}
+:focus-visible{outline:2px solid var(--orange);outline-offset:3px;border-radius:8px}
+.kopf{flex:none;display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;
+ padding:16px max(16px,env(safe-area-inset-left)) 12px}
+.kopf h1{font:600 13px var(--mono);letter-spacing:.42em;color:var(--glut);text-transform:uppercase}
+.status{display:flex;align-items:center;gap:10px;font:500 12px var(--mono);letter-spacing:.2em;
+ color:var(--hell);text-transform:uppercase}
+.status i{width:9px;height:9px;border-radius:50%;background:var(--leise)}
+.status[data-z="hoert"] i{background:var(--gruen);box-shadow:0 0 14px var(--gruen);animation:atmen 1.1s ease-in-out infinite}
+.status[data-z="uebersetzt"] i{background:#fff;box-shadow:0 0 16px #fff;animation:atmen .6s ease-in-out infinite}
+.status[data-z="spricht"] i{background:var(--orange);box-shadow:0 0 14px var(--orange);animation:atmen .8s ease-in-out infinite}
+.status[data-z="fehler"] i{background:var(--rot);box-shadow:0 0 14px var(--rot)}
+@keyframes atmen{50%{transform:scale(1.6);opacity:.5}}
+main{flex:1;width:100%;max-width:1100px;margin:0 auto;display:flex;flex-direction:column;gap:18px;
+ padding:6px max(16px,env(safe-area-inset-left)) 24px}
+.wahl{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.gross{display:flex;flex-direction:column;align-items:flex-start;justify-content:center;gap:6px;min-height:110px;
+ padding:18px 22px;border-radius:16px;border:2px solid var(--linie);background:rgba(255,255,255,.03);text-align:left}
+.gross b{font:600 clamp(20px,3.4vw,30px) var(--sans)}
+.gross small{font:500 12px var(--mono);letter-spacing:.14em;color:var(--leise);text-transform:uppercase}
+.gross:hover{border-color:var(--glut)}
+.gross[data-an="true"]{border-color:var(--orange);background:rgba(255,106,31,.14);box-shadow:0 0 28px rgba(255,106,31,.18)}
+.gast{gap:10px;cursor:default}
+.gast button.sprecher{display:flex;flex-direction:column;align-items:flex-start;gap:4px;width:100%;
+ background:none;border:none;padding:0;text-align:left}
+.gast select{width:100%;padding:10px 12px;border-radius:10px;border:1px solid var(--linie);
+ background:var(--tief);font-size:17px}
+.steuer{display:flex;flex-wrap:wrap;gap:14px;align-items:center}
+.steuer label{display:flex;gap:8px;align-items:center;font:500 13px var(--mono);letter-spacing:.1em;color:var(--hell)}
+.knopf{padding:9px 16px;border-radius:10px;border:1px solid var(--linie);background:rgba(255,255,255,.04);
+ font:500 12px var(--mono);letter-spacing:.14em;text-transform:uppercase}
+.knopf:hover{border-color:var(--glut)}
+.untertitel{border:1px solid var(--linie);border-radius:16px;padding:20px 22px;min-height:230px;
+ background:rgba(13,7,5,.7);display:flex;flex-direction:column;gap:14px}
+.vorlaeufig{min-height:1.3em;font:400 15px var(--sans);color:var(--leise);font-style:italic}
+.zeile{display:flex;flex-direction:column;gap:4px}
+.etikett{font:500 11px var(--mono);letter-spacing:.24em;color:var(--leise);text-transform:uppercase}
+.alt .text{font:400 clamp(16px,2.2vw,20px) var(--sans);color:var(--text);opacity:.8}
+.neu .text{font:600 clamp(26px,5vw,50px)/1.18 var(--sans);color:var(--hell)}
+.takt{font:500 12px var(--mono);letter-spacing:.1em;color:var(--leise)}
+.tippen{display:flex;gap:10px}
+.tippen input{flex:1;min-width:0;padding:11px 14px;border-radius:10px;border:1px solid var(--linie);
+ background:var(--tief);font-size:16px}
+.verlauf h2{font:600 11px var(--mono);letter-spacing:.3em;color:var(--leise);text-transform:uppercase;margin:6px 0 10px}
+.verlauf ol{list-style:none;display:flex;flex-direction:column;gap:10px}
+.verlauf li{border-left:3px solid var(--linie);padding:2px 0 2px 12px}
+.verlauf li[data-sprecher="ich"]{border-left-color:var(--orange)}
+.verlauf li small{display:block;font:500 11px var(--mono);letter-spacing:.14em;color:var(--leise);text-transform:uppercase}
+.verlauf li span{display:block}
+.verlauf li .u{font-weight:600;color:var(--hell)}
+.leer{font:400 14px var(--sans);color:var(--leise)}
+.hinweise{flex:none;max-width:1100px;width:100%;margin:0 auto;padding:6px max(16px,env(safe-area-inset-left)) 28px;
+ font:400 12.5px/1.55 var(--sans);color:var(--leise);display:flex;flex-direction:column;gap:6px}
+.nur-leser{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+@media (max-width:700px){.wahl{grid-template-columns:1fr}.gross{min-height:92px}}
+@media (prefers-reduced-motion:reduce){.status i{animation:none!important}*{scroll-behavior:auto!important}}
+</style></head><body>
+<header class="kopf">
+ <h1>Dolmetscher</h1>
+ <div class="status" id="status" data-z="bereit" role="status" aria-live="polite"><i></i><span id="statustext">bereit</span></div>
+</header>
+<main>
+ <section class="wahl" aria-label="Wer spricht gerade">
+  <button type="button" class="gross" id="knopfIch" aria-pressed="false" data-an="false">
+   <b>Ich spreche Deutsch</b><small id="richtungIch">Deutsch → Türkisch</small>
+  </button>
+  <div class="gross gast" id="kartGast" data-an="false">
+   <button type="button" class="sprecher" id="knopfGast" aria-pressed="false">
+    <b>Gast spricht</b><small id="richtungGast">Türkisch → Deutsch</small>
+   </button>
+   <label><span class="nur-leser">Sprache des Gastes</span><select id="gastSprache"></select></label>
+  </div>
+ </section>
+ <section class="steuer" aria-label="Einstellungen">
+  <label><input type="checkbox" id="abwechselnd" checked> abwechselnd</label>
+  <button type="button" class="knopf" id="knopfAus">Mikrofon aus</button>
+  <button type="button" class="knopf" id="knopfLeeren">Verlauf leeren</button>
+ </section>
+ <section class="untertitel" id="untertitel" aria-live="polite" aria-label="Untertitel">
+  <p class="vorlaeufig" id="vorlaeufig"></p>
+  <div class="zeile alt"><span class="etikett" id="etiOriginal">Gesagt</span><span class="text" id="textOriginal"></span></div>
+  <div class="zeile neu"><span class="etikett" id="etiUebersetzung">Übersetzung</span><span class="text" id="textUebersetzung">Wähle oben, wer spricht – dann geht es los.</span></div>
+  <p class="takt" id="takt"></p>
+ </section>
+ <form class="tippen" id="tippform" autocomplete="off">
+  <label class="nur-leser" for="tippfeld">Text eintippen</label>
+  <input id="tippfeld" type="text" maxlength="1500" placeholder="Oder hier tippen – für den, der gerade dran ist">
+  <button type="submit" class="knopf">Übersetzen</button>
+ </form>
+ <section class="verlauf" aria-label="Letzte Gespräche">
+  <h2>Letzte Runden (nur in diesem Fenster)</h2>
+  <ol id="verlauf"></ol>
+  <p class="leer" id="verlaufLeer">Noch nichts gesagt.</p>
+ </section>
+</main>
+<footer class="hinweise">
+ <span><b>Rundenweise, nicht gleichzeitig:</b> Erst wird ein Satz erkannt, dann übersetzt, dann vorgelesen. Das dauert pro Satz
+ grob 1,5 bis 3 Sekunden (Schätzung – die gemessene Zeit steht über dem Verlauf). Während Jarvis spricht, hört das Mikrofon nicht zu.</span>
+ <span>Die Spracherkennung des Browsers schickt den Ton an den Hersteller des Browsers (Google bei Chrome, Apple bei Safari).
+ Zum Übersetzen geht der erkannte Text an Gemini oder Claude, je nach Einstellung von Jarvis.</span>
+ <span>Der Verlauf bleibt in diesem Fenster und wird nicht gespeichert. Der letzte Untertitel liegt bis zum Beenden von Jarvis
+ im Arbeitsspeicher der Zentrale.</span>
+</footer>
+<audio id="ton" hidden></audio>
+<script>
+window.addEventListener('error',function(e){document.documentElement.setAttribute('data-fehler',String(e.message||e).slice(0,200))});
+(function(){
+"use strict";
+var SCHLUESSEL="{{SCHLUESSEL}}";
+var SPRACHEN=""" + json.dumps({k: [v[0], v[1]] for k, v in SPRACHEN.items()}) + r""";
+// Wenn der Browser für eine Sprache keine Stimme hat, versucht er eine nahe verwandte.
+var NAHE={bs:["bs","hr","sr"],sr:["sr","hr","bs"],hr:["hr","sr","bs"],sk:["sk","cs"],cs:["cs","sk"],uk:["uk","ru"],fa:["fa","ar"]};
+var aktivCodes=Object.keys(SPRACHEN).filter(function(c){return c!=="de"});
+var serverStimme=false;
+var aktiv="ich";            // wer gerade dran ist: "ich" (Deutsch) oder "gast"
+var willHoeren=false, belegt=false, erkLaeuft=false, fehlerZaehler=0, rundenNr=0;
+var verlauf=[];
+var el=function(id){return document.getElementById(id)};
+
+function url(p){return p+(SCHLUESSEL?(p.indexOf("?")<0?"?":"&")+"schluessel="+encodeURIComponent(SCHLUESSEL):"")}
+function holenJson(p,k){
+ var o={headers:{"Content-Type":"application/json"}};
+ if(k!==undefined){o.method="POST";o.body=JSON.stringify(k)}
+ return fetch(url(p),o).then(function(r){return r.json()});
+}
+function name(c){return SPRACHEN[c]?SPRACHEN[c][0]:c}
+function tag(c){return SPRACHEN[c]?SPRACHEN[c][1]:c}
+function gast(){return el("gastSprache").value||aktivCodes[0]||"en"}
+function code(wer){return wer==="ich"?"de":gast()}
+function status(z,t){el("status").dataset.z=z;el("statustext").textContent=t}
+function sek(ms){return (ms/1000).toFixed(1).replace(".",",")+" s"}
+
+/* ---------- Sprachwahl ---------- */
+function auswahlFuellen(vorgabe){
+ var feld=el("gastSprache"),alt=vorgabe||feld.value;
+ if(alt&&aktivCodes.indexOf(alt)<0&&SPRACHEN[alt]&&alt!=="de"){aktivCodes.push(alt)}
+ feld.textContent="";
+ aktivCodes.forEach(function(c){var o=document.createElement("option");o.value=c;o.textContent=name(c);feld.appendChild(o)});
+ if(alt&&aktivCodes.indexOf(alt)>=0){feld.value=alt}
+ beschriften();
+}
+function beschriften(){
+ el("richtungIch").textContent="Deutsch → "+name(gast());
+ el("richtungGast").textContent=name(gast())+" → Deutsch";
+ var ich=aktiv==="ich";
+ el("knopfIch").setAttribute("aria-pressed",String(willHoeren&&ich));
+ el("knopfIch").dataset.an=String(willHoeren&&ich);
+ el("knopfGast").setAttribute("aria-pressed",String(willHoeren&&!ich));
+ el("kartGast").dataset.an=String(willHoeren&&!ich);
+}
+var vorgabeNach=(new URLSearchParams(location.search).get("nach")||"").toLowerCase();
+if(!SPRACHEN[vorgabeNach]||vorgabeNach==="de"){vorgabeNach=""}
+auswahlFuellen(vorgabeNach);
+holenJson("/api/zustand").then(function(z){
+ if(z&&z.dolmetscher_sprachen&&z.dolmetscher_sprachen.length){
+  aktivCodes=z.dolmetscher_sprachen.filter(function(c){return SPRACHEN[c]&&c!=="de"});
+ }
+ serverStimme=!!(z&&z.stimme_im_browser);
+ auswahlFuellen(vorgabeNach||el("gastSprache").value);
+}).catch(function(){});
+el("gastSprache").addEventListener("change",function(){beschriften();if(willHoeren&&aktiv==="gast"){wechsle()}});
+
+/* ---------- Erkennung ---------- */
+var Erk=window.SpeechRecognition||window.webkitSpeechRecognition;
+var erk=null;
+function erkStart(){
+ if(!erk||erkLaeuft||!willHoeren||belegt){return}
+ erk.lang=tag(code(aktiv));
+ try{erk.start();erkLaeuft=true;status("hoert","hört zu: "+name(code(aktiv)))}catch(f){erkLaeuft=false}
+}
+function erkStopp(){if(erk&&erkLaeuft){try{erk.stop()}catch(f){}}}
+function wechsle(){
+ beschriften();
+ if(!willHoeren){return}
+ if(erkLaeuft){erkStopp()}else{erkStart()}   // onend startet mit der neuen Sprache neu
+}
+if(!Erk){
+ status("fehler","keine Spracherkennung");
+ el("textUebersetzung").textContent="Dieser Browser kann keine Spracherkennung. Nimm Safari oder Chrome – oder tipp unten.";
+}else{
+ erk=new Erk();
+ erk.continuous=true;
+ erk.interimResults=true;
+ erk.onend=function(){erkLaeuft=false;if(willHoeren&&!belegt){setTimeout(erkStart,250)}};
+ erk.onerror=function(e){
+  erkLaeuft=false;
+  var art=e&&e.error;
+  if(art==="not-allowed"||art==="service-not-allowed"){
+   willHoeren=false;beschriften();status("fehler","Mikrofon nicht erlaubt");
+   el("textUebersetzung").textContent="Der Browser lässt mich nicht ans Mikrofon. Erlaub es in der Adressleiste und lad die Seite neu.";
+  }else if(art==="network"||art==="audio-capture"){
+   fehlerZaehler++;
+   if(fehlerZaehler>=3){
+    willHoeren=false;beschriften();status("fehler","Spracherkennung nicht erreichbar");
+    el("textUebersetzung").textContent="Die Spracherkennung des Browsers ist gerade nicht erreichbar. Tipp unten oder versuch es später noch einmal.";
+   }
+  }
+ };
+ erk.onresult=function(e){
+  if(belegt){return}
+  fehlerZaehler=0;
+  var fertig="",vorl="";
+  for(var i=e.resultIndex;i<e.results.length;i++){
+   if(e.results[i].isFinal){fertig+=e.results[i][0].transcript}else{vorl+=e.results[i][0].transcript}
+  }
+  if(vorl){el("vorlaeufig").textContent=vorl}
+  if(fertig.trim()){runde(fertig.trim())}
+ };
+}
+function starte(wer){
+ aktiv=wer;willHoeren=true;fehlerZaehler=0;
+ if(!Erk){beschriften();el("tippfeld").focus();return}
+ wechsle();
+}
+el("knopfIch").addEventListener("click",function(){starte("ich")});
+el("knopfGast").addEventListener("click",function(){starte("gast")});
+el("knopfAus").addEventListener("click",function(){
+ willHoeren=false;erkStopp();if(window.speechSynthesis){window.speechSynthesis.cancel()}
+ el("ton").pause();belegt=false;rundenNr++;beschriften();status("bereit","Mikrofon aus");
+});
+
+/* ---------- Eine Runde ---------- */
+function runde(text){
+ var von=code(aktiv),nach=code(aktiv==="ich"?"gast":"ich"),wer=aktiv,nr=++rundenNr;
+ belegt=true;erkStopp();
+ el("vorlaeufig").textContent="";
+ el("etiOriginal").textContent="Gesagt – "+name(von);
+ el("textOriginal").textContent=text;
+ el("etiUebersetzung").textContent="Übersetzung – "+name(nach);
+ el("textUebersetzung").textContent="…";
+ el("takt").textContent="";
+ status("uebersetzt","übersetzt …");
+ var t0=performance.now();
+ var kontext=verlauf.slice(-4).map(function(v){return {von:v.von,original:v.original,uebersetzung:v.uebersetzung}});
+ holenJson("/api/uebersetzen",{text:text,von:von,nach:nach,verlauf:kontext,sprecher:wer}).then(function(a){
+  if(nr!==rundenNr){return}
+  var dauer=performance.now()-t0;
+  if(!a||!a.ok){
+   el("textUebersetzung").textContent=(a&&a.fehler)||"Das Übersetzen hat nicht geklappt.";
+   status("fehler","Fehler");
+   fertigRunde(true);return;
+  }
+  el("textUebersetzung").textContent=a.uebersetzung;
+  el("takt").textContent="Übersetzt in "+sek(dauer)+(a.gehirn?" ("+(a.gehirn==="gemini"?"Gemini":"Claude")+")":"");
+  verlauf.push({von:von,nach:nach,sprecher:wer,original:text,uebersetzung:a.uebersetzung,dauer:dauer});
+  if(verlauf.length>10){verlauf.shift()}
+  verlaufZeigen();
+  status("spricht","spricht: "+name(nach));
+  sprich(a.sprechstuecke&&a.sprechstuecke.length?a.sprechstuecke:[a.uebersetzung],nach,function(){
+   if(nr===rundenNr){fertigRunde(false)}
+  });
+ }).catch(function(f){
+  if(nr!==rundenNr){return}
+  el("textUebersetzung").textContent="Ich erreiche Jarvis nicht: "+f.message;
+  status("fehler","Fehler");
+  fertigRunde(true);
+ });
+}
+function fertigRunde(mitFehler){
+ belegt=false;
+ if(!mitFehler&&el("abwechselnd").checked){aktiv=(aktiv==="ich"?"gast":"ich")}
+ beschriften();
+ if(willHoeren){erkStart()}else{status("bereit","bereit")}
+}
+el("tippform").addEventListener("submit",function(e){
+ e.preventDefault();
+ var t=el("tippfeld").value.trim();
+ if(!t||belegt){return}
+ el("tippfeld").value="";
+ runde(t);
+});
+function verlaufZeigen(){
+ var liste=el("verlauf");liste.textContent="";
+ verlauf.slice().reverse().forEach(function(v){
+  var li=document.createElement("li");li.dataset.sprecher=v.sprecher;
+  var kopf=document.createElement("small");kopf.textContent=(v.sprecher==="ich"?"Ich":"Gast")+" · "+name(v.von)+" → "+name(v.nach)+" · "+sek(v.dauer);
+  var o=document.createElement("span");o.textContent=v.original;
+  var u=document.createElement("span");u.className="u";u.textContent=v.uebersetzung;
+  li.appendChild(kopf);li.appendChild(o);li.appendChild(u);liste.appendChild(li);
+ });
+ el("verlaufLeer").style.display=verlauf.length?"none":"";
+}
+el("knopfLeeren").addEventListener("click",function(){
+ verlauf=[];verlaufZeigen();
+ el("textOriginal").textContent="";el("textUebersetzung").textContent="";el("takt").textContent="";
+ el("etiOriginal").textContent="Gesagt";el("etiUebersetzung").textContent="Übersetzung";
+});
+
+/* ---------- Sprechen ---------- */
+function sprachCode(l){return String(l||"").toLowerCase().replace("_","-").split("-")[0]}
+function alleStimmen(){return window.speechSynthesis?window.speechSynthesis.getVoices():[]}
+if(window.speechSynthesis){window.speechSynthesis.onvoiceschanged=alleStimmen}
+// Die natürlichste Stimme für eine Sprache: erst hochwertige (Premium, Enhanced, Natural,
+// Neural), dann Google, dann irgendeine. Gibt es keine, eine nahe verwandte Sprache.
+function besteStimme(c){
+ var liste=alleStimmen(),kette=NAHE[c]||[c];
+ for(var k=0;k<kette.length;k++){
+  var passend=liste.filter(function(s){return sprachCode(s.lang)===kette[k]});
+  if(!passend.length){continue}
+  var stufen=[/premium|enhanced|natural|neural|online/i,/google/i];
+  for(var i=0;i<stufen.length;i++){
+   var t=passend.filter(function(s){return stufen[i].test(s.name)});
+   if(t.length){return {stimme:t[0],sprache:kette[k]}}
+  }
+  return {stimme:passend[0],sprache:kette[k]};
+ }
+ return null;
+}
+function sprich(stuecke,c,danach){
+ if(serverStimme){spielServer(stuecke,c,danach)}else{spielBrowser(stuecke,c,danach)}
+}
+function spielBrowser(stuecke,c,danach){
+ var wahl=besteStimme(c);
+ if(!window.speechSynthesis||!wahl){
+  el("takt").textContent+=(el("takt").textContent?" · ":"")+"Dein Browser hat keine Stimme für "+name(c)+" – nur Text.";
+  danach();return;
+ }
+ if(wahl.sprache!==c){el("takt").textContent+=" · Stimme: "+name(wahl.sprache)+" (für "+name(c)+" gibt es keine)"}
+ window.speechSynthesis.cancel();
+ var i=0,fertig=false;
+ function ende(){if(fertig){return}fertig=true;danach()}
+ function weiter(){
+  if(fertig){return}
+  if(i>=stuecke.length){ende();return}
+  var u=new SpeechSynthesisUtterance(stuecke[i++]);
+  u.lang=wahl.stimme.lang||tag(wahl.sprache);u.voice=wahl.stimme;u.rate=1;
+  u.onend=weiter;
+  u.onerror=function(e){if(e&&(e.error==="canceled"||e.error==="interrupted")){ende()}else{weiter()}};
+  window.speechSynthesis.speak(u);
+ }
+ weiter();
+ // Sicherheitsnetz: manche Browser melden das Ende nicht.
+ setTimeout(function(){if(!fertig){window.speechSynthesis.cancel();ende()}},Math.min(120000,4000+stuecke.join(" ").length*90));
+}
+function spielServer(stuecke,c,danach){
+ var ton=el("ton"),i=0,vorab=null;
+ function holeStueck(t){
+  return fetch(url("/api/sprache"),{method:"POST",headers:{"Content-Type":"application/json"},
+   body:JSON.stringify({text:t,sprache:c})}).then(function(r){
+    if(!r.ok){throw new Error("Serverstimme: "+r.status)}
+    return r.blob();
+  }).then(function(b){return URL.createObjectURL(b)});
+ }
+ function zurueck(rest){
+  // Die Serverstimme geht nicht (kein Guthaben, kein Netz): mit der Browserstimme weiter.
+  serverStimme=false;
+  el("takt").textContent+=(el("takt").textContent?" · ":"")+"Serverstimme nicht verfügbar – Browserstimme";
+  spielBrowser(rest,c,danach);
+ }
+ function weiter(){
+  if(i>=stuecke.length){danach();return}
+  var jetzt=i;
+  var p=vorab||holeStueck(stuecke[i]);
+  i++;
+  vorab=i<stuecke.length?holeStueck(stuecke[i]):null;
+  if(vorab){vorab.catch(function(){})}
+  p.then(function(u){
+   ton.onended=function(){URL.revokeObjectURL(u);weiter()};
+   ton.onerror=function(){zurueck(stuecke.slice(jetzt))};
+   ton.src=u;
+   return ton.play();
+  }).catch(function(){zurueck(stuecke.slice(jetzt))});
+ }
+ weiter();
+}
+verlaufZeigen();
+beschriften();
+})();
+</script></body></html>
+"""
 
 
 # =========================================================================
@@ -23930,6 +28447,14 @@ class Scheduler:
         if BRIEFING_ABENDS:
             self.job_anlegen("abendrueckblick", BRIEFING_ABENDS,
                              self._abendrueckblick, "Abendrückblick")
+        # [P5 Sicht] Anfang
+        # Abends: Erholung heute niedrig, morgen voll? Dann kommt ein Vorschlag - sonst bleibt Jarvis still
+        # (ein leerer Text wird nicht ausgegeben). Die Uhrzeit "aus" schaltet die Prüfung ab.
+        if (":" in str(BELASTUNG_PRUEFEN_UM or "")
+                and getattr(getattr(self.agent, "tools", None), "leistung", None) is not None):
+            self.job_anlegen("belastung", BELASTUNG_PRUEFEN_UM,
+                             lambda: self.agent.tools.leistung.belastung_job(), "Belastung für morgen prüfen")
+        # [P5 Sicht] Ende
 
     def routinen_einhaengen(self):
         """Hängt alle Routinen mit Uhrzeit in den Zeitplan."""
@@ -24584,8 +29109,32 @@ ANZEIGE_PFADE |= {"/api/weltkarte"}
 # [P4 Büro] Anfang
 # [P4 Büro] Ende
 # [P5 Sicht] Anfang
+# Die Seite Sicht und was sie liest - nur ansehen. Speichern und Gesten gehen nur in der Web-App.
+ANZEIGE_PFADE |= {"/sehen", "/api/sicht/stand", "/api/sicht/verlauf"}
+# Die Dateien der Handerkennung (die Version steht im Pfad): alles, was so anfängt, ist erlaubt;
+# ausgeliefert werden trotzdem nur die weißgelisteten Namen.
+ANZEIGE_PRAEFIXE = (SICHT_DATEIEN_PRAEFIX,)
+# Wohin Oura und Whoop nach der Anmeldung den Browser zurückschicken. Dort steht kein Jarvis-Schlüssel
+# in der Adresse; geschützt ist der Rückruf durch den einmaligen, befristeten Anmelde-Code (state).
+WEARABLE_RUECKRUF = {"/oura/rueckruf": "oura", "/whoop/rueckruf": "whoop"}
 # [P5 Sicht] Ende
 # [P6 Stimme] Anfang
+# Wie oft die Serverstimme und der Übersetzer gefragt werden dürfen: höchstens 60 Anfragen
+# in 60 Sekunden. Beides kostet Geld; eine Schleife in einer Seite soll nicht das Guthaben leeren.
+SPRACHE_MAX_ANFRAGEN = 60
+SPRACHE_FENSTER_S = 60
+
+
+def sprachrate_erlaubt(zeiten: list, sperre, jetzt: float = None,
+                       maximum: int = SPRACHE_MAX_ANFRAGEN, fenster: float = SPRACHE_FENSTER_S) -> bool:
+    """Gleitendes Fenster: darf jetzt noch eine Anfrage durch? Zählt die Anfrage, wenn ja."""
+    jetzt = time.time() if jetzt is None else jetzt
+    with sperre:
+        zeiten[:] = [t for t in zeiten if jetzt - t < fenster]
+        if len(zeiten) >= maximum:
+            return False
+        zeiten.append(jetzt)
+        return True
 # [P6 Stimme] Ende
 # [P7 Start] Anfang
 # [P7 Start] Ende
@@ -24626,6 +29175,14 @@ class JarvisWeb:
         # [P5 Sicht] Anfang
         # [P5 Sicht] Ende
         # [P6 Stimme] Anfang
+        # Gleitende Fenster für /api/sprache und /api/uebersetzen (60 Anfragen je 60 Sekunden).
+        self._sprache_zeiten = []
+        self._uebersetzen_zeiten = []
+        self._sprache_sperre = threading.Lock()
+        # Der Dolmetscher gibt es nur hier, nicht in der Anzeige des Dienstes: das Werkzeug
+        # dolmetscher_starten fragt die Web-App, ob sie läuft.
+        if not self.nur_anzeige:
+            agent.tools.web_app = self
         # [P6 Stimme] Ende
         # [P7 Start] Anfang
         # [P7 Start] Ende
@@ -24744,6 +29301,12 @@ class JarvisWeb:
             return False
         if not self.token:
             return True
+        # P5 Sicht: Die Dateien der Handerkennung sind öffentliche Bibliotheken, und MediaPipe
+        # holt sie selbst - dabei lässt sich kein Schlüssel anhängen. Nur die weißgelisteten Namen.
+        if sicht_pfad_oeffentlich(urlparse(behandler.path).path):
+            return True
+        if urlparse(behandler.path).path.rstrip("/") in WEARABLE_RUECKRUF:
+            return True
         gefragt = parse_qs(urlparse(behandler.path).query).get("schluessel", [""])[0]
         kopfschluessel = behandler.headers.get("X-Jarvis-Schluessel", "")
         return secrets.compare_digest(gefragt or kopfschluessel, self.token)
@@ -24773,7 +29336,8 @@ class JarvisWeb:
             return self._antworten(behandler, 403,
                                    {"fehler": "Kein Zugang. Der Schlüssel fehlt "
                                               "oder stimmt nicht."})
-        if self.nur_anzeige and (methode != "GET" or pfad not in ANZEIGE_PFADE):
+        if self.nur_anzeige and (methode != "GET" or not (
+                pfad in ANZEIGE_PFADE or pfad.startswith(ANZEIGE_PRAEFIXE))):
             return self._antworten(behandler, 404,
                                    {"fehler": "Hier läuft nur die Anzeige. Sprich mit Jarvis."})
         if methode == "POST" and not self._herkunft_ok(behandler):
@@ -24838,6 +29402,9 @@ class JarvisWeb:
                 "modell": CLAUDE_MODEL,
                 "werkzeuge": len(werkzeuge.namen()),
                 "rollen": [r["rolle"] for r in werkzeuge.team.rollen_liste()],
+                "stimme_im_browser": bool(STIMME_IM_BROWSER and anbieter_reihenfolge()),
+                "stimme_anbieter": (anbieter_reihenfolge() or [""])[0],
+                "dolmetscher_sprachen": sprachen_aktiv(),
                 "dienste": konfig_uebersicht()})
         if pfad == "/api/meldungen":
             return self._antworten(behandler, 200,
@@ -24888,8 +29455,52 @@ class JarvisWeb:
         # [P4 Büro] Anfang
         # [P4 Büro] Ende
         # [P5 Sicht] Anfang
+        if pfad == "/sehen":
+            # Die Kamera nur für die Seite selbst - und gar nicht, solange SICHT_AN aus ist.
+            return self._html(behandler, SEITE_SEHEN.replace("{{SCHLUESSEL}}", self.token), {
+                "Content-Security-Policy": SEHEN_CSP,
+                "Permissions-Policy": SEHEN_ERLAUBNIS if SICHT_AN else SEHEN_ERLAUBNIS_AUS})
+        if pfad.startswith(SICHT_DATEIEN_PRAEFIX):
+            code, inhalt, typ = sicht_ausliefern(pfad)
+            if code != 200:
+                return self._antworten(behandler, code, {"fehler": typ})
+            # Die Version steht im Pfad - der Browser darf die Datei ein Jahr behalten.
+            self._kopf_setzen(behandler, 200, typ, len(inhalt),
+                              {"Cache-Control": "public, max-age=31536000, immutable"})
+            return behandler.wfile.write(inhalt)
+        if pfad in ("/api/sicht/stand", "/api/sicht/verlauf"):
+            # Auf der Anzeige des Dienstes gibt es im Diskretmodus keine Gesundheitswerte.
+            diskret = bool(self.nur_anzeige and ANZEIGE_DISKRET)
+            if pfad == "/api/sicht/stand":
+                return self._antworten(behandler, 200, sicht_stand_bauen(
+                    werkzeuge, schreiben=not self.nur_anzeige, diskret=diskret))
+            if diskret:
+                return self._antworten(behandler, 200, {"ok": True, "tage": 0, "messungen": [],
+                                                        "tageswerte": [], "diskret": True})
+            return self._antworten(behandler, 200,
+                                   werkzeuge.handruhe.verlauf(frage.get("tage", ["14"])[0]))
+        if pfad in WEARABLE_RUECKRUF:
+            # Rückkehr von Oura/Whoop: Code und state gehen an die Erholung, die beides prüft.
+            from html import escape as seite_maskieren
+            if (frage.get("error") or [""])[0]:
+                ergebnis = {"ok": False, "fehler": "Die Anmeldung wurde abgebrochen oder abgelehnt."}
+            else:
+                ergebnis = werkzeuge.erholung.oauth_abschluss(
+                    WEARABLE_RUECKRUF[pfad], (frage.get("code") or [""])[0],
+                    (frage.get("state") or [""])[0])
+            text = ergebnis.get("text") if ergebnis.get("ok") else ergebnis.get("fehler")
+            return self._html(behandler, (
+                "<!doctype html><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>"
+                "<title>Jarvis Anmeldung</title>"
+                "<body style='font:16px system-ui;background:#0b0d12;color:#e8e6e3;max-width:36em;margin:3em auto;padding:0 1em'>"
+                "<h2>%s</h2><p>%s</p><p>Du kannst dieses Fenster schließen.</p></body>") % (
+                    "Angemeldet" if ergebnis.get("ok") else "Anmeldung nicht abgeschlossen",
+                    seite_maskieren(str(text or ""))))
         # [P5 Sicht] Ende
         # [P6 Stimme] Anfang
+        if pfad == "/dolmetscher":
+            # Nur in der Web-App: nicht in ANZEIGE_PFADE, also gibt es die Seite im Dienst nicht.
+            return self._html(behandler, SEITE_DOLMETSCHER.replace("{{SCHLUESSEL}}", self.token))
         # [P6 Stimme] Ende
         # [P7 Start] Anfang
         # [P7 Start] Ende
@@ -24981,8 +29592,56 @@ class JarvisWeb:
         # [P4 Büro] Anfang
         # [P4 Büro] Ende
         # [P5 Sicht] Anfang
+        if pfad == "/api/sicht/messung":
+            # Nur Zahlen, klein und streng geprüft. Ein Bild kommt hier nie an.
+            try:
+                laenge = int(behandler.headers.get("Content-Length") or 0)
+            except (TypeError, ValueError):
+                laenge = 0
+            if laenge > 2048:
+                return self._antworten(behandler, 400, {"fehler": "Zu viele Daten."},
+                                       {"Connection": "close"})
+            messung, fehler = messung_pruefen(daten)
+            if messung is None:
+                return self._antworten(behandler, 400, {"fehler": fehler})
+            ergebnis = werkzeuge.handruhe.speichern(messung)
+            return self._antworten(behandler, 200 if ergebnis.get("ok") else 400, ergebnis)
+        if pfad == "/api/vorschlag/geste":
+            code, antwort = vorschlag_per_geste(self, daten)
+            return self._antworten(behandler, code, antwort)
         # [P5 Sicht] Ende
         # [P6 Stimme] Anfang
+        if pfad == "/api/sprache":
+            # Die Serverstimme für den Browser: Text rein, Sprachdatei (MP3) raus.
+            text = str(daten.get("text") or "")[:600].strip()
+            sprache = str(daten.get("sprache") or "de").strip().lower()
+            if not text:
+                return self._antworten(behandler, 400, {"fehler": "Es kam kein Text an."})
+            if sprache not in SPRACHEN:
+                return self._antworten(behandler, 400, {"fehler": "Diese Sprache kenne ich nicht."})
+            if not sprachrate_erlaubt(self._sprache_zeiten, self._sprache_sperre):
+                return self._antworten(behandler, 429,
+                                       {"fehler": "Zu viele Sprachanfragen in kurzer Zeit."})
+            ergebnis = sprachaudio(text, "mp3", sprache)
+            if ergebnis.get("ok") and ergebnis.get("daten"):
+                self._kopf_setzen(behandler, 200, ergebnis["typ"], len(ergebnis["daten"]))
+                return behandler.wfile.write(ergebnis["daten"])
+            return self._antworten(behandler, 503, {
+                "fehler": ergebnis.get("fehler") or "Keine Sprachausgabe eingerichtet."})
+
+        if pfad == "/api/uebersetzen":
+            # Der Dolmetscher: eine Äußerung rein, Übersetzung raus (und als Untertitel auf die Zentrale).
+            if not sprachrate_erlaubt(self._uebersetzen_zeiten, self._sprache_sperre):
+                return self._antworten(behandler, 429,
+                                       {"ok": False, "fehler": "Zu viele Übersetzungen in kurzer Zeit."})
+            text = str(daten.get("text") or "")
+            ergebnis = uebersetzen(text, daten.get("von"), daten.get("nach"),
+                                   verlauf=daten.get("verlauf"), agent=self.agent)
+            if ergebnis.get("ok"):
+                untertitel_veroeffentlichen(werkzeuge, text, ergebnis,
+                                            str(daten.get("sprecher") or "gast"),
+                                            str(daten.get("von") or ""), str(daten.get("nach") or ""))
+            return self._antworten(behandler, 200, ergebnis)
         # [P6 Stimme] Ende
         # [P7 Start] Anfang
         if pfad == "/api/hochfahren":
@@ -25549,8 +30208,13 @@ class Einrichtung:
         # [P4 Büro] Anfang
         # [P4 Büro] Ende
         # [P5 Sicht] Anfang
+        # Beide verbinden sich über eine eigene App (OAuth): hier nur das Client-Secret, alles Weitere macht
+        # `python3 jarvis.py zugang oura` bzw. `zugang whoop` (fragt auch die Client-ID und meldet an).
+        ("oura", "Oura Ring, Client-Secret (danach: zugang oura)", "OURA_CLIENT_SECRET", "https://cloud.ouraring.com/oauth/applications"),
+        ("whoop", "Whoop, Client-Secret (danach: zugang whoop)", "WHOOP_CLIENT_SECRET", "https://developer-dashboard.whoop.com/"),
         # [P5 Sicht] Ende
         # [P6 Stimme] Anfang
+        ("fish", "Fish Audio (Stimme)", "FISH_API_KEY", "https://fish.audio/app/api-keys/"),
         # [P6 Stimme] Ende
         # [P7 Start] Anfang
         # [P7 Start] Ende
@@ -26476,6 +31140,11 @@ FREIGABE_AUFLOESEN["termin_verschieben"] = _aufloesen_termin_verschieben
 FREIGABE_AUFLOESEN["termin_wiederherstellen"] = _aufloesen_termin_wiederherstellen
 # [P4 Büro] Ende
 # [P5 Sicht] Anfang
+# Erholung und Leistung: lesen, rechnen, vorschlagen - nichts davon wirkt nach außen (der Abruf bei Oura und
+# Whoop geht an feste Adressen), darum ohne Freigabe. Ein Vorschlag führt nie etwas aus; Termine absagen oder
+# verschieben fragen einzeln nach Freigabe.
+ERHOLUNG_WERKZEUGE = {"erholung_lesen", "erholung_eintragen", "erholung_abrufen", "gesundheit_importieren",
+                      "leistung_zusammenhang", "belastung_pruefen"}
 # [P5 Sicht] Ende
 # [P6 Stimme] Anfang
 # [P6 Stimme] Ende
@@ -26609,8 +31278,18 @@ class Werkzeuge:
         self.kalender.memory = self.memory  # darin liegt der Papierkorb für abgesagte Termine
         # [P4 Büro] Ende
         # [P5 Sicht] Anfang
+        self.handruhe = Handruhe(self.memory, anzeige=self)
+        # Gesundheitsdaten: nur lokal, der Import liest nur im Benutzerordner und nichts Gesperrtes.
+        self.erholung = Erholung(self.memory, zugriff=self.mac, anzeige=self)
+        self.leistung = Leistung(self.memory, self.kalender, self.erholung, self.call_analysis, anzeige=self)
+        # Die Vorschläge werden erst beim Prüfen gesucht, nicht hier - die Reihenfolge im Aufbau darf egal sein.
+        self.leistung.vorschlaege_suche = lambda: getattr(self, "vorschlaege", None)
         # [P5 Sicht] Ende
         # [P6 Stimme] Anfang
+        # Die laufende Web-App setzt sich hier ein (nur sie hat die Dolmetscher-Seite).
+        self.web_app = None
+        # Austauschbarer Öffner für den Dolmetscher: Prüfungen öffnen nie ein Fenster.
+        self.dolmetscher_oeffner = None
         # [P6 Stimme] Ende
         # [P7 Start] Anfang
         self.inhalte = Inhalte(self.memory, self.werkstatt, anzeige=self)
@@ -26646,6 +31325,8 @@ class Werkzeuge:
         """Reicht die Sprachausgabe durch - für Sprachnachrichten."""
         self.stimme = stimme
         self.messenger.stimme = stimme
+        if stimme is not None:
+            stimme.anzeige = self.anzeige  # der Pegel der Stimme geht an den Orb
 
     def agent_setzen(self, agent):
         """Verknüpft den Katalog mit dem Agenten, damit Werkzeuge Claude nutzen können."""
@@ -26992,7 +31673,8 @@ class Werkzeuge:
                      ["von", "nach"]),
             werkzeug("umschauen",
                      "Nimmt ein Einzelbild der Kamera auf und beschreibt, was zu sehen "
-                     "ist. Kein Dauervideo.",
+                     "ist. Kein Dauervideo auf dem Server; das Live-Bild gibt es nur auf der "
+                     "Seite Sicht im Browser.",
                      {"frage": text, "behalten": wahr}),
 
             # -- Browser --
@@ -27155,8 +31837,37 @@ class Werkzeuge:
                      {"id": ganz, "angenommen": wahr}, ["id", "angenommen"]),
             # [P4 Büro] Ende
             # [P5 Sicht] Anfang
+            werkzeug("sicht_stand",
+                     "Stand der Kamera-Seite Sicht: ob die Live-Kamera an ist, die Handerkennung geladen ist "
+                     "und die letzte Handruhe-Messung. Nur lesend; Selbstbeobachtung, kein Medizinprodukt.", {}),
+            # -- Erholung und Leistung --
+            werkzeug("erholung_lesen",
+                     "Erholungswert heute und der letzten Tage aus dem verbundenen Wearable oder dem "
+                     "Apple-Health-Export, mit Quelle. Zeigt ihn auf der Zentrale. Kein Medizinprodukt.",
+                     {"tage": ganz}),
+            werkzeug("erholung_eintragen",
+                     "Trägt einen Erholungswert (0 bis 100) von Hand ein, etwa aus der Oura- oder Whoop-App.",
+                     {"wert": zahl, "tag": text}, ["wert"]),
+            werkzeug("erholung_abrufen", "Holt die neuesten Werte von Oura oder Whoop.",
+                     {"dienst": {"type": "string", "enum": ["oura", "whoop"]}}, ["dienst"]),
+            werkzeug("gesundheit_importieren",
+                     "Liest einen Apple-Health-Export (export.zip oder export.xml) aus dem Benutzerordner und "
+                     "berechnet die Erholung je Tag.", {"pfad": text}, ["pfad"]),
+            werkzeug("leistung_zusammenhang",
+                     "Wie Erholung, Terminlast und Abschlussquote zusammenhängen, mit Fallzahlen. "
+                     "Zusammenhang, keine Ursache.", {"tage": ganz}),
+            werkzeug("belastung_pruefen",
+                     "Prüft jetzt, ob der morgige Tag bei der heutigen Erholung zu voll ist, und schlägt "
+                     "gegebenenfalls Entlastung vor. Ändert selbst nichts.", {}),
             # [P5 Sicht] Ende
             # [P6 Stimme] Anfang
+            # -- Dolmetscher --
+            werkzeug("dolmetscher_starten",
+                     "Öffnet den Dolmetscher im Browser: du sprichst Deutsch, der Gast seine Sprache; "
+                     "Jarvis übersetzt hin und her und zeigt Untertitel auf der Zentrale.",
+                     {"nach": {"type": "string", "enum": sorted(k for k in SPRACHEN if k != "de"),
+                               "description": "Sprachkürzel des Gastes, zum Beispiel tr, hr, en."}},
+                     ["nach"]),
             # [P6 Stimme] Ende
             # [P7 Start] Anfang
             # -- Start und Steuerung --
@@ -27717,8 +32428,19 @@ class Werkzeuge:
             return self.vorschlaege.beantworten(a.get("id"), a.get("angenommen"))
         # [P4 Büro] Ende
         # [P5 Sicht] Anfang
+        if name == "sicht_stand":
+            stand = sicht_stand_bauen(self, schreiben=True, diskret=False)
+            return dict({"ok": True, "text": sicht_stand_text(stand)},
+                        **{k: stand[k] for k in ("an", "dateien_da", "geste", "handruhe_letzte", "erholung", "hinweis")})
+        if name in ERHOLUNG_WERKZEUGE:
+            return self._erholung_ausfuehren(name, a)
         # [P5 Sicht] Ende
         # [P6 Stimme] Anfang
+        if name == "dolmetscher_starten":
+            if self.im_hintergrund():
+                return {"ok": False, "fehler": "Im Hintergrund öffne ich keine Fenster."}
+            return dolmetscher_starten(a.get("nach"), web=getattr(self, "web_app", None),
+                                       oeffnen=getattr(self, "dolmetscher_oeffner", None))
         # [P6 Stimme] Ende
         # [P7 Start] Anfang
         if name == "hardware_bericht":
@@ -27821,6 +32543,57 @@ class Werkzeuge:
     # [P4 Büro] Anfang
     # [P4 Büro] Ende
     # [P5 Sicht] Anfang
+    def _erholung_ausfuehren(self, name: str, a: dict) -> dict:
+        """Die Werkzeuge zu Erholung und Leistung. Gesundheitswerte gehen nur an Claude und die eigene Zentrale."""
+        if name == "erholung_lesen":
+            try:
+                tage = max(1, min(30, int(a.get("tage") or 7)))
+            except (TypeError, ValueError):
+                tage = 7
+            heute = self.erholung.heute()
+            verlauf = self.erholung.verlauf(tage)
+            if not heute.get("ok") and not verlauf:
+                return {"ok": False, "fehler": heute.get("fehler", "Es gibt keine Erholungswerte."),
+                        "hinweis": "Kein Medizinprodukt."}
+            self.erholung.anzeigen(heute if heute.get("ok") else (verlauf[-1] if verlauf else None))
+            ergebnis = {"ok": True, "hinweis": "Kein Medizinprodukt; bei Apple Health ist es eine eigene Schätzung.",
+                        "verlauf": [{"tag": e["tag"], "wert": e["wert"], "band": e["band"], "quelle": e["quelle"]}
+                                    for e in verlauf]}
+            if heute.get("ok"):
+                ergebnis["heute"] = {k: heute[k] for k in ("tag", "wert", "band", "quelle")}
+                ergebnis["text"] = heute["text"]
+            else:
+                ergebnis["text"] = heute.get("fehler", "")
+            return ergebnis
+        if name == "erholung_eintragen":
+            ergebnis = self.erholung.manuell(a.get("tag"), a.get("wert"))
+            if ergebnis.get("ok"):
+                self.erholung.anzeigen()
+            return ergebnis
+        if name == "erholung_abrufen":
+            ergebnis = self.erholung.abrufen(a.get("dienst"))
+            if ergebnis.get("ok"):
+                self.erholung.anzeigen()
+            return ergebnis
+        if name == "gesundheit_importieren":
+            ergebnis = self.erholung.importieren(a.get("pfad"))
+            if ergebnis.get("ok") and not ergebnis.get("hintergrund"):
+                self.erholung.anzeigen()
+            return ergebnis
+        if name == "leistung_zusammenhang":
+            try:
+                tage = max(7, min(90, int(a.get("tage") or 60)))
+            except (TypeError, ValueError):
+                tage = 60
+            z = self.leistung.zusammenhang(tage, anzeigen=True)
+            return {"ok": True, "text": z["text"], "n": z["n"], "ausreichend": z["ausreichend"], "r": z["r"],
+                    "tabelle": z["tabelle"], "gesamt": z["gesamt"], "hinweis": z["hinweis"]}
+        # belastung_pruefen: nur ein Vorschlag als Text - ändern tut dieses Werkzeug nichts
+        text = self.leistung.belastung_pruefen()
+        if text:
+            return {"ok": True, "vorschlag": True, "text": text}
+        return {"ok": True, "vorschlag": False,
+                "text": "Ich schlage heute nichts vor. %s" % self.leistung.letzter_grund}
     # [P5 Sicht] Ende
     # [P6 Stimme] Anfang
     # [P6 Stimme] Ende
@@ -28138,6 +32911,8 @@ ZUSATZREGELN = (
         "ohne vorher alle Themen aufzuzählen. Nenne nur Zahlen, die das Werkzeug geliefert hat.",
     # [P2 Weltlage] Ende
     # [P3 Telefon] Anfang
+    "Nach restaurant_anrufen sagst du über den Ausgang des Gesprächs nichts, bevor anruf_status "
+    "ihn meldet; einen Kalendereintrag schlägst du nur vor.",
     # [P3 Telefon] Ende
     # [P4 Büro] Anfang
     "Bei allem, was eine Freigabe braucht, schreibst du in begruendung in einem Satz, "
@@ -28147,6 +32922,8 @@ ZUSATZREGELN = (
     "fragen trotzdem einzeln nach Freigabe.",
     # [P4 Büro] Ende
     # [P5 Sicht] Anfang
+    "Erholung und Handruhe sind Selbstbeobachtung, kein Medizinprodukt: nenne nur Zahlen aus "
+    "erholung_lesen oder sicht_stand, mit Quelle, und stell keine Diagnose.",
     # [P5 Sicht] Ende
     # [P6 Stimme] Anfang
     # [P6 Stimme] Ende
@@ -28360,10 +33137,13 @@ class JarvisAgent:
         ]
 
     def text_anfrage(self, auftrag: str, bild_base64: str = "",
-                     bild_typ: str = "image/jpeg", max_tokens: int = 8000) -> dict:
+                     bild_typ: str = "image/jpeg", max_tokens: int = 8000,
+                     effort: str = "medium") -> dict:
         """Eine einzelne Anfrage ohne Werkzeuge - gibt reinen Text zurück.
 
         Zählt wie jede Claude-Runde zum Monatslimit und landet im Gedankenlog.
+        ``effort`` ist die Denktiefe (low, medium, high ...): ``low`` für Aufträge, bei
+        denen es auf Tempo ankommt, etwa das Übersetzen im Dolmetscher.
         """
         if self.gedankenlog.limit_erreicht():
             return {"ok": False, "fehler": self._limit_meldung()}
@@ -28374,7 +33154,7 @@ class JarvisAgent:
             "max_tokens": max(int(max_tokens or 0), 8000),
             "messages": [{"role": "user",
                           "content": self._inhalt_bauen(auftrag, bild_base64, bild_typ)}],
-        }, summe, effort="medium", zwischenspeicher=False)
+        }, summe, effort=effort or "medium", zwischenspeicher=False)
         if summe:
             self.gedankenlog.eintragen(auftrag, "claude", "Einzelauftrag", time.time() - beginn,
                                        summe.get("ein", 0), summe.get("aus", 0), summe_kosten(summe))
@@ -28823,6 +33603,14 @@ class JarvisAgent:
         # [P4 Büro] Anfang
         # [P4 Büro] Ende
         # [P5 Sicht] Anfang
+        if morgens:
+            # Eine Zeile zur Erholung - nur, wenn es für heute einen echten Wert gibt (sonst gar nichts).
+            try:
+                erholung = self.tools.erholung.heute(abrufen=True)
+                if erholung.get("ok"):
+                    teile.append("Erholung: %s" % erholung["text"])
+            except Exception as fehler:
+                print("[briefing] Erholung nicht abrufbar: %s" % fehler)
         # [P5 Sicht] Ende
         # [P6 Stimme] Anfang
         # [P6 Stimme] Ende
@@ -28973,7 +33761,9 @@ class JarvisAgent:
 #     python3 jarvis.py export      Buchhaltung als CSV
 #     python3 jarvis.py stimme      Stimmprofil einlernen
 #     python3 jarvis.py stimmen     ElevenLabs-Stimme aussuchen
+#     python3 jarvis.py sicht       Kamera-Seite: laden (Handerkennung holen), an oder aus
 #     python3 jarvis.py test        Selbsttest
+#     python3 jarvis.py sprechprobe Stimmkette prüfen und einen Probesatz sprechen
 #     python3 jarvis.py einrichten  geführte Ersteinrichtung
 #     python3 jarvis.py hardware    den Mac prüfen: Last, Speicher, Platte, Netz, Wärme
 #     python3 jarvis.py zugang      einen Schlüssel eintragen oder ersetzen
@@ -28981,6 +33771,8 @@ class JarvisAgent:
 #     python3 jarvis.py zugang telegram  Handy verbinden: schreiben und sprechen von unterwegs
 #     python3 jarvis.py macapp      Jarvis als Programm: Symbol im Dock und im Programme-Ordner
 #     python3 jarvis.py autopilot   Postfach des Autopiloten (an / aus zum Schalten)
+#     python3 jarvis.py gesundheit  Apple-Health-Export einlesen (Datei) oder alle Gesundheitswerte vergessen
+#     python3 jarvis.py zugang oura Oura Ring verbinden (ebenso: zugang whoop) für den Erholungswert
 #     python3 jarvis.py daemon      dauerhaft, nur Stimme, ohne Fenster (der iMac als Kopf)
 #     python3 jarvis.py dienst      installieren | entfernen | status | neustart | hinweise
 #     python3 jarvis.py anzeige     Zentrale und Gehirn auf den Bildschirmen öffnen
@@ -29154,6 +33946,8 @@ def dauerbetrieb(dienst: bool = False):
     # [P4 Büro] Anfang
     # [P4 Büro] Ende
     # [P5 Sicht] Anfang
+    # Ein langer Gesundheitsimport läuft im Hintergrund und meldet sich, wenn er fertig ist.
+    agent.tools.erholung.ausgabe = ansager.sagen if dienst else stimme.sprich
     # [P5 Sicht] Ende
     # [P6 Stimme] Anfang
     # [P6 Stimme] Ende
@@ -29514,6 +34308,7 @@ def webbetrieb(argumente=None):
     # [P4 Büro] Anfang
     # [P4 Büro] Ende
     # [P5 Sicht] Anfang
+    agent.tools.erholung.ausgabe = web.melden
     # [P5 Sicht] Ende
     # [P6 Stimme] Anfang
     # [P6 Stimme] Ende
@@ -29900,6 +34695,9 @@ def selbsttest() -> int:
                ("eigene Nummer %s" % telefon["eigene_nummer"])
                if telefon["eingerichtet"]
                else "fuer Anrufe und SMS: TWILIO_SID, TWILIO_TOKEN, TWILIO_NUMMER")
+        ta = agent.tools.telefonagent.zustand()
+        melden("Telefonassistent (Restaurant anrufen)", "ok" if ta["gespraech_moeglich"] else "fehlt",
+               ta["hinweis"][:70])
         browser = agent.tools.browser.zustand()
         melden("Browser-Steuerung", "ok" if browser["verfuegbar"] else "fehlt",
                browser["hinweis"])
@@ -29990,7 +34788,8 @@ def hauptprogramm(argumente=None) -> int:
         return macapp_anlegen(argumente[1:])
     elif modus == "autopilot":
         return autopilot_zeigen(argumente[1:])
-    elif modus in ("zugang", "schluessel", "schlüssel"):
+    elif modus in ("zugang", "schluessel", "schlüssel") \
+            and (argumente[1].strip().lower() if len(argumente) > 1 else "") not in ("oura", "whoop"):
         return 0 if zugang_eintragen(argumente[1] if len(argumente) > 1 else "") else 1
     # Neue Betriebsarten der Pakete, je als "elif modus == ...:".
     # [P1 Bühne] Anfang
@@ -30002,8 +34801,17 @@ def hauptprogramm(argumente=None) -> int:
     # [P4 Büro] Anfang
     # [P4 Büro] Ende
     # [P5 Sicht] Anfang
+    elif modus == "sicht":
+        return sicht_befehl(argumente[1:])
+    elif modus in ("zugang", "schluessel", "schlüssel"):
+        # nur oura und whoop kommen hier an (siehe die Bedingung der ersten Zeile von "zugang")
+        return wearable_zugang_im_terminal(argumente[1].strip().lower())
+    elif modus in ("gesundheit", "erholung"):
+        return gesundheit_im_terminal(argumente[1:])
     # [P5 Sicht] Ende
     # [P6 Stimme] Anfang
+    elif modus == "sprechprobe":
+        return sprechprobe(argumente[1:])
     # [P6 Stimme] Ende
     # [P7 Start] Anfang
     elif modus == "hardware":

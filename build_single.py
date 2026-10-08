@@ -131,6 +131,8 @@ Betriebsarten:
     python3 jarvis.py sprechprobe Stimmkette prüfen und einen Probesatz sprechen
     python3 jarvis.py einrichten  geführte Ersteinrichtung
     python3 jarvis.py hardware    den Mac prüfen: Last, Speicher, Platte, Netz, Wärme
+    python3 jarvis.py gesundheit  Apple-Health-Export einlesen (Datei) oder alle Gesundheitswerte vergessen
+    python3 jarvis.py zugang oura Oura Ring verbinden (ebenso: zugang whoop) für den Erholungswert
 
 Alle Daten bleiben lokal auf diesem Rechner.
 """

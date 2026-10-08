@@ -276,6 +276,9 @@ ANZEIGE_PFADE |= {"/sehen", "/api/sicht/stand", "/api/sicht/verlauf"}
 # Die Dateien der Handerkennung (die Version steht im Pfad): alles, was so anfängt, ist erlaubt;
 # ausgeliefert werden trotzdem nur die weißgelisteten Namen.
 ANZEIGE_PRAEFIXE = (SICHT_DATEIEN_PRAEFIX,)
+# Wohin Oura und Whoop nach der Anmeldung den Browser zurückschicken. Dort steht kein Jarvis-Schlüssel
+# in der Adresse; geschützt ist der Rückruf durch den einmaligen, befristeten Anmelde-Code (state).
+WEARABLE_RUECKRUF = {"/oura/rueckruf": "oura", "/whoop/rueckruf": "whoop"}
 # [P5 Sicht] Ende
 # [P6 Stimme] Anfang
 # Wie oft die Serverstimme und der Übersetzer gefragt werden dürfen: höchstens 60 Anfragen
@@ -464,6 +467,8 @@ class JarvisWeb:
         # holt sie selbst - dabei lässt sich kein Schlüssel anhängen. Nur die weißgelisteten Namen.
         if sicht_pfad_oeffentlich(urlparse(behandler.path).path):
             return True
+        if urlparse(behandler.path).path.rstrip("/") in WEARABLE_RUECKRUF:
+            return True
         gefragt = parse_qs(urlparse(behandler.path).query).get("schluessel", [""])[0]
         kopfschluessel = behandler.headers.get("X-Jarvis-Schluessel", "")
         return secrets.compare_digest(gefragt or kopfschluessel, self.token)
@@ -636,6 +641,23 @@ class JarvisWeb:
                                                         "tageswerte": [], "diskret": True})
             return self._antworten(behandler, 200,
                                    werkzeuge.handruhe.verlauf(frage.get("tage", ["14"])[0]))
+        if pfad in WEARABLE_RUECKRUF:
+            # Rückkehr von Oura/Whoop: Code und state gehen an die Erholung, die beides prüft.
+            from html import escape as seite_maskieren
+            if (frage.get("error") or [""])[0]:
+                ergebnis = {"ok": False, "fehler": "Die Anmeldung wurde abgebrochen oder abgelehnt."}
+            else:
+                ergebnis = werkzeuge.erholung.oauth_abschluss(
+                    WEARABLE_RUECKRUF[pfad], (frage.get("code") or [""])[0],
+                    (frage.get("state") or [""])[0])
+            text = ergebnis.get("text") if ergebnis.get("ok") else ergebnis.get("fehler")
+            return self._html(behandler, (
+                "<!doctype html><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>"
+                "<title>Jarvis Anmeldung</title>"
+                "<body style='font:16px system-ui;background:#0b0d12;color:#e8e6e3;max-width:36em;margin:3em auto;padding:0 1em'>"
+                "<h2>%s</h2><p>%s</p><p>Du kannst dieses Fenster schließen.</p></body>") % (
+                    "Angemeldet" if ergebnis.get("ok") else "Anmeldung nicht abgeschlossen",
+                    seite_maskieren(str(text or ""))))
         # [P5 Sicht] Ende
         # [P6 Stimme] Anfang
         if pfad == "/dolmetscher":
