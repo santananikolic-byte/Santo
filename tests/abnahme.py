@@ -5016,6 +5016,783 @@ def pruefung_buero(agent):
 # [P5 Sicht] Anfang
 # [P5 Sicht] Ende
 # [P6 Stimme] Anfang
+# Spielt die Dolmetscher-Seite gegen ein gefälschtes DOM durch (nur mit node): Mikrofon, Übersetzer,
+# Stimme und Browser sind Fälscher - es gibt kein Netz, kein Fenster und keinen Ton.
+_DOLMETSCHER_HARNISCH = r"""
+const fs = require("fs");
+const quelle = fs.readFileSync(process.argv[2], "utf8");
+const modus = process.argv[3] || "browser";
+const ausgabe = { fetch: [], erkStarts: [], gesprochen: [] };
+const elemente = {};
+function neuesElement(tag) {
+  const e = { tag, dataset: {}, style: {}, children: [], _h: {}, value: "", checked: false, attrs: {},
+    classList: { add() {}, remove() {} },
+    setAttribute(k, v) { this.attrs[k] = v; }, getAttribute(k) { return this.attrs[k]; },
+    addEventListener(ev, fn) { (this._h[ev] = this._h[ev] || []).push(fn); },
+    appendChild(k) { this.children.push(k); if (this.tag === "select" && this.value === "") { this.value = k.value; } return k; },
+    click() { (this._h.click || []).forEach(f => f({ preventDefault() {} })); },
+    focus() {}, pause() {},
+    play() { const s = this; return Promise.resolve().then(() => { setTimeout(() => s.onended && s.onended(), 0); }); } };
+  Object.defineProperty(e, "textContent", { get() { return this._t || ""; },
+    set(v) { this._t = String(v); if (v === "") { this.children = []; } } });
+  return e;
+}
+["status","statustext","knopfIch","richtungIch","kartGast","knopfGast","richtungGast","gastSprache","abwechselnd","knopfAus",
+ "knopfLeeren","untertitel","vorlaeufig","etiOriginal","textOriginal","etiUebersetzung","textUebersetzung","takt","tippform",
+ "tippfeld","verlauf","verlaufLeer","ton"].forEach(i => { elemente[i] = neuesElement(i === "gastSprache" ? "select" : "x"); });
+elemente.abwechselnd.checked = true;
+const document = { getElementById: id => elemente[id], createElement: neuesElement, documentElement: { setAttribute() {} } };
+class Erkennung { constructor() { Erkennung.letzte = this; } start() { ausgabe.erkStarts.push(this.lang); } stop() {} }
+const stimmen = [{ name: "Yelda", lang: "tr-TR" }, { name: "Anna", lang: "de-DE" }, { name: "Lana", lang: "hr-HR" }];
+const window = { addEventListener() {}, SpeechRecognition: Erkennung,
+  speechSynthesis: { getVoices: () => stimmen, cancel() {},
+    speak(u) { ausgabe.gesprochen.push([u.text, u.lang, u.voice && u.voice.name]); setTimeout(() => u.onend && u.onend(), 0); } } };
+class Aeusserung { constructor(t) { this.text = t; } }
+const zustand = { ok: true, stimme_im_browser: modus !== "browser", dolmetscher_sprachen: ["tr", "hr", "bs", "en"] };
+const uebersetzungen = { "Guten Tag": "Merhaba", "Nasılsın": "Wie geht es dir?" };
+function fetchFalsch(url, opt) {
+  const k = opt && opt.body ? JSON.parse(opt.body) : null;
+  ausgabe.fetch.push([url, k]);
+  if (url.startsWith("/api/zustand")) { return Promise.resolve({ ok: true, json: () => Promise.resolve(zustand) }); }
+  if (url.startsWith("/api/uebersetzen")) {
+    const u = uebersetzungen[k.text] || (k.nach + ":" + k.text);
+    return Promise.resolve({ ok: true, json: () => Promise.resolve({ ok: true, uebersetzung: u, sprechstuecke: [u], gehirn: "gemini" }) });
+  }
+  if (url.startsWith("/api/sprache")) {
+    if (modus === "server-kaputt") { return Promise.resolve({ ok: false, status: 503, blob: () => Promise.reject(new Error("x")) }); }
+    return Promise.resolve({ ok: true, blob: () => Promise.resolve({}) });
+  }
+  return Promise.reject(new Error("unbekannt " + url));
+}
+const vm = require("vm");
+const kasten = { document, window, location: { search: "?nach=tr" }, URLSearchParams, fetch: fetchFalsch,
+  performance: { now: () => Date.now() }, setTimeout, clearTimeout, SpeechSynthesisUtterance: Aeusserung,
+  URL: { createObjectURL: () => "blob:x", revokeObjectURL() {} }, console, encodeURIComponent,
+  speechSynthesis: window.speechSynthesis, SpeechRecognition: Erkennung };
+vm.createContext(kasten);
+vm.runInContext(quelle, kasten);
+const warte = ms => new Promise(r => setTimeout(r, ms));
+const ergebnis = text => ({ resultIndex: 0, results: [Object.assign([{ transcript: text }], { isFinal: true })] });
+(async () => {
+  await warte(30);
+  const rueck = { optionen: elemente.gastSprache.children.map(o => o.value), gast: elemente.gastSprache.value,
+    richtung: elemente.richtungIch.textContent };
+  elemente.knopfIch.click(); await warte(5);
+  const e = Erkennung.letzte;
+  rueck.lang1 = ausgabe.erkStarts[ausgabe.erkStarts.length - 1];
+  e.onresult(ergebnis("Guten Tag")); await warte(60);
+  rueck.original = elemente.textOriginal.textContent;
+  rueck.uebersetzung = elemente.textUebersetzung.textContent;
+  rueck.takt = elemente.takt.textContent;
+  e.onend(); await warte(300);
+  rueck.lang2 = ausgabe.erkStarts[ausgabe.erkStarts.length - 1];
+  e.onresult(ergebnis("Nasılsın")); await warte(60);
+  e.onend(); await warte(300);
+  rueck.lang3 = ausgabe.erkStarts[ausgabe.erkStarts.length - 1];
+  rueck.anfragen = ausgabe.fetch.filter(f => f[0].startsWith("/api/uebersetzen")).map(f => f[1]);
+  rueck.sprache = ausgabe.fetch.filter(f => f[0].startsWith("/api/sprache")).map(f => f[1]);
+  rueck.gesprochen = ausgabe.gesprochen;
+  rueck.verlaufZeilen = elemente.verlauf.children.length;
+  elemente.knopfLeeren.click();
+  rueck.verlaufNachLeeren = elemente.verlauf.children.length;
+  elemente.knopfAus.click();
+  rueck.statusAus = elemente.statustext.textContent;
+  console.log(JSON.stringify(rueck));
+})().catch(f => { console.log("FEHLER " + (f && f.stack || f)); process.exit(1); });
+"""
+
+
+def _wav_sinus(sekunden=0.2, rate=22050, amplitude=0.5, stille_vorne=0.0):
+    """Eine kleine echte WAV: erst Stille, dann ein 1-kHz-Ton."""
+    import array
+    import math
+    stille = array.array("h", [0]) * int(rate * stille_vorne)
+    ton = array.array("h", (int(amplitude * 32767 * math.sin(2 * math.pi * 1000 * i / rate))
+                            for i in range(int(rate * sekunden))))
+    from modules.stimmanbieter import pcm_als_wav
+    return pcm_als_wav((stille + ton).tobytes(), rate)
+
+
+class _FalscheAntwort:
+    """Das, was urlopen zurückgibt: read(), headers und als Kontext benutzbar."""
+    def __init__(self, daten=b"", kopf=None):
+        self.daten, self.headers = daten, kopf or {}
+    def read(self): return self.daten
+    def __enter__(self): return self
+    def __exit__(self, *a): return False
+
+
+def pruefung_stimme(agent):
+    """P6: Stimmkette (Fish / ElevenLabs / Mac), Pegel für den Orb, Serverstimme im Browser, Dolmetscher."""
+    abschnitt("Stimme: Anbieterkette, Pegel und Dolmetscher")
+    import array
+    import io
+    import math
+    import re as _re
+    import socket
+    import urllib.error as _fehler
+    import urllib.request as _netz
+    import wave
+    import modules.dolmetscher as dol
+    import modules.router as router_modul
+    import modules.stimmanbieter as sa
+    import modules.webapp as webapp_modul
+    from modules.sprechtext import sprechstuecke_fremd
+
+    namen = ("STIMME_ANBIETER", "FISH_API_KEY", "FISH_STIMME_ID", "FISH_MODELL", "FISH_LATENZ", "ELEVENLABS_API_KEY",
+             "ELEVENLABS_MODEL", "GEMINI_API_KEY", "ANTHROPIC_API_KEY", "STIMME_IM_BROWSER", "STIMME_VORLAUF_MS",
+             "DOLMETSCHER_GEHIRN", "DOLMETSCHER_SPRACHEN")
+    echt_config = {n: getattr(config, n) for n in namen}
+    werkzeuge = agent.tools
+    echt_tools = (werkzeuge.web_app, werkzeuge.dolmetscher_oeffner, werkzeuge.stimme, werkzeuge.messenger.stimme,
+                  werkzeuge.freigabe_kanal)
+    echt_sonst = (webapp_modul.uebersetzen, webapp_modul.sprachaudio, dol.gemini_fragen, voice_modul.shutil.which,
+                  voice_modul.stimme_fuer_sprache, _netz.urlopen)
+    for n in ("FISH_API_KEY", "FISH_STIMME_ID", "ELEVENLABS_API_KEY", "GEMINI_API_KEY", "ANTHROPIC_API_KEY"):
+        setattr(config, n, "")
+    config.STIMME_ANBIETER, config.FISH_MODELL, config.FISH_LATENZ = "auto", "s2.1-pro", "balanced"
+    config.ELEVENLABS_MODEL, config.STIMME_VORLAUF_MS = "eleven_multilingual_v2", 60
+    config.DOLMETSCHER_GEHIRN = "auto"
+    config.DOLMETSCHER_SPRACHEN = "tr,hr,sr,bs,sq,pl,ro,hu,en,uk,ru,ar"
+    try:
+        # -- Die Kette der Anbieter ------------------------------------------------------------
+        config.ELEVENLABS_API_KEY = "e"
+        nur_eleven = sa.anbieter_reihenfolge()
+        config.FISH_API_KEY = "f"
+        ohne_id = sa.anbieter_reihenfolge()
+        config.FISH_STIMME_ID = "stimme123"
+        beide = sa.anbieter_reihenfolge()
+        config.STIMME_ANBIETER = "mac"
+        mac = sa.anbieter_reihenfolge()
+        config.STIMME_ANBIETER = "fish"
+        nur_fish = sa.anbieter_reihenfolge()
+        config.FISH_API_KEY = ""
+        fish_ohne_schluessel = sa.anbieter_reihenfolge()
+        config.FISH_API_KEY = "f"
+        config.FISH_STIMME_ID = ""
+        fish_ohne_id_ausdruecklich = sa.anbieter_reihenfolge()
+        config.STIMME_ANBIETER = "elevenlabs"
+        nur_eleven_gewaehlt = sa.anbieter_reihenfolge()
+        config.STIMME_ANBIETER, config.FISH_STIMME_ID = "auto", "stimme123"
+        pruefen("Anbieter: nur ElevenLabs-Schlüssel gibt ElevenLabs", nur_eleven == ["elevenlabs"], str(nur_eleven))
+        pruefen("Anbieter: auto nimmt Fish nur mit Schlüssel UND Stimmen-ID",
+                ohne_id == ["elevenlabs"] and beide == ["fish", "elevenlabs"], "%s / %s" % (ohne_id, beide))
+        pruefen("Anbieter: mac schaltet die Dienste ab, fish ohne Schlüssel gibt nichts",
+                mac == [] and fish_ohne_schluessel == [] and nur_fish == ["fish"], "")
+        pruefen("Anbieter: fish ausdrücklich gewählt geht auch ohne Stimmen-ID, elevenlabs wählt nur ElevenLabs",
+                fish_ohne_id_ausdruecklich == ["fish"] and nur_eleven_gewaehlt == ["elevenlabs"], "")
+        quelle_konfig = open(os.path.join(WURZEL, "src/config.py"), encoding="utf-8").read()
+        pruefen("Standards: Serverstimme im Browser ist aus, Fish im Modus auto, Dolmetscher-Gehirn auto",
+                '_wahrheit("STIMME_IM_BROWSER", False)' in quelle_konfig
+                and '_text("STIMME_ANBIETER", "auto")' in quelle_konfig
+                and '_text("DOLMETSCHER_GEHIRN", "auto")' in quelle_konfig
+                and any(z[0] == "fish" and z[2] == "FISH_API_KEY" and "fish.audio" in z[3]
+                        for z in wizard_modul.Einrichtung.ZUGAENGE)
+                and "FISH_STIMME_ID=" in open(os.path.join(WURZEL, "config/.env.beispiel"), encoding="utf-8").read(),
+                "config.py, Einrichtung, .env.beispiel")
+
+        # -- Fish Audio mit gefälschtem Netz ---------------------------------------------------
+        gesehen = []
+        def holen_ok(anfrage, timeout=0):
+            kopf = {k.lower(): v for k, v in anfrage.header_items()}
+            gesehen.append((anfrage.full_url, kopf, json.loads(anfrage.data.decode("utf-8")), timeout))
+            return _FalscheAntwort(b"FISHTON", {"request-id": "r-1"})
+        daten, fehler = sa.fish_holen("Guten Tag.", "wav", 22050, holen=holen_ok)
+        url, kopf, koerper, _ = gesehen[-1]
+        pruefen("Fish: Modell im Kopf, Bearer-Schlüssel, normalize aus, Abtastrate bei wav",
+                daten == b"FISHTON" and fehler == "" and url == sa.FISH_URL and kopf.get("model") == "s2.1-pro"
+                and kopf.get("authorization") == "Bearer f" and koerper["normalize"] is False
+                and koerper["format"] == "wav" and koerper["sample_rate"] == 22050
+                and koerper["reference_id"] == "stimme123" and koerper["latency"] == "balanced"
+                and "model" not in koerper, "model steht im Kopf, nicht im Körper")
+        sa.fish_holen("Guten Tag.", "mp3", holen=holen_ok)
+        pruefen("Fish: bei mp3 keine Abtastrate", "sample_rate" not in gesehen[-1][2], "")
+
+        def holen_mit_code(code):
+            def holen(anfrage, timeout=0):
+                raise _fehler.HTTPError(anfrage.full_url, code, "x", {}, None)
+            return holen
+        meldungen = {code: sa.fish_holen("x", holen=holen_mit_code(code))[1] for code in (401, 402, 503, 500)}
+        def holen_netz(anfrage, timeout=0):
+            raise _fehler.URLError("Netz weg")
+        pruefen("Fish: Fehlertexte (Schlüssel, Guthaben, überlastet, Netz)",
+                "lehnt den Schlüssel ab" in meldungen[401] and "kein Guthaben mehr" in meldungen[402]
+                and "überlastet" in meldungen[503] and "Fehler 500" in meldungen[500]
+                and "nicht erreichbar" in sa.fish_holen("x", holen=holen_netz)[1]
+                and sa.fish_holen("x", holen=holen_netz)[0] is None, "401, 402, 503, 500, Netz")
+
+        # -- ElevenLabs: pcm und mp3 -----------------------------------------------------------
+        sa.elevenlabs_holen("Hallo.", "pcm", holen=holen_ok)
+        url_pcm, kopf_pcm, _, _ = gesehen[-1]
+        sa.elevenlabs_holen("Hallo.", "mp3", "Davor.", "Danach.", ["a", "b", "c", "d"], holen=holen_ok)
+        url_mp3, kopf_mp3, koerper_mp3, _ = gesehen[-1]
+        pruefen("ElevenLabs: pcm fragt pcm_22050 und schickt kein Accept: audio/mpeg",
+                "output_format=pcm_22050" in url_pcm and "accept" not in kopf_pcm
+                and "output_format" not in url_mp3 and kopf_mp3.get("accept") == "audio/mpeg", url_pcm[-40:])
+        pruefen("ElevenLabs: Satz davor und danach, höchstens drei Vorgänger-Kennungen",
+                koerper_mp3["previous_text"] == "Davor." and koerper_mp3["next_text"] == "Danach."
+                and koerper_mp3["previous_request_ids"] == ["b", "c", "d"], "")
+        config.ELEVENLABS_MODEL = "eleven_flash_v2_5"
+        sa.elevenlabs_holen("Merhaba.", "mp3", sprache="tr", holen=holen_ok)
+        mit_sprache = gesehen[-1][2]
+        config.ELEVENLABS_MODEL = "eleven_multilingual_v2"
+        sa.elevenlabs_holen("Merhaba.", "mp3", sprache="tr", holen=holen_ok)
+        pruefen("ElevenLabs: language_code nur bei flash- und turbo-Modellen",
+                mit_sprache.get("language_code") == "tr" and "language_code" not in gesehen[-1][2], "")
+        daten_id = sa.elevenlabs_holen("Hallo.", holen=holen_ok)
+        pruefen("ElevenLabs: gibt die Kennung der Anfrage zurück", daten_id == (b"FISHTON", "r-1", ""), str(daten_id[1:]))
+
+        # -- sprachaudio: die ganze Kette --------------------------------------------------------
+        pcm = (array.array("h", [1000, -1000]) * 500).tobytes()
+        def holen_kette(anfrage, timeout=0):
+            if "fish.audio" in anfrage.full_url:
+                raise _fehler.HTTPError(anfrage.full_url, 402, "x", {}, None)
+            return _FalscheAntwort(pcm if "pcm_22050" in anfrage.full_url else b"ID3eleven", {})
+        mp3 = sa.sprachaudio("Hallo.", "mp3", "de", holen=holen_kette)
+        wav = sa.sprachaudio("Hallo.", "wav", "de", holen=holen_kette)
+        pruefen("Kette: fällt Fish aus (kein Guthaben), spricht ElevenLabs - als mp3 und als wav",
+                mp3["ok"] and mp3["anbieter"] == "elevenlabs" and mp3["typ"] == "audio/mpeg" and mp3["daten"] == b"ID3eleven"
+                and wav["ok"] and wav["typ"] == "audio/wav" and wav["daten"][:4] == b"RIFF", "%s / %s" % (mp3["typ"], wav["typ"]))
+        def holen_alles_kaputt(anfrage, timeout=0):
+            raise _fehler.HTTPError(anfrage.full_url, 402, "x", {}, None)
+        kaputt = sa.sprachaudio("Hallo.", "mp3", holen=holen_alles_kaputt)
+        config.STIMME_ANBIETER = "mac"
+        keiner = sa.sprachaudio("Hallo.")
+        config.STIMME_ANBIETER = "auto"
+        pruefen("Kette: scheitern alle, sagt das Ergebnis warum; ohne Anbieter steht es ehrlich da",
+                kaputt["ok"] is False and kaputt["daten"] is None and "Guthaben" in kaputt["fehler"]
+                and keiner["ok"] is False and keiner["fehler"] == "Keine Sprachausgabe eingerichtet.", kaputt["fehler"][:50])
+
+        # -- WAV und Pegel -----------------------------------------------------------------------
+        wav_klein = sa.pcm_als_wav((array.array("h", [0, 100]) * 50).tobytes())
+        with wave.open(io.BytesIO(wav_klein), "rb") as w:
+            wav_werte = (w.getframerate(), w.getnchannels(), w.getsampwidth(), w.getnframes())
+        pruefen("pcm_als_wav: 22050 Hz, ein Kanal, 16 Bit", wav_werte == (22050, 1, 2, 100), str(wav_werte))
+        pegel = sa.pegel_aus_wav(_wav_sinus(1.0, stille_vorne=1.0))
+        pruefen("Pegel: eine Sekunde Stille, dann ein Ton - 100 Werte, erst leise, dann laut",
+                len(pegel) == 100 and sum(pegel[:50]) / 50.0 < 30 and sum(pegel[50:]) / 50.0 > 180
+                and all(isinstance(p, int) and 0 <= p <= 255 for p in pegel),
+                "leise %.0f, laut %.0f" % (sum(pegel[:50]) / 50.0, sum(pegel[50:]) / 50.0))
+        pfad_wav = os.path.join(ARBEITSVERZEICHNIS, "pegel_probe.wav")
+        open(pfad_wav, "wb").write(_wav_sinus(0.1))
+        zwei_kanaele = io.BytesIO()
+        with wave.open(zwei_kanaele, "wb") as w:
+            w.setnchannels(2); w.setsampwidth(2); w.setframerate(22050)
+            w.writeframes((array.array("h", [20000, 20000]) * 441).tobytes())
+        acht_bit = io.BytesIO()
+        with wave.open(acht_bit, "wb") as w:
+            w.setnchannels(1); w.setsampwidth(1); w.setframerate(8000); w.writeframes(b"\x80" * 160)
+        pruefen("Pegel: auch aus Dateipfad und Stereo; Nicht-WAV, leere, abgeschnittene und 8-Bit-Daten ergeben []",
+                len(sa.pegel_aus_wav(pfad_wav)) == 5 and len(sa.pegel_aus_wav(zwei_kanaele.getvalue())) == 1
+                and sa.pegel_aus_wav(b"ID3mp3") == [] and sa.pegel_aus_wav(b"") == [] and sa.pegel_aus_wav(None) == []
+                and sa.pegel_aus_wav(_wav_sinus(0.1)[:30]) == [] and sa.pegel_aus_wav(acht_bit.getvalue()) == []
+                and sa.pegel_aus_wav("/gibt/es/nicht.wav") == [], "nie eine Ausnahme")
+
+        # -- Stimme: Pegel kommt unmittelbar vor dem Abspielen --------------------------------
+        ereignisse = []
+        class FalscheAnzeige:
+            def melden(self, kanal, daten, dauer_s=0):
+                ereignisse.append(("melden", kanal, daten, time.time() * 1000))
+                return len(ereignisse)
+        stimme = voice_modul.Stimme()
+        stimme.anzeige = FalscheAnzeige()
+        gespielt = []
+        def abspielen_fake(pfad):
+            gespielt.append((pfad, open(pfad, "rb").read(5)))
+            ereignisse.append(("abspielen", pfad))
+            return True
+        stimme.abspielen = abspielen_fake
+        stuecke_probe = ["Erster Satz zum Hören.", "Zweiter Satz danach."]
+        stimme._elevenlabs_holen = lambda text, vorher="", nachher="", vorige=None: _wav_sinus(0.2)
+        config.ELEVENLABS_API_KEY = "e"
+        ok_zahl = stimme._anbieter_sprechen(stuecke_probe, "elevenlabs", "de")
+        arten = [(e[0], e[2]["art"] if e[0] == "melden" else "") for e in ereignisse]
+        pegel_meldungen = [e for e in ereignisse if e[0] == "melden"]
+        pruefen("Stimme: vor jedem Abspielen steht eine Pegel-Meldung im Kanal 'stimme'",
+                ok_zahl == 2 and arten == [("melden", "pegel"), ("abspielen", ""), ("melden", "pegel"), ("abspielen", "")]
+                and all(e[1] == "stimme" for e in pegel_meldungen), str(arten)[:55])
+        erste = pegel_meldungen[0][2]
+        pruefen("Stimme: die Meldung trägt Pegelkurve, Text, Quelle und einen Startzeitpunkt kurz vor dem Ton",
+                erste["rahmen_ms"] == 20 and len(erste["pegel"]) == 10 and min(erste["pegel"]) > 180
+                and erste["text"] == stuecke_probe[0] and erste["quelle"] == "elevenlabs"
+                and abs((erste["start_ms"] - config.STIMME_VORLAUF_MS) - pegel_meldungen[0][3]) < 200,
+                "start_ms = jetzt + %d ms" % config.STIMME_VORLAUF_MS)
+        pruefen("Stimme: die abgespielte Datei ist die WAV, die gemessen wurde",
+                gespielt[0][1][:4] == b"RIFF" and gespielt[0][0].endswith(".wav"), gespielt[0][0][-12:])
+        ereignisse.clear()
+        stimme.stoppen()
+        pruefen("Stimme: stoppen() meldet 'aus'", [e[2] for e in ereignisse if e[0] == "melden"] == [{"art": "aus"}], "")
+        # MP3 hat keine Kurve - gemeldet wird trotzdem, denn die Zentrale folgt dem Text
+        ereignisse.clear()
+        stimme._stopp.clear()  # stoppen() oben hat es gesetzt; sprich() löscht es sonst selbst
+        stimme._elevenlabs_holen = lambda text, vorher="", nachher="", vorige=None: b"ID3mp3"
+        stimme._anbieter_sprechen(["Nur eine MP3."], "elevenlabs", "de")
+        pruefen("Stimme: bei MP3 ohne Kurve wird trotzdem gemeldet (leerer Pegel), nichts bricht ab",
+                ereignisse[0][0] == "melden" and ereignisse[0][2]["pegel"] == [] and ereignisse[0][2]["text"] == "Nur eine MP3."
+                and ereignisse[1][0] == "abspielen", "")
+        # kaputte Anzeige darf das Sprechen nicht stören
+        class KaputteAnzeige:
+            def melden(self, *a, **k): raise RuntimeError("Anzeige kaputt")
+        stimme.anzeige = KaputteAnzeige()
+        gespielt.clear(); ereignisse.clear()
+        zahl = stimme._anbieter_sprechen(["Trotzdem sprechen."], "elevenlabs", "de")
+        pruefen("Stimme: eine kaputte Anzeige stört das Sprechen nicht", zahl == 1 and len(gespielt) == 1, "")
+        stimme.anzeige = FalscheAnzeige()
+
+        # -- Rückfall von Fish auf ElevenLabs, dann auf die Systemstimme ---------------------------
+        text4 = " ".join("Das ist der Satz Nummer %s mit etwas Text, der lang genug ist, damit er geteilt wird, und zwar an einer guten Stelle."
+                         % zahl_wort(i) for i in range(1, 5))
+        stuecke4 = sprechstuecke(text4)
+        config.FISH_API_KEY, config.FISH_STIMME_ID, config.ELEVENLABS_API_KEY = "f", "stimme123", "e"
+        zaehler = {"fish": 0}
+        def fish_faellt_aus(text, vorher="", nachher="", vorige=None):
+            zaehler["fish"] += 1
+            return _wav_sinus(0.1) if zaehler["fish"] <= 2 else None
+        stimme._fish_holen = fish_faellt_aus
+        stimme._elevenlabs_holen = lambda text, vorher="", nachher="", vorige=None: _wav_sinus(0.1)
+        rest_system = []
+        stimme._systemstimme_sprechen = lambda text: rest_system.append(text) or True
+        ereignisse.clear()
+        ok = stimme.sprich(text4)
+        quellen = [e[2]["quelle"] for e in ereignisse if e[0] == "melden" and e[2]["art"] == "pegel"]
+        texte = [e[2]["text"] for e in ereignisse if e[0] == "melden" and e[2]["art"] == "pegel"]
+        pruefen("Rückfall: zwei Abschnitte mit Fish, der Rest mit ElevenLabs, jeder genau einmal und in Reihenfolge",
+                ok and len(stuecke4) == 4 and quellen == ["fish", "fish", "elevenlabs", "elevenlabs"]
+                and texte == stuecke4 and rest_system == [], str(quellen))
+        pruefen("Rückfall: am Ende des Sprechens meldet die Stimme 'aus'",
+                ereignisse[-1][0] == "melden" and ereignisse[-1][2] == {"art": "aus"}, "")
+        stimme._fish_holen = lambda text, vorher="", nachher="", vorige=None: None
+        stimme._elevenlabs_holen = lambda text, vorher="", nachher="", vorige=None: None
+        rest_system.clear()
+        stimme.sprich(text4)
+        pruefen("Rückfall: gehen beide Dienste nicht, spricht die Systemstimme alles in einem Zug",
+                len(rest_system) == 1 and rest_system[0].startswith(stuecke4[0]) and stuecke4[3] in rest_system[0], "")
+        del stimme._systemstimme_sprechen
+
+        # -- Die Systemstimme als WAV (say -o) ------------------------------------------------------
+        config.STIMME_ANBIETER = "mac"
+        voice_modul.shutil.which = lambda n: "/usr/bin/%s" % n if n in ("say", "afplay", "afconvert") else None
+        befehle = []
+        def say_schreibt_wav(befehl, timeout):
+            befehle.append(befehl)
+            if befehl[0] == "say" and "-o" in befehl and "--data-format=LEI16@22050" in befehl:
+                open(befehl[befehl.index("-o") + 1], "wb").write(_wav_sinus(0.2))
+            return 0
+        stimme.ausfuehren = say_schreibt_wav
+        stimme.macos_stimme = "Anna"
+        ereignisse.clear(); gespielt.clear()
+        stimme.sprich("Hallo Welt.")
+        pruefen("Systemstimme: say schreibt eine WAV, der Pegel geht vor dem Abspielen (afplay) an den Orb",
+                [e[0] for e in ereignisse][:2] == ["melden", "abspielen"] and ereignisse[0][2]["quelle"] == "say"
+                and len(ereignisse[0][2]["pegel"]) == 10 and "-v" in befehle[0] and "Anna" in befehle[0]
+                and gespielt[0][0].endswith(".wav"), str(befehle[0])[:55])
+        # Fremdsprache: andere Stimme, Zahlen bleiben
+        voice_modul.stimme_fuer_sprache = lambda code, liste=None: {"tr": "Yelda"}.get(code, "")
+        befehle.clear()
+        stimme.sprich("Toplam 12.50 lira.", sprache="tr")
+        pruefen("Systemstimme: für Türkisch die türkische Stimme, Zahlen unverändert",
+                "Yelda" in befehle[0] and "Toplam 12.50 lira." in befehle[0], str(befehle[0])[-40:])
+        # Nur AIFF möglich: say -o x.aiff, dann afconvert
+        def say_nur_aiff(befehl, timeout):
+            befehle.append(befehl)
+            if befehl[0] == "say" and "--data-format=LEI16@22050" in befehl:
+                return 1
+            if befehl[0] == "say" and "-o" in befehl:
+                open(befehl[befehl.index("-o") + 1], "wb").write(b"FORM....AIFF")
+            if befehl[0] == "afconvert":
+                open(befehl[-1], "wb").write(_wav_sinus(0.2))
+            return 0
+        stimme.ausfuehren = say_nur_aiff
+        befehle.clear(); ereignisse.clear()
+        stimme.sprich("Noch ein Satz.", sprache="de")
+        pruefen("Systemstimme: gibt say keine WAV her, geht es über AIFF und afconvert",
+                any(b[0] == "afconvert" and "LEI16@22050" in b for b in befehle) and ereignisse[0][2]["quelle"] == "say", "")
+        # Gar keine WAV: das alte say, der Orb bekommt 'aus' vorab
+        einfach = []
+        stimme._systemstimme_einfach = lambda text, sprache="de": einfach.append(text) or True
+        stimme.ausfuehren = lambda befehl, timeout: 1
+        ereignisse.clear(); gespielt.clear()
+        stimme.sprich("Und zuletzt das einfache say.")
+        pruefen("Systemstimme: klappt keine WAV, spricht das einfache say - der Orb bekommt vorher 'aus'",
+                einfach == ["Und zuletzt das einfache say."] and not gespielt
+                and [e[2] for e in ereignisse if e[0] == "melden"][0] == {"art": "aus"}, "")
+        del stimme._systemstimme_einfach
+        pruefen("Systemstimme: say_befehl mit Datenformat und Ziel; ohne Stimme kein -v",
+                "--data-format=LEI16@22050" in sa.say_befehl("Hi", "/t/x.wav", "Anna", 185)
+                and "-o" in sa.say_befehl("Hi", "/t/x.wav", "Anna", 185) and "-v" not in sa.say_befehl("Hi", "/t/x.wav", "", 185)
+                and sa.say_befehl("Hi", "/t/x.wav", "Anna", 185)[-1] == "Hi", "")
+        mac_liste = ("Anna               de_DE    # Hallo\nYelda               tr_TR    # Merhaba\n"
+                     "Yelda (Premium)     tr_TR    # Merhaba\nLana                hr_HR    # Dobar dan\n"
+                     "Alice               it_IT    # Ciao\n")
+        pruefen("Systemstimme: die Stimme je Sprache kommt aus 'say -v ?' (Premium zuerst)",
+                echt_sonst[4]("tr", mac_liste) == "Yelda (Premium)"
+                and echt_sonst[4]("hr", mac_liste) == "Lana" and echt_sonst[4]("fa", mac_liste) == "", "")
+        voice_modul.stimme_fuer_sprache = echt_sonst[4]
+        voice_modul.shutil.which = echt_sonst[3]
+
+        # -- Sprachnachrichten über die Kette --------------------------------------------------------
+        config.STIMME_ANBIETER = "auto"
+        stimme_t = voice_modul.Stimme()
+        stimme_t._fish_holen = lambda text, vorher="", nachher="", vorige=None: b"fisch%d" % len(text)
+        stimme_t._elevenlabs_holen = lambda text, vorher="", nachher="", vorige=None: b"eleven"
+        datei_fish = stimme_t.sprachdatei_erzeugen(text4)
+        inhalt_fish = open(datei_fish, "rb").read() if datei_fish else b""
+        stimme_t._fish_holen = lambda text, vorher="", nachher="", vorige=None: None
+        datei_eleven = stimme_t.sprachdatei_erzeugen(text4)
+        inhalt_eleven = open(datei_eleven, "rb").read() if datei_eleven else b""
+        pruefen("Sprachnachricht: erst Fish (mp3), fällt es aus, ElevenLabs",
+                datei_fish.endswith(".mp3") and inhalt_fish.startswith(b"fisch") and inhalt_fish.count(b"fisch") == 4
+                and inhalt_eleven == b"eleven" * 4, "")
+        for datei in (datei_fish, datei_eleven):
+            if datei:
+                os.remove(datei)
+        config.FISH_API_KEY, config.ELEVENLABS_API_KEY = "f", "e"
+        zustand_stimme = voice_modul.Stimme().zustand()
+        pruefen("Stimme.zustand nennt Fish und die Kette",
+                zustand_stimme["fish"] is True and zustand_stimme["anbieter"] == ["fish", "elevenlabs"], "")
+        pruefen("Fish steht in der Übersicht der Dienste", config.konfig_uebersicht().get("Fish Audio") is True, "")
+        fremd = sprechstuecke_fremd("Price is 12.50 EUR on 3/4")
+        pruefen("sprechstuecke_fremd: keine deutsche Zahlenschreibung, Punkt in 12.50 trennt keinen Satz",
+                fremd == ["Price is 12.50 EUR on 3/4"] and sprechstuecke_fremd("") == []
+                and sprechstuecke_fremd("**Merhaba** dünya") == ["Merhaba dünya"], str(fremd))
+
+        # -- Übersetzen ------------------------------------------------------------------------------
+        aufrufe = []
+        def gemini_fake(frage, systemtext, verlauf=None, timeout=30, max_tokens=None):
+            aufrufe.append({"frage": frage, "system": systemtext, "verlauf": verlauf, "max_tokens": max_tokens})
+            ins_deutsche = _re.search(r"zwischen \w+ und Deutsch\.", systemtext) is not None
+            return {"ok": True, "text": "\"Das kostet 12 Euro.\"" if ins_deutsche else "Bu 12 euro."}
+        dol.gemini_fragen = gemini_fake
+        config.GEMINI_API_KEY = "g"
+        r_tr = dol.uebersetzen("Das macht 12 Euro.", "de", "tr",
+                               verlauf=[{"original": "Wann kommt ihr?", "uebersetzung": "Ne zaman geliyorsunuz?"}])
+        pruefen("Übersetzen mit Gemini: Ergebnis, Gebäudereinigung im Auftrag, Vorgeschichte, großzügige Tokengrenze",
+                r_tr["ok"] and r_tr["uebersetzung"] == "Bu 12 euro." and (r_tr["von"], r_tr["nach"]) == ("de", "tr")
+                and "Gebäudereinigung" in aufrufe[0]["system"] and "Deutsch und Türkisch" in aufrufe[0]["system"]
+                and "Wann kommt ihr?" in aufrufe[0]["system"] and aufrufe[0]["frage"] == "Das macht 12 Euro."
+                and aufrufe[0]["verlauf"] == [] and aufrufe[0]["max_tokens"] >= 2000
+                and r_tr["gehirn"] == "gemini" and r_tr["zeit"], str(r_tr.get("uebersetzung")))
+        r_de = dol.uebersetzen("Bu 12 euro.", "tr", "de")
+        pruefen("Übersetzen: Anführungszeichen des Modells fallen weg; ins Deutsche werden Zahlen ausgeschrieben",
+                r_de["ok"] and r_de["uebersetzung"] == "Das kostet 12 Euro."
+                and "zwölf Euro" in " ".join(r_de["sprechstuecke"]) and r_tr["sprechstuecke"] == ["Bu 12 euro."],
+                str(r_de.get("sprechstuecke")))
+        gleich = dol.uebersetzen("Hallo", "de", "de")
+        unbekannt = dol.uebersetzen("Hallo", "xx", "de")
+        leer = dol.uebersetzen("   ", "de", "tr")
+        lang = dol.uebersetzen("a" * 1501, "de", "tr")
+        pruefen("Übersetzen: gleiche Sprache, unbekannte Sprache, leerer und zu langer Text werden abgewiesen",
+                gleich["ok"] is False and unbekannt["ok"] is False and "kenne ich nicht" in unbekannt["fehler"]
+                and "Möglich:" in unbekannt["fehler"] and leer["ok"] is False and lang["ok"] is False
+                and "1500" in lang["fehler"], unbekannt["fehler"][:50])
+        pruefen("Übersetzen: die zwanzig Sprachen mit Namen und Kennung für den Browser",
+                len(dol.SPRACHEN) == 20 and dol.SPRACHEN["tr"] == ("Türkisch", "tr-TR") and dol.SPRACHEN["sr"][1] == "sr-RS"
+                and dol.SPRACHEN["de"] == ("Deutsch", "de-DE") and dol.sprachen_aktiv()[:3] == ["tr", "hr", "sr"]
+                and "de" not in dol.sprachen_aktiv(), "")
+        config.GEMINI_API_KEY = ""
+        ohne = dol.uebersetzen("Hallo", "de", "tr", agent=agent)
+        pruefen("Übersetzen ohne Schlüssel: ehrliche Meldung",
+                ohne["ok"] is False and "kein Schlüssel" in ohne["fehler"] and "Gemini oder Claude" in ohne["fehler"], ohne["fehler"][:50])
+        # der Rückfall auf Claude: text_anfrage mit niedriger Denktiefe
+        config.ANTHROPIC_API_KEY = "a"
+        erfasst = []
+        def runde_fake(koerper, summe, effort="", zwischenspeicher=True):
+            erfasst.append({"effort": effort, "inhalt": koerper["messages"][0]["content"]})
+            return {"ok": True, "daten": {"content": [{"type": "text", "text": "Merhaba"}], "stop_reason": "end_turn"}}
+        agent._claude_runde = runde_fake
+        try:
+            r_claude = dol.uebersetzen("Guten Tag", "de", "tr", verlauf=["Hallo"], agent=agent)
+            agent.text_anfrage("Normaler Auftrag")
+        finally:
+            del agent._claude_runde
+        pruefen("Übersetzen ohne Gemini geht an Claude über text_anfrage mit Denktiefe 'low'; sonst bleibt 'medium'",
+                r_claude["ok"] and r_claude["uebersetzung"] == "Merhaba" and r_claude["gehirn"] == "claude"
+                and erfasst[0]["effort"] == "low" and "Zu übersetzen:\nGuten Tag" in erfasst[0]["inhalt"]
+                and "Gebäudereinigung" in erfasst[0]["inhalt"] and erfasst[1]["effort"] == "medium",
+                "effort %s, dann %s" % (erfasst[0]["effort"], erfasst[1]["effort"]))
+        # Gemini fällt aus (auto): Claude; im Modus gemini: ehrlicher Fehler; im Modus claude: nie Gemini
+        config.GEMINI_API_KEY = "g"
+        dol.gemini_fragen = lambda *a, **k: {"ok": False, "fehler": "Gemini meldet Fehler 429."}
+        agent._claude_runde = runde_fake
+        try:
+            auto_rueckfall = dol.uebersetzen("Guten Tag", "de", "tr", agent=agent)
+            config.DOLMETSCHER_GEHIRN = "gemini"
+            nur_gemini = dol.uebersetzen("Guten Tag", "de", "tr", agent=agent)
+            config.DOLMETSCHER_GEHIRN = "claude"
+            dol.gemini_fragen = gemini_fake
+            nur_claude = dol.uebersetzen("Guten Tag", "de", "tr", agent=agent)
+        finally:
+            del agent._claude_runde
+            config.DOLMETSCHER_GEHIRN = "auto"
+        pruefen("DOLMETSCHER_GEHIRN: auto fällt von Gemini auf Claude zurück, gemini bleibt bei Gemini, claude nimmt nie Gemini",
+                auto_rueckfall["ok"] and auto_rueckfall["gehirn"] == "claude"
+                and nur_gemini["ok"] is False and "429" in nur_gemini["fehler"]
+                and nur_claude["gehirn"] == "claude", "")
+        config.ANTHROPIC_API_KEY = ""
+        # Gemini: die Grenze für die Antwort
+        gemini_koerper = []
+        def urlopen_gemini(anfrage, timeout=0):
+            gemini_koerper.append(json.loads(anfrage.data.decode("utf-8")))
+            return _FalscheAntwort(json.dumps({"candidates": [{"content": {"parts": [{"text": "ok"}]}}]}).encode("utf-8"))
+        _netz.urlopen = urlopen_gemini
+        try:
+            router_modul.gemini_fragen("Frage", "System")
+            router_modul.gemini_fragen("Frage", "System", max_tokens=2500)
+        finally:
+            _netz.urlopen = echt_sonst[5]
+        pruefen("Gemini: max_tokens hebt die Grenze nur für diesen Aufruf, sonst bleibt GEMINI_MAX_TOKENS",
+                gemini_koerper[0]["generationConfig"]["maxOutputTokens"] == config.GEMINI_MAX_TOKENS
+                and gemini_koerper[1]["generationConfig"]["maxOutputTokens"] == 2500, "")
+        dol.gemini_fragen = echt_sonst[2]
+
+        # -- Die Seite -----------------------------------------------------------------------------------
+        seite = dol.SEITE_DOLMETSCHER
+        ohne_ns = seite.replace("http://www.w3.org/2000/svg", "")
+        pruefen("Dolmetscher-Seite: lädt nichts aus dem Netz, nimmt den Schlüssel auf, beachtet reduzierte Bewegung",
+                "http://" not in ohne_ns and "https://" not in ohne_ns and "{{SCHLUESSEL}}" in seite
+                and "prefers-reduced-motion" in seite and _re.search(r"\bconfig\b", seite) is None, "")
+        pruefen("Dolmetscher-Seite: zwei große Knöpfe, Sprachwahl, abwechselnd, Spracherkennung je Zug, Verlauf leeren",
+                "Ich spreche Deutsch" in seite and "Gast spricht" in seite and 'id="gastSprache"' in seite
+                and 'id="abwechselnd" checked' in seite and "erk.lang=tag(code(aktiv))" in seite
+                and "Verlauf leeren" in seite and 'get("nach")' in seite
+                and "erkStopp()" in seite and "erk.onend" in seite, "")
+        pruefen("Dolmetscher-Seite: Server- oder Browserstimme, Hinweis auf den Browser-Hersteller, ehrliche Rundenbeschriftung",
+                "/api/uebersetzen" in seite and "/api/sprache" in seite and "speechSynthesis" in seite
+                and "stimme_im_browser" in seite and "besteStimme" in seite
+                and "schickt den Ton an den Hersteller des Browsers (Google bei Chrome, Apple bei Safari)" in seite
+                and "1,5 bis 3 Sekunden" in seite and "nicht gleichzeitig" in seite and "nicht gespeichert" in seite, "")
+        if shutil.which("node"):
+            skript = _re.findall(r"<script>(.*?)</script>", seite, _re.S)[0].replace("{{SCHLUESSEL}}", "")
+            pfad_js = os.path.join(ARBEITSVERZEICHNIS, "dolmetscher_seite.js")
+            pfad_harnisch = os.path.join(ARBEITSVERZEICHNIS, "dolmetscher_harnisch.js")
+            open(pfad_js, "w", encoding="utf-8").write(skript)
+            open(pfad_harnisch, "w", encoding="utf-8").write(_DOLMETSCHER_HARNISCH)
+            syntax = subprocess.run(["node", "--check", pfad_js], capture_output=True, text=True, timeout=30)
+
+            def seite_spielen(modus):
+                lauf = subprocess.run(["node", pfad_harnisch, pfad_js, modus], capture_output=True, text=True, timeout=60)
+                try:
+                    return json.loads(lauf.stdout.strip().splitlines()[-1])
+                except (ValueError, IndexError):
+                    return {"fehler": (lauf.stdout + lauf.stderr)[-300:]}
+            browser = seite_spielen("browser")
+            server = seite_spielen("server")
+            kaputt = seite_spielen("server-kaputt")
+            pruefen("Dolmetscher-Seite: das Skript ist gültiges JavaScript", syntax.returncode == 0, syntax.stderr[:55])
+            pruefen("Dolmetscher-Seite im gespielten Ablauf: ?nach= wählt die Sprache, Erkennung je Zug, Übersetzung, Stimme",
+                    browser.get("gast") == "tr" and browser.get("richtung") == "Deutsch → Türkisch"
+                    and browser.get("lang1") == "de-DE" and browser.get("lang2") == "tr-TR" and browser.get("lang3") == "de-DE"
+                    and browser.get("original") == "Guten Tag" and browser.get("uebersetzung") == "Merhaba"
+                    and browser["anfragen"][0]["von"] == "de" and browser["anfragen"][0]["nach"] == "tr"
+                    and browser["anfragen"][0]["sprecher"] == "ich"
+                    and browser["anfragen"][1]["von"] == "tr" and browser["anfragen"][1]["sprecher"] == "gast"
+                    and browser["anfragen"][1]["verlauf"][0]["original"] == "Guten Tag"
+                    and browser["gesprochen"][0] == ["Merhaba", "tr-TR", "Yelda"]
+                    and browser["gesprochen"][1] == ["Wie geht es dir?", "de-DE", "Anna"]
+                    and browser["sprache"] == [], str(browser)[:55])
+            pruefen("Dolmetscher-Seite: Verlauf mit höchstens zehn Runden, 'Verlauf leeren' und 'Mikrofon aus' wirken",
+                    browser.get("verlaufZeilen") == 2 and browser.get("verlaufNachLeeren") == 0
+                    and browser.get("statusAus") == "Mikrofon aus" and "Übersetzt in" in browser.get("takt", ""), "")
+            pruefen("Dolmetscher-Seite: mit Serverstimme geht der Text an /api/sprache, fällt sie aus, spricht der Browser",
+                    [s["sprache"] for s in server["sprache"]] == ["tr", "de"] and server["gesprochen"] == []
+                    and len(kaputt["sprache"]) == 1 and kaputt["gesprochen"][0][0] == "Merhaba"
+                    and kaputt["gesprochen"][1][0] == "Wie geht es dir?", str(kaputt.get("sprache"))[:55])
+
+        # -- HTTP: Seite, Stimme, Übersetzer ----------------------------------------------------------------
+        def freier_port():
+            probe = socket.socket(); probe.bind(("127.0.0.1", 0)); port = probe.getsockname()[1]; probe.close()
+            return port
+
+        def anfrage(port, pfad, koerper=None, kopf=None):
+            roh = _netz.Request("http://127.0.0.1:%d%s" % (port, pfad))
+            if koerper is not None:
+                roh.data = json.dumps(koerper).encode("utf-8")
+                roh.add_header("Content-Type", "application/json")
+            for name, wert in (kopf or {}).items():
+                roh.add_header(name, wert)
+            try:
+                with _netz.urlopen(roh, timeout=15) as antwort:
+                    return antwort.status, antwort.read(), antwort.headers
+            except _fehler.HTTPError as ausnahme:
+                return ausnahme.code, ausnahme.read(), ausnahme.headers
+
+        def als_json(inhalt):
+            try:
+                return json.loads(inhalt.decode("utf-8"))
+            except ValueError:
+                return {}
+
+        port = freier_port()
+        web = JarvisWeb(agent, port=port)
+        web_gesetzt = werkzeuge.web_app is web
+        web.starten(blockierend=False)
+        time.sleep(0.3)
+        try:
+            code, inhalt, _ = anfrage(port, "/dolmetscher?nach=tr")
+            seite_http = inhalt.decode("utf-8")
+            code_zustand, inhalt_zustand, _ = anfrage(port, "/api/zustand")
+            zustand = als_json(inhalt_zustand)
+            pruefen("GET /dolmetscher liefert die Seite ohne Netz-Adressen",
+                    code == 200 and "Jarvis – Dolmetscher" in seite_http and "{{SCHLUESSEL}}" not in seite_http
+                    and "http://" not in seite_http.replace("http://www.w3.org/2000/svg", "")
+                    and "https://" not in seite_http, "%d Zeichen" % len(seite_http))
+            pruefen("/api/zustand nennt stimme_im_browser (standardmäßig aus), den Anbieter und die Gastsprachen",
+                    code_zustand == 200 and zustand.get("stimme_im_browser") is False
+                    and zustand.get("stimme_anbieter") == "fish" and zustand.get("dolmetscher_sprachen", [""])[0] == "tr"
+                    and "de" not in zustand.get("dolmetscher_sprachen", ["de"]), str(zustand.get("stimme_anbieter")))
+            config.STIMME_IM_BROWSER = True
+            an = als_json(anfrage(port, "/api/zustand")[1])
+            config.FISH_API_KEY = config.ELEVENLABS_API_KEY = ""
+            ohne_anbieter = als_json(anfrage(port, "/api/zustand")[1])
+            config.STIMME_IM_BROWSER = False
+            pruefen("Serverstimme im Browser: nur wenn eingeschaltet UND ein Anbieter da ist",
+                    an.get("stimme_im_browser") is True and ohne_anbieter.get("stimme_im_browser") is False
+                    and ohne_anbieter.get("stimme_anbieter") == "", "")
+
+            # POST /api/sprache
+            code, inhalt, _ = anfrage(port, "/api/sprache", {"text": "Guten Tag", "sprache": "de"})
+            ohne_stimme = als_json(inhalt)
+            code_leer, _, _ = anfrage(port, "/api/sprache", {"text": "  "})
+            code_sprache, _, _ = anfrage(port, "/api/sprache", {"text": "Hallo", "sprache": "xx"})
+            code_fremd, _, _ = anfrage(port, "/api/sprache", {"text": "Hallo"}, {"Origin": "http://boese.example"})
+            pruefen("POST /api/sprache ohne Anbieter: 503 mit ehrlichem Fehler; leerer Text und unbekannte Sprache: 400",
+                    code == 503 and ohne_stimme.get("fehler") == "Keine Sprachausgabe eingerichtet."
+                    and code_leer == 400 and code_sprache == 400, ohne_stimme.get("fehler", "")[:50])
+            pruefen("POST /api/sprache: eine Anfrage von einer fremden Seite wird abgewiesen", code_fremd == 403, "")
+            gefragt = []
+            def sprachaudio_fake(text, format="mp3", sprache="de", holen=None):
+                gefragt.append((text, format, sprache))
+                return {"ok": True, "daten": b"ID3stimme", "typ": "audio/mpeg", "anbieter": "fish", "fehler": ""}
+            webapp_modul.sprachaudio = sprachaudio_fake
+            code, inhalt, kopf = anfrage(port, "/api/sprache", {"text": "x" * 700, "sprache": "tr"})
+            pruefen("POST /api/sprache: Audio-Bytes mit dem Typ des Anbieters, Text auf 600 Zeichen gekürzt",
+                    code == 200 and inhalt == b"ID3stimme" and kopf.get("Content-Type") == "audio/mpeg"
+                    and gefragt == [("x" * 600, "mp3", "tr")], "")
+            webapp_modul.sprachaudio = echt_sonst[1]
+
+            # POST /api/uebersetzen
+            vorher = werkzeuge.anzeige.stand("untertitel")["version"]
+            uebergeben = []
+            def uebersetzen_fake(text, von, nach, verlauf=None, agent=None):
+                uebergeben.append((text, von, nach, verlauf, agent))
+                return {"ok": True, "uebersetzung": "Merhaba", "von": von, "nach": nach,
+                        "sprechstuecke": ["Merhaba"], "zeit": "2026-10-08T10:00:00"}
+            webapp_modul.uebersetzen = uebersetzen_fake
+            code, inhalt, _ = anfrage(port, "/api/uebersetzen", {
+                "text": "Guten Tag", "von": "de", "nach": "tr", "sprecher": "ich", "verlauf": [{"original": "Hallo"}]})
+            antwort = als_json(inhalt)
+            stand = werkzeuge.anzeige.stand("untertitel")
+            buehne = werkzeuge.anzeige.stand("buehne")["daten"]
+            pruefen("POST /api/uebersetzen: Antwort, Untertitel im Kanal (Version steigt) und die Zentrale zeigt ihn",
+                    code == 200 and antwort.get("ok") and stand["version"] > vorher
+                    and stand["daten"]["original"] == "Guten Tag" and stand["daten"]["uebersetzung"] == "Merhaba"
+                    and stand["daten"]["sprecher"] == "ich" and (stand["daten"]["von"], stand["daten"]["nach"]) == ("de", "tr")
+                    and buehne.get("modus") == "untertitel" and uebergeben[0][3] == [{"original": "Hallo"}]
+                    and uebergeben[0][4] is agent, "Version %d -> %d" % (vorher, stand["version"]))
+            webapp_modul.uebersetzen = lambda *a, **k: {"ok": False, "fehler": "Zum Übersetzen brauche ich Gemini oder Claude."}
+            nach_fehler = werkzeuge.anzeige.stand("untertitel")["version"]
+            code, inhalt, _ = anfrage(port, "/api/uebersetzen", {"text": "Hallo", "von": "de", "nach": "tr"})
+            pruefen("POST /api/uebersetzen: ein Fehler kommt zurück und schreibt keinen Untertitel",
+                    als_json(inhalt).get("ok") is False and werkzeuge.anzeige.stand("untertitel")["version"] == nach_fehler, "")
+            webapp_modul.uebersetzen = echt_sonst[0]
+            code, inhalt, _ = anfrage(port, "/api/uebersetzen", {"text": "Hallo", "von": "xx", "nach": "tr"})
+            pruefen("POST /api/uebersetzen mit dem echten Übersetzer: unbekannte Sprache wird ehrlich gemeldet",
+                    "kenne ich nicht" in als_json(inhalt).get("fehler", ""), "")
+        finally:
+            web.stoppen()
+            config.STIMME_IM_BROWSER = False
+            webapp_modul.uebersetzen, webapp_modul.sprachaudio = echt_sonst[0], echt_sonst[1]
+
+        # Ratenbegrenzung: die 61. Anfrage in 60 Sekunden gibt 429
+        config.FISH_API_KEY = config.ELEVENLABS_API_KEY = ""
+        port = freier_port()
+        web = JarvisWeb(agent, port=port)
+        web.starten(blockierend=False)
+        time.sleep(0.3)
+        try:
+            codes = [anfrage(port, "/api/sprache", {"text": "Satz %d" % i})[0] for i in range(61)]
+            code_429, inhalt_429, _ = anfrage(port, "/api/sprache", {"text": "noch einer"})
+            pruefen("Ratenbegrenzung: 60 Anfragen gehen durch, die 61. in 60 Sekunden bekommt 429",
+                    codes[:60] == [503] * 60 and codes[60] == 429 and code_429 == 429
+                    and "Zu viele Sprachanfragen" in als_json(inhalt_429).get("fehler", ""), "%s…%s" % (codes[59], codes[60]))
+        finally:
+            web.stoppen()
+        fenster, sperre = [], threading.Lock()
+        frei = [webapp_modul.sprachrate_erlaubt(fenster, sperre, jetzt=100.0 + i * 0.1) for i in range(61)]
+        spaeter = webapp_modul.sprachrate_erlaubt(fenster, sperre, jetzt=161.0)
+        pruefen("Ratenbegrenzung: gleitendes Fenster - nach 60 Sekunden ist wieder Platz",
+                frei == [True] * 60 + [False] and spaeter is True, "")
+
+        # Im Dienst gibt es die Seite nicht
+        port = freier_port()
+        nur = JarvisWeb(agent, port=port, nur_anzeige=True)
+        nur.starten(blockierend=False)
+        time.sleep(0.3)
+        try:
+            code_get, _, _ = anfrage(port, "/dolmetscher")
+            code_post, _, _ = anfrage(port, "/api/sprache", {"text": "Hallo"})
+            code_uebersetzen, _, _ = anfrage(port, "/api/uebersetzen", {"text": "Hallo", "von": "de", "nach": "tr"})
+            pruefen("Nur-Anzeige (Dienst): /dolmetscher, /api/sprache und /api/uebersetzen gibt es nicht",
+                    (code_get, code_post, code_uebersetzen) == (404, 404, 404) and werkzeuge.web_app is not nur, "")
+        finally:
+            nur.stoppen()
+
+        # -- Das Werkzeug dolmetscher_starten ------------------------------------------------------------------
+        port = freier_port()
+        web_mit_schluessel = JarvisWeb(agent, port=port, token="geheim")
+        pruefen("Die Web-App meldet sich bei den Werkzeugen an", web_gesetzt, "")
+        geoeffnet = []
+        werkzeuge.dolmetscher_oeffner = lambda adresse: geoeffnet.append(adresse) or True
+        werkzeuge.web_app = None
+        im_dienst = werkzeuge.run("dolmetscher_starten", {"nach": "tr"})
+        pruefen("dolmetscher_starten ohne laufende Web-App (Dienst): sagt es ehrlich und öffnet nichts",
+                im_dienst["ok"] is False and "läuft in der Web-App" in im_dienst["fehler"] and "Dock-Symbol" in im_dienst["fehler"]
+                and geoeffnet == [], im_dienst["fehler"][:55])
+        werkzeuge.web_app = web_mit_schluessel  # angelegt, aber nicht gestartet: läuft nicht
+        nicht_gestartet = werkzeuge.run("dolmetscher_starten", {"nach": "tr"})
+        pruefen("dolmetscher_starten mit angehaltener Web-App: ebenso", nicht_gestartet["ok"] is False and geoeffnet == [], "")
+        web_laeuft = types.SimpleNamespace(server=object(), adresse=lambda: "http://localhost:8765/")
+        werkzeuge.web_app = web_laeuft
+        offen = werkzeuge.run("dolmetscher_starten", {"nach": "tr"})
+        pruefen("dolmetscher_starten öffnet die Seite mit der Sprache über den eingespeisten Öffner",
+                offen["ok"] is True and geoeffnet == ["http://localhost:8765/dolmetscher?nach=tr"]
+                and offen["text"] == "Der Dolmetscher ist offen: Du sprichst Deutsch, der Gast Türkisch.", offen["text"][:55])
+        web_laeuft.adresse = lambda: "http://192.168.0.5:8765/?schluessel=abc"
+        mit_schluessel = werkzeuge.run("dolmetscher_starten", {"nach": "hr"})
+        pruefen("dolmetscher_starten: der Schlüssel geht an den Browser, steht aber nicht im Ergebnis für Claude",
+                geoeffnet[-1] == "http://192.168.0.5:8765/dolmetscher?nach=hr&schluessel=abc"
+                and "abc" not in json.dumps(mit_schluessel, ensure_ascii=False), "")
+        werkzeuge.dolmetscher_oeffner = lambda adresse: None  # ein Rechner ohne 'open', etwa Linux
+        web_laeuft.adresse = lambda: "http://localhost:8765/"
+        ohne_open = werkzeuge.run("dolmetscher_starten", {"nach": "tr"})
+        pruefen("dolmetscher_starten ohne 'open': gibt die Adresse als Text, öffnet kein Fenster",
+                ohne_open["ok"] is True and "localhost" in ohne_open["text"] and "/dolmetscher?nach=tr" in ohne_open["text"], "")
+        schlecht = [werkzeuge.run("dolmetscher_starten", {"nach": n}) for n in ("de", "xx", "")]
+        werkzeuge.lauf_beginnen(hintergrund=True)
+        im_hintergrund = werkzeuge.run("dolmetscher_starten", {"nach": "tr"})
+        werkzeuge.lauf_beginnen()
+        pruefen("dolmetscher_starten: Deutsch und unbekannte Sprachen werden abgelehnt; im Hintergrund öffnet es nichts",
+                all(s["ok"] is False for s in schlecht) and im_hintergrund["ok"] is False and "Hintergrund" in im_hintergrund["fehler"]
+                and len(geoeffnet) == 2, "")
+        katalog = {w["name"]: w for w in werkzeuge.katalog()}
+        eintrag = katalog.get("dolmetscher_starten", {})
+        schema = eintrag.get("input_schema", {})
+        pruefen("dolmetscher_starten im Katalog: nach ist Pflicht (Auswahl ohne Deutsch), keine Freigabe nötig",
+                schema.get("required") == ["nach"] and "de" not in schema["properties"]["nach"]["enum"]
+                and "tr" in schema["properties"]["nach"]["enum"] and len(eintrag.get("description", "")) < 260
+                and not werkzeuge.braucht_freigabe("dolmetscher_starten"), "")
+        # Die Stimme bekommt den Anzeige-Speicher
+        probe_stimme = voice_modul.Stimme()
+        werkzeuge.stimme_setzen(probe_stimme)
+        pruefen("Werkzeuge.stimme_setzen reicht den Anzeige-Speicher an die Stimme", probe_stimme.anzeige is werkzeuge.anzeige, "")
+    finally:
+        for n, wert in echt_config.items():
+            setattr(config, n, wert)
+        werkzeuge.web_app, werkzeuge.dolmetscher_oeffner, werkzeuge.stimme, werkzeuge.messenger.stimme = echt_tools[:4]
+        werkzeuge.freigabe_kanal_setzen(echt_tools[4])
+        werkzeuge.lauf_beginnen()
+        (webapp_modul.uebersetzen, webapp_modul.sprachaudio, dol.gemini_fragen, voice_modul.shutil.which,
+         voice_modul.stimme_fuer_sprache, _netz.urlopen) = echt_sonst
 # [P6 Stimme] Ende
 # [P7 Start] Anfang
 def _start_mac_fake():
@@ -6116,6 +6893,7 @@ def main() -> int:
     # [P5 Sicht] Anfang
     # [P5 Sicht] Ende
     # [P6 Stimme] Anfang
+    pruefung_stimme(agent)
     # [P6 Stimme] Ende
     # [P7 Start] Anfang
     pruefung_start_steuerung(agent)

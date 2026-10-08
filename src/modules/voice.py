@@ -29,7 +29,7 @@ import urllib.request
 import wave
 
 import config
-from modules.sprechtext import abschnitte, sprechstuecke, sprechstuecke_fremd, sprechtext
+from modules.sprechtext import abschnitte_ziffernsicher, sprechstuecke, sprechstuecke_fremd, sprechtext
 from modules.stimmanbieter import (PEGEL_ABTASTRATE, anbieter_reihenfolge, elevenlabs_holen,
                                    fish_holen, pcm_als_wav, pegel_aus_wav, say_befehl)
 
@@ -529,7 +529,7 @@ class Stimme:
         if not text:
             return True
         sprache = getattr(self._lokal, "sprache", "de") or "de"
-        stuecke = abschnitte(text) or [text]
+        stuecke = abschnitte_ziffernsicher(text) or [text]
         gesprochen = 0
         if shutil.which("afplay"):
             gesprochen = self._anbieter_sprechen(stuecke, "say", sprache)
