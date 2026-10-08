@@ -274,6 +274,12 @@ CALDAV_ZEITZONE = _text("CALDAV_ZEITZONE", "Europe/Vienna")
 # [P7 Start] Anfang
 # Für welche Plattformen die Inhalte-Planung Beiträge schreibt.
 INHALTE_PLATTFORMEN = _text("INHALTE_PLATTFORMEN", "instagram,facebook,google")
+# Beim Hochfahren begrüßt Jarvis mit dem Tag (Termine, Post, Wetter, Offenes) - einmal je Tag.
+BEGRUESSUNG_AN = _wahrheit("BEGRUESSUNG_AN", True)
+# Der Ordner der Kurzbefehle-App, aus dem Jarvis Kurzbefehle ausführt (Licht, Szenen, Fokus).
+KURZBEFEHL_ORDNER = _text("KURZBEFEHL_ORDNER", "Jarvis")
+# Auf welchem Bildschirm die Zentrale steht (0 = Hauptbildschirm, 1 = der zweite).
+ANZEIGE_BILDSCHIRM = _ganzzahl("ANZEIGE_BILDSCHIRM", 1)
 # [P7 Start] Ende
 
 
