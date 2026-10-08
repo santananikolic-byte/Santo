@@ -42,6 +42,7 @@ from modules.lernpfad import SEITE_PFAD, lernpfad_stand
 from modules.webseite import SEITE_HTML
 # Importe der Pakete.
 # [P1 Bühne] Anfang
+from modules.weltkarte import LANDMASKE_BREITE, LANDMASKE_HOEHE, LANDMASKE_QUELLE, LANDMASKE_RLE
 # [P1 Bühne] Ende
 # [P2 Weltlage] Anfang
 # [P2 Weltlage] Ende
@@ -194,6 +195,8 @@ ANZEIGE_PFADE = {"/gehirn", "/zentrale", "/api/gehirn", "/api/zentrale", "/api/s
                  "/api/lichter", "/favicon.ico", "/symbol.svg", "/api/anzeige"}
 # Die Pakete ergänzen hier, etwa ANZEIGE_PFADE |= {"/api/weltkarte"}.
 # [P1 Bühne] Anfang
+# Die Küsten des Globus - nur Lesen, ändert sich nie.
+ANZEIGE_PFADE |= {"/api/weltkarte"}
 # [P1 Bühne] Ende
 # [P2 Weltlage] Anfang
 # [P2 Weltlage] Ende
@@ -491,6 +494,13 @@ class JarvisWeb:
                 "dashboard.html" if pfad == "/dashboard" else "sales.html")
             return self._datei(behandler, str(datei))
         # [P1 Bühne] Anfang
+        if pfad == "/api/weltkarte":
+            # Die Landmaske für die Küsten des Globus. Sie ändert sich nur mit
+            # einer neuen Fassung - einen Tag lang darf der Browser sie behalten.
+            return self._antworten(behandler, 200, {
+                "ok": True, "breite": LANDMASKE_BREITE, "hoehe": LANDMASKE_HOEHE,
+                "quelle": LANDMASKE_QUELLE, "rle": LANDMASKE_RLE},
+                {"Cache-Control": "max-age=86400"})
         # [P1 Bühne] Ende
         # [P2 Weltlage] Anfang
         # [P2 Weltlage] Ende

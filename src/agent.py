@@ -189,6 +189,10 @@ Heute ist {wochentag}, der {datum}.
 # Text bleibt von Frage zu Frage gleich, der Zwischenspeicher hält.
 ZUSATZREGELN = (
     # [P1 Bühne] Anfang
+    "Die große Anzeige folgt deinen Werkzeugen: weltlage zeigt den Globus, maerkte die "
+    "Kurse, ein Anruf das Telefon. Mit anzeige_zeigen schaltest du um, etwa auf die "
+    "Kennzahlen. Sag nie, dass etwas angezeigt wird, wenn das Werkzeug einen Fehler "
+    "gemeldet hat.",
     # [P1 Bühne] Ende
     # [P2 Weltlage] Anfang
     # [P2 Weltlage] Ende
