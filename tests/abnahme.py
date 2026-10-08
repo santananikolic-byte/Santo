@@ -3412,6 +3412,546 @@ def pruefung_kern(agent):
 # [P3 Telefon] Anfang
 # [P3 Telefon] Ende
 # [P4 Büro] Anfang
+
+
+def pruefung_buero(agent):
+    """Kalender: Zeiten, Serien, Absagen, Verschieben, Papierkorb, freie Zeiten - offline mit einem Fake-CalDAV-Server."""
+    abschnitt("Büro: Kalender")
+    import contextlib
+    import hashlib
+    import io
+    from urllib.parse import quote, urlsplit
+    from xml.sax.saxutils import escape as xml_escape
+    from modules import calendar_mod as kal
+    from modules.calendar_mod import Kalender
+    from modules.freigabe import FREIGABE_ANGABEN, FREIGABE_AUFLOESEN, freigabe_lesen
+
+    w = agent.tools
+    jetzt_fest = datetime(2026, 10, 8, 9, 0)  # ein Donnerstag, Sommerzeit
+    uhr = {"jetzt": jetzt_fest}
+
+    def ics(*ereignisse):
+        return "BEGIN:VCALENDAR\nVERSION:2.0\n" + "".join(ereignisse) + "END:VCALENDAR\n"
+
+    def ereignis(uid, titel, *zeilen):
+        return "BEGIN:VEVENT\nUID:%s\nSUMMARY:%s\n%s\nEND:VEVENT\n" % (uid, titel, "\n".join(zeilen))
+
+    huber = ics(ereignis("huber-1", "Besichtigung Huber", "LOCATION:Wien\\, Hauptstraße 1",
+                         "DTSTART:20261009T080000Z", "DTEND:20261009T090000Z"))
+    berger = ics(ereignis("berger-1", "Angebot Berger", "DTSTART;TZID=Europe/Vienna:20261009T143000",
+                          "DTEND;TZID=Europe/Vienna:20261009T153000"))
+    new_york = ics(ereignis("ny-1", "Call New York", "DTSTART;TZID=America/New_York:20261009T090000",
+                            "DTEND;TZID=America/New_York:20261009T100000"))
+    urlaub = ics(ereignis("urlaub-1", "Urlaub Müller", "DTSTART;VALUE=DATE:20261009",
+                          "DTEND;VALUE=DATE:20261010"))
+    gestrichen = ics(ereignis("weg-1", "Gestrichen", "DTSTART:20261009T100000Z", "STATUS:CANCELLED"))
+    # Mo und Mi um 8 Uhr; der 14.10. fällt aus, der 19.10. liegt auf 10 Uhr, der 21.10. ist abgesagt.
+    serie = ics(
+        ereignis("serie-1", "Teamrunde", "DTSTART;TZID=Europe/Vienna:20261005T080000",
+                 "DTEND;TZID=Europe/Vienna:20261005T090000", "RRULE:FREQ=WEEKLY;BYDAY=MO,WE",
+                 "EXDATE;TZID=Europe/Vienna:20261014T080000"),
+        ereignis("serie-1", "Teamrunde", "RECURRENCE-ID;TZID=Europe/Vienna:20261019T080000",
+                 "DTSTART;TZID=Europe/Vienna:20261019T100000", "DTEND;TZID=Europe/Vienna:20261019T110000"),
+        ereignis("serie-1", "Teamrunde", "RECURRENCE-ID;TZID=Europe/Vienna:20261021T080000",
+                 "DTSTART;TZID=Europe/Vienna:20261021T080000", "STATUS:CANCELLED"))
+    unklar = ics(ereignis("monat-1", "Monatsbericht", "DTSTART;TZID=Europe/Vienna:20260929T080000",
+                          "DTEND;TZID=Europe/Vienna:20260929T090000",
+                          "RRULE:FREQ=MONTHLY;BYSETPOS=-1;BYDAY=MO,TU"))
+    ressourcen = {"/dav/home/huber.ics": ('"e-huber"', huber), "/dav/home/berger.ics": ('"e-berger"', berger),
+                  "/dav/home/ny.ics": ('"e-ny"', new_york), "/dav/home/urlaub.ics": ('"e-urlaub"', urlaub),
+                  "/dav/home/weg.ics": ('"e-weg"', gestrichen), "/dav/home/serie.ics": ('"e-serie"', serie),
+                  "/dav/home/monat.ics": ('"e-monat"', unklar)}
+
+    class FakeCalDAV:
+        """Ein winziger CalDAV-Server: REPORT, GET, PUT und DELETE mit If-Match und If-None-Match."""
+
+        def __init__(self, daten):
+            self.ressourcen = {pfad: {"etag": etag, "ics": text} for pfad, (etag, text) in daten.items()}
+            self.log = []
+            self.expand_ablehnen = False
+            self.vor_loeschen = None
+            self.zaehler = 0
+
+        def anfrage(self, methode, url, koerper="", zusatz=None):
+            zusatz = zusatz or {}
+            self.log.append((methode, url, koerper, dict(zusatz)))
+            pfad = urlsplit(url).path
+            if methode == "REPORT":
+                if self.expand_ablehnen and "<C:expand" in koerper:
+                    return 501, "", {}
+                teile = ['<?xml version="1.0" encoding="utf-8"?><D:multistatus xmlns:D="DAV:" '
+                         'xmlns:C="urn:ietf:params:xml:ns:caldav">']
+                for ressource, inhalt in self.ressourcen.items():
+                    teile.append(
+                        "<D:response><D:href>%s</D:href><D:propstat><D:prop><D:getetag>%s</D:getetag>"
+                        "<C:calendar-data>%s</C:calendar-data></D:prop><D:status>HTTP/1.1 200 OK</D:status>"
+                        "</D:propstat></D:response>" % (ressource, inhalt["etag"], xml_escape(inhalt["ics"])))
+                teile.append("</D:multistatus>")
+                return 207, "".join(teile), {}
+            ressource = self.ressourcen.get(pfad)
+            if methode == "GET":
+                return (200, ressource["ics"], {"etag": ressource["etag"]}) if ressource else (404, "", {})
+            if methode == "DELETE":
+                if ressource is None:
+                    return 404, "", {}
+                if zusatz.get("If-Match") and zusatz["If-Match"] != ressource["etag"]:
+                    return 412, "", {}
+                if self.vor_loeschen:
+                    self.vor_loeschen(pfad)
+                del self.ressourcen[pfad]
+                return 204, "", {}
+            if methode == "PUT":
+                if zusatz.get("If-None-Match") == "*" and ressource is not None:
+                    return 412, "", {}
+                if zusatz.get("If-Match") and (ressource is None or zusatz["If-Match"] != ressource["etag"]):
+                    return 412, "", {}
+                self.zaehler += 1
+                etag = '"neu-%d"' % self.zaehler
+                self.ressourcen[pfad] = {"etag": etag, "ics": koerper}
+                return (204 if ressource else 201), "", {"etag": etag}
+            return 405, "", {}
+
+        def aufrufe(self, methode):
+            return [a for a in self.log if a[0] == methode]
+
+    def neu(daten=None):
+        server = FakeCalDAV(ressourcen if daten is None else daten)
+        return server, Kalender(memory=w.memory, anfrage=server.anfrage, uhr=lambda: uhr["jetzt"])
+
+    def nach_titel(ergebnis):
+        return {t["titel"]: t for t in ergebnis.get("termine", [])}
+
+    echt = (config.CALDAV_URL, config.CALDAV_USER, config.CALDAV_PASSWORT, config.CALDAV_KALENDER,
+            config.CALDAV_ZEITZONE)
+    echt_kalender, echt_kanal = w.kalender, w.freigabe_kanal
+    config.CALDAV_URL, config.CALDAV_USER, config.CALDAV_PASSWORT = "https://cal.example/dav/home", "jarvis", "x"
+    config.CALDAV_KALENDER, config.CALDAV_ZEITZONE = "", "Europe/Vienna"
+    uhr["jetzt"] = jetzt_fest
+    try:
+        # -- Zeiten ----------------------------------------------------------
+        pruefen("Zeit mit Z ist UTC und wird lokal: 17:30 Z ist 19:30 in Wien (Sommerzeit)",
+                kal.ics_zeit_lesen("20261009T173000Z") == datetime(2026, 10, 9, 19, 30), "")
+        pruefen("Winterzeit stimmt auch: 17:30 Z im Januar ist 18:30",
+                kal.ics_zeit_lesen("20270115T173000Z") == datetime(2027, 1, 15, 18, 30), "")
+        pruefen("TZID New York 09:00 ist 15:00 in Wien; Windows-Name und unbekannte Namen gehen",
+                kal.ics_zeit_lesen("20261009T090000", "America/New_York") == datetime(2026, 10, 9, 15, 0)
+                and kal.ics_zeit_lesen("20261009T093000", "W. Europe Standard Time") == datetime(2026, 10, 9, 9, 30)
+                and kal.ics_zeit_lesen("20261009T093000", "Romance Standard Time") == datetime(2026, 10, 9, 9, 30)
+                and kal.ics_zeit_lesen("20261009T093000", "Gibt/EsNicht") == datetime(2026, 10, 9, 9, 30)
+                and kal.ics_zeit_lesen("20261009T093000") == datetime(2026, 10, 9, 9, 30), "")
+        config.CALDAV_ZEITZONE = "Europe/Lisbon"
+        in_lissabon = kal.ics_zeit_lesen("20261009T173000Z")
+        config.CALDAV_ZEITZONE = "Europe/Vienna"
+        pruefen("Zeitzone aus der Einstellung: mit Lissabon wird aus 17:30 Z 18:30",
+                in_lissabon == datetime(2026, 10, 9, 18, 30), str(in_lissabon))
+        ganztags = kal.ics_termine_lesen(urlaub)
+        pruefen("Ein Tag ohne Uhrzeit ist Mitternacht und als ganztägig vermerkt",
+                kal.ics_zeit_lesen("20261009", nur_datum=True) == datetime(2026, 10, 9)
+                and len(ganztags) == 1 and ganztags[0]["ganztaegig"] is True
+                and ganztags[0]["ende"] == datetime(2026, 10, 10), "")
+        pruefen("Abgesagte Termine (STATUS:CANCELLED) fehlen, ein Alarm im Termin überschreibt nichts",
+                kal.ics_termine_lesen(gestrichen) == []
+                and kal.ics_termine_lesen(ics(ereignis("a", "Echt", "DTSTART:20261009T080000Z",
+                                                       "BEGIN:VALARM", "DESCRIPTION:Alarm", "END:VALARM")))[0]["beschreibung"] == "", "")
+
+        # -- Wiederholungsregeln --------------------------------------------
+        mo = datetime(2026, 10, 5, 8, 0)
+        fenster = (datetime(2026, 10, 5), datetime(2026, 10, 19))
+        woechentlich = kal.regel_ausdehnen(mo, "FREQ=WEEKLY;BYDAY=MO,WE", [], *fenster)
+        ohne_mittwoch = kal.regel_ausdehnen(mo, "FREQ=WEEKLY;BYDAY=MO,WE", [datetime(2026, 10, 7, 8, 0)], *fenster)
+        pruefen("Regel: wöchentlich Mo und Mi über 14 Tage sind 4 Termine, ein EXDATE nimmt einen heraus",
+                len(woechentlich) == 4 and woechentlich[1] == datetime(2026, 10, 7, 8, 0)
+                and len(ohne_mittwoch) == 3 and datetime(2026, 10, 7, 8, 0) not in ohne_mittwoch, str(len(woechentlich)))
+        monatsende = kal.regel_ausdehnen(datetime(2026, 1, 31, 8, 0), "FREQ=MONTHLY;BYMONTHDAY=-1;COUNT=4")
+        zweiter_dienstag = kal.regel_ausdehnen(datetime(2026, 10, 13, 8, 0), "FREQ=MONTHLY;BYDAY=2TU;COUNT=3")
+        pruefen("Regel: Monatsletzter, zweiter Dienstag, jährlich, alle drei Tage bis UNTIL, Intervall",
+                [t.strftime("%m-%d") for t in monatsende] == ["01-31", "02-28", "03-31", "04-30"]
+                and [t.strftime("%m-%d") for t in zweiter_dienstag] == ["10-13", "11-10", "12-08"]
+                and [t.year for t in kal.regel_ausdehnen(datetime(2026, 10, 13, 8), "FREQ=YEARLY;COUNT=3")]
+                == [2026, 2027, 2028]
+                and len(kal.regel_ausdehnen(datetime(2026, 10, 13, 8), "FREQ=DAILY;INTERVAL=3;UNTIL=20261025T000000Z")) == 4
+                and [t.day for t in kal.regel_ausdehnen(mo, "FREQ=WEEKLY;INTERVAL=2;COUNT=3")] == [5, 19, 2], "")
+        ja, grund = kal.regel_pruefen("FREQ=MONTHLY;BYSETPOS=-1;BYDAY=MO,TU")
+        pruefen("Regel mit BYSETPOS wird nicht geraten: nur der erste Termin, die Prüfung sagt warum",
+                kal.regel_ausdehnen(mo, "FREQ=MONTHLY;BYSETPOS=-1;BYDAY=MO,TU") == [mo] and ja is False
+                and "BYSETPOS" in grund and kal.regel_pruefen("FREQ=WEEKLY;BYDAY=MO")[0] is True, grund[:55])
+        wiederholt = kal.ics_termine_lesen(serie, datetime(2026, 10, 8), datetime(2026, 10, 22))
+        pruefen("Serie mit EXDATE, verschobenem und abgesagtem Tag: nur 12.10. und 19.10. um 10 Uhr",
+                [t["beginn"] for t in wiederholt] == [datetime(2026, 10, 12, 8, 0), datetime(2026, 10, 19, 10, 0)]
+                and all(t["serie"] for t in wiederholt), str([t["beginn"].strftime("%d.%m. %H:%M") for t in wiederholt]))
+
+        google = ics(ereignis("g-1", "Täglich", "DTSTART;TZID=Europe/Vienna:20261005T080000",
+                              "DTEND;TZID=Europe/Vienna:20261005T090000", "RRULE:FREQ=DAILY;COUNT=5",
+                              "EXDATE;VALUE=DATE:20261007"))
+        ueber_umstellung = [datetime(2026, 10, 19), datetime(2026, 11, 9)]
+        in_utc = kal.ics_termine_lesen(ics(ereignis("u-1", "UTC-Serie", "DTSTART:20261019T080000Z",
+                                                    "DTEND:20261019T090000Z", "RRULE:FREQ=WEEKLY")), *ueber_umstellung)
+        in_wien = kal.ics_termine_lesen(ics(ereignis("w-1", "Wien-Serie", "DTSTART;TZID=Europe/Vienna:20261019T100000",
+                                                     "DTEND;TZID=Europe/Vienna:20261019T110000", "RRULE:FREQ=WEEKLY")),
+                                        *ueber_umstellung)
+        pruefen("Serien über die Zeitumstellung (25.10.): UTC-Serie wandert eine Stunde, Serie in Wien bleibt um 10",
+                [t["beginn"].strftime("%d.%m. %H:%M") for t in in_utc] == ["19.10. 10:00", "26.10. 09:00", "02.11. 09:00"]
+                and [t["beginn"].strftime("%d.%m. %H:%M") for t in in_wien] == ["19.10. 10:00", "26.10. 10:00", "02.11. 10:00"],
+                str([t["beginn"].strftime("%H:%M") for t in in_utc]))
+        pruefen("Ausnahme als Tag ohne Uhrzeit (EXDATE;VALUE=DATE) nimmt den Termin dieses Tages heraus",
+                [t["beginn"].day for t in kal.ics_termine_lesen(google, datetime(2026, 10, 1), datetime(2026, 10, 31))]
+                == [5, 6, 8, 9], "")
+
+        # -- Lesen über CalDAV -----------------------------------------------
+        server, k = neu()
+        gelesen = k.termine(14)
+        titel = nach_titel(gelesen)
+        pruefen("Lesen: Fenster in UTC (lokale Mitternacht, nicht UTC-Mitternacht), expand und time-range",
+                gelesen.get("ok") is True and len(server.aufrufe("REPORT")) == 1
+                and '<C:expand start="20261007T220000Z" end="20261021T220000Z"' in server.aufrufe("REPORT")[0][2]
+                and '<C:time-range start="20261007T220000Z" end="20261021T220000Z"' in server.aufrufe("REPORT")[0][2]
+                and server.aufrufe("REPORT")[0][3].get("Depth") == "1", "")
+        pruefen("Lesen: Zeiten lokal, Serie ausgedehnt, Abgesagtes fehlt, Server ohne Zeitfilter schadet nicht",
+                set(titel) == {"Besichtigung Huber", "Angebot Berger", "Call New York", "Urlaub Müller", "Teamrunde"}
+                and titel["Besichtigung Huber"]["beginn"] == "2026-10-09 10:00"
+                and titel["Besichtigung Huber"]["ort"] == "Wien, Hauptstraße 1"
+                and titel["Angebot Berger"]["uhrzeit"] == "14:30" and titel["Call New York"]["uhrzeit"] == "15:00"
+                and gelesen["anzahl"] == 6 and "Gestrichen" not in titel, str(sorted(titel)))
+        huber_zeile = titel["Besichtigung Huber"]
+        pruefen("Lesen: kurze id aus sha1(Adresse + Beginn), ganztägig und Serie sind vermerkt",
+                huber_zeile["id"] == hashlib.sha1(b"/dav/home/huber.ics20261009T100000").hexdigest()[:8]
+                and re.fullmatch(r"[0-9a-f]{8}", huber_zeile["id"])
+                and titel["Urlaub Müller"].get("ganztaegig") is True and titel["Urlaub Müller"]["uhrzeit"] == "ganztägig"
+                and titel["Teamrunde"].get("serie") is True and not huber_zeile.get("serie")
+                and k.termine(14)["termine"][0]["id"] == gelesen["termine"][0]["id"], huber_zeile["id"])
+        pruefen("Lesen: Überschneidung von Berger und New York (30 Minuten), ganztägiger Urlaub zählt nicht",
+                len(gelesen["konflikte"]) == 1 and gelesen["konflikte"][0]["minuten"] == 30
+                and "Urlaub" not in gelesen["konflikte"][0]["text"], gelesen["konflikte"][0]["text"][:55])
+        pruefen("Lesen: eine Serie mit unbekannter Regel kommt mit Hinweis, geraten wird nichts",
+                "Monatsbericht" in gelesen.get("hinweis", "") and "Monatsbericht" not in titel
+                and len(json.dumps(gelesen, ensure_ascii=False)) < 5500, gelesen.get("hinweis", "")[:55])
+        mehrstatus = kal.multistatus_lesen(server.anfrage("REPORT", "https://cal.example/dav/home", "")[1])
+        pruefen("Antwort des Servers: Adresse, Stand und Kalenderdaten bleiben erhalten",
+                len(mehrstatus) == 7 and mehrstatus[0]["href"] == "/dav/home/huber.ics"
+                and mehrstatus[0]["etag"] == '"e-huber"' and "SUMMARY:Besichtigung Huber" in mehrstatus[0]["ics"]
+                and kal.ics_termine_lesen(mehrstatus[0]["ics"])[0]["uid"] == "huber-1"
+                and kal.multistatus_lesen("kein xml") == [], "")
+        termine_huber = [e for e in k._termine_holen(datetime(2026, 10, 8), datetime(2026, 10, 12))[0]
+                         if e["titel"] == "Besichtigung Huber"]
+        pruefen("Jeder Termin trägt Adresse, Stand und uid",
+                len(termine_huber) == 1 and termine_huber[0]["href"] == "/dav/home/huber.ics"
+                and termine_huber[0]["etag"] == '"e-huber"' and termine_huber[0]["uid"] == "huber-1"
+                and termine_huber[0]["serie"] is False and termine_huber[0]["ganztaegig"] is False, "")
+
+        server, k = neu()
+        server.expand_ablehnen = True
+        ohne = k.termine(14)
+        berichte = server.aufrufe("REPORT")
+        pruefen("Kann der Server expand nicht, fragt Jarvis ohne und dehnt die Serie selbst aus",
+                ohne.get("ok") is True and len(berichte) == 2 and "<C:expand" not in berichte[1][2]
+                and sum(1 for t in ohne["termine"] if t["titel"] == "Teamrunde") == 2, "")
+        ausgedehnt = ics(*[ereignis("serie-2", "Teamrunde 2", "RECURRENCE-ID:2026101%dT060000Z" % tag,
+                                    "DTSTART:2026101%dT060000Z" % tag, "DTEND:2026101%dT070000Z" % tag)
+                           for tag in (2, 3)])
+        server, k = neu({"/dav/home/s2.ics": ('"e-s2"', ausgedehnt)})
+        vom_server = k.termine(14)
+        pruefen("Hat der Server die Serie schon ausgedehnt, bleiben es einzelne Termine mit Serien-Vermerk",
+                vom_server["anzahl"] == 2 and all(t.get("serie") for t in vom_server["termine"]), "")
+        def fehler_bei(status, inhalt=""):
+            return Kalender(memory=w.memory, uhr=lambda: jetzt_fest,
+                            anfrage=lambda m, u, b="", z=None: (status, inhalt, {})).termine(1).get("fehler", "")
+        pruefen("Fehler des Servers werden ehrlich benannt (401, 404, 503, nicht erreichbar)",
+                "Benutzer oder Passwort" in fehler_bei(401) and "nicht gefunden" in fehler_bei(404)
+                and "Fehler 503" in fehler_bei(503) and "Netz weg" in fehler_bei(0, "Netz weg")
+                and "nicht erreichbar" in fehler_bei(0, "Netz weg"), fehler_bei(404)[:55])
+
+        # -- Kalender wählen und Termin anlegen ------------------------------
+        pruefen("CALDAV_KALENDER: leer = die Adresse, Name = Adresse + Name, http... = diese Adresse",
+                k.kalender_url() == "https://cal.example/dav/home"
+                and (setattr(config, "CALDAV_KALENDER", "Arbeit Büro") or k.kalender_url()
+                     == "https://cal.example/dav/home/" + quote("Arbeit Büro") + "/")
+                and (setattr(config, "CALDAV_KALENDER", "https://andere.example/cal/x/") or k.kalender_url()
+                     == "https://andere.example/cal/x/"), "")
+        config.CALDAV_KALENDER = "Arbeit Büro"
+        server, k = neu({})
+        angelegt = k.termin_anlegen("Neukunde, Müller", "2026-10-09 19:30", 45, "Wien; Mitte", "Schlüssel\nmitbringen")
+        put = server.aufrufe("PUT")
+        koerper = put[0][2] if put else ""
+        zurueck = kal.ics_termine_lesen(koerper)
+        pruefen("Anlegen: Zeiten in UTC mit Z (19:30 lokal ist 17:30Z), Kalendername in der Adresse, nichts überschrieben",
+                angelegt.get("ok") is True and "DTSTART:20261009T173000Z" in koerper and "DTEND:20261009T181500Z" in koerper
+                and put[0][1].startswith("https://cal.example/dav/home/Arbeit%20B%C3%BCro/")
+                and put[0][1].endswith(".ics") and put[0][3].get("If-None-Match") == "*"
+                and len(zurueck) == 1 and zurueck[0]["titel"] == "Neukunde, Müller"
+                and zurueck[0]["beginn"] == datetime(2026, 10, 9, 19, 30) and zurueck[0]["ort"] == "Wien; Mitte",
+                angelegt.get("text", angelegt.get("fehler", ""))[:55])
+        unklar_zeit = k.termin_anlegen("X", "irgendwann")
+        config.CALDAV_URL = ""
+        ohne_kalender = Kalender().termin_anlegen("X", "2026-10-09 10:00")
+        config.CALDAV_URL = "https://cal.example/dav/home"
+        pruefen("Anlegen: unverständliche Zeit und fehlender Kalender werden benannt, nichts wird gesendet",
+                unklar_zeit.get("ok") is False and "verstehe ich nicht" in unklar_zeit["fehler"]
+                and len(server.aufrufe("PUT")) == 1 and ohne_kalender.get("ok") is False
+                and "kein Kalender" in ohne_kalender["fehler"], "")
+        config.CALDAV_KALENDER = ""
+
+        # -- Absagen ----------------------------------------------------------
+        server, k = neu()
+        k._papierkorb_db()
+        lese = nach_titel(k.termine(3))
+        papierkorb_beim_loeschen = []
+        server.vor_loeschen = lambda pfad: papierkorb_beim_loeschen.append(
+            len(w.memory._lesen("SELECT * FROM kalender_papierkorb WHERE href LIKE ?", ("%" + pfad,))))
+        vorher = len(w.memory._lesen("SELECT * FROM kalender_papierkorb"))
+        weg = k.termine_absagen([lese["Besichtigung Huber"]["id"], lese["Angebot Berger"]["id"]], "Kunde sagt ab")
+        loeschen = server.aufrufe("DELETE")
+        zeilen = w.memory._lesen("SELECT * FROM kalender_papierkorb ORDER BY id")[vorher:]
+        pruefen("Absagen: jeder Termin wird vorher gelesen und gesichert, gelöscht wird mit If-Match auf den Stand",
+                weg.get("ok") is True and len(weg["erledigt"]) == 2 and len(loeschen) == 2
+                and [a[3].get("If-Match") for a in loeschen] == ['"e-huber"', '"e-berger"']
+                and [a[0] for a in server.log[1:5]] == ["GET", "DELETE", "GET", "DELETE"]
+                and papierkorb_beim_loeschen == [1, 1]
+                and "/dav/home/huber.ics" not in server.ressourcen and "/dav/home/ny.ics" in server.ressourcen,
+                weg.get("text", "")[:55])
+        pruefen("Absagen: Papierkorb hält Adresse, Kalenderdaten, Titel und Zeit; der Text nennt die Nummern",
+                len(zeilen) == 2 and zeilen[0]["titel"] == "Besichtigung Huber" and zeilen[0]["beginn"] == "2026-10-09 10:00"
+                and zeilen[0]["href"].endswith("/dav/home/huber.ics") and zeilen[0]["ics"] == huber
+                and zeilen[0]["geloescht_am"] == "2026-10-08 09:00:00"
+                and "Papierkorb" in weg["text"] and "Freitag, 09.10.2026 um 10:00 Uhr" in weg["text"]
+                and weg["erledigt"][0]["papierkorb_id"] == zeilen[0]["id"], weg.get("text", "")[:55])
+        nochmal = k.termine_absagen([lese["Besichtigung Huber"]["id"]], "doppelt")
+        pruefen("Absagen: ein schon abgesagter Termin lässt sich nicht noch einmal absagen",
+                nochmal.get("ok") is False and "erst lesen" in nochmal["fehler"], nochmal.get("fehler", "")[:55])
+
+        server, k = neu()
+        lese = nach_titel(k.termine(14))
+        kennung = lese["Angebot Berger"]["id"]
+        server.ressourcen["/dav/home/berger.ics"]["etag"] = '"von-jemand-anderem-geaendert"'
+        berger_vorher = len(w.memory._lesen("SELECT * FROM kalender_papierkorb WHERE titel='Angebot Berger'"))
+        abgelehnt = k.termine_absagen([kennung], "Test")
+        pruefen("Absagen: hat sich der Stand geändert (412), löscht Jarvis nichts und sagt es freundlich",
+                abgelehnt.get("ok") is False and "inzwischen geändert" in abgelehnt["fehler"]
+                and "Lies die Termine neu" in abgelehnt["fehler"] and "/dav/home/berger.ics" in server.ressourcen
+                and len(w.memory._lesen("SELECT * FROM kalender_papierkorb WHERE titel='Angebot Berger'")) == berger_vorher,
+                abgelehnt.get("fehler", "")[:55])
+        server.ressourcen["/dav/home/huber.ics"]["ics"] = huber.replace("Besichtigung Huber", "Besichtigung Meier")
+        geaendert = k.termine_absagen([lese["Besichtigung Huber"]["id"]], "Test")
+        pruefen("Absagen: stimmt der Termin im Kalender nicht mehr mit dem Gelesenen überein, passiert nichts",
+                geaendert.get("ok") is False and "inzwischen geändert" in geaendert["fehler"]
+                and "/dav/home/huber.ics" in server.ressourcen, geaendert.get("fehler", "")[:55])
+        vor_serie = len(server.aufrufe("DELETE"))
+        serien_absage = k.termine_absagen([lese["Teamrunde"]["id"]], "Test")
+        pruefen("Absagen: ein Serientermin wird nie abgesagt, auch nicht ein einzelner Tag davon",
+                serien_absage.get("ok") is False and kal.KALENDER_SERIE_ABGELEHNT in serien_absage["fehler"]
+                and serien_absage["fehler"].startswith("„Teamrunde“: Das ist ein Serientermin. Einzelne Termine einer "
+                                                       "Serie sage ich nicht ab – das machst du bitte im Kalender.")
+                and len(server.aufrufe("DELETE")) == vor_serie, serien_absage.get("fehler", "")[:55])
+        server, k = neu()
+        unbekannt = k.termine_absagen(["deadbeef"], "Test")
+        ohne_lesen = k.termine_absagen([], "Test")
+        pruefen("Absagen: eine unbekannte Kennung oder nichts Gelesenes heißt erst lesen, es wird nichts gesendet",
+                unbekannt.get("ok") is False and "Ich muss die Termine erst lesen" in unbekannt["fehler"]
+                and "frag mich nach den Terminen, dann sage ich dir, welche ich absagen würde" in unbekannt["fehler"]
+                and ohne_lesen.get("ok") is False and len(server.log) == 0, unbekannt.get("fehler", "")[:55])
+        lese = nach_titel(k.termine(3))
+        gemischt = k.termine_absagen([lese["Besichtigung Huber"]["id"], "deadbeef", lese["Call New York"]["id"]], "Test")
+        pruefen("Absagen: bei mehreren geht, was geht; Unbekanntes steht unter abgelehnt",
+                gemischt.get("ok") is True and [e["titel"] for e in gemischt["erledigt"]] ==
+                ["Besichtigung Huber", "Call New York"] and len(gemischt["abgelehnt"]) == 1
+                and gemischt["abgelehnt"][0]["id"] == "deadbeef", gemischt.get("text", "")[:55])
+        zuviele = k.termine_absagen(["a%d" % i for i in range(11)], "Test")
+        pruefen("Absagen: mehr als zehn auf einmal lehnt Jarvis ab",
+                zuviele.get("ok") is False and "höchstens 10" in zuviele["fehler"], "")
+        uhr["jetzt"] = jetzt_fest + timedelta(minutes=29)
+        noch_gueltig = k.termine_absagen([lese["Angebot Berger"]["id"]], "Test")
+        uhr["jetzt"] = jetzt_fest + timedelta(minutes=31)
+        abgelaufen = k.termine_absagen([lese["Urlaub Müller"]["id"]], "Test")
+        uhr["jetzt"] = jetzt_fest
+        pruefen("Kennungen gelten 30 Minuten: nach 29 geht es, nach 31 muss Jarvis neu lesen",
+                noch_gueltig.get("ok") is True and abgelaufen.get("ok") is False
+                and "erst lesen" in abgelaufen["fehler"] and "/dav/home/urlaub.ics" in server.ressourcen, "")
+
+        # -- Wiederherstellen -------------------------------------------------
+        server, k = neu()
+        lese = nach_titel(k.termine(3))
+        k.termine_absagen([lese["Besichtigung Huber"]["id"]], "Test")
+        nummer = w.memory._lesen("SELECT id FROM kalender_papierkorb WHERE titel='Besichtigung Huber' ORDER BY id DESC")[0]["id"]
+        zurueckgeholt = k.termin_wiederherstellen(nummer)
+        put = server.aufrufe("PUT")
+        pruefen("Wiederherstellen: die gesicherten Kalenderdaten gehen an dieselbe Adresse, mit If-None-Match",
+                zurueckgeholt.get("ok") is True and len(put) == 1 and put[0][3].get("If-None-Match") == "*"
+                and put[0][1] == "https://cal.example/dav/home/huber.ics" and put[0][2] == huber
+                and server.ressourcen["/dav/home/huber.ics"]["ics"] == huber
+                and w.memory._lesen("SELECT * FROM kalender_papierkorb WHERE id=?", (nummer,))[0]["wiederhergestellt_am"],
+                zurueckgeholt.get("text", "")[:55])
+        zweites_mal = k.termin_wiederherstellen(nummer)
+        pruefen("Wiederherstellen: liegt der Termin schon da (412), überschreibt Jarvis nichts; falsche Nummer wird benannt",
+                zweites_mal.get("ok") is False and "überschreibe nichts" in zweites_mal["fehler"]
+                and k.termin_wiederherstellen(99999).get("ok") is False
+                and "keinen Termin" in k.termin_wiederherstellen(99999)["fehler"], zweites_mal.get("fehler", "")[:55])
+
+        # -- Verschieben ------------------------------------------------------
+        server, k = neu()
+        lese = nach_titel(k.termine(3))
+        verschoben = k.termin_verschieben(lese["Besichtigung Huber"]["id"], "2026-10-12 14:00")
+        put = server.aufrufe("PUT")
+        neuer_text = put[0][2] if put else ""
+        gelesen_neu = kal.ics_termine_lesen(neuer_text)
+        pruefen("Verschieben: neuer Beginn in UTC (14:00 lokal ist 12:00Z), Dauer und alles andere bleiben, If-Match",
+                verschoben.get("ok") is True and put[0][3].get("If-Match") == '"e-huber"'
+                and "DTSTART:20261012T120000Z" in neuer_text and "DTEND:20261012T130000Z" in neuer_text
+                and "SUMMARY:Besichtigung Huber" in neuer_text and "LOCATION:Wien\\, Hauptstraße 1" in neuer_text
+                and "SEQUENCE:1" in neuer_text and neuer_text.count("DTSTART") == 1
+                and len(gelesen_neu) == 1 and gelesen_neu[0]["beginn"] == datetime(2026, 10, 12, 14, 0)
+                and gelesen_neu[0]["ende"] == datetime(2026, 10, 12, 15, 0), verschoben.get("text", "")[:55])
+        pruefen("Verschieben: die Antwort nennt alte und neue Zeit",
+                "Freitag, 09.10.2026 um 10:00 Uhr" in verschoben["text"]
+                and "Montag, 12.10.2026 um 14:00 Uhr" in verschoben["text"], "")
+        server, k = neu()
+        lese = nach_titel(k.termine(3))
+        k.termin_verschieben(lese["Angebot Berger"]["id"], "2026-10-09 16:00", 90)
+        lang = kal.ics_termine_lesen(server.ressourcen["/dav/home/berger.ics"]["ics"])
+        ganz = k.termin_verschieben(lese["Urlaub Müller"]["id"], "2026-10-12")
+        urlaub_neu = server.ressourcen["/dav/home/urlaub.ics"]["ics"]
+        pruefen("Verschieben: eine neue Dauer gilt; ein ganztägiger Termin wandert als Tag",
+                lang[0]["beginn"] == datetime(2026, 10, 9, 16, 0) and lang[0]["ende"] == datetime(2026, 10, 9, 17, 30)
+                and ganz.get("ok") is True and "DTSTART;VALUE=DATE:20261012" in urlaub_neu
+                and "DTEND;VALUE=DATE:20261013" in urlaub_neu, str(ganz.get("text", ganz.get("fehler")))[:55])
+        server, k = neu()
+        lese = nach_titel(k.termine(14))
+        serie_nein = k.termin_verschieben(lese["Teamrunde"]["id"], "2026-10-13 10:00")
+        unbekannt_nein = k.termin_verschieben("deadbeef", "2026-10-13 10:00")
+        unklar_nein = k.termin_verschieben(lese["Besichtigung Huber"]["id"], "irgendwann")
+        server.ressourcen["/dav/home/huber.ics"]["etag"] = '"anderer-stand"'
+        geaendert_nein = k.termin_verschieben(lese["Besichtigung Huber"]["id"], "2026-10-13 10:00")
+        pruefen("Verschieben: Serien, Unbekanntes, Unverständliches und geänderte Termine bleiben unangetastet",
+                serie_nein.get("ok") is False and "Serientermin" in serie_nein["fehler"]
+                and unbekannt_nein.get("ok") is False and "erst lesen" in unbekannt_nein["fehler"]
+                and unklar_nein.get("ok") is False and "verstehe ich nicht" in unklar_nein["fehler"]
+                and geaendert_nein.get("ok") is False and "inzwischen geändert" in geaendert_nein["fehler"]
+                and server.ressourcen["/dav/home/huber.ics"]["ics"] == huber, geaendert_nein.get("fehler", "")[:55])
+
+        # -- Freie Zeiten -----------------------------------------------------
+        zwei = {"/dav/home/a.ics": ('"a"', ics(ereignis("a", "Termin A", "DTSTART:20261009T070000Z", "DTEND:20261009T080000Z"))),
+                "/dav/home/b.ics": ('"b"', ics(ereignis("b", "Termin B", "DTSTART:20261009T090000Z", "DTEND:20261009T103000Z"))),
+                "/dav/home/c.ics": ('"c"', ics(ereignis("c", "Urlaub", "DTSTART;VALUE=DATE:20261009", "DTEND;VALUE=DATE:20261010"))),
+                "/dav/home/d.ics": ('"d"', ics(ereignis("d", "Nur vermerkt", "DTSTART:20261009T110000Z",
+                                                        "DTEND:20261009T120000Z", "TRANSP:TRANSPARENT"))),
+                "/dav/home/e.ics": ('"e"', gestrichen)}
+        server, k = neu(zwei)
+        frei = k.freie_zeiten("2026-10-09", "08:00", "18:00", 60)
+        pruefen("Freie Zeiten: Termine 9-10 und 11-12:30, Fenster 8-18, mindestens 60: drei Lücken",
+                frei.get("ok") is True and [(z["von"], z["bis"]) for z in frei["freie_zeiten"]] ==
+                [("08:00", "09:00"), ("10:00", "11:00"), ("12:30", "18:00")]
+                and [z["minuten"] for z in frei["freie_zeiten"]] == [60, 60, 330]
+                and "12:30 bis 18:00" in frei["text"], frei.get("text", "")[:55])
+        pruefen("Freie Zeiten: ganztägige und als frei eingetragene Termine blockieren nichts, ein Hinweis sagt es",
+                "ganztägige" in frei.get("hinweis", "")
+                and '<C:time-range start="20261009T060000Z" end="20261009T160000Z"' in server.aufrufe("REPORT")[0][2], "")
+        kurz = k.freie_zeiten("morgen", "8", "18", 90)
+        pruefen("Freie Zeiten: nur Lücken ab 90 Minuten, 'morgen' ist der 9.10., ohne Angaben gilt 8 bis 18 und 60",
+                [(z["von"], z["bis"]) for z in kurz["freie_zeiten"]] == [("12:30", "18:00")] and kurz["tag"] == "2026-10-09"
+                and k.freie_zeiten("2026-10-09")["freie_zeiten"] == frei["freie_zeiten"], "")
+        schlecht = [k.freie_zeiten("Quatsch"), k.freie_zeiten("2026-10-09", "18:00", "08:00"),
+                    k.freie_zeiten("2026-10-09", "abc", "18:00")]
+        voll = {"/dav/home/v.ics": ('"v"', ics(ereignis("v", "Ganzer Tag", "DTSTART:20261009T060000Z", "DTEND:20261009T170000Z")))}
+        belegt = neu(voll)[1].freie_zeiten("2026-10-09", "08:00", "18:00", 60)
+        pruefen("Freie Zeiten: unverständliche Angaben werden benannt; ein voller Tag hat keine Lücke und sagt das",
+                all(s.get("ok") is False for s in schlecht) and belegt.get("ok") is True
+                and belegt["freie_zeiten"] == [] and "nichts frei" in belegt["text"], belegt.get("text", "")[:55])
+        pruefen("Freie Zeiten: Lücken-Rechnung legt Überlappendes zusammen",
+                kal.kalender_freie_luecken([(datetime(2026, 10, 9, 9), datetime(2026, 10, 9, 11)),
+                                            (datetime(2026, 10, 9, 10), datetime(2026, 10, 9, 12))],
+                                           datetime(2026, 10, 9, 8), datetime(2026, 10, 9, 18), 60)
+                == [(datetime(2026, 10, 9, 8), datetime(2026, 10, 9, 9)),
+                    (datetime(2026, 10, 9, 12), datetime(2026, 10, 9, 18))], "")
+
+        # -- Werkzeuge: Freigabe nennt Titel und Zeit ---------------------------
+        katalog = {t["name"]: t["input_schema"] for t in w.katalog()}
+        drei = ("termine_absagen", "termin_verschieben", "termin_wiederherstellen")
+        pruefen("Katalog: die vier Kalender-Werkzeuge stehen da, die drei mit Wirkung verlangen Begründung und Freigabe",
+                set(drei) | {"freie_zeiten"} <= set(katalog)
+                and all(n in FREIGABE_PFLICHTIG and w.braucht_freigabe(n) and "begruendung" in katalog[n]["required"]
+                        and n in FREIGABE_ANGABEN and n in FREIGABE_AUFLOESEN for n in drei)
+                and "freie_zeiten" not in FREIGABE_PFLICHTIG and not w.braucht_freigabe("freie_zeiten")
+                and katalog["termine_absagen"]["properties"]["ids"]["maxItems"] == 10
+                and katalog["termin_verschieben"]["required"] == ["id", "neuer_beginn", "begruendung"]
+                and "freie_zeiten" in ROLLEN["terminplaner"]["werkzeuge"]
+                and all(n in ROLLEN["terminplaner"]["werkzeuge"] for n in ("termine_absagen", "termin_verschieben")), "")
+
+        class Fragender:
+            def __init__(self, antwort):
+                self.antwort, self.gefragt = antwort, []
+
+            def anfordern(self, aktion, details):
+                self.gefragt.append((aktion, details))
+                return {"erlaubt": self.antwort, "grund": "Probe"}
+
+        server = FakeCalDAV(ressourcen)
+        w.kalender = Kalender(memory=w.memory, anfrage=server.anfrage, uhr=lambda: uhr["jetzt"])
+        w.anfrage_kanal_setzen(None)
+        w.lauf_beginnen()
+        nein = Fragender(False)
+        w.freigabe_kanal = nein
+        gelesen_w = w.run("termine_lesen", {"tage": 14})
+        lese = nach_titel(gelesen_w)
+        ids = [lese["Besichtigung Huber"]["id"], lese["Angebot Berger"]["id"], lese["Teamrunde"]["id"], "deadbeef"]
+        w.run("termine_absagen", {"ids": ids, "begruendung": "Morgen ist der Kunde krank"})
+        w.run("termin_verschieben", {"id": lese["Besichtigung Huber"]["id"], "neuer_beginn": "2026-10-12 14:00",
+                                     "begruendung": "Kunde war verhindert"})
+        w.run("termin_verschieben", {"id": "deadbeef", "neuer_beginn": "2026-10-12 14:00", "begruendung": "Test"})
+        w.run("termin_wiederherstellen", {"papierkorb_id": 99999, "begruendung": "Test"})
+        absage, verschiebung, unklar_v, unklar_w = [freigabe_lesen(d) for _, d in nein.gefragt]
+        pruefen("Freigabe Absagen: jeder Termin einzeln mit Titel, Tag und Uhrzeit - nie nur eine Kennung",
+                [a for a, _ in nein.gefragt] == ["termine_absagen", "termin_verschieben", "termin_verschieben",
+                                                 "termin_wiederherstellen"]
+                and "„Besichtigung Huber“ am Freitag, 09.10.2026 um 10:00 Uhr" in absage["was"]
+                and "„Angebot Berger“ am Freitag, 09.10.2026 um 14:30 Uhr" in absage["was"]
+                and "diese 4 Termine" in absage["was"]
+                and lese["Besichtigung Huber"]["id"] not in absage["was"]
+                and absage["warum"] == "Morgen ist der Kunde krank" and "Papierkorb" in absage["wie"], absage["was"][:55])
+        pruefen("Freigabe Absagen: Serien und Unbekanntes stehen als nicht abgesagt da",
+                "„Teamrunde“ am Montag, 19.10.2026 um 10:00 Uhr (Serientermin, wird nicht abgesagt)" in absage["was"]
+                and "ein Termin, den ich nicht mehr kenne (wird nicht abgesagt)" in absage["was"], "")
+        pruefen("Freigabe Verschieben: Titel, alte und neue Zeit; unbekannter Termin und unbekannte Nummer sagen es",
+                "„Besichtigung Huber“" in verschiebung["was"]
+                and "von Freitag, 09.10.2026 um 10:00 Uhr auf Montag, 12.10.2026 um 14:00 Uhr verschieben" in verschiebung["was"]
+                and "Dauer 60 Minuten" in verschiebung["was"] and verschiebung["warum"] == "Kunde war verhindert"
+                and "kenne ich nicht mehr" in unklar_v["was"] and "kenne ich nicht" in unklar_w["was"], verschiebung["was"][:55])
+        pruefen("Freigabe: nichts wurde ausgeführt, solange niemand Ja gesagt hat",
+                len(server.aufrufe("DELETE")) == 0 and len(server.aufrufe("PUT")) == 0, "")
+        ja = Fragender(True)
+        w.freigabe_kanal = ja
+        erledigt = w.run("termine_absagen", {"ids": [lese["Besichtigung Huber"]["id"]], "begruendung": "Test"})
+        nummer = erledigt["erledigt"][0]["papierkorb_id"] if erledigt.get("erledigt") else 0
+        w.run("termin_wiederherstellen", {"papierkorb_id": nummer, "begruendung": "Doch nicht abgesagt"})
+        wiederherstellung = freigabe_lesen(ja.gefragt[1][1])
+        pruefen("Freigabe Wiederherstellen: Titel und Zeit des Termins aus dem Papierkorb; mit Ja läuft alles durch",
+                erledigt.get("ok") is True and wiederherstellung is not None
+                and "„Besichtigung Huber“ (Freitag, 09.10.2026 um 10:00 Uhr)" in wiederherstellung["was"]
+                and wiederherstellung["warum"] == "Doch nicht abgesagt"
+                and "/dav/home/huber.ics" in server.ressourcen and len(server.aufrufe("DELETE")) == 1
+                and len(server.aufrufe("PUT")) == 1, wiederherstellung["was"][:55] if wiederherstellung else "")
+        gefragt_vorher = len(ja.gefragt)
+        w.lauf_beginnen(True)
+        im_hintergrund = [w.run(n, {"ids": ["x"], "id": "x", "neuer_beginn": "2026-10-12 10:00", "papierkorb_id": 1,
+                                    "begruendung": "Hintergrund"}) for n in drei]
+        w.lauf_beginnen()
+        pruefen("Im Hintergrund werden Absagen, Verschieben und Wiederherstellen ohne Frage abgelehnt",
+                all(e.get("abgebrochen") for e in im_hintergrund) and len(ja.gefragt) == gefragt_vorher
+                and len(server.aufrufe("DELETE")) == 1, "")
+        w.freigabe_kanal = echt_kanal
+        w.kalender = echt_kalender
+        frei_w = Kalender(memory=w.memory, anfrage=FakeCalDAV(zwei).anfrage, uhr=lambda: uhr["jetzt"])
+        w.kalender = frei_w
+        ohne_frage = w.run("freie_zeiten", {"tag": "2026-10-09", "mindestens_minuten": 60})
+        w.kalender = echt_kalender
+        pruefen("freie_zeiten läuft ohne Freigabe über das Werkzeug",
+                ohne_frage.get("ok") is True and len(ohne_frage["freie_zeiten"]) == 3, "")
+        beispiel = open(os.path.join(WURZEL, "config", ".env.beispiel"), encoding="utf-8").read()
+        pruefen("Einstellungen: CALDAV_ZEITZONE (Standard Wien) und CALDAV_KALENDER stehen in der Beispieldatei",
+                "CALDAV_ZEITZONE=Europe/Vienna" in beispiel and "CALDAV_KALENDER=" in beispiel
+                and hasattr(config, "CALDAV_ZEITZONE"), "")
+    finally:
+        (config.CALDAV_URL, config.CALDAV_USER, config.CALDAV_PASSWORT, config.CALDAV_KALENDER,
+         config.CALDAV_ZEITZONE) = echt
+        w.kalender, w.freigabe_kanal = echt_kalender, echt_kanal
+        w.lauf_beginnen()
 # [P4 Büro] Ende
 # [P5 Sicht] Anfang
 # [P5 Sicht] Ende
@@ -3783,6 +4323,7 @@ def main() -> int:
     # [P3 Telefon] Anfang
     # [P3 Telefon] Ende
     # [P4 Büro] Anfang
+    pruefung_buero(agent)
     # [P4 Büro] Ende
     # [P5 Sicht] Anfang
     # [P5 Sicht] Ende

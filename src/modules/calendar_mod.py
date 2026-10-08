@@ -432,8 +432,14 @@ def _kal_neuer_termin() -> dict:
             "_dauer": None, "_ausnahmen_roh": [], "_rid_roh": None}
 
 
-def _kal_in_wand(zeit, art, zone):
-    """Eine gelesene Zeit als Wanduhrzeit in der Zeitzone einer Serie."""
+def _kal_in_wand(zeit, art, zone, uhrzeit=None):
+    """Eine gelesene Zeit als Wanduhrzeit in der Zeitzone einer Serie.
+
+    Ein Tag ohne Uhrzeit (``EXDATE;VALUE=DATE``) meint bei einer Serie mit Uhrzeit
+    den Termin dieses Tages: ``uhrzeit`` ist die Uhrzeit der Serie.
+    """
+    if art == "datum" and uhrzeit is not None:
+        return datetime.combine(zeit.date(), uhrzeit)
     if art in ("utc", "zone"):
         if zone is not None:
             return zeit.astimezone(zone).replace(tzinfo=None)
@@ -457,8 +463,9 @@ def _kal_termin_abschliessen(termin: dict):
     if ende is None or ende < termin["beginn"]:
         ende = termin["beginn"] + (timedelta(days=1) if termin["ganztaegig"] else timedelta(hours=1))
     termin["ende"] = ende
+    uhrzeit = None if termin["ganztaegig"] else termin["_beginn_wand"].time()
     for roh_zeit, roh_art in termin["_ausnahmen_roh"]:
-        termin["ausnahmen"].append(_kal_in_wand(roh_zeit, roh_art, termin["_zone"]))
+        termin["ausnahmen"].append(_kal_in_wand(roh_zeit, roh_art, termin["_zone"], uhrzeit))
     termin["serie"] = bool(termin["rrule"]) or termin["_rid_roh"] is not None
 
 
@@ -544,7 +551,8 @@ def ics_termine_lesen(rohtext: str, von=None, bis=None) -> list:
         if termin["rrule"] and termin["_rid_roh"] is None:
             for uid, (roh_zeit, roh_art) in ausgenommen:
                 if uid and uid == termin["uid"]:
-                    termin["ausnahmen"].append(_kal_in_wand(roh_zeit, roh_art, termin["_zone"]))
+                    uhrzeit = None if termin["ganztaegig"] else termin["_beginn_wand"].time()
+                    termin["ausnahmen"].append(_kal_in_wand(roh_zeit, roh_art, termin["_zone"], uhrzeit))
 
     if von is not None and bis is not None:
         ausgedehnt = []
@@ -1262,19 +1270,20 @@ class Kalender:
         liste = [{"von": a.strftime("%H:%M"), "bis": b.strftime("%H:%M"),
                   "minuten": int((b - a).total_seconds() // 60)} for a, b in luecken]
         wann = "%s, %s" % (_KAL_TAGESNAMEN[datum.weekday()], datum.strftime("%d.%m.%Y"))
-        rahmen = "%s bis %s Uhr" % (fenster_von.strftime("%H:%M"), fenster_bis.strftime("%H:%M"))
+        rahmen = "von %s bis %s Uhr" % (fenster_von.strftime("%H:%M"), fenster_bis.strftime("%H:%M"))
         if liste:
-            text = "Frei am %s zwischen %s, mindestens %d Minuten: %s." % (
+            text = "Frei am %s (%s, mindestens %d Minuten am Stück): %s." % (
                 wann, rahmen, laenge, ", ".join("%s bis %s" % (z["von"], z["bis"]) for z in liste))
         else:
-            text = "Am %s ist zwischen %s nichts frei, das mindestens %d Minuten am Stück dauert." % (
+            text = "Am %s ist %s nichts frei, das mindestens %d Minuten am Stück dauert." % (
                 wann, rahmen, laenge)
         ergebnis = {"ok": True, "tag": datum.strftime("%Y-%m-%d"), "von": fenster_von.strftime("%H:%M"),
                     "bis": fenster_bis.strftime("%H:%M"), "mindestens_minuten": laenge,
                     "freie_zeiten": liste, "text": text}
         zusatz = list(hinweise)
         if ganztags:
-            zusatz.append("%d ganztägige Termine an dem Tag habe ich nicht eingerechnet." % ganztags)
+            zusatz.append("%s an dem Tag habe ich nicht eingerechnet."
+                          % ("Einen ganztägigen Termin" if ganztags == 1 else "%d ganztägige Termine" % ganztags))
         if zusatz:
             ergebnis["hinweis"] = " ".join(zusatz)
         return ergebnis
