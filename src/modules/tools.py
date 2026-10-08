@@ -68,6 +68,7 @@ from modules.vorschlaege import Vorschlaege
 # [P5 Sicht] Anfang
 # [P5 Sicht] Ende
 # [P6 Stimme] Anfang
+from modules.dolmetscher import SPRACHEN, dolmetscher_starten
 # [P6 Stimme] Ende
 # [P7 Start] Anfang
 from modules.hardware import hardware_bericht, wlan_bericht
@@ -449,6 +450,10 @@ class Werkzeuge:
         # [P5 Sicht] Anfang
         # [P5 Sicht] Ende
         # [P6 Stimme] Anfang
+        # Die laufende Web-App setzt sich hier ein (nur sie hat die Dolmetscher-Seite).
+        self.web_app = None
+        # Austauschbarer Öffner für den Dolmetscher: Prüfungen öffnen nie ein Fenster.
+        self.dolmetscher_oeffner = None
         # [P6 Stimme] Ende
         # [P7 Start] Anfang
         self.inhalte = Inhalte(self.memory, self.werkstatt, anzeige=self)
@@ -484,6 +489,8 @@ class Werkzeuge:
         """Reicht die Sprachausgabe durch - für Sprachnachrichten."""
         self.stimme = stimme
         self.messenger.stimme = stimme
+        if stimme is not None:
+            stimme.anzeige = self.anzeige  # der Pegel der Stimme geht an den Orb
 
     def agent_setzen(self, agent):
         """Verknüpft den Katalog mit dem Agenten, damit Werkzeuge Claude nutzen können."""
@@ -995,6 +1002,13 @@ class Werkzeuge:
             # [P5 Sicht] Anfang
             # [P5 Sicht] Ende
             # [P6 Stimme] Anfang
+            # -- Dolmetscher --
+            werkzeug("dolmetscher_starten",
+                     "Öffnet den Dolmetscher im Browser: du sprichst Deutsch, der Gast seine Sprache; "
+                     "Jarvis übersetzt hin und her und zeigt Untertitel auf der Zentrale.",
+                     {"nach": {"type": "string", "enum": sorted(k for k in SPRACHEN if k != "de"),
+                               "description": "Sprachkürzel des Gastes, zum Beispiel tr, hr, en."}},
+                     ["nach"]),
             # [P6 Stimme] Ende
             # [P7 Start] Anfang
             # -- Start und Steuerung --
@@ -1557,6 +1571,11 @@ class Werkzeuge:
         # [P5 Sicht] Anfang
         # [P5 Sicht] Ende
         # [P6 Stimme] Anfang
+        if name == "dolmetscher_starten":
+            if self.im_hintergrund():
+                return {"ok": False, "fehler": "Im Hintergrund öffne ich keine Fenster."}
+            return dolmetscher_starten(a.get("nach"), web=getattr(self, "web_app", None),
+                                       oeffnen=getattr(self, "dolmetscher_oeffner", None))
         # [P6 Stimme] Ende
         # [P7 Start] Anfang
         if name == "hardware_bericht":
