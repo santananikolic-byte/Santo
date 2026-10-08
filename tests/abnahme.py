@@ -3660,6 +3660,8 @@ def pruefung_video_funktionen(agent):
     ohne_claude = w.run("inhalte_planen", {"thema": "Büroreinigung"})
     w.inhalte.agent = echt_agent
     pruefen("Ohne Claude erfindet inhalte_planen nichts", not ohne_claude.get("ok") and ohne_claude.get("fehler"), "")
+    # Der Vorschlags-Test hat eine Meldung vorgemerkt - nichts davon soll in andere Prüfungen hinüberwandern.
+    agent._meldungen = []
 
 
 def pruefung_einzeldatei():
