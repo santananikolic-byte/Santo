@@ -281,6 +281,15 @@ def text_kuerzen(text: str, grenze: int) -> str:
     return stueck.rstrip(" ,;:-–") + "…"
 
 
+def nachrichten_ganzzahl(wert, standard: int, kleinst: int, groesst: int) -> int:
+    """Eine Zahl aus einem Werkzeugargument, in Grenzen - Unlesbares wird der Standard."""
+    try:
+        zahl = int(float(wert)) if wert not in (None, "", False) else standard
+    except (TypeError, ValueError, OverflowError):
+        zahl = standard
+    return max(kleinst, min(groesst, zahl))
+
+
 def _satz_ende(text: str) -> str:
     text = str(text or "").strip()
     return text if not text or text[-1] in ".!?…\"“”'" else text + "."
@@ -482,6 +491,23 @@ def freigabe_nachrichten_suchen(a: dict) -> tuple:
             "vorher fremder Text gelesen wurde.")
 
 
+def nachrichten_markt_ansicht(ergebnis: dict) -> dict:
+    """Die Märkte-Ansicht aus einem Kursergebnis, wenn nur das Ergebnis vorliegt.
+
+    Übernommen werden nur die Felder des Anzeige-Vertrags (4a, maerkte); was das
+    Ergebnis nicht trägt, fehlt auch hier - nichts wird ergänzt.
+    """
+    felder = ("schluessel", "symbol", "name", "wert", "einheit", "aenderung_prozent",
+              "verlauf", "zeit")
+    kurse = [{f: k[f] for f in felder if f in k}
+             for k in (ergebnis.get("kurse") or [])[:12] if isinstance(k, dict)]
+    stand = str(ergebnis.get("stand") or "")
+    return {"titel": "Märkte", "kurse": kurse,
+            "zeitraum": ergebnis.get("zeitraum") or "heute",
+            "fehlend": [str(x) for x in (ergebnis.get("fehlend") or [])],
+            "stand": text_kuerzen(("Stand %s" % stand) if stand else "Kurse, verzögert", 160)}
+
+
 # ---------------------------------------------------------------------------
 # Nachrichten
 # ---------------------------------------------------------------------------
@@ -509,7 +535,9 @@ class Nachrichten:
     @staticmethod
     def _quellen_an() -> list:
         """Die eingeschalteten Quellen laut NACHRICHTEN_QUELLEN."""
-        kennungen = [k.strip().lower() for k in str(config.NACHRICHTEN_QUELLEN or "").split(",")]
+        # getattr: bis die Verbindung den Schlüssel in config.py trägt, gilt der Standard.
+        roh = getattr(config, "NACHRICHTEN_QUELLEN", "tagesschau,google,dw")
+        kennungen = [k.strip().lower() for k in str(roh or "").split(",")]
         return [NACHRICHTEN_KENNUNGEN[k] for k in kennungen if k in NACHRICHTEN_KENNUNGEN]
 
     def _tagesschau_frei(self, jetzt: float) -> bool:
@@ -636,6 +664,14 @@ class Nachrichten:
         return auswahl
 
     @staticmethod
+    def _ausfaelle(fehler_quellen: dict) -> str:
+        """" Nicht erreichbar waren: ..." - damit "keine Meldungen" nie einen Ausfall versteckt."""
+        if not fehler_quellen:
+            return ""
+        return " Nicht erreichbar waren: %s." % "; ".join(
+            "%s (%s)" % (q, f) for q, f in fehler_quellen.items())
+
+    @staticmethod
     def _nicht_erreichbar(fehler_quellen: dict) -> str:
         teile = ["%s: %s" % (q, f) for q, f in fehler_quellen.items()]
         if not teile:
@@ -649,10 +685,13 @@ class Nachrichten:
         return datetime.fromtimestamp(self._uhr()).strftime("%H:%M")
 
     def _fuer_claude(self, meldung: dict, anriss: int = ANRISS_HOECHSTENS) -> dict:
-        """Eine Meldung fürs Werkzeugergebnis: ohne Link, Zeit sprechbar, Anriss kurz."""
+        """Eine Meldung fürs Werkzeugergebnis: ohne Link, Zeit als ISO-Text, Anriss kurz.
+
+        Die gesprochene Form der Zeit ("13:40", "gestern 22:10") steht im ``text``.
+        """
         kurz = {"titel": text_kuerzen(meldung.get("titel"), 160),
                 "quelle": meldung.get("quelle") or "",
-                "zeit": zeit_sprechbar(meldung.get("zeit"), self._uhr())}
+                "zeit": meldung.get("zeit") or ""}
         if anriss and meldung.get("anriss"):
             kurz["anriss"] = text_kuerzen(meldung["anriss"], anriss)
         return kurz
@@ -684,11 +723,14 @@ class Nachrichten:
     def _globus_daten(self, titel: str, meldungen: list, quellen: list, region: dict = None) -> dict:
         """Die Nutzlast für die Globus-Ansicht der Zentrale (Anzeige-Vertrag 4a)."""
         daten = {"titel": text_kuerzen(titel, 80),
-                 "marker": self._marker(meldungen),
                  "liste": [{"titel": text_kuerzen(m["titel"], 120), "quelle": m.get("quelle") or "",
                             "zeit": m.get("zeit") or ""} for m in meldungen[:8]],
                  "stand": text_kuerzen("Quellen: %s · Stand %s"
                                        % (", ".join(quellen) or "keine", self._stand()), 160)}
+        # Ohne Region (freie Suche) nur dann Marker, wenn Orte erkannt wurden.
+        marker = self._marker(meldungen)
+        if marker or region is not None:
+            daten["marker"] = marker
         if region is not None:
             daten["fokus"] = {"lat": region["lat"], "lon": region["lon"],
                               "zoom": region["zoom"], "name": region["name"]}
@@ -701,6 +743,8 @@ class Nachrichten:
         if self.anzeige is None:
             return None
         try:
+            if dauer_s is None:  # ohne Angabe gilt die Standarddauer des Speichers
+                return self.anzeige.zeigen(modus, daten, quelle=quelle)
             return self.anzeige.zeigen(modus, daten, dauer_s=dauer_s, quelle=quelle)
         except Exception as fehler:
             print("[nachrichten] Anzeige: %s" % fehler)
@@ -738,7 +782,7 @@ class Nachrichten:
             return {"ok": False, "fehler": "Die Region '%s' kenne ich nicht. Möglich sind: %s."
                     % (str(region or "")[:40], ", ".join(sorted(REGIONEN)))}, None
         angaben = REGIONEN[schluessel]
-        anzahl = max(1, min(10, int(anzahl or 6)))
+        anzahl = nachrichten_ganzzahl(anzahl, 6, 1, 10)
         meldungen, quellen, fehler_quellen = self._region_holen(schluessel)
         if not quellen:
             return {"ok": False, "region": schluessel, "name": angaben["name"],
@@ -747,8 +791,8 @@ class Nachrichten:
         auswahl = self._auswaehlen(meldungen, anzahl, NACHRICHTEN_HOECHSTALTER_H)
         if not auswahl:
             return {"ok": False, "region": schluessel, "name": angaben["name"],
-                    "fehler": "Zu %s finde ich gerade keine Meldungen der letzten zwei Tage."
-                              % angaben["name"],
+                    "fehler": "Zu %s finde ich gerade keine Meldungen der letzten 24 Stunden.%s"
+                              % (angaben["name"], self._ausfaelle(fehler_quellen)),
                     "quellen": quellen, "fehler_quellen": fehler_quellen}, None
         stand = self._stand()
         ergebnis = {"hinweis": HINWEIS_SCHLAGZEILEN, "ok": True, "region": schluessel,
@@ -799,11 +843,8 @@ class Nachrichten:
         if re.search(r"[\x00-\x1f\x7f;|&$`<>]", str(suchtext)):
             return {"ok": False, "fehler": "Der Suchbegriff enthält Zeichen, die ich nicht "
                                            "weitergebe (; | & $ ` < >)."}
-        try:
-            tage = max(1, min(30, int(tage or 1)))
-        except (TypeError, ValueError):
-            tage = 1
-        anzahl = max(1, min(10, int(anzahl or 8)))
+        tage = nachrichten_ganzzahl(tage, 1, 1, 30)
+        anzahl = nachrichten_ganzzahl(anzahl, 8, 1, 10)
         woerter = [w for w in nachrichten_suchform(text).split() if len(w) >= 3]
 
         def passt(meldung):
@@ -819,8 +860,9 @@ class Nachrichten:
                     "fehler_quellen": fehler_quellen}
         auswahl = self._auswaehlen(meldungen, anzahl, tage * 24 + 6)
         if not auswahl:
-            return {"ok": False, "fehler": "Zu „%s“ finde ich in den letzten %s keine Meldungen."
-                                           % (text, "24 Stunden" if tage == 1 else "%d Tagen" % tage),
+            return {"ok": False, "fehler": "Zu „%s“ finde ich in den letzten %s keine Meldungen.%s"
+                                           % (text, "24 Stunden" if tage == 1 else "%d Tagen" % tage,
+                                              self._ausfaelle(fehler_quellen)),
                     "quellen": quellen, "fehler_quellen": fehler_quellen}
         stand = self._stand()
         ergebnis = self._ergebnis_begrenzen({
@@ -838,7 +880,9 @@ class Nachrichten:
 
     def schlagzeilen(self, anzahl: int = 4) -> dict:
         """Die wichtigsten Meldungen: tagesschau-Startseite, sonst ihre Nachrichtenliste."""
-        anzahl = max(1, min(10, int(anzahl or 4)))
+        anzahl = nachrichten_ganzzahl(anzahl, 4, 1, 10)
+        if not self._quellen_an():
+            return {"ok": False, "fehler": self._nicht_erreichbar({})}
         fehler_alle = {}
         for quelle, url, leser in (
                 (QUELLE_TAGESSCHAU, TAGESSCHAU_HOME, tagesschau_lesen),
@@ -854,9 +898,10 @@ class Nachrichten:
             auswahl = self._auswaehlen(meldungen, anzahl, NACHRICHTEN_HOECHSTALTER_H,
                                        sortieren=(url != TAGESSCHAU_HOME))
             if auswahl:
-                return {"hinweis": HINWEIS_SCHLAGZEILEN, "ok": True, "quellen": quellen,
-                        "meldungen": [self._fuer_claude(m, 120) for m in auswahl],
-                        "text": self._vorlesetext("Stand %s." % self._stand(), auswahl)}
+                return self._ergebnis_begrenzen({
+                    "hinweis": HINWEIS_SCHLAGZEILEN, "ok": True, "quellen": quellen,
+                    "meldungen": [self._fuer_claude(m, 120) for m in auswahl],
+                    "text": self._vorlesetext("Stand %s." % self._stand(), auswahl)})
         return {"ok": False, "fehler": self._nicht_erreichbar(fehler_alle)
                 if fehler_alle else "Gerade finde ich keine aktuellen Schlagzeilen."}
 
@@ -884,7 +929,8 @@ class Nachrichten:
         stichworte, gewaehlt = [], []
         for k in schluessel:
             wort = region_stichwort(k)
-            kandidaten = [wort] + [w for w in REGIONEN[k]["name"].split() if len(w) > 2]
+            kandidaten = [wort] + [w for w in REGIONEN[k]["name"].split()
+                                   if len(w) > 3 or w.isupper()]
             frei = next((w for w in kandidaten if nachrichten_flach(w) not in
                          {nachrichten_flach(s) for s in stichworte + ["Märkte", "Betrieb"]}), "")
             if frei:
@@ -901,11 +947,16 @@ class Nachrichten:
             if maerkte is None:
                 return None, None
             try:
-                if hasattr(maerkte, "kurse_mit_anzeige"):
-                    return maerkte.kurse_mit_anzeige(None, "heute")
+                # Die echte Klasse liefert Ergebnis UND fertige Anzeige-Daten (mit Kurven).
+                # Auf der Klasse gesucht, nicht auf dem Objekt: ein Fake täuscht sonst jede Methode vor.
+                if callable(getattr(type(maerkte), "kurse_mit_anzeige", None)):
+                    gelesen = maerkte.kurse_mit_anzeige(None, "heute")
+                    if isinstance(gelesen, tuple) and len(gelesen) == 2 and isinstance(gelesen[0], dict):
+                        return gelesen
                 ergebnis = maerkte.kurse(None, "heute", zeigen=False)
-                return ergebnis, {"titel": "Märkte", "kurse": list(ergebnis.get("kurse") or [])[:12],
-                                  "zeitraum": "heute", "fehlend": list(ergebnis.get("fehlend") or [])}
+                if not isinstance(ergebnis, dict):
+                    return {"ok": False, "fehler": "Kurse nicht abrufbar"}, None
+                return ergebnis, nachrichten_markt_ansicht(ergebnis)
             except Exception as fehler:
                 return {"ok": False, "fehler": "Kurse nicht abrufbar: %s" % fehler}, None
 
@@ -929,8 +980,11 @@ class Nachrichten:
             schritte.append({"stichwort": wort, "ansicht": dict(globus, modus="globus")})
         if maerkte is not None:
             if markt and markt.get("ok"):
+                markt_text = markt.get("text") or " ".join(
+                    "%s %s." % (k.get("name"), k.get("wert")) for k in markt.get("kurse") or []
+                    if isinstance(k, dict) and k.get("name") and k.get("wert") is not None)
                 abschnitte.append({"thema": "Märkte", "stichwort": "Märkte",
-                                   "text": text_kuerzen(markt.get("text"), 900)})
+                                   "text": text_kuerzen(markt_text, 900)})
             else:
                 abschnitte.append({"thema": "Märkte", "stichwort": "Märkte",
                                    "fehler": "nicht abrufbar: %s" % (markt or {}).get("fehler", "")})
@@ -947,11 +1001,10 @@ class Nachrichten:
 
         if not any("fehler" not in a for a in abschnitte):
             fehler = "; ".join("%s %s" % (a["thema"], a["fehler"]) for a in abschnitte)
-            if unbekannt:
-                fehler = ("Unbekannte Regionen: %s. " % ", ".join(unbekannt)) + fehler
-            return {"ok": False, "fehler": ("Für das Lagebild war gerade nichts abrufbar (%s)."
-                                            % fehler) if fehler
-                    else "Für ein Lagebild brauche ich mindestens eine Region."}
+            vorne = ("Unbekannte Regionen: %s. " % ", ".join(unbekannt)) if unbekannt else ""
+            return {"ok": False, "fehler": vorne + (
+                "Für das Lagebild war gerade nichts abrufbar (%s)." % fehler if fehler
+                else "Für ein Lagebild brauche ich mindestens eine Region.")}
 
         reihenfolge = [a["stichwort"] for a in abschnitte]
         ergebnis = {
