@@ -31,7 +31,8 @@ import wave
 import config
 from modules.sprechtext import abschnitte_ziffernsicher, sprechstuecke, sprechstuecke_fremd, sprechtext
 from modules.stimmanbieter import (PEGEL_ABTASTRATE, anbieter_reihenfolge, elevenlabs_holen,
-                                   fish_holen, pcm_als_wav, pegel_aus_wav, say_befehl)
+                                   fish_holen, pcm_als_wav, pegel_aus_wav, say_befehl,
+                                   wav_reparieren)
 
 try:
     import numpy as np
@@ -355,7 +356,8 @@ class Stimme:
         if daten is None:
             self.letzter_fehler = fehler
             print("[stimme] %s" % fehler)
-        return daten
+            return None
+        return wav_reparieren(daten) if wav and daten[:4] == b"RIFF" else daten
 
     def _say_holen(self, text: str, vorher: str = "", nachher: str = "", vorige=None):
         """Lässt die Systemstimme einen Abschnitt als WAV-Datei sprechen. ``None`` bei Fehler."""

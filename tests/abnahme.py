@@ -5288,6 +5288,23 @@ def pruefung_stimme(agent):
                 and sa.pegel_aus_wav(_wav_sinus(0.1)[:30]) == [] and sa.pegel_aus_wav(acht_bit.getvalue()) == []
                 and sa.pegel_aus_wav("/gibt/es/nicht.wav") == [], "nie eine Ausnahme")
 
+        # Ein Dienst, der die WAV schon beim Erzeugen verschickt, kennt die Länge nicht und schreibt 0 oder 0xFFFFFFFF
+        import struct
+        toene_roh = array.array("h", (int(0.5 * 32767 * math.sin(2 * math.pi * 1000 * i / 22050)) for i in range(4410))).tobytes()
+        def wav_ohne_laenge(marke):
+            return (b"RIFF" + struct.pack("<I", marke) + b"WAVEfmt " + struct.pack("<IHHIIHH", 16, 1, 1, 22050, 44100, 2, 16)
+                    + b"data" + struct.pack("<I", marke) + toene_roh)
+        pruefen("Pegel: auch eine WAV mit unbekannter Länge im Kopf (0 oder 0xFFFFFFFF) ergibt die Kurve",
+                len(sa.pegel_aus_wav(wav_ohne_laenge(0xFFFFFFFF))) == 10 and len(sa.pegel_aus_wav(wav_ohne_laenge(0))) == 10
+                and min(sa.pegel_aus_wav(wav_ohne_laenge(0))) > 180 and sa.pegel_aus_wav(b"RIFF\0\0\0\0WAVEjunk") == [], "Streaming-Kopf")
+        repariert = sa.wav_reparieren(wav_ohne_laenge(0xFFFFFFFF))
+        with wave.open(io.BytesIO(repariert), "rb") as w:
+            repariert_werte = (w.getframerate(), w.getnchannels(), w.getnframes())
+        gueltig = _wav_sinus(0.1)
+        pruefen("WAV-Kopf mit falscher Länge wird für afplay repariert; gültige und fremde Daten bleiben unverändert",
+                repariert_werte == (22050, 1, 2205 * 2) and sa.wav_reparieren(gueltig) is gueltig
+                and sa.wav_reparieren(b"ID3mp3") == b"ID3mp3", str(repariert_werte))
+
         # -- Stimme: Pegel kommt unmittelbar vor dem Abspielen --------------------------------
         ereignisse = []
         class FalscheAnzeige:

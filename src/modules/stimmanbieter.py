@@ -26,6 +26,7 @@ import io
 import json
 import math
 import os
+import struct
 import sys
 import urllib.error
 import urllib.request
@@ -219,6 +220,51 @@ def sprachaudio(text: str, format: str = "mp3", sprache: str = "de", holen=None)
 
 # -- Pegel ------------------------------------------------------------------------------------
 
+def _wav_nachsichtig(daten: bytes):
+    """Liest Kopf und Töne einer WAV-Datei, auch wenn die Längenangaben nicht stimmen.
+
+    Ein Dienst, der die Datei beim Erzeugen schon verschickt, kennt die Länge noch nicht
+    und schreibt 0 oder 0xFFFFFFFF in den Kopf; ``wave`` weist das ab. Gibt
+    ``(kanaele, breite, rate, rohdaten)`` zurück oder ``None``.
+    """
+    if len(daten) < 12 or daten[:4] != b"RIFF" or daten[8:12] != b"WAVE":
+        return None
+    stelle, format_ = 12, None
+    while stelle + 8 <= len(daten):
+        kennung, groesse = struct.unpack("<4sI", daten[stelle:stelle + 8])
+        inhalt = stelle + 8
+        if kennung == b"fmt " and inhalt + 16 <= len(daten):
+            tag, kanaele, rate, _, _, bits = struct.unpack("<HHIIHH", daten[inhalt:inhalt + 16])
+            format_ = (tag, kanaele, rate, bits)
+        elif kennung == b"data":
+            if format_ is None or format_[0] not in (1, 0xFFFE):
+                return None
+            ende = len(daten) if groesse in (0, 0xFFFFFFFF) else min(len(daten), inhalt + groesse)
+            return format_[1], format_[3] // 8, format_[2], daten[inhalt:ende]
+        stelle = inhalt + groesse + (groesse & 1)
+    return None
+
+
+def wav_reparieren(daten: bytes) -> bytes:
+    """Macht aus einer WAV mit falschen Längenangaben im Kopf eine saubere Datei.
+
+    ``afplay`` und ``wave`` mögen keine Datei, die 0 oder 0xFFFFFFFF als Länge angibt
+    (ein Dienst, der beim Erzeugen schon verschickt). Eine gültige oder unlesbare Datei
+    kommt unverändert zurück; nur Mono mit 16 Bit wird neu verpackt.
+    """
+    try:
+        with wave.open(io.BytesIO(daten), "rb") as datei:
+            gesagt = datei.getnframes() * datei.getsampwidth() * datei.getnchannels()
+            if gesagt > 0 and len(datei.readframes(datei.getnframes())) == gesagt:
+                return daten  # der Kopf stimmt mit dem Inhalt überein
+    except (wave.Error, EOFError):
+        pass
+    gelesen = _wav_nachsichtig(daten)
+    if gelesen is None or gelesen[0] != 1 or gelesen[1] != 2 or not gelesen[3]:
+        return daten
+    return pcm_als_wav(gelesen[3][:len(gelesen[3]) - (len(gelesen[3]) % 2)], gelesen[2])
+
+
 def pegel_aus_wav(quelle, rahmen_ms: int = 20) -> list:
     """Die Lautstärke einer WAV-Datei als Hüllkurve: ein Wert von 0 bis 255 je Rahmen.
 
@@ -235,14 +281,21 @@ def pegel_aus_wav(quelle, rahmen_ms: int = 20) -> list:
             quelle = io.BytesIO(bytes(quelle))
         elif isinstance(quelle, (str, os.PathLike)):
             quelle = geoeffnet = open(quelle, "rb")
-        with wave.open(quelle, "rb") as datei:
-            kanaele = datei.getnchannels()
-            breite = datei.getsampwidth()
-            rate = datei.getframerate()
-            if breite != 2 or kanaele < 1 or rate <= 0:
+        rohbytes = quelle.read() if hasattr(quelle, "read") else b""
+        try:
+            with wave.open(io.BytesIO(rohbytes), "rb") as datei:
+                kanaele, breite, rate = datei.getnchannels(), datei.getsampwidth(), datei.getframerate()
+                rohdaten = datei.readframes(datei.getnframes())
+        except (wave.Error, EOFError):
+            rohdaten = b""
+        if not rohdaten:
+            gelesen = _wav_nachsichtig(rohbytes)
+            if gelesen is None:
                 return []
-            rohdaten = datei.readframes(datei.getnframes())
-    except (wave.Error, EOFError, OSError, ValueError, TypeError, AttributeError):
+            kanaele, breite, rate, rohdaten = gelesen
+        if breite != 2 or kanaele < 1 or rate <= 0:
+            return []
+    except (OSError, ValueError, TypeError, AttributeError, struct.error):
         return []
     finally:
         if geoeffnet is not None:
