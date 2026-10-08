@@ -326,3 +326,38 @@ def sprechtext(text: str) -> str:
 def sprechstuecke(text: str, ziel: int = 170) -> list:
     """Der Text, zum Sprechen vorbereitet und in Atemabschnitte geteilt."""
     return abschnitte(sprechtext(text), ziel)
+
+
+# Satzzeichen anderer Schriften, die ``abschnitte`` sonst nicht als Satzende erkennt.
+_FREMDE_SATZZEICHEN = {"؟": "?", "؛": ";", "،": ",", "۔": ".",
+                       "。": ".", "！": "!", "？": "?"}
+_DEZIMALPUNKT = "․"  # sieht aus wie ein Punkt, trennt aber keinen Satz
+
+
+def abschnitte_ziffernsicher(text: str, ziel: int = 170) -> list:
+    """Wie :func:`abschnitte`, aber ein Punkt zwischen zwei Ziffern ist kein Satzende.
+
+    Nötig für Text, dessen Zahlen nicht ausgeschrieben sind ("12.50 EUR"): sonst risse
+    ``abschnitte`` mitten in der Zahl.
+    """
+    geschuetzt = re.sub(r"(?<=\d)\.(?=\d)", _DEZIMALPUNKT, str(text or ""))
+    return [stueck.replace(_DEZIMALPUNKT, ".") for stueck in abschnitte(geschuetzt, ziel)]
+
+
+def sprechstuecke_fremd(text: str, ziel: int = 220) -> list:
+    """Wie :func:`sprechstuecke`, aber für Text in einer anderen Sprache als Deutsch.
+
+    Zahlen, Beträge und Daten bleiben, wie sie sind: Die deutsche Zahlenschreibung
+    (``schreiben_zu_sprechen``) würde "12.50" zu "zwölf Komma fünfzig" machen, mitten
+    in einem türkischen oder englischen Satz. Es fallen nur Markdown-Zeichen,
+    Schleifen und Steuerzeichen weg, dann wird in Atemabschnitte geteilt.
+    """
+    t = re.sub(r"[\x00-\x08\x0b-\x1f\x7f]", " ", str(text or ""))
+    t = t.translate({ord(k): v for k, v in _FREMDE_SATZZEICHEN.items()})
+    t = re.sub(r"```.*?```", " ", t, flags=re.S)
+    t = re.sub(r"[*_`~]{1,3}", "", t)
+    t = re.sub(r"(?m)^\s*#{1,6}\s*", "", t)
+    t = re.sub(r"\s+", " ", t).strip()
+    if not t:
+        return []
+    return abschnitte_ziffernsicher(schleifen_entfernen(t), ziel)

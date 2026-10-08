@@ -54,6 +54,9 @@ from modules.freigabe import GESTE_GESPERRT
 # [P5 Sicht] Anfang
 # [P5 Sicht] Ende
 # [P6 Stimme] Anfang
+from modules.dolmetscher import (SEITE_DOLMETSCHER, SPRACHEN, sprachen_aktiv, uebersetzen,
+                                 untertitel_veroeffentlichen)
+from modules.stimmanbieter import anbieter_reihenfolge, sprachaudio
 # [P6 Stimme] Ende
 # [P7 Start] Anfang
 from modules.hardware import hochfahren
@@ -267,6 +270,22 @@ ANZEIGE_PFADE |= {"/api/weltkarte"}
 # [P5 Sicht] Anfang
 # [P5 Sicht] Ende
 # [P6 Stimme] Anfang
+# Wie oft die Serverstimme und der Übersetzer gefragt werden dürfen: höchstens 60 Anfragen
+# in 60 Sekunden. Beides kostet Geld; eine Schleife in einer Seite soll nicht das Guthaben leeren.
+SPRACHE_MAX_ANFRAGEN = 60
+SPRACHE_FENSTER_S = 60
+
+
+def sprachrate_erlaubt(zeiten: list, sperre, jetzt: float = None,
+                       maximum: int = SPRACHE_MAX_ANFRAGEN, fenster: float = SPRACHE_FENSTER_S) -> bool:
+    """Gleitendes Fenster: darf jetzt noch eine Anfrage durch? Zählt die Anfrage, wenn ja."""
+    jetzt = time.time() if jetzt is None else jetzt
+    with sperre:
+        zeiten[:] = [t for t in zeiten if jetzt - t < fenster]
+        if len(zeiten) >= maximum:
+            return False
+        zeiten.append(jetzt)
+        return True
 # [P6 Stimme] Ende
 # [P7 Start] Anfang
 # [P7 Start] Ende
@@ -307,6 +326,14 @@ class JarvisWeb:
         # [P5 Sicht] Anfang
         # [P5 Sicht] Ende
         # [P6 Stimme] Anfang
+        # Gleitende Fenster für /api/sprache und /api/uebersetzen (60 Anfragen je 60 Sekunden).
+        self._sprache_zeiten = []
+        self._uebersetzen_zeiten = []
+        self._sprache_sperre = threading.Lock()
+        # Der Dolmetscher gibt es nur hier, nicht in der Anzeige des Dienstes: das Werkzeug
+        # dolmetscher_starten fragt die Web-App, ob sie läuft.
+        if not self.nur_anzeige:
+            agent.tools.web_app = self
         # [P6 Stimme] Ende
         # [P7 Start] Anfang
         # [P7 Start] Ende
@@ -519,6 +546,9 @@ class JarvisWeb:
                 "modell": config.CLAUDE_MODEL,
                 "werkzeuge": len(werkzeuge.namen()),
                 "rollen": [r["rolle"] for r in werkzeuge.team.rollen_liste()],
+                "stimme_im_browser": bool(config.STIMME_IM_BROWSER and anbieter_reihenfolge()),
+                "stimme_anbieter": (anbieter_reihenfolge() or [""])[0],
+                "dolmetscher_sprachen": sprachen_aktiv(),
                 "dienste": config.konfig_uebersicht()})
         if pfad == "/api/meldungen":
             return self._antworten(behandler, 200,
@@ -571,6 +601,9 @@ class JarvisWeb:
         # [P5 Sicht] Anfang
         # [P5 Sicht] Ende
         # [P6 Stimme] Anfang
+        if pfad == "/dolmetscher":
+            # Nur in der Web-App: nicht in ANZEIGE_PFADE, also gibt es die Seite im Dienst nicht.
+            return self._html(behandler, SEITE_DOLMETSCHER.replace("{{SCHLUESSEL}}", self.token))
         # [P6 Stimme] Ende
         # [P7 Start] Anfang
         # [P7 Start] Ende
@@ -664,6 +697,37 @@ class JarvisWeb:
         # [P5 Sicht] Anfang
         # [P5 Sicht] Ende
         # [P6 Stimme] Anfang
+        if pfad == "/api/sprache":
+            # Die Serverstimme für den Browser: Text rein, Sprachdatei (MP3) raus.
+            text = str(daten.get("text") or "")[:600].strip()
+            sprache = str(daten.get("sprache") or "de").strip().lower()
+            if not text:
+                return self._antworten(behandler, 400, {"fehler": "Es kam kein Text an."})
+            if sprache not in SPRACHEN:
+                return self._antworten(behandler, 400, {"fehler": "Diese Sprache kenne ich nicht."})
+            if not sprachrate_erlaubt(self._sprache_zeiten, self._sprache_sperre):
+                return self._antworten(behandler, 429,
+                                       {"fehler": "Zu viele Sprachanfragen in kurzer Zeit."})
+            ergebnis = sprachaudio(text, "mp3", sprache)
+            if ergebnis.get("ok") and ergebnis.get("daten"):
+                self._kopf_setzen(behandler, 200, ergebnis["typ"], len(ergebnis["daten"]))
+                return behandler.wfile.write(ergebnis["daten"])
+            return self._antworten(behandler, 503, {
+                "fehler": ergebnis.get("fehler") or "Keine Sprachausgabe eingerichtet."})
+
+        if pfad == "/api/uebersetzen":
+            # Der Dolmetscher: eine Äußerung rein, Übersetzung raus (und als Untertitel auf die Zentrale).
+            if not sprachrate_erlaubt(self._uebersetzen_zeiten, self._sprache_sperre):
+                return self._antworten(behandler, 429,
+                                       {"ok": False, "fehler": "Zu viele Übersetzungen in kurzer Zeit."})
+            text = str(daten.get("text") or "")
+            ergebnis = uebersetzen(text, daten.get("von"), daten.get("nach"),
+                                   verlauf=daten.get("verlauf"), agent=self.agent)
+            if ergebnis.get("ok"):
+                untertitel_veroeffentlichen(werkzeuge, text, ergebnis,
+                                            str(daten.get("sprecher") or "gast"),
+                                            str(daten.get("von") or ""), str(daten.get("nach") or ""))
+            return self._antworten(behandler, 200, ergebnis)
         # [P6 Stimme] Ende
         # [P7 Start] Anfang
         if pfad == "/api/hochfahren":

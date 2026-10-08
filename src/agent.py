@@ -423,10 +423,13 @@ class JarvisAgent:
         ]
 
     def text_anfrage(self, auftrag: str, bild_base64: str = "",
-                     bild_typ: str = "image/jpeg", max_tokens: int = 8000) -> dict:
+                     bild_typ: str = "image/jpeg", max_tokens: int = 8000,
+                     effort: str = "medium") -> dict:
         """Eine einzelne Anfrage ohne Werkzeuge - gibt reinen Text zurück.
 
         Zählt wie jede Claude-Runde zum Monatslimit und landet im Gedankenlog.
+        ``effort`` ist die Denktiefe (low, medium, high ...): ``low`` für Aufträge, bei
+        denen es auf Tempo ankommt, etwa das Übersetzen im Dolmetscher.
         """
         if self.gedankenlog.limit_erreicht():
             return {"ok": False, "fehler": self._limit_meldung()}
@@ -437,7 +440,7 @@ class JarvisAgent:
             "max_tokens": max(int(max_tokens or 0), 8000),
             "messages": [{"role": "user",
                           "content": self._inhalt_bauen(auftrag, bild_base64, bild_typ)}],
-        }, summe, effort="medium", zwischenspeicher=False)
+        }, summe, effort=effort or "medium", zwischenspeicher=False)
         if summe:
             self.gedankenlog.eintragen(auftrag, "claude", "Einzelauftrag", time.time() - beginn,
                                        summe.get("ein", 0), summe.get("aus", 0), summe_kosten(summe))

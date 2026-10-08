@@ -511,6 +511,7 @@ class Einrichtung:
         # [P5 Sicht] Anfang
         # [P5 Sicht] Ende
         # [P6 Stimme] Anfang
+        ("fish", "Fish Audio (Stimme)", "FISH_API_KEY", "https://fish.audio/app/api-keys/"),
         # [P6 Stimme] Ende
         # [P7 Start] Anfang
         # [P7 Start] Ende
