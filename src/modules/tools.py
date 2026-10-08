@@ -160,6 +160,90 @@ def _aufloesen_mail_antworten(werkzeuge, argumente):
 
 FREIGABE_ANGABEN["mail_antworten"] = _angaben_mail_antworten
 FREIGABE_AUFLOESEN["mail_antworten"] = _aufloesen_mail_antworten
+
+# Kalender: absagen, verschieben, wiederherstellen. Die Freigabe nennt jeden Termin mit
+# Titel, Tag und Uhrzeit - nie nur eine Kennung.
+FREIGABE_PFLICHTIG |= {"termine_absagen", "termin_verschieben", "termin_wiederherstellen"}
+
+
+def _angaben_termine_absagen(a):
+    zeilen = a.get("termin_zeilen")
+    if not zeilen:
+        ids = a.get("ids")
+        ids = ", ".join(str(i) for i in ids) if isinstance(ids, (list, tuple)) else str(ids or "?")
+        return ("Termine mit den Kennungen %s absagen - die Termine selbst kenne ich nicht mehr, "
+                "es würde nichts gelöscht" % _wert_kurz_tools(ids, 80),
+                "Es wird nichts verändert. Lies die Termine vorher noch einmal.")
+    if len(zeilen) == 1:
+        was = "den Termin %s absagen und im Kalender löschen" % zeilen[0]
+    else:
+        was = "diese %d Termine absagen und im Kalender löschen: %s" % (len(zeilen), "; ".join(zeilen))
+    return (was, "Im Kalender per CalDAV gelöscht; vorher sichert Jarvis jeden Termin im Papierkorb. "
+                 "Serientermine bleiben unangetastet.")
+
+
+def _aufloesen_termine_absagen(werkzeuge, argumente):
+    zeilen = []
+    for z in werkzeuge.kalender.freigabe_termine(argumente.get("ids")):
+        if not z["bekannt"]:
+            zeilen.append("ein Termin, den ich nicht mehr kenne (wird nicht abgesagt)")
+            continue
+        zeile = "„%s“ am %s" % (_wert_kurz_tools(z["titel"], 70), z["wann"])
+        zeilen.append(zeile + (" (Serientermin, wird nicht abgesagt)" if z["serie"] else ""))
+    return {"termin_zeilen": zeilen}
+
+
+def _angaben_termin_verschieben(a):
+    titel = a.get("termin_titel")
+    if not titel:
+        return ("einen Termin (Kennung %s) auf %s verschieben - den Termin selbst kenne ich nicht mehr, "
+                "es würde nichts verändert" % (_wert_kurz_tools(a.get("id"), 20),
+                                                _wert_kurz_tools(a.get("neuer_beginn"), 40)),
+                "Es wird nichts verändert. Lies die Termine vorher noch einmal.")
+    neu = a.get("termin_neu") or ("„%s“ (den Zeitpunkt verstehe ich nicht, es würde nichts verändert)"
+                                  % _wert_kurz_tools(a.get("neuer_beginn"), 40))
+    zusatz = " (Serientermin, wird nicht verschoben)" if a.get("termin_serie") else \
+        " (Dauer %s Minuten)" % a.get("termin_dauer", "?")
+    return ("den Termin „%s“ von %s auf %s verschieben%s"
+            % (_wert_kurz_tools(titel, 70), a.get("termin_alt", "?"), neu, zusatz),
+            "Im Kalender per CalDAV geändert; Titel, Ort und alles andere bleiben. Hat sich der "
+            "Termin inzwischen geändert, passiert nichts.")
+
+
+def _aufloesen_termin_verschieben(werkzeuge, argumente):
+    angaben = werkzeuge.kalender.freigabe_verschieben(
+        argumente.get("id"), argumente.get("neuer_beginn"), argumente.get("dauer_minuten"))
+    if not angaben:
+        return {}
+    return {"termin_titel": angaben["titel"], "termin_alt": angaben["alt"], "termin_neu": angaben["neu"],
+            "termin_dauer": angaben["dauer_minuten"], "termin_serie": angaben["serie"]}
+
+
+def _angaben_termin_wiederherstellen(a):
+    titel = a.get("termin_titel")
+    if not titel:
+        return ("den abgesagten Termin Nr. %s aus dem Papierkorb wieder eintragen - die Nummer kenne "
+                "ich nicht, es würde nichts eingetragen" % _wert_kurz_tools(a.get("papierkorb_id"), 10),
+                "Es wird nichts verändert.")
+    return ("den abgesagten Termin „%s“ (%s) wieder in den Kalender eintragen"
+            % (_wert_kurz_tools(titel, 70), a.get("termin_wann", "?")),
+            "Aus dem Papierkorb zurück in den Kalender per CalDAV. Was dort schon liegt, wird nicht "
+            "überschrieben.")
+
+
+def _aufloesen_termin_wiederherstellen(werkzeuge, argumente):
+    angaben = werkzeuge.kalender.freigabe_wiederherstellen(argumente.get("papierkorb_id"))
+    if not angaben:
+        return {}
+    return {"termin_titel": angaben["titel"], "termin_wann": angaben["wann"]}
+
+
+FREIGABE_ANGABEN["termine_absagen"] = _angaben_termine_absagen
+FREIGABE_ANGABEN["termin_verschieben"] = _angaben_termin_verschieben
+FREIGABE_ANGABEN["termin_wiederherstellen"] = _angaben_termin_wiederherstellen
+FREIGABE_AUFLOESEN["termine_absagen"] = _aufloesen_termine_absagen
+FREIGABE_AUFLOESEN["termin_verschieben"] = _aufloesen_termin_verschieben
+FREIGABE_AUFLOESEN["termin_wiederherstellen"] = _aufloesen_termin_wiederherstellen
 # [P4 Büro] Ende
 # [P5 Sicht] Anfang
 # [P5 Sicht] Ende
@@ -263,6 +347,7 @@ class Werkzeuge:
         # [P3 Telefon] Ende
         # [P4 Büro] Anfang
         self.vorschlaege = Vorschlaege(self.memory)
+        self.kalender.memory = self.memory  # darin liegt der Papierkorb für abgesagte Termine
         # [P4 Büro] Ende
         # [P5 Sicht] Anfang
         # [P5 Sicht] Ende
@@ -754,6 +839,28 @@ class Werkzeuge:
                      {"ort": text, "kueche": text, "radius": ganz}),
             # [P3 Telefon] Ende
             # [P4 Büro] Anfang
+            # -- Kalender: absagen, verschieben, freie Zeiten --
+            werkzeug("termine_absagen",
+                     "Sagt Termine ab (löscht sie im Kalender). Nur Termine, die du gerade mit termine_lesen "
+                     "gesehen hast, über ihre id. Die Freigabe nennt jeden Termin einzeln. Serientermine bleiben "
+                     "unangetastet; gelöschte kommen in den Papierkorb.",
+                     {"ids": {"type": "array", "items": {"type": "string"}, "maxItems": 10},
+                      "begruendung": begruendung}, ["ids", "begruendung"]),
+            werkzeug("termin_verschieben",
+                     "Verschiebt einen eben gelesenen Termin auf einen neuen Beginn (gleiche Dauer, wenn nicht "
+                     "anders angegeben). Braucht eine Freigabe.",
+                     {"id": text, "neuer_beginn": text, "dauer_minuten": ganz, "begruendung": begruendung},
+                     ["id", "neuer_beginn", "begruendung"]),
+            werkzeug("termin_wiederherstellen",
+                     "Legt einen abgesagten Termin aus dem Papierkorb wieder an. Braucht eine Freigabe.",
+                     {"papierkorb_id": ganz, "begruendung": begruendung}, ["papierkorb_id", "begruendung"]),
+            werkzeug("freie_zeiten",
+                     "Freie Zeitfenster an einem Tag zwischen von und bis, mindestens so lang wie angegeben.",
+                     {"tag": {"type": "string", "description": "YYYY-MM-DD, heute oder morgen"},
+                      "von": {"type": "string", "description": "Standard 08:00"},
+                      "bis": {"type": "string", "description": "Standard 18:00"},
+                      "mindestens_minuten": {"type": "integer", "description": "Standard 60"}},
+                     ["tag"]),
             # -- Post und Vorschläge --
             werkzeug("mail_antworten",
                      "Antwortet auf eine gelesene Mail im selben Faden (Betreff Re:). Die Kennung steht in "
@@ -1279,6 +1386,16 @@ class Werkzeuge:
                                       a.get("radius") or 2500)
         # [P3 Telefon] Ende
         # [P4 Büro] Anfang
+        if name == "termine_absagen":
+            return self.kalender.termine_absagen(a.get("ids"), a.get("begruendung", ""))
+        if name == "termin_verschieben":
+            return self.kalender.termin_verschieben(a.get("id"), a.get("neuer_beginn"),
+                                                    a.get("dauer_minuten"))
+        if name == "termin_wiederherstellen":
+            return self.kalender.termin_wiederherstellen(a.get("papierkorb_id"))
+        if name == "freie_zeiten":
+            return self.kalender.freie_zeiten(a.get("tag") or "heute", a.get("von") or "08:00",
+                                              a.get("bis") or "18:00", a.get("mindestens_minuten") or 60)
         if name == "mail_antworten":
             return self.mail.antworten(a.get("kennung"), a.get("text", ""))
         if name == "mail_entwurf":

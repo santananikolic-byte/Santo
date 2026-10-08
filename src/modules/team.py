@@ -302,6 +302,7 @@ ROLLEN["rechercheur"]["werkzeuge"] += ["lokale_suchen"]
 # [P3 Telefon] Ende
 # [P4 Büro] Anfang
 ROLLEN["postmeister"]["werkzeuge"] += ["mail_antworten", "mail_entwurf"]
+ROLLEN["terminplaner"]["werkzeuge"] += ["freie_zeiten", "termine_absagen", "termin_verschieben"]
 # [P4 Büro] Ende
 # [P5 Sicht] Anfang
 # [P5 Sicht] Ende
