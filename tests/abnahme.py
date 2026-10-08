@@ -3406,6 +3406,141 @@ def pruefung_kern(agent):
 # ---------------------------------------------------------------------------
 
 # [P1 Bühne] Anfang
+ZENTRALE_NODE_PRUEFUNG = r"""
+const fs=require('fs');const d=JSON.parse(fs.readFileSync(process.argv[1],'utf8'));
+const e={};
+e.lon=[lonWeg(170,-170),lonWeg(-170,170),lonWeg(0,180),lonWeg(10,350),lonWeg(350,10),lonWeg(5,5)];
+e.ease=[easeInOut(0),easeInOut(0.5),easeInOut(1),easeInOut(-3),easeInOut(7)];
+let ok=true,vor=-1;for(let i=0;i<=100;i++){const v=easeInOut(i/100);if(v<vor)ok=false;vor=v}e.easeSteigt=ok;
+e.fz=[flugZoom(1,4,120,0.5),flugZoom(1,4,120,0),flugZoom(1,4,120,1),flugZoom(2,2,0,0.5),flugZoom(1,6,10,0.5)];
+let s=12345;const r=()=>{s=(s*1103515245+12345)%2147483648;return s/2147483648};let innen=true;
+for(let i=0;i<50;i++){const z=flugZoom(r()*9-1,r()*9-1,r()*240-20,r()*1.4-0.2);if(!(z>=1&&z<=6))innen=false}
+e.fzInnen=innen;
+e.lerp=[kugelLerp([0,0],[0,90],0.5),kugelLerp([10,170],[10,-170],0.5),kugelLerp({lat:50,lon:10},{lat:35,lon:-40},0),kugelLerp([50,10],[35,-40],1),kugelLerp([0,0],[0,180],0.25)];
+e.winkel=[kugelWinkel([0,0],[0,90]),kugelWinkel([48,16],[48,16]),kugelWinkel([90,0],[-90,0])];
+e.falten=[faltenText("Märkte – groß!"),stichwortTrifft("Die MAERKTE im Blick","Märkte"),stichwortTrifft("Israelische Truppen ziehen ab","Israel"),
+ stichwortTrifft("In Israel, heute","Israel"),stichwortTrifft("Nahost-Lage spitzt sich zu","Nahost"),stichwortTrifft("irgendwas",""),stichwortTrifft("Die Straße von Hormus","Strasse von Hormus")];
+const m=rleDekodieren(d.rle,d.breite,d.hoehe);
+e.maske=m?m.length:null;
+let summe=0;if(m)for(let i=0;i<m.length;i++)summe+=m[i];e.summe=summe;
+const zelle=(lat,lon)=>m[Math.floor((90-lat)/0.25)*d.breite+Math.floor((lon+180)/0.25)];
+const nahLand=(lat,lon)=>zelle(lat,lon-1e-3)||zelle(lat,lon+1e-3);
+e.orte=m?[zelle(48.2,16.37),zelle(40,-30),zelle(0,-150),zelle(55.76,37.62)]:null;
+e.kaputt=[rleDekodieren("",1440,720),rleDekodieren("1,2;3",1440,720),rleDekodieren(d.rle,1440,719)];
+e.mengen=[];
+if(m)for(const schritt of [4,2,1]){const M=punktMengeBauen(m,d.breite,d.hoehe,schritt);
+ const st=M.land.start,sk=M.kueste.start;let steigt=true;for(let i=0;i<M.zeilen;i++)if(st[i+1]<st[i]||sk[i+1]<sk[i])steigt=false;
+ let einheit=true,auf=0;for(const teil of [M.land,M.kueste])for(let i=0;i<teil.pts.length;i+=3){const q=teil.pts[i]*teil.pts[i]+teil.pts[i+1]*teil.pts[i+1];if(Math.abs(q-1)>1e-4)einheit=false}
+ // Bei der feinsten Stufe liegt jeder Punkt auf einer Landzelle
+ if(schritt===1){let n=0;for(const teil of [M.land,M.kueste])for(let i=0;i<teil.pts.length;i+=3){const lat=Math.asin(teil.pts[i])*180/Math.PI,lon=teil.pts[i+2]*180/Math.PI;
+   if(!nahLand(lat,lon)){n++}}auf=n}
+ e.mengen.push({schritt,zeilen:M.zeilen,anzahl:M.anzahl,laenge:M.land.pts.length/3+M.kueste.pts.length/3,steigt,einheit,wasser:auf,
+  ende:[st[M.zeilen]*3===M.land.pts.length,sk[M.zeilen]*3===M.kueste.pts.length]})}
+console.log(JSON.stringify(e));
+"""
+
+
+def pruefung_zentrale(agent):
+    """Die Zentrale: Seite ohne Fremdes, der Rechenblock mit node, Küsten aus der Landmaske."""
+    abschnitt("Zentrale: Bühne, Globus, Ansichten")
+    from modules.weltkarte import (LANDMASKE_BREITE, LANDMASKE_HOEHE, LANDMASKE_RLE,
+                                   landmaske_dekodieren)
+    a = ansicht_modul
+    seite = a.SEITE_ZENTRALE
+    ohne_ns = seite.replace("http://www.w3.org/2000/svg", "")
+    pruefen("Zentrale: nichts aus dem Netz, kein Eingabefeld, nichts Gefährliches im Skript",
+            "http://" not in ohne_ns and "https://" not in ohne_ns and "{{SCHLUESSEL}}" in seite
+            and "<input" not in seite and "<textarea" not in seite
+            and not any(w in seite for w in ("innerHTML", "insertAdjacentHTML", "document.write", "eval(")),
+            "Text nur als Text")
+    sys.path.insert(0, WURZEL)
+    try:
+        import build_single as bau
+    finally:
+        sys.path.remove(WURZEL)
+    reste = bau.config_reste_finden(bau.config_bezug_aufloesen(seite))
+    pruefen("Zentrale: kein nacktes Wort config in der Seite (build_single bräche)", not reste, str(reste[:1]))
+    lagen = ("maerkte", "kennzahlen", "anruf", "sicht", "untertitel", "hochfahren", "recherche", "inhalte")
+    pruefen("Zentrale: Bühne mit einer Ebene je Ansicht, Überblendung und ruhige Bewegung",
+            'id="buehne"' in seite and 'data-modus="uebersicht"' in seite
+            and all('data-lage="%s"' % lage in seite for lage in lagen)
+            and "opacity .4s" in seite and "prefers-reduced-motion" in seite and "requestAnimationFrame" in seite,
+            "%d Ebenen" % len(lagen))
+    pruefen("Zentrale: eine Langabfrage für alle sechs Kanäle, Versionen ab -1, Neustart und Uhrversatz",
+            "/api/anzeige?nach=" in seite and "&warten=20" in seite
+            and all('"%s"' % k in seite for k in ("buehne", "stimme", "anruf", "sicht", "untertitel", "hochfahren"))
+            and "VERSION[k]=-1" in seite and "d.start!==START" in seite and "d.jetzt*1000-Date.now()" in seite
+            and "setTimeout(f,3000)" in seite, "wie im Anzeige-Vertrag")
+    pruefen("Zentrale: Block rechnen-zentrale genau einmal, Rest der Übersicht unverändert",
+            seite.count("// <rechnen-zentrale>") == 1 and seite.count("// </rechnen-zentrale>") == 1
+            and seite.index("// <rechnen-zentrale>") < seite.index("// </rechnen-zentrale>")
+            and "/api/weltkarte" in seite and "/api/zentrale" in seite and "/api/lichter" in seite, "")
+    kacheln = a.kennzahlen_kacheln(agent.tools)
+    pruefen("Kennzahlen-Kacheln: höchstens acht, jeder Wert eine echte Zahl",
+            len(kacheln) <= 8 and all(isinstance(k["wert"], (int, float)) and not isinstance(k["wert"], bool)
+                                      for k in kacheln), "%d Kacheln" % len(kacheln))
+    pruefen("status_daten trägt das Feld anzeige", "anzeige" in a.status_daten(agent.tools, agent)
+            and "modus" in a.status_daten(agent.tools, agent)["anzeige"], "")
+    maske = landmaske_dekodieren(LANDMASKE_RLE) if LANDMASKE_RLE else None
+
+    knoten = shutil.which("node")
+    if not knoten:
+        pruefen("Zentrale: node-Prüfungen", True, "node fehlt - übersprungen")
+        return
+    skript = re.search(r"<script>(.*)</script>", seite.replace("{{SCHLUESSEL}}", ""), re.S).group(1)
+    skriptdatei = os.path.join(ARBEITSVERZEICHNIS, "zentrale_skript.js")
+    with open(skriptdatei, "w", encoding="utf-8") as datei:
+        datei.write(skript)
+    lauf = subprocess.run([knoten, "--check", skriptdatei], capture_output=True, text=True, timeout=60)
+    pruefen("Zentrale: das Skript der Seite hat gültige Syntax (node --check)", lauf.returncode == 0,
+            (lauf.stderr or "")[:60])
+    block = seite[seite.index("// <rechnen-zentrale>"):seite.index("// </rechnen-zentrale>")]
+    daten = os.path.join(ARBEITSVERZEICHNIS, "zentrale_karte.json")
+    with open(daten, "w", encoding="utf-8") as datei:
+        json.dump({"rle": LANDMASKE_RLE, "breite": LANDMASKE_BREITE, "hoehe": LANDMASKE_HOEHE}, datei)
+    lauf = subprocess.run([knoten, "-e", block + "\n" + ZENTRALE_NODE_PRUEFUNG, daten],
+                          capture_output=True, text=True, timeout=120)
+    try:
+        e = json.loads(lauf.stdout.strip().splitlines()[-1])
+    except (ValueError, IndexError):
+        e = None
+    pruefen("Zentrale: der Rechenblock läuft unter node", e is not None, "" if e else (lauf.stderr or lauf.stdout)[-60:])
+    if e is None:
+        return
+
+    def nah(wert, soll, genau=1e-6):
+        return abs(wert - soll) < genau
+
+    pruefen("lonWeg: kürzester vorzeichenbehafteter Längenunterschied in (-180, 180]",
+            e["lon"] == [20, -20, 180, -20, 20, 0], str(e["lon"]))
+    pruefen("easeInOut: 0, 0,5 und 1 an den Enden und in der Mitte, steigend, begrenzt",
+            e["ease"] == [0, 0.5, 1, 0, 1] and e["easeSteigt"], str(e["ease"]))
+    pruefen("flugZoom: Mitte eines weiten Flugs liegt unter 2, Enden stimmen, immer in 1..6",
+            e["fz"][0] < 2 and nah(e["fz"][1], 1) and nah(e["fz"][2], 4) and nah(e["fz"][3], 2)
+            and 1 <= e["fz"][4] <= 6 and e["fzInnen"], str([round(x, 2) for x in e["fz"]]))
+    pruefen("kugelLerp: Großkreis - Mitte, Enden, über die Datumsgrenze",
+            nah(e["lerp"][0][0], 0, 1e-6) and nah(e["lerp"][0][1], 45, 1e-6)
+            and nah(abs(e["lerp"][1][1]), 180, 1e-6) and e["lerp"][1][0] > 10.1
+            and nah(e["lerp"][2][0], 50, 1e-6) and nah(e["lerp"][2][1], 10, 1e-6)
+            and nah(e["lerp"][3][0], 35, 1e-6) and nah(e["lerp"][3][1], -40, 1e-6)
+            and nah(e["lerp"][4][1], 45, 1e-6) and nah(e["winkel"][0], 90, 1e-6)
+            and nah(e["winkel"][1], 0, 1e-6) and nah(e["winkel"][2], 180, 1e-6), "")
+    pruefen("Themenfolge: Stichwörter gefaltet und nur als ganzes Wort",
+            e["falten"] == ["maerkte gross", True, False, True, True, False, True], str(e["falten"]))
+    if maske is None:
+        pruefen("Zentrale: Küsten aus der Landmaske", True, "Weltkarte noch nicht gebaut")
+        return
+    pruefen("Landmaske im Browser dekodiert wie in Python (Größe und Landzellen)",
+            e["maske"] == LANDMASKE_BREITE * LANDMASKE_HOEHE and e["summe"] == sum(maske), "%s Landzellen" % e["summe"])
+    pruefen("Landmaske im Browser: Wien und Moskau Land, Atlantik und Pazifik Wasser, Kaputtes wird null",
+            e["orte"] == [1, 0, 0, 1] and e["kaputt"] == [None, None, None], str(e["orte"]))
+    m4, m2, m1 = e["mengen"]
+    pruefen("Punktsätze 1°, 0,5° und 0,25°: Zeilen, Anfänge, Einheitsvektoren, feiner = mehr",
+            [m["zeilen"] for m in e["mengen"]] == [180, 360, 720]
+            and all(m["steigt"] and m["einheit"] and m["ende"] == [True, True] and m["anzahl"] == m["laenge"]
+                    for m in e["mengen"]) and m4["anzahl"] < m2["anzahl"] < m1["anzahl"]
+            and 5000 < m4["anzahl"] < 60000, "%d / %d / %d Punkte" % (m4["anzahl"], m2["anzahl"], m1["anzahl"]))
+    pruefen("Punktsatz 0,25°: jeder Punkt liegt auf einer Landzelle", m1["wasser"] == 0, "%d daneben" % m1["wasser"])
 # [P1 Bühne] Ende
 # [P2 Weltlage] Anfang
 # [P2 Weltlage] Ende
@@ -5967,6 +6102,7 @@ def main() -> int:
     pruefung_sprache_und_welt(agent)
     pruefung_kern(agent)
     # [P1 Bühne] Anfang
+    pruefung_zentrale(agent)
     # [P1 Bühne] Ende
     # [P2 Weltlage] Anfang
     pruefung_video_funktionen(agent)
