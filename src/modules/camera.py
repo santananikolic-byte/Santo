@@ -8,6 +8,10 @@ Damit sieht Jarvis den Nutzer, einen vorgehaltenen Beleg oder ein Objekt.
 Überwachung, keine Aufzeichnung im Hintergrund. Das Bild wird nach der
 Auswertung gelöscht, außer der Nutzer will es ausdrücklich behalten.
 
+Der Server nimmt nur Einzelbilder auf (umschauen, Belege). Ein Live-Bild gibt es
+nur im Browser auf der Seite Sicht, nur nach Einschalten (SICHT_AN); es verlässt
+den Browser nie und wird nicht aufgezeichnet - gespeichert werden nur Messzahlen.
+
 Das Kamera-Recht muss dem Terminal unter Systemeinstellungen, Datenschutz,
 Kamera erteilt sein. Die Ersteinrichtung weist darauf hin.
 """

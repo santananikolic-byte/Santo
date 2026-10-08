@@ -126,6 +126,7 @@ Betriebsarten:
     python3 jarvis.py export      Buchhaltung als CSV
     python3 jarvis.py stimme      Stimmprofil einlernen
     python3 jarvis.py stimmen     ElevenLabs-Stimme aussuchen
+    python3 jarvis.py sicht       Kamera-Seite: laden (Handerkennung holen), an oder aus
     python3 jarvis.py test        Selbsttest
     python3 jarvis.py sprechprobe Stimmkette prüfen und einen Probesatz sprechen
     python3 jarvis.py einrichten  geführte Ersteinrichtung

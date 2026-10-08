@@ -18,6 +18,7 @@ Terminal spricht, nimmt ``hoeren``.
     python3 jarvis.py export      Buchhaltung als CSV
     python3 jarvis.py stimme      Stimmprofil einlernen
     python3 jarvis.py stimmen     ElevenLabs-Stimme aussuchen
+    python3 jarvis.py sicht       Kamera-Seite: laden (Handerkennung holen), an oder aus
     python3 jarvis.py test        Selbsttest
     python3 jarvis.py sprechprobe Stimmkette prüfen und einen Probesatz sprechen
     python3 jarvis.py einrichten  geführte Ersteinrichtung
@@ -64,6 +65,7 @@ from modules.webapp import JarvisWeb, STANDARD_PORT
 # [P4 Büro] Anfang
 # [P4 Büro] Ende
 # [P5 Sicht] Anfang
+from modules.sicht import sicht_befehl
 # [P5 Sicht] Ende
 # [P6 Stimme] Anfang
 from modules.voice import sprechprobe
@@ -1068,6 +1070,8 @@ def hauptprogramm(argumente=None) -> int:
     # [P4 Büro] Anfang
     # [P4 Büro] Ende
     # [P5 Sicht] Anfang
+    elif modus == "sicht":
+        return sicht_befehl(argumente[1:])
     # [P5 Sicht] Ende
     # [P6 Stimme] Anfang
     elif modus == "sprechprobe":

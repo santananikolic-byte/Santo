@@ -52,6 +52,9 @@ from modules.weltkarte import LANDMASKE_BREITE, LANDMASKE_HOEHE, LANDMASKE_QUELL
 from modules.freigabe import GESTE_GESPERRT
 # [P4 Büro] Ende
 # [P5 Sicht] Anfang
+from modules.sicht import (SICHT_DATEIEN_PRAEFIX, messung_pruefen, sicht_ausliefern, sicht_pfad_oeffentlich,
+                           sicht_stand_bauen, vorschlag_per_geste)
+from modules.sehen import SEITE_SEHEN, SEHEN_CSP, SEHEN_ERLAUBNIS, SEHEN_ERLAUBNIS_AUS
 # [P5 Sicht] Ende
 # [P6 Stimme] Anfang
 from modules.dolmetscher import (SEITE_DOLMETSCHER, SPRACHEN, sprachen_aktiv, uebersetzen,
@@ -268,6 +271,11 @@ ANZEIGE_PFADE |= {"/api/weltkarte"}
 # [P4 Büro] Anfang
 # [P4 Büro] Ende
 # [P5 Sicht] Anfang
+# Die Seite Sicht und was sie liest - nur ansehen. Speichern und Gesten gehen nur in der Web-App.
+ANZEIGE_PFADE |= {"/sehen", "/api/sicht/stand", "/api/sicht/verlauf"}
+# Die Dateien der Handerkennung (die Version steht im Pfad): alles, was so anfängt, ist erlaubt;
+# ausgeliefert werden trotzdem nur die weißgelisteten Namen.
+ANZEIGE_PRAEFIXE = (SICHT_DATEIEN_PRAEFIX,)
 # [P5 Sicht] Ende
 # [P6 Stimme] Anfang
 # Wie oft die Serverstimme und der Übersetzer gefragt werden dürfen: höchstens 60 Anfragen
@@ -452,6 +460,10 @@ class JarvisWeb:
             return False
         if not self.token:
             return True
+        # P5 Sicht: Die Dateien der Handerkennung sind öffentliche Bibliotheken, und MediaPipe
+        # holt sie selbst - dabei lässt sich kein Schlüssel anhängen. Nur die weißgelisteten Namen.
+        if sicht_pfad_oeffentlich(urlparse(behandler.path).path):
+            return True
         gefragt = parse_qs(urlparse(behandler.path).query).get("schluessel", [""])[0]
         kopfschluessel = behandler.headers.get("X-Jarvis-Schluessel", "")
         return secrets.compare_digest(gefragt or kopfschluessel, self.token)
@@ -481,7 +493,8 @@ class JarvisWeb:
             return self._antworten(behandler, 403,
                                    {"fehler": "Kein Zugang. Der Schlüssel fehlt "
                                               "oder stimmt nicht."})
-        if self.nur_anzeige and (methode != "GET" or pfad not in ANZEIGE_PFADE):
+        if self.nur_anzeige and (methode != "GET" or not (
+                pfad in ANZEIGE_PFADE or pfad.startswith(ANZEIGE_PRAEFIXE))):
             return self._antworten(behandler, 404,
                                    {"fehler": "Hier läuft nur die Anzeige. Sprich mit Jarvis."})
         if methode == "POST" and not self._herkunft_ok(behandler):
@@ -599,6 +612,30 @@ class JarvisWeb:
         # [P4 Büro] Anfang
         # [P4 Büro] Ende
         # [P5 Sicht] Anfang
+        if pfad == "/sehen":
+            # Die Kamera nur für die Seite selbst - und gar nicht, solange SICHT_AN aus ist.
+            return self._html(behandler, SEITE_SEHEN.replace("{{SCHLUESSEL}}", self.token), {
+                "Content-Security-Policy": SEHEN_CSP,
+                "Permissions-Policy": SEHEN_ERLAUBNIS if config.SICHT_AN else SEHEN_ERLAUBNIS_AUS})
+        if pfad.startswith(SICHT_DATEIEN_PRAEFIX):
+            code, inhalt, typ = sicht_ausliefern(pfad)
+            if code != 200:
+                return self._antworten(behandler, code, {"fehler": typ})
+            # Die Version steht im Pfad - der Browser darf die Datei ein Jahr behalten.
+            self._kopf_setzen(behandler, 200, typ, len(inhalt),
+                              {"Cache-Control": "public, max-age=31536000, immutable"})
+            return behandler.wfile.write(inhalt)
+        if pfad in ("/api/sicht/stand", "/api/sicht/verlauf"):
+            # Auf der Anzeige des Dienstes gibt es im Diskretmodus keine Gesundheitswerte.
+            diskret = bool(self.nur_anzeige and config.ANZEIGE_DISKRET)
+            if pfad == "/api/sicht/stand":
+                return self._antworten(behandler, 200, sicht_stand_bauen(
+                    werkzeuge, schreiben=not self.nur_anzeige, diskret=diskret))
+            if diskret:
+                return self._antworten(behandler, 200, {"ok": True, "tage": 0, "messungen": [],
+                                                        "tageswerte": [], "diskret": True})
+            return self._antworten(behandler, 200,
+                                   werkzeuge.handruhe.verlauf(frage.get("tage", ["14"])[0]))
         # [P5 Sicht] Ende
         # [P6 Stimme] Anfang
         if pfad == "/dolmetscher":
@@ -695,6 +732,23 @@ class JarvisWeb:
         # [P4 Büro] Anfang
         # [P4 Büro] Ende
         # [P5 Sicht] Anfang
+        if pfad == "/api/sicht/messung":
+            # Nur Zahlen, klein und streng geprüft. Ein Bild kommt hier nie an.
+            try:
+                laenge = int(behandler.headers.get("Content-Length") or 0)
+            except (TypeError, ValueError):
+                laenge = 0
+            if laenge > 2048:
+                return self._antworten(behandler, 400, {"fehler": "Zu viele Daten."},
+                                       {"Connection": "close"})
+            messung, fehler = messung_pruefen(daten)
+            if messung is None:
+                return self._antworten(behandler, 400, {"fehler": fehler})
+            ergebnis = werkzeuge.handruhe.speichern(messung)
+            return self._antworten(behandler, 200 if ergebnis.get("ok") else 400, ergebnis)
+        if pfad == "/api/vorschlag/geste":
+            code, antwort = vorschlag_per_geste(self, daten)
+            return self._antworten(behandler, code, antwort)
         # [P5 Sicht] Ende
         # [P6 Stimme] Anfang
         if pfad == "/api/sprache":
