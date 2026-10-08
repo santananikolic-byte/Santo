@@ -1330,18 +1330,24 @@ function maerkteZeichnen(d){
  $("#mk-fuss").textContent=fuss.join("  ·  ")}
 // --- Ansichten: Kennzahlen
 function kachelnAusZentrale(z){
+ // Wie auf dem Server: ohne eine einzige Buchung oder einen Interessenten wäre jede Zahl eine bloße Null - dann fehlt die Kachel.
  const m=z.monat||{},b=z.bedarf||{},p=z.pipeline||{},k=[];
  const neu=(name,wert,einheit,ziel,text,farbe)=>{if(istZahl(wert))k.push({name:name,wert:wert,einheit:einheit,ziel:istZahl(ziel)&&ziel>0?ziel:null,text:text||"",farbe:farbe||"neutral"})};
+ const kasse=[m.einnahmen,m.ausgaben,m.ergebnis,m.zahllast].some(x=>istZahl(x)&&x!==0);
+ const stufen=Object.values(p.stufen&&typeof p.stufen==="object"?p.stufen:{}).reduce((s_,x)=>s_+(typeof x==="number"?x:(x&&x.anzahl)||0),0);
+ const kunden=stufen>0||[p.gewichtet,p.gesichert,p.offen_wert].some(x=>istZahl(x)&&x!==0);
  const gewinn=b.berechenbar&&istZahl(b.gewinn)&&b.gewinn>0?b.gewinn:null;
- if(istZahl(m.ergebnis)){const netto=m.ergebnis-(istZahl(m.zahllast)?m.zahllast:0);
-  neu("Ergebnis Monat",m.ergebnis,"€",gewinn,gewinn?Math.round(netto/gewinn*100)+" % vom Bedarf":"Einnahmen minus Ausgaben",m.ergebnis>=0?"gut":"schlecht")}
- neu("Einnahmen Monat",m.einnahmen,"€",null,"brutto");neu("Ausgaben Monat",m.ausgaben,"€",null,"brutto");
- neu("Zahllast",m.zahllast,"€",null,"Umsatzsteuer minus Vorsteuer");
+ if(kasse){
+  if(istZahl(m.ergebnis)){const netto=m.ergebnis-(istZahl(m.zahllast)?m.zahllast:0);
+   neu("Ergebnis Monat",m.ergebnis,"€",gewinn,gewinn?Math.round(netto/gewinn*100)+" % vom Bedarf":"Einnahmen minus Ausgaben",m.ergebnis>=0?"gut":"schlecht")}
+  neu("Einnahmen Monat",m.einnahmen,"€",null,"brutto");neu("Ausgaben Monat",m.ausgaben,"€",null,"brutto");
+  neu("Zahllast",m.zahllast,"€",null,"Umsatzsteuer minus Vorsteuer")}
  if(istZahl(z.belegquote))neu("Belegquote",z.belegquote,"%",100,"der Ausgaben belegt",z.belegquote>=90?"gut":z.belegquote<50?"schlecht":"neutral");
- neu("Pipeline gewichtet",p.gewichtet,"€",null,"nach Wahrscheinlichkeit");
  const noetig=b.berechenbar&&istZahl(b.noetig)&&b.noetig>0?b.noetig:null;
- neu("Gesichert je Monat",p.gesichert,"€",noetig,noetig&&istZahl(p.gesichert)?Math.round(p.gesichert/noetig*100)+" % vom nötigen Umsatz":"aus gewonnenen Aufträgen",
-  noetig&&istZahl(p.gesichert)?(p.gesichert>=noetig?"gut":"schlecht"):"neutral");
+ if(kunden){
+  neu("Pipeline gewichtet",p.gewichtet,"€",null,"nach Wahrscheinlichkeit");
+  neu("Gesichert je Monat",p.gesichert,"€",noetig,noetig&&istZahl(p.gesichert)?Math.round(p.gesichert/noetig*100)+" % vom nötigen Umsatz":"aus gewonnenen Aufträgen",
+   noetig&&istZahl(p.gesichert)?(p.gesichert>=noetig?"gut":"schlecht"):"neutral")}
  neu("Nötiger Umsatz",noetig,"€",null,"je Monat, damit das Private gedeckt ist");
  return k.slice(0,8)}
 function kzWert(k){
