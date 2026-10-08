@@ -5429,6 +5429,16 @@ def pruefung_erholung(agent):
             datei.write("OURA_REFRESH_TOKEN=von-anderem-prozess\nOURA_CLIENT_ID=cid\nOURA_CLIENT_SECRET=csec\n")
         pruefen("Token: hat ein anderer Prozess rotiert, gilt dessen Token (die .env wird neu gelesen)",
                 datei_er.oura_holen()["ok"], "")
+        # Was ein anderer Prozess in die .env geschrieben hat, geht beim Speichern nicht verloren.
+        config.env_neu_laden()
+        with open(env_pfad, "a", encoding="utf-8") as datei:
+            datei.write("ANDERER_EINTRAG=bleibt\n")
+        speichern_ok = datei_er._token_speichern("oura", "nach-fremdem-eintrag")
+        with open(env_pfad, encoding="utf-8") as datei:
+            env_text = datei.read()
+        pruefen("Token: beim Speichern bleibt, was ein anderer Prozess inzwischen eingetragen hat",
+                speichern_ok and "ANDERER_EINTRAG=bleibt" in env_text and "OURA_REFRESH_TOKEN=nach-fremdem-eintrag" in env_text
+                and "OURA_CLIENT_SECRET=csec" in env_text, "")
         config.ENV_DATEI, config.CONFIG_VERZEICHNIS = sicher[6], sicher[7]
         config.OURA_REFRESH_TOKEN = sicher[2]
         config.env_neu_laden()

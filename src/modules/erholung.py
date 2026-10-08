@@ -842,6 +842,9 @@ class Erholung:
         try:
             if self._env_setzen_fn is not None:
                 return bool(self._env_setzen_fn(name, wert))
+            # env_setzen schreibt den ganzen Stand dieses Prozesses zurück. Der kann Stunden alt sein - hat
+            # ein anderer Prozess inzwischen etwas eingetragen (Token, Client-ID), ginge es verloren.
+            config.env_neu_laden()
             return bool(config.env_setzen(name, wert))
         except Exception as fehler:
             print("[erholung] %s ließ sich nicht speichern: %s" % (name, fehler))
