@@ -19,9 +19,11 @@ import urllib.request
 import config
 
 GEO_URL = "https://geocoding-api.open-meteo.com/v1/search"
-# OpenStreetMap über Overpass: frei, ohne Schlüssel. Zwei Server, falls einer voll ist.
+# OpenStreetMap über Overpass: frei, ohne Schlüssel. Mehrere Spiegel, falls einer voll ist.
 OVERPASS_URLS = ("https://overpass-api.de/api/interpreter",
-                 "https://overpass.kumi.systems/api/interpreter")
+                 "https://overpass.kumi.systems/api/interpreter",
+                 "https://overpass.private.coffee/api/interpreter",
+                 "https://maps.mail.ru/osm/tools/overpass/api/interpreter")
 
 # Welche Betriebe eine Gebäudereinigung brauchen - als OpenStreetMap-Merkmale.
 OSM_BRANCHEN = {
@@ -262,10 +264,10 @@ class Welt:
                 anfrage = urllib.request.Request(
                     url, data=urllib.parse.urlencode({"data": abfrage}).encode("utf-8"),
                     method="POST", headers={"User-Agent": "Jarvis/1.0 (Gebaeudereinigung)"})
-                with urllib.request.urlopen(anfrage, timeout=40) as antwort:
+                with urllib.request.urlopen(anfrage, timeout=25) as antwort:
                     return json.loads(antwort.read().decode("utf-8")), ""
             except (urllib.error.URLError, OSError, ValueError) as fehler:
-                letzter = str(fehler)
+                letzter = str(fehler)  # nächster Spiegel
         return None, "Die Karte (OpenStreetMap) ist gerade nicht erreichbar: %s" % letzter
 
     def betriebe_suchen(self, ort: str, branche: str = "", anzahl: int = 15,
