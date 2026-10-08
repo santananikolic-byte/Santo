@@ -426,7 +426,7 @@ def _kal_dauer_lesen(wert: str):
 def _kal_neuer_termin() -> dict:
     return {"titel": "", "ort": "", "beginn": None, "ende": None, "beschreibung": "", "uid": "",
             "ganztaegig": False, "serie": False, "rrule": "", "ausnahmen": [],
-            "wiederholung_von": None, "status": "", "frei": False,
+            "wiederholung_von": None, "status": "", "frei": False, "teilnehmer": 0,
             "href": "", "etag": "", "id": "",
             "_zone": None, "_beginn_wand": None, "_beginn_roh": None, "_ende_roh": None,
             "_dauer": None, "_ausnahmen_roh": [], "_rid_roh": None}
@@ -526,6 +526,10 @@ def ics_termine_lesen(rohtext: str, von=None, bis=None) -> list:
             aktuell["frei"] = wert.strip().upper() == "TRANSPARENT"
         elif name == "RRULE":
             aktuell["rrule"] = wert.strip()
+        elif name == "ATTENDEE":  # Gäste außer dem eigenen Konto: sie bekommen Absagen und Änderungen mit
+            adresse = wert.strip().lower().replace("mailto:", "")
+            if adresse and adresse != str(config.CALDAV_USER or "").strip().lower():
+                aktuell["teilnehmer"] += 1
         elif name == "DTSTART":
             gelesen = _kal_zeit_parsen(wert, tzid, nur_datum)
             if gelesen[0] is not None:
@@ -1205,6 +1209,8 @@ class Kalender:
             text["ganztaegig"] = True
         if termin.get("serie"):
             text["serie"] = True
+        if termin.get("teilnehmer"):
+            text["teilnehmer"] = termin["teilnehmer"]
         return text
 
     def heute(self) -> dict:
@@ -1565,18 +1571,20 @@ class Kalender:
     def freigabe_termine(self, ids) -> list:
         """Zu jeder Kennung eine Zeile für die Freigabe: Titel, Tag und Uhrzeit.
 
-        Gibt ``[{"id", "titel", "wann", "serie", "bekannt"}]`` zurück; unbekannte Kennungen
+        Gibt ``[{"id", "titel", "wann", "serie", "bekannt", "teilnehmer"}]`` zurück; unbekannte Kennungen
         stehen mit ``bekannt: False`` da.
         """
         zeilen = []
         for kennung in self._ids_normalisieren(ids):
             termin = self._termin_zur_id(kennung)
             if termin is None:
-                zeilen.append({"id": kennung, "titel": "", "wann": "", "serie": False, "bekannt": False})
+                zeilen.append({"id": kennung, "titel": "", "wann": "", "serie": False, "bekannt": False,
+                               "teilnehmer": 0})
             else:
                 zeilen.append({"id": kennung, "titel": termin["titel"] or "(ohne Titel)",
                                "wann": kalender_wann(termin["beginn"], termin.get("ganztaegig")),
-                               "serie": bool(termin.get("serie")), "bekannt": True})
+                               "serie": bool(termin.get("serie")), "bekannt": True,
+                               "teilnehmer": int(termin.get("teilnehmer") or 0)})
         return zeilen
 
     def freigabe_verschieben(self, kennung, neuer_beginn, dauer_minuten=None) -> dict:
@@ -1598,7 +1606,8 @@ class Kalender:
                 "alt": kalender_wann(termin["beginn"], ganz),
                 "neu": kalender_wann(neu, ganz) if neu is not None else "",
                 "dauer_minuten": int(dauer.total_seconds() // 60),
-                "serie": bool(termin.get("serie"))}
+                "serie": bool(termin.get("serie")),
+                "teilnehmer": int(termin.get("teilnehmer") or 0)}
 
     def freigabe_wiederherstellen(self, papierkorb_id) -> dict:
         """Titel und Zeit eines Papierkorb-Termins für die Freigabe - ``{}``, wenn unbekannt."""

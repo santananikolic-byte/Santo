@@ -3439,7 +3439,8 @@ def pruefung_buero(agent):
     huber = ics(ereignis("huber-1", "Besichtigung Huber", "LOCATION:Wien\\, Hauptstraße 1",
                          "DTSTART:20261009T080000Z", "DTEND:20261009T090000Z"))
     berger = ics(ereignis("berger-1", "Angebot Berger", "DTSTART;TZID=Europe/Vienna:20261009T143000",
-                          "DTEND;TZID=Europe/Vienna:20261009T153000"))
+                          "DTEND;TZID=Europe/Vienna:20261009T153000",
+                          "ATTENDEE;CN=Ich:mailto:Ich@Example.com", "ATTENDEE;CN=Berger:mailto:berger@firma.at"))
     new_york = ics(ereignis("ny-1", "Call New York", "DTSTART;TZID=America/New_York:20261009T090000",
                             "DTEND;TZID=America/New_York:20261009T100000"))
     urlaub = ics(ereignis("urlaub-1", "Urlaub Müller", "DTSTART;VALUE=DATE:20261009",
@@ -3524,7 +3525,7 @@ def pruefung_buero(agent):
     echt = (config.CALDAV_URL, config.CALDAV_USER, config.CALDAV_PASSWORT, config.CALDAV_KALENDER,
             config.CALDAV_ZEITZONE)
     echt_kalender, echt_kanal = w.kalender, w.freigabe_kanal
-    config.CALDAV_URL, config.CALDAV_USER, config.CALDAV_PASSWORT = "https://cal.example/dav/home", "jarvis", "x"
+    config.CALDAV_URL, config.CALDAV_USER, config.CALDAV_PASSWORT = "https://cal.example/dav/home", "ich@example.com", "x"
     config.CALDAV_KALENDER, config.CALDAV_ZEITZONE = "", "Europe/Vienna"
     uhr["jetzt"] = jetzt_fest
     try:
@@ -3896,15 +3897,21 @@ def pruefung_buero(agent):
                                      "begruendung": "Kunde war verhindert"})
         w.run("termin_verschieben", {"id": "deadbeef", "neuer_beginn": "2026-10-12 14:00", "begruendung": "Test"})
         w.run("termin_wiederherstellen", {"papierkorb_id": 99999, "begruendung": "Test"})
-        absage, verschiebung, unklar_v, unklar_w = [freigabe_lesen(d) for _, d in nein.gefragt]
+        w.run("termin_verschieben", {"id": lese["Angebot Berger"]["id"], "neuer_beginn": "2026-10-09 16:30",
+                                     "begruendung": "Test"})
+        absage, verschiebung, unklar_v, unklar_w, mit_gast = [freigabe_lesen(d) for _, d in nein.gefragt]
         pruefen("Freigabe Absagen: jeder Termin einzeln mit Titel, Tag und Uhrzeit - nie nur eine Kennung",
                 [a for a, _ in nein.gefragt] == ["termine_absagen", "termin_verschieben", "termin_verschieben",
-                                                 "termin_wiederherstellen"]
+                                                 "termin_wiederherstellen", "termin_verschieben"]
                 and "„Besichtigung Huber“ am Freitag, 09.10.2026 um 10:00 Uhr" in absage["was"]
                 and "„Angebot Berger“ am Freitag, 09.10.2026 um 14:30 Uhr" in absage["was"]
                 and "diese 4 Termine" in absage["was"]
                 and lese["Besichtigung Huber"]["id"] not in absage["was"]
                 and absage["warum"] == "Morgen ist der Kunde krank" and "Papierkorb" in absage["wie"], absage["was"][:55])
+        pruefen("Freigabe: Gäste eines Termins stehen dabei (ohne den eigenen Eintrag), beim Lesen auch",
+                "„Angebot Berger“ am Freitag, 09.10.2026 um 14:30 Uhr (mit einem Gast - er kann eine Absage "
+                "bekommen)" in absage["was"] and "der Termin hat einen Gast, er kann eine Änderung" in mit_gast["was"]
+                and lese["Angebot Berger"].get("teilnehmer") == 1 and "teilnehmer" not in lese["Besichtigung Huber"], "")
         pruefen("Freigabe Absagen: Serien und Unbekanntes stehen als nicht abgesagt da",
                 "„Teamrunde“ am Montag, 19.10.2026 um 10:00 Uhr (Serientermin, wird nicht abgesagt)" in absage["was"]
                 and "ein Termin, den ich nicht mehr kenne (wird nicht abgesagt)" in absage["was"], "")

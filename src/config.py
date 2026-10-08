@@ -264,7 +264,7 @@ BRIEFING_MAERKTE = _wahrheit("BRIEFING_MAERKTE", False)
 GESTEN_FREIGABE = _wahrheit("GESTEN_FREIGABE", False)
 # Jarvis darf von sich aus etwas vorschlagen (nie ausführen).
 VORSCHLAEGE_AN = _wahrheit("VORSCHLAEGE_AN", True)
-# Zeitzone des Kalenders (Namen der Zeitzonen-Datenbank, etwa Europe/Vienna). Leer: die des Rechners.
+# Zeitzone des Kalenders (Namen der Zeitzonen-Datenbank, etwa Europe/Vienna).
 CALDAV_ZEITZONE = _text("CALDAV_ZEITZONE", "Europe/Vienna")
 # [P4 Büro] Ende
 # [P5 Sicht] Anfang

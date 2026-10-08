@@ -166,6 +166,13 @@ FREIGABE_AUFLOESEN["mail_antworten"] = _aufloesen_mail_antworten
 FREIGABE_PFLICHTIG |= {"termine_absagen", "termin_verschieben", "termin_wiederherstellen"}
 
 
+def _teilnehmer_text(anzahl, mit=True):
+    """``mit einem Gast`` / ``mit 3 Gästen`` - oder, ohne ``mit``, ``einen Gast`` / ``3 Gäste``."""
+    if mit:
+        return "einem Gast" if anzahl == 1 else "%d Gästen" % anzahl
+    return "einen Gast" if anzahl == 1 else "%d Gäste" % anzahl
+
+
 def _angaben_termine_absagen(a):
     zeilen = a.get("termin_zeilen")
     if not zeilen:
@@ -189,7 +196,12 @@ def _aufloesen_termine_absagen(werkzeuge, argumente):
             zeilen.append("ein Termin, den ich nicht mehr kenne (wird nicht abgesagt)")
             continue
         zeile = "„%s“ am %s" % (_wert_kurz_tools(z["titel"], 70), z["wann"])
-        zeilen.append(zeile + (" (Serientermin, wird nicht abgesagt)" if z["serie"] else ""))
+        if z["serie"]:
+            zeile += " (Serientermin, wird nicht abgesagt)"
+        elif z["teilnehmer"]:
+            zeile += " (mit %s - %s eine Absage bekommen)" % (
+                _teilnehmer_text(z["teilnehmer"]), "er kann" if z["teilnehmer"] == 1 else "sie können")
+        zeilen.append(zeile)
     return {"termin_zeilen": zeilen}
 
 
@@ -204,6 +216,9 @@ def _angaben_termin_verschieben(a):
                                   % _wert_kurz_tools(a.get("neuer_beginn"), 40))
     zusatz = " (Serientermin, wird nicht verschoben)" if a.get("termin_serie") else \
         " (Dauer %s Minuten)" % a.get("termin_dauer", "?")
+    if a.get("termin_gaeste") and not a.get("termin_serie"):
+        zusatz += " - der Termin hat %s, %s eine Änderung bekommen" % (
+            _teilnehmer_text(a["termin_gaeste"], False), "er kann" if a["termin_gaeste"] == 1 else "sie können")
     return ("den Termin „%s“ von %s auf %s verschieben%s"
             % (_wert_kurz_tools(titel, 70), a.get("termin_alt", "?"), neu, zusatz),
             "Im Kalender per CalDAV geändert; Titel, Ort und alles andere bleiben. Hat sich der "
@@ -216,7 +231,8 @@ def _aufloesen_termin_verschieben(werkzeuge, argumente):
     if not angaben:
         return {}
     return {"termin_titel": angaben["titel"], "termin_alt": angaben["alt"], "termin_neu": angaben["neu"],
-            "termin_dauer": angaben["dauer_minuten"], "termin_serie": angaben["serie"]}
+            "termin_dauer": angaben["dauer_minuten"], "termin_serie": angaben["serie"],
+            "termin_gaeste": angaben["teilnehmer"]}
 
 
 def _angaben_termin_wiederherstellen(a):
