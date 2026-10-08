@@ -538,7 +538,7 @@ def pruefung_werkzeugvertrag(agent):
         "punkte_offen": {}, "auswertung": {}, "fehlende_belege": {},
         "csv_export": {}, "offene_leads": {}, "verkaufsmuster": {},
         "routinen_liste": {}, "pipeline": {}, "nachfassliste": {},
-        "anrufliste": {},
+        "anrufliste": {}, "protokoll": {},
         "cashflow_prognose": {"monate": 3}, "team_liste": {}, "lagebericht": {},
         "werkstatt_liste": {}, "gedaechtnis_durchsuchen": {"frage": "Berger"},
         "fixkosten_liste": {}, "bedarfsrechnung": {},
@@ -1147,6 +1147,94 @@ def pruefung_webapp(agent):
         agent.tools.freigabe_kanal_setzen(None)
 
 
+def pruefung_protokoll(agent):
+    """Das Protokoll aus dem Gesprächsverlauf - per Werkzeug und im Browser."""
+    abschnitt("Protokoll")
+    import urllib.request as _netz
+    heute = datetime.now().strftime("%Y-%m-%d")
+    gestern = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+    agent.memory.verlauf_anhaengen("user", "Protokollprobe Berger Angebot")
+    agent.memory.verlauf_anhaengen("assistant", "Angebot für Berger ist vorbereitet")
+    agent.memory.verlauf_anhaengen("user", "Etwas ganz anderes <script>x</script>")
+    agent.memory._schreiben(
+        "INSERT INTO verlauf (rolle, text, zeit) VALUES (?,?,?)",
+        ("user", "Alter Eintrag von gestern", "%s 10:00:00" % gestern))
+    agent.memory.aktion_protokollieren("pipeline", {}, "ok")
+
+    erg = agent.tools.run("protokoll", {})
+    pruefen("Protokoll heute: ok, Gespräche und Aktionen",
+            erg.get("ok") is True and erg["datum"] == heute
+            and any("Berger" in g["text"] for g in erg["gespraeche"])
+            and any(a["werkzeug"] == "pipeline" for a in erg["aktionen"]),
+            erg.get("text", "")[:120])
+    pruefen("Protokoll heute enthält nichts von gestern",
+            not any("gestern" in g["text"] for g in erg["gespraeche"]))
+    erg = agent.tools.run("protokoll", {"tag": "gestern"})
+    pruefen("Protokoll gestern zeigt nur gestern",
+            erg.get("ok") is True and len(erg["gespraeche"]) == 1
+            and "gestern" in erg["gespraeche"][0]["text"])
+    erg = agent.tools.run("protokoll", {"thema": "Berger"})
+    pruefen("Protokoll mit Thema filtert auf beide Seiten des Gesprächs",
+            len(erg["gespraeche"]) == 2,
+            "%d Zeilen" % len(erg["gespraeche"]))
+    erg = agent.tools.run("protokoll", {"tage": 2})
+    pruefen("Protokoll über 2 Tage nimmt gestern dazu",
+            any("gestern" in g["text"] for g in erg["gespraeche"]))
+    erg = agent.tools.run("protokoll", {"tag": "blabla"})
+    pruefen("Ein unlesbarer Tag wird gemeldet, nicht still ersetzt",
+            erg.get("ok") is False and "blabla" in erg["text"])
+    erg = agent.tools.run("protokoll", {"tag": "1999-01-01"})
+    pruefen("Ein leerer Tag sagt, dass nichts protokolliert ist",
+            erg.get("ok") is True and "nichts protokolliert" in erg["text"])
+    pruefen("Das Protokoll braucht keine Freigabe",
+            "protokoll" not in agent.tools.katalog_freigabe()
+            if hasattr(agent.tools, "katalog_freigabe") else True)
+
+    web = JarvisWeb(agent, port=8796)
+    web.starten(blockierend=False)
+    time.sleep(0.5)
+    try:
+        with _netz.urlopen("http://127.0.0.1:8796/api/protokoll?thema=Berger",
+                           timeout=8) as r:
+            daten = json.loads(r.read().decode("utf-8"))
+        pruefen("/api/protokoll liefert das Protokoll",
+                daten.get("ok") is True and len(daten["gespraeche"]) == 2)
+        with _netz.urlopen("http://127.0.0.1:8796/protokoll", timeout=8) as r:
+            seite = r.read().decode("utf-8")
+        pruefen("/protokoll ist deine persönliche Seite",
+                config.NUTZER_NAME in seite and "{{" not in seite
+                and "/api/protokoll" in seite)
+        pruefen("Die Protokollseite lädt nichts aus dem Netz nach",
+                "https://" not in seite and "http://" not in seite)
+        pruefen("Die Protokollseite setzt Text nie als HTML ein",
+                "innerHTML" not in seite)
+    finally:
+        web.stoppen()
+
+    offen = JarvisWeb(agent, port=8797, offen=True)
+    offen.starten(blockierend=False)
+    time.sleep(0.5)
+    try:
+        for pfad, name in (("/api/protokoll", "Schnittstelle"), ("/protokoll", "Seite")):
+            anfrage = _netz.Request("http://127.0.0.1:8797" + pfad)
+            anfrage.add_header("Host", "localhost")
+            try:
+                with _netz.urlopen(anfrage, timeout=8) as r:
+                    code = r.status
+            except Exception as fehler:
+                code = getattr(fehler, "code", 0)
+            pruefen("Protokoll-%s: ohne Schlüssel kein Zugang" % name, code == 403)
+        anfrage = _netz.Request("http://127.0.0.1:8797/protokoll?schluessel=" + offen.token)
+        anfrage.add_header("Host", "localhost")
+        with _netz.urlopen(anfrage, timeout=8) as r:
+            seite = r.read().decode("utf-8")
+        pruefen("Mit Schlüssel öffnet die Seite und trägt ihn für die Abfragen",
+                offen.token in seite)
+    finally:
+        offen.stoppen()
+        agent.tools.freigabe_kanal_setzen(None)
+
+
 def pruefung_sicherheit(agent):
     abschnitt("Sicherheit")
     ergebnis = agent.tools.run("systeminfo", {"was": "rm -rf /"})
@@ -1290,6 +1378,7 @@ def main() -> int:
     pruefung_telefon(agent)
     pruefung_browser(agent)
     pruefung_webapp(agent)
+    pruefung_protokoll(agent)
     pruefung_routinen(agent)
     pruefung_zeitplan()
     pruefung_kalender()

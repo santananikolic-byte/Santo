@@ -289,6 +289,30 @@ class Memory:
         zeilen = self._lesen("SELECT * FROM verlauf ORDER BY id DESC LIMIT ?", (limit,))
         return list(reversed(zeilen))
 
+    def verlauf_zeitraum(self, von: str, bis: str, begriff: str = "",
+                         limit: int = 500) -> list:
+        """Äußerungen zwischen zwei Zeitstempeln, in zeitlicher Reihenfolge.
+
+        Mit ``begriff`` kommen nur Zeilen, in denen der Begriff vorkommt - egal,
+        wer gesprochen hat.
+        """
+        sql = "SELECT * FROM verlauf WHERE zeit BETWEEN ? AND ?"
+        werte = [von, bis]
+        begriff = (begriff or "").strip()
+        if begriff:
+            sql += " AND text LIKE ?"
+            werte.append("%%%s%%" % begriff)
+        sql += " ORDER BY id DESC LIMIT ?"
+        werte.append(int(limit))
+        return list(reversed(self._lesen(sql, tuple(werte))))
+
+    def aktionen_zeitraum(self, von: str, bis: str, limit: int = 500) -> list:
+        """Ausgeführte Aktionen zwischen zwei Zeitstempeln, in zeitlicher Reihenfolge."""
+        zeilen = self._lesen(
+            "SELECT * FROM aktionen WHERE zeit BETWEEN ? AND ? ORDER BY id DESC LIMIT ?",
+            (von, bis, int(limit)))
+        return list(reversed(zeilen))
+
     def aeusserungen_suchen(self, begriff: str, limit: int = 8) -> list:
         """Sucht in früheren Äußerungen des Nutzers."""
         begriff = (begriff or "").strip()

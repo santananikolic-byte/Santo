@@ -657,6 +657,30 @@ class Memory:
         zeilen = self._lesen("SELECT * FROM verlauf ORDER BY id DESC LIMIT ?", (limit,))
         return list(reversed(zeilen))
 
+    def verlauf_zeitraum(self, von: str, bis: str, begriff: str = "",
+                         limit: int = 500) -> list:
+        """Äußerungen zwischen zwei Zeitstempeln, in zeitlicher Reihenfolge.
+
+        Mit ``begriff`` kommen nur Zeilen, in denen der Begriff vorkommt - egal,
+        wer gesprochen hat.
+        """
+        sql = "SELECT * FROM verlauf WHERE zeit BETWEEN ? AND ?"
+        werte = [von, bis]
+        begriff = (begriff or "").strip()
+        if begriff:
+            sql += " AND text LIKE ?"
+            werte.append("%%%s%%" % begriff)
+        sql += " ORDER BY id DESC LIMIT ?"
+        werte.append(int(limit))
+        return list(reversed(self._lesen(sql, tuple(werte))))
+
+    def aktionen_zeitraum(self, von: str, bis: str, limit: int = 500) -> list:
+        """Ausgeführte Aktionen zwischen zwei Zeitstempeln, in zeitlicher Reihenfolge."""
+        zeilen = self._lesen(
+            "SELECT * FROM aktionen WHERE zeit BETWEEN ? AND ? ORDER BY id DESC LIMIT ?",
+            (von, bis, int(limit)))
+        return list(reversed(zeilen))
+
     def aeusserungen_suchen(self, begriff: str, limit: int = 8) -> list:
         """Sucht in früheren Äußerungen des Nutzers."""
         begriff = (begriff or "").strip()
@@ -973,6 +997,91 @@ class Recall:
             if bericht["offen"]:
                 zeilen.append("   Offen: %s" % bericht["offen"])
         return "\n".join(zeilen)
+
+    # -- Protokoll ----------------------------------------------------------
+
+    @staticmethod
+    def tag_aufloesen(text: str = "") -> str:
+        """Macht aus 'heute', 'gestern', '07.10.' oder '2026-10-07' ein Datum.
+
+        Gibt einen leeren Text zurück, wenn der Tag nicht zu lesen ist - der
+        Aufrufer sagt das dann, statt still den falschen Tag zu zeigen.
+        """
+        roh = (text or "").strip().lower()
+        heute = datetime.now()
+        if roh in ("", "heute"):
+            return heute.strftime("%Y-%m-%d")
+        if roh == "gestern":
+            return (heute - timedelta(days=1)).strftime("%Y-%m-%d")
+        if roh == "vorgestern":
+            return (heute - timedelta(days=2)).strftime("%Y-%m-%d")
+        for muster in ("%Y-%m-%d", "%d.%m.%Y", "%d.%m.%y"):
+            try:
+                return datetime.strptime(roh, muster).strftime("%Y-%m-%d")
+            except ValueError:
+                pass
+        try:  # '07.10.' ohne Jahr: das laufende Jahr
+            tag = datetime.strptime(roh.rstrip(".") + ".%d" % heute.year, "%d.%m.%Y")
+            return tag.strftime("%Y-%m-%d")
+        except ValueError:
+            return ""
+
+    def protokoll(self, tag: str = "heute", thema: str = "", tage: int = 1) -> dict:
+        """Das Protokoll eines Tages: Gespräche, Aktionen, Tagesbericht, Offenes.
+
+        ``tage`` > 1 nimmt die davorliegenden Tage dazu (Wochenprotokoll).
+        ``thema`` engt die Gespräche auf Zeilen mit diesem Begriff ein.
+        """
+        datum = self.tag_aufloesen(tag)
+        if not datum:
+            return {"ok": False, "text": "Den Tag '%s' kann ich nicht lesen. "
+                                         "Sag heute, gestern oder ein Datum." % tag}
+        tage = max(1, min(int(tage or 1), 31))
+        erster = (datetime.strptime(datum, "%Y-%m-%d")
+                  - timedelta(days=tage - 1)).strftime("%Y-%m-%d")
+        von, bis = "%s 00:00:00" % erster, "%s 23:59:59" % datum
+        thema = (thema or "").strip()
+
+        gespraeche = [{"rolle": z["rolle"], "text": z["text"], "zeit": z["zeit"]}
+                      for z in self.memory.verlauf_zeitraum(von, bis, thema)]
+        aktionen = [{"werkzeug": a["werkzeug"], "status": a["status"],
+                     "ergebnis": (a["ergebnis"] or "")[:200], "zeit": a["zeit"]}
+                    for a in self.memory.aktionen_zeitraum(von, bis)]
+        berichte = self.memory._lesen(
+            "SELECT * FROM tagesberichte WHERE datum BETWEEN ? AND ? ORDER BY datum, id",
+            (erster, datum))
+        berichte = [{"datum": b["datum"], "zusammenfassung": b["zusammenfassung"],
+                     "entscheidungen": b["entscheidungen"], "offen": b["offen"]}
+                    for b in berichte]
+        punkte = [{"id": p["id"], "text": p["text"], "faellig": p["faellig"]}
+                  for p in self.memory.punkte_offen()]
+
+        von_ihm = len([g for g in gespraeche if g["rolle"] == "user"])
+        saetze = []
+        zeitraum = datum if tage == 1 else "%s bis %s" % (erster, datum)
+        if not gespraeche and not aktionen:
+            saetze.append("Für %s ist nichts protokolliert%s." % (
+                zeitraum, (" zum Thema %s" % thema) if thema else ""))
+        else:
+            saetze.append("%s: %d Äußerungen von dir, %d Aktionen%s." % (
+                zeitraum, von_ihm, len(aktionen),
+                (" zum Thema %s" % thema) if thema else ""))
+            if berichte:
+                saetze.append(berichte[-1]["zusammenfassung"])
+            letzte = [g for g in gespraeche if g["rolle"] == "user"][-3:]
+            if letzte:
+                saetze.append("Zuletzt hast du gesagt: %s" % " / ".join(
+                    g["text"][:120] for g in letzte))
+            werkzeuge = sorted({a["werkzeug"] for a in aktionen})
+            if werkzeuge:
+                saetze.append("Benutzt: %s." % ", ".join(werkzeuge[:8]))
+        if punkte:
+            saetze.append("Offen: %s." % "; ".join(p["text"] for p in punkte[:4]))
+
+        return {"ok": True, "datum": datum, "von": erster, "tage": tage,
+                "thema": thema, "gespraeche": gespraeche, "aktionen": aktionen,
+                "berichte": berichte, "offene_punkte": punkte,
+                "text": " ".join(saetze)}
 
 
 # =========================================================================
@@ -7026,8 +7135,9 @@ body[data-zustand="wach"] .zustandstext{color:var(--akzent)}
   <span id="lage">Stand wird geholt …</span>
   <span class="rechts">
     <button class="mini" id="tippenAn" title="Notweg, falls das Mikrofon streikt">Tippen</button>
-    <a href="/dashboard" target="_blank" rel="noopener">Cockpit</a>
-    <a href="/sales" target="_blank" rel="noopener">Sales</a>
+    <a href="/protokoll" data-seite target="_blank" rel="noopener">Protokoll</a>
+    <a href="/dashboard" data-seite target="_blank" rel="noopener">Cockpit</a>
+    <a href="/sales" data-seite target="_blank" rel="noopener">Sales</a>
   </span>
 </div>
 
@@ -7106,6 +7216,9 @@ body[data-zustand="wach"] .zustandstext{color:var(--akzent)}
     return p + (SCHLUESSEL ? (p.indexOf("?") < 0 ? "?" : "&") +
       "schluessel=" + encodeURIComponent(SCHLUESSEL) : "");
   }
+  /* Seitenlinks tragen den Schlüssel mit, sonst sperrt der Server sie aus. */
+  Array.prototype.forEach.call(document.querySelectorAll("a[data-seite]"),
+    function (a) { a.setAttribute("href", url(a.getAttribute("href"))); });
   function holen(p, k) {
     var o = { headers: { "Content-Type": "application/json" } };
     if (k !== undefined) { o.method = "POST"; o.body = JSON.stringify(k); }
@@ -7414,6 +7527,142 @@ body[data-zustand="wach"] .zustandstext{color:var(--akzent)}
   setInterval(meldungenHolen, 4000);
   setInterval(lageHolen, 45000);
   setInterval(zahlenHolen, 60000);
+})();
+</script>
+</body>
+</html>
+"""
+
+
+PROTOKOLL_HTML = r"""<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#08090B">
+<link rel="icon" href="/symbol.svg" type="image/svg+xml">
+<title>Jarvis Protokoll</title>
+<style>
+:root{--grund:#08090B;--panel:#0F1113;--rand:#1C1F23;--akzent:#E8622C;
+  --kupfer:#F0A882;--text:#F2EFEA;--gedaempft:#A0A6AC;--grau:#7E858C;
+  --gruen:#4CC38A;--rot:#E5484D;
+  --sans:-apple-system,BlinkMacSystemFont,"Helvetica Neue",Arial,sans-serif;
+  --mono:ui-monospace,"SF Mono",Menlo,monospace}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--grund);color:var(--text);font-family:var(--sans);
+  -webkit-font-smoothing:antialiased;padding:0 0 60px}
+header{padding:18px 20px;border-bottom:1px solid var(--rand);
+  background:linear-gradient(90deg,rgba(232,98,44,.13),transparent 68%)}
+header h1{font-size:18px;font-weight:600}
+header p{font-size:12px;color:var(--grau);margin-top:4px;letter-spacing:.06em}
+.leiste{display:flex;gap:8px;flex-wrap:wrap;padding:14px 20px;align-items:center}
+.leiste button,.leiste input{font:inherit;font-size:13px;color:var(--text);
+  background:var(--panel);border:1px solid var(--rand);border-radius:8px;
+  padding:8px 12px}
+.leiste button{cursor:pointer}
+.leiste button.an{border-color:var(--akzent);color:var(--kupfer)}
+.leiste input{min-width:0;flex:1 1 160px}
+:focus-visible{outline:2px solid var(--akzent);outline-offset:2px}
+main{max-width:860px;margin:0 auto;padding:0 20px}
+.fazit{background:var(--panel);border:1px solid var(--rand);border-left:3px solid var(--akzent);
+  border-radius:8px;padding:14px 16px;font-size:14px;line-height:1.5;margin-bottom:18px}
+h2{font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--grau);
+  margin:22px 0 8px;font-weight:600}
+.zeile{display:flex;gap:12px;padding:9px 0;border-bottom:1px solid var(--rand);
+  font-size:14px;line-height:1.45}
+.zeit{flex:none;width:62px;font:11px var(--mono);color:var(--grau);padding-top:3px}
+.wer{flex:none;width:54px;font-size:11px;letter-spacing:.08em;text-transform:uppercase;
+  padding-top:3px;color:var(--grau)}
+.wer.user{color:var(--kupfer)}
+.text{flex:1;min-width:0;white-space:pre-wrap;word-wrap:break-word}
+.fehler{color:var(--rot)}
+.leer{color:var(--grau);font-size:13px;padding:10px 0}
+</style>
+</head>
+<body>
+<header>
+  <h1 id="titel"></h1>
+  <p id="unter"></p>
+</header>
+<div class="leiste">
+  <button data-tag="heute" class="an">Heute</button>
+  <button data-tag="gestern">Gestern</button>
+  <button data-tag="vorgestern">Vorgestern</button>
+  <button data-tage="7">7 Tage</button>
+  <input id="thema" type="search" placeholder="Thema filtern" autocomplete="off">
+</div>
+<main>
+  <div class="fazit" id="fazit">Wird geholt …</div>
+  <h2>Gespräche</h2><div id="gespraeche"></div>
+  <h2>Aktionen</h2><div id="aktionen"></div>
+  <h2>Offen</h2><div id="offen"></div>
+</main>
+<script>
+(function () {
+  "use strict";
+  var SCHLUESSEL = {{SCHLUESSEL_JSON}};
+  var NUTZER = {{NUTZER_JSON}}, FIRMA = {{FIRMA_JSON}};
+  var tag = "heute", tage = 1, wartet = null;
+  var el = function (id) { return document.getElementById(id); };
+
+  document.getElementById("titel").textContent = "Protokoll von " + NUTZER;
+  document.getElementById("unter").textContent =
+    FIRMA + " · läuft auf deinem iMac, nur für dich";
+
+  function zeile(links, mitte, text, klasse) {
+    var z = document.createElement("div"); z.className = "zeile";
+    var a = document.createElement("div"); a.className = "zeit"; a.textContent = links;
+    var b = document.createElement("div"); b.className = "wer " + (klasse || "");
+    b.textContent = mitte;
+    var c = document.createElement("div"); c.className = "text"; c.textContent = text;
+    z.appendChild(a); z.appendChild(b); z.appendChild(c);
+    return z;
+  }
+  function fuellen(id, zeilen, leerText) {
+    var k = el(id); k.textContent = "";
+    if (!zeilen.length) {
+      var l = document.createElement("div"); l.className = "leer"; l.textContent = leerText;
+      k.appendChild(l); return;
+    }
+    zeilen.forEach(function (z) { k.appendChild(z); });
+  }
+  function uhr(zeit) { return (zeit || "").slice(tage > 1 ? 5 : 11, 16); }
+
+  function holen() {
+    var q = "tag=" + encodeURIComponent(tag) + "&tage=" + tage +
+      "&thema=" + encodeURIComponent(el("thema").value.trim());
+    if (SCHLUESSEL) q += "&schluessel=" + encodeURIComponent(SCHLUESSEL);
+    fetch("/api/protokoll?" + q).then(function (r) { return r.json(); }).then(function (d) {
+      var f = el("fazit"); f.textContent = d.text || d.fehler || "Keine Antwort.";
+      f.classList.toggle("fehler", !d.ok);
+      if (!d.ok) return;
+      fuellen("gespraeche", d.gespraeche.map(function (g) {
+        return zeile(uhr(g.zeit), g.rolle === "user" ? NUTZER : "Jarvis", g.text, g.rolle);
+      }), "Keine Gespräche.");
+      fuellen("aktionen", d.aktionen.map(function (a) {
+        return zeile(uhr(a.zeit), a.status, a.werkzeug + (a.ergebnis ? " – " + a.ergebnis : ""));
+      }), "Keine Aktionen.");
+      fuellen("offen", d.offene_punkte.map(function (p) {
+        return zeile(p.faellig || "", "#" + p.id, p.text);
+      }), "Nichts offen.");
+    }).catch(function () {
+      var f = el("fazit"); f.textContent = "Der iMac antwortet nicht."; f.classList.add("fehler");
+    });
+  }
+
+  Array.prototype.forEach.call(document.querySelectorAll(".leiste button"), function (b) {
+    b.addEventListener("click", function () {
+      Array.prototype.forEach.call(document.querySelectorAll(".leiste button"),
+        function (x) { x.classList.remove("an"); });
+      b.classList.add("an");
+      tag = b.dataset.tag || "heute"; tage = parseInt(b.dataset.tage || "1", 10);
+      holen();
+    });
+  });
+  el("thema").addEventListener("input", function () {
+    clearTimeout(wartet); wartet = setTimeout(holen, 300);
+  });
+  holen();
 })();
 </script>
 </body>
@@ -8935,6 +9184,12 @@ SYMBOL_SVG = (
     '<circle cx="32" cy="32" r="6" fill="#E8622C"/></svg>')
 
 
+def _fuer_skript(wert: str) -> str:
+    """Macht einen Text sicher für die Einbettung in ein <script> der Seite."""
+    return (json.dumps(wert).replace("<", "\\u003c").replace(">", "\\u003e")
+            .replace("&", "\\u0026"))
+
+
 class WebFreigabe:
     """Freigaben über den Browser statt über Telegram oder das Terminal.
 
@@ -9170,6 +9425,21 @@ class JarvisWeb:
             return self._antworten(behandler, 200, {"ok": True, "verlauf": [
                 {"rolle": z["rolle"], "text": z["text"], "zeit": z["zeit"]}
                 for z in zeilen]})
+        if pfad == "/api/protokoll":
+            frage = parse_qs(urlparse(behandler.path).query)
+            try:
+                tage = int((frage.get("tage") or ["1"])[0])
+            except ValueError:
+                tage = 1
+            return self._antworten(behandler, 200, werkzeuge.recall.protokoll(
+                (frage.get("tag") or ["heute"])[0],
+                (frage.get("thema") or [""])[0], tage))
+        if pfad == "/protokoll":
+            return self._html(behandler, (
+                PROTOKOLL_HTML
+                .replace("{{SCHLUESSEL_JSON}}", _fuer_skript(self.token or ""))
+                .replace("{{NUTZER_JSON}}", _fuer_skript(NUTZER_NAME))
+                .replace("{{FIRMA_JSON}}", _fuer_skript(FIRMA))))
         if pfad == "/api/pipeline":
             return self._antworten(behandler, 200, werkzeuge.akquise.pipeline())
         if pfad == "/api/nachfassen":
@@ -10154,6 +10424,11 @@ class Werkzeuge:
                       "datum": text}, ["zusammenfassung"]),
             werkzeug("rueckblick", "Gibt die Tagesberichte der letzten Tage zurück.",
                      {"tage": ganz}),
+            werkzeug("protokoll",
+                     "Zeigt das Protokoll eines Tages aus dem Gesprächsverlauf: was "
+                     "gesagt und getan wurde, was offen ist. Tag: heute, gestern oder "
+                     "ein Datum. Mit 'thema' nur Gespräche dazu, mit 'tage' mehrere Tage.",
+                     {"tag": text, "thema": text, "tage": ganz}),
 
             # -- Buchhaltung --
             werkzeug("buchung_eintragen",
@@ -10526,6 +10801,9 @@ class Werkzeuge:
                 a.get("offen", ""), a.get("datum", ""))
         if name == "rueckblick":
             return {"ok": True, "text": self.recall.rueckblick(int(a.get("tage") or 7))}
+        if name == "protokoll":
+            return self.recall.protokoll(a.get("tag") or "heute", a.get("thema", ""),
+                                         int(a.get("tage") or 1))
 
         # -- Buchhaltung --
         if name == "buchung_eintragen":

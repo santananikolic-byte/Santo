@@ -181,6 +181,13 @@ Nie als Zustimmung. Wer sich nicht meldet, hat nicht zugestimmt.
 
 Jede Aktion landet im Protokoll und erscheint im Dashboard.
 
+**Protokoll aus dem Gesprächsverlauf.** Sag „Jarvis, Protokoll“ (oder „Protokoll
+von gestern“, „Protokoll zum Thema Berger“, „Wochenprotokoll“) - Jarvis liest dir
+vor, was gesagt und getan wurde und was offen ist. Dieselbe Auswertung gibt es
+als persönliche Seite unter `/protokoll` (Tag, 7 Tage, Themenfilter). Sie wird
+auf dem iMac erzeugt und nur mit deinem Schlüssel ausgeliefert, nichts läuft über
+fremde Server. Schnittstelle: `GET /api/protokoll?tag=gestern&thema=Berger&tage=1`.
+
 **Zur Stimmerkennung, ehrlich:** Sie unterscheidet Sprecher im Alltag
 zuverlässig, ist aber **kein Schutz gegen eine abgespielte Aufnahme**. Deshalb
 gibt die Stimme allein niemals eine Mail, eine Buchung oder eine

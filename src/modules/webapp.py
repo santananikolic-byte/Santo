@@ -32,7 +32,7 @@ from urllib.parse import parse_qs, urlparse
 
 import config
 from modules.memory import zeitstempel
-from modules.webseite import SEITE_HTML
+from modules.webseite import PROTOKOLL_HTML, SEITE_HTML
 
 STANDARD_PORT = 8765
 MAX_KOERPER = 512 * 1024
@@ -44,6 +44,12 @@ SYMBOL_SVG = (
     '<rect width="64" height="64" rx="14" fill="#0F1113"/>'
     '<circle cx="32" cy="32" r="17" fill="none" stroke="#E8622C" stroke-width="5"/>'
     '<circle cx="32" cy="32" r="6" fill="#E8622C"/></svg>')
+
+
+def _fuer_skript(wert: str) -> str:
+    """Macht einen Text sicher für die Einbettung in ein <script> der Seite."""
+    return (json.dumps(wert).replace("<", "\\u003c").replace(">", "\\u003e")
+            .replace("&", "\\u0026"))
 
 
 class WebFreigabe:
@@ -281,6 +287,21 @@ class JarvisWeb:
             return self._antworten(behandler, 200, {"ok": True, "verlauf": [
                 {"rolle": z["rolle"], "text": z["text"], "zeit": z["zeit"]}
                 for z in zeilen]})
+        if pfad == "/api/protokoll":
+            frage = parse_qs(urlparse(behandler.path).query)
+            try:
+                tage = int((frage.get("tage") or ["1"])[0])
+            except ValueError:
+                tage = 1
+            return self._antworten(behandler, 200, werkzeuge.recall.protokoll(
+                (frage.get("tag") or ["heute"])[0],
+                (frage.get("thema") or [""])[0], tage))
+        if pfad == "/protokoll":
+            return self._html(behandler, (
+                PROTOKOLL_HTML
+                .replace("{{SCHLUESSEL_JSON}}", _fuer_skript(self.token or ""))
+                .replace("{{NUTZER_JSON}}", _fuer_skript(config.NUTZER_NAME))
+                .replace("{{FIRMA_JSON}}", _fuer_skript(config.FIRMA))))
         if pfad == "/api/pipeline":
             return self._antworten(behandler, 200, werkzeuge.akquise.pipeline())
         if pfad == "/api/nachfassen":

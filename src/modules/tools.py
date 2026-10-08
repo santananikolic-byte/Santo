@@ -193,6 +193,11 @@ class Werkzeuge:
                       "datum": text}, ["zusammenfassung"]),
             werkzeug("rueckblick", "Gibt die Tagesberichte der letzten Tage zurück.",
                      {"tage": ganz}),
+            werkzeug("protokoll",
+                     "Zeigt das Protokoll eines Tages aus dem Gesprächsverlauf: was "
+                     "gesagt und getan wurde, was offen ist. Tag: heute, gestern oder "
+                     "ein Datum. Mit 'thema' nur Gespräche dazu, mit 'tage' mehrere Tage.",
+                     {"tag": text, "thema": text, "tage": ganz}),
 
             # -- Buchhaltung --
             werkzeug("buchung_eintragen",
@@ -565,6 +570,9 @@ class Werkzeuge:
                 a.get("offen", ""), a.get("datum", ""))
         if name == "rueckblick":
             return {"ok": True, "text": self.recall.rueckblick(int(a.get("tage") or 7))}
+        if name == "protokoll":
+            return self.recall.protokoll(a.get("tag") or "heute", a.get("thema", ""),
+                                         int(a.get("tage") or 1))
 
         # -- Buchhaltung --
         if name == "buchung_eintragen":

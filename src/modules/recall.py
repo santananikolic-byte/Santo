@@ -272,3 +272,89 @@ class Recall:
             if bericht["offen"]:
                 zeilen.append("   Offen: %s" % bericht["offen"])
         return "\n".join(zeilen)
+
+    # -- Protokoll ----------------------------------------------------------
+
+    @staticmethod
+    def tag_aufloesen(text: str = "") -> str:
+        """Macht aus 'heute', 'gestern', '07.10.' oder '2026-10-07' ein Datum.
+
+        Gibt einen leeren Text zurück, wenn der Tag nicht zu lesen ist - der
+        Aufrufer sagt das dann, statt still den falschen Tag zu zeigen.
+        """
+        roh = (text or "").strip().lower()
+        heute = datetime.now()
+        if roh in ("", "heute"):
+            return heute.strftime("%Y-%m-%d")
+        if roh == "gestern":
+            return (heute - timedelta(days=1)).strftime("%Y-%m-%d")
+        if roh == "vorgestern":
+            return (heute - timedelta(days=2)).strftime("%Y-%m-%d")
+        for muster in ("%Y-%m-%d", "%d.%m.%Y", "%d.%m.%y"):
+            try:
+                return datetime.strptime(roh, muster).strftime("%Y-%m-%d")
+            except ValueError:
+                pass
+        try:  # '07.10.' ohne Jahr: das laufende Jahr
+            tag = datetime.strptime(roh.rstrip(".") + ".%d" % heute.year, "%d.%m.%Y")
+            return tag.strftime("%Y-%m-%d")
+        except ValueError:
+            return ""
+
+    def protokoll(self, tag: str = "heute", thema: str = "", tage: int = 1) -> dict:
+        """Das Protokoll eines Tages: Gespräche, Aktionen, Tagesbericht, Offenes.
+
+        ``tage`` > 1 nimmt die davorliegenden Tage dazu (Wochenprotokoll).
+        ``thema`` engt die Gespräche auf Zeilen mit diesem Begriff ein.
+        """
+        datum = self.tag_aufloesen(tag)
+        if not datum:
+            return {"ok": False, "text": "Den Tag '%s' kann ich nicht lesen. "
+                                         "Sag heute, gestern oder ein Datum." % tag}
+        tage = max(1, min(int(tage or 1), 31))
+        erster = (datetime.strptime(datum, "%Y-%m-%d")
+                  - timedelta(days=tage - 1)).strftime("%Y-%m-%d")
+        von, bis = "%s 00:00:00" % erster, "%s 23:59:59" % datum
+        thema = (thema or "").strip()
+
+        gespraeche = [{"rolle": z["rolle"], "text": z["text"], "zeit": z["zeit"]}
+                      for z in self.memory.verlauf_zeitraum(von, bis, thema)]
+        aktionen = [{"werkzeug": a["werkzeug"], "status": a["status"],
+                     "ergebnis": (a["ergebnis"] or "")[:200], "zeit": a["zeit"]}
+                    for a in self.memory.aktionen_zeitraum(von, bis)]
+        berichte = self.memory._lesen(
+            "SELECT * FROM tagesberichte WHERE datum BETWEEN ? AND ? ORDER BY datum, id",
+            (erster, datum))
+        berichte = [{"datum": b["datum"], "zusammenfassung": b["zusammenfassung"],
+                     "entscheidungen": b["entscheidungen"], "offen": b["offen"]}
+                    for b in berichte]
+        punkte = [{"id": p["id"], "text": p["text"], "faellig": p["faellig"]}
+                  for p in self.memory.punkte_offen()]
+
+        von_ihm = len([g for g in gespraeche if g["rolle"] == "user"])
+        saetze = []
+        zeitraum = datum if tage == 1 else "%s bis %s" % (erster, datum)
+        if not gespraeche and not aktionen:
+            saetze.append("Für %s ist nichts protokolliert%s." % (
+                zeitraum, (" zum Thema %s" % thema) if thema else ""))
+        else:
+            saetze.append("%s: %d Äußerungen von dir, %d Aktionen%s." % (
+                zeitraum, von_ihm, len(aktionen),
+                (" zum Thema %s" % thema) if thema else ""))
+            if berichte:
+                saetze.append(berichte[-1]["zusammenfassung"])
+            letzte = [g for g in gespraeche if g["rolle"] == "user"][-3:]
+            if letzte:
+                saetze.append("Zuletzt hast du gesagt: %s" % " / ".join(
+                    g["text"][:120] for g in letzte))
+            werkzeuge = sorted({a["werkzeug"] for a in aktionen})
+            if werkzeuge:
+                saetze.append("Benutzt: %s." % ", ".join(werkzeuge[:8]))
+        if punkte:
+            saetze.append("Offen: %s." % "; ".join(p["text"] for p in punkte[:4]))
+
+        return {"ok": True, "datum": datum, "von": erster, "tage": tage,
+                "thema": thema, "gespraeche": gespraeche, "aktionen": aktionen,
+                "berichte": berichte, "offene_punkte": punkte,
+                "text": " ".join(saetze)}
+
