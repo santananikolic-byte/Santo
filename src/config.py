@@ -285,6 +285,12 @@ VORSCHLAEGE_AN = _wahrheit("VORSCHLAEGE_AN", True)
 CALDAV_ZEITZONE = _text("CALDAV_ZEITZONE", "Europe/Vienna")
 # [P4 Büro] Ende
 # [P5 Sicht] Anfang
+# Wo geladene Modelle liegen (die Handerkennung, etwa 31 MB). Der Ordner ist nicht im Repository.
+MODELL_VERZEICHNIS = BASIS / "modelle"
+# Live-Kamera auf der Seite Sicht (/sehen). Voreingestellt aus; das Bild bleibt im Browser.
+SICHT_AN = _wahrheit("SICHT_AN", False)
+# Länge von Handgelenk bis Mittelfingerwurzel in Millimetern - Grundlage der Handruhe-Schätzung.
+HANDLAENGE_MM = _zahl("HANDLAENGE_MM", 95)
 # [P5 Sicht] Ende
 # [P6 Stimme] Anfang
 # [P6 Stimme] Ende
