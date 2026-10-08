@@ -3627,6 +3627,9 @@ def pruefung_video_funktionen(agent):
     pruefen("Vorschläge: einmal je Schlüssel, offen sichtbar, eine Antwort lässt sich nicht umdrehen",
             vs.get("ok") and nochmal.get("doppelt") and offen.get("anzahl", 0) >= 1 and beantwortet.get("ok")
             and not umgedreht.get("ok"), str(umgedreht.get("fehler", ""))[:45])
+    # Der Vorschlag hat eine Meldung vorgemerkt - sie soll spätere Prüfungen (pruefung_kern) nicht stören.
+    with agent._meldesperre:
+        agent._meldungen = []
 
     # -- Inhalte ----------------------------------------------------------------
     plan_json = {"idee": "Sauberkeit sichtbar machen", "kernbotschaft": "Gepflegte Räume, ruhiger Betrieb",

@@ -56,6 +56,7 @@ from modules.freigabe import GESTE_GESPERRT
 # [P6 Stimme] Anfang
 # [P6 Stimme] Ende
 # [P7 Start] Anfang
+from modules.hardware import hochfahren
 # [P7 Start] Ende
 
 STANDARD_PORT = 8765
@@ -665,6 +666,9 @@ class JarvisWeb:
         # [P6 Stimme] Anfang
         # [P6 Stimme] Ende
         # [P7 Start] Anfang
+        if pfad == "/api/hochfahren":
+            # Die Seite ruft das beim Laden: Mac prüfen, einmal je Tag mit dem Tag begrüßen.
+            return self._antworten(behandler, 200, hochfahren(self.agent))
         # [P7 Start] Ende
         return self._antworten(behandler, 404, {"fehler": "Das gibt es nicht."})
 

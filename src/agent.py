@@ -214,6 +214,9 @@ ZUSATZREGELN = (
     # [P6 Stimme] Anfang
     # [P6 Stimme] Ende
     # [P7 Start] Anfang
+        "Licht, Szenen und Fokus gehen nur über Kurzbefehle: erst kurzbefehle_liste, dann "
+        "kurzbefehl_ausfuehren mit einem Namen aus der Liste. Was ein Kurzbefehl getan hat, siehst "
+        "du nicht - sag nur, dass er gelaufen ist.",
         "Dateien ordnest du immer erst mit ordnen_planen (zeigt nur den Plan); verschoben wird erst "
         "nach der Freigabe mit ordnen_ausfuehren. Beiträge für soziale Netze sind Entwürfe - "
         "veröffentlicht wird nie etwas von dir.",
@@ -987,6 +990,22 @@ class JarvisAgent:
     # [P6 Stimme] Anfang
     # [P6 Stimme] Ende
     # [P7 Start] Anfang
+    def begruessung(self, bericht: dict) -> str:
+        """Die Begrüßung beim Hochfahren: ein Satz zum Rechner, dann der Tag.
+
+        Die Fakten (Termine, Post, Wetter, Offenes) kommen aus denselben Quellen wie im
+        Morgenbriefing; was nicht abrufbar war, sagt Claude kurz, erfunden wird nichts.
+        Ohne Schlüssel gibt es die nackten Fakten.
+        """
+        bausteine = self._bausteine_sammeln(morgens=True)
+        kurz = str((bericht or {}).get("kurz") or "")
+        if not self.einsatzbereit():
+            return "Hallo. Ich bin da. " + kurz + "\n" + bausteine
+        auftrag = ("Begrüße %s beim Hochfahren in drei bis fünf gesprochenen Sätzen: ein Satz zum Rechner "
+                   "(nur Auffälliges), dann der Tag – Termine, Post, Wetter, Offenes. Erfinde nichts; was "
+                   "nicht abrufbar war, sag kurz.\n\nRechner: %s\n\nDaten:\n%s"
+                   % (config.NUTZER_NAME, kurz, bausteine))
+        return self.denken(auftrag, protokollieren=False, anzeigen=False)
     # [P7 Start] Ende
 
     # -- Übersicht ----------------------------------------------------------

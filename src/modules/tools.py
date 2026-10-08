@@ -69,6 +69,9 @@ from modules.vorschlaege import Vorschlaege
 # [P6 Stimme] Anfang
 # [P6 Stimme] Ende
 # [P7 Start] Anfang
+from modules.hardware import hardware_bericht, wlan_bericht
+from modules.steuerung import (LAYOUTS, fenster_anordnen, kurzbefehl_ausfuehren, kurzbefehl_bekannt,
+                               kurzbefehl_merken, kurzbefehl_pruefen, kurzbefehle_liste, lautstaerke_setzen)
 from modules.inhalte import Inhalte
 # [P7 Start] Ende
 
@@ -97,7 +100,6 @@ SYSTEM_AKTIONEN = {
 PARAMETER_AKTIONEN = {
     "ordner_zeigen": (["ls", "-la", "{pfad}"], "pfad", "Inhalt eines Ordners"),
     "programm_oeffnen": (["open", "-a", "{programm}"], "programm", "Programm starten"),
-    "datei_oeffnen": (["open", "{pfad}"], "pfad", "Datei öffnen"),
 }
 
 # Alles hier drin fragt vor der Ausführung nach einer Freigabe.
@@ -193,6 +195,34 @@ FREIGABE_ANGABEN["ordnen_ausfuehren"] = _angaben_ordnen
 FREIGABE_ANGABEN["ordnen_rueckgaengig"] = _angaben_ordnen_zurueck
 FREIGABE_AUFLOESEN["ordnen_ausfuehren"] = _aufloesen_ordnen
 FREIGABE_AUFLOESEN["ordnen_rueckgaengig"] = _aufloesen_ordnen
+
+
+def _start_kurz(wert, grenze=80):
+    """Ein Wert als eine Zeile, höchstens ``grenze`` Zeichen."""
+    text = " ".join(str(wert if wert is not None else "").split())
+    return text if len(text) <= grenze else text[:grenze].rstrip() + " …"
+
+
+def _angaben_kurzbefehl(a):
+    mit = " mit der Eingabe „%s“" % _start_kurz(a.get("eingabe")) if a.get("eingabe") else ""
+    wie = "Über die Kurzbefehle-App; was er tut, legt der Kurzbefehl selbst fest."
+    if a.get("kurzbefehl_nach_fremdem"):
+        wie += " Ich frage, weil ich gerade fremden Text gelesen habe."
+    elif a.get("kurzbefehl_erstmals"):
+        wie += " Das ist der erste Lauf dieses Kurzbefehls; danach läuft er ohne Rückfrage."
+    return "den Kurzbefehl „%s“ ausführen%s" % (_start_kurz(a.get("name")), mit), wie
+
+
+def _aufloesen_kurzbefehl(werkzeuge, argumente):
+    return {"kurzbefehl_erstmals": not kurzbefehl_bekannt(str(argumente.get("name") or ""),
+                                                          werkzeuge.memory.db_pfad),
+            "kurzbefehl_nach_fremdem": werkzeuge.fremdes_gelesen()}
+
+
+# Der Kurzbefehl steht nicht in FREIGABE_PFLICHTIG: Gefragt wird nur beim ersten Lauf eines
+# Namens und nach fremdem Text - das entscheidet Werkzeuge._kurzbefehl_ausfuehren.
+FREIGABE_ANGABEN["kurzbefehl_ausfuehren"] = _angaben_kurzbefehl
+FREIGABE_AUFLOESEN["kurzbefehl_ausfuehren"] = _aufloesen_kurzbefehl
 # [P7 Start] Ende
 
 
@@ -272,6 +302,9 @@ class Werkzeuge:
         self.inhalte = Inhalte(self.memory, self.werkstatt, anzeige=self)
         self.mac.db_pfad = self.memory.db_pfad
         self.mac.kunden_quelle = self._kundennamen
+        # Austauschbare Ausführer für Prüfungen: None heißt, die echten Programme laufen.
+        self.steuerung_ausfuehren = None
+        self.hardware_messhilfen = {}
         # [P7 Start] Ende
 
     def freigabe_kanal_setzen(self, kanal):
@@ -773,6 +806,24 @@ class Werkzeuge:
             # [P6 Stimme] Anfang
             # [P6 Stimme] Ende
             # [P7 Start] Anfang
+            # -- Start und Steuerung --
+            werkzeug("hardware_bericht",
+                     "Prüft den Rechner: Last, Speicher, Festplatte, Netz, WLAN, Wärme, Kamera, Mikrofon, "
+                     "Dienste. Nur lesend; was nicht messbar ist, steht als Lücke da.", {}),
+            werkzeug("kurzbefehle_liste",
+                     "Zeigt die Kurzbefehle im Ordner '%s' der Kurzbefehle-App (Licht, Szenen, Fokus)."
+                     % config.KURZBEFEHL_ORDNER, {}),
+            werkzeug("kurzbefehl_ausfuehren",
+                     "Führt einen Kurzbefehl aus dem Ordner '%s' aus – Licht, Szene, Fokus. Nur Namen aus "
+                     "kurzbefehle_liste. Der erste Lauf je Name fragt nach; was er tut, sehe ich nicht."
+                     % config.KURZBEFEHL_ORDNER,
+                     {"name": text, "eingabe": text, "begruendung": begruendung}, ["name", "begruendung"]),
+            werkzeug("fenster_anordnen",
+                     "Ordnet die Fenster nach einem festen Layout: zentrale (Zentrale auf dem zweiten "
+                     "Bildschirm), arbeiten, praesentation.",
+                     {"layout": {"type": "string", "enum": sorted(LAYOUTS)}}, ["layout"]),
+            werkzeug("lautstaerke_setzen", "Stellt die Lautstärke des Macs (0 bis 100).",
+                     {"prozent": ganz}, ["prozent"]),
             # -- Dateien und Inhalte --
             werkzeug("datei_oeffnen",
                      "Öffnet ein Dokument, Bild oder Medium (PDF, Word, Excel, Foto, Musik, Video) mit dem "
@@ -1296,6 +1347,18 @@ class Werkzeuge:
         # [P6 Stimme] Anfang
         # [P6 Stimme] Ende
         # [P7 Start] Anfang
+        if name == "hardware_bericht":
+            return self._hardware_pruefen()
+        if name == "kurzbefehle_liste":
+            return kurzbefehle_liste(ausfuehren=self.steuerung_ausfuehren)
+        if name == "kurzbefehl_ausfuehren":
+            return self._kurzbefehl_ausfuehren(a)
+        if name in ("fenster_anordnen", "lautstaerke_setzen"):
+            if self.im_hintergrund():
+                return {"ok": False, "fehler": "Im Hintergrund ändere ich weder Fenster noch Lautstärke."}
+            if name == "fenster_anordnen":
+                return fenster_anordnen(a.get("layout", ""), ausfuehren=self.steuerung_ausfuehren)
+            return lautstaerke_setzen(a.get("prozent"), ausfuehren=self.steuerung_ausfuehren)
         if name == "datei_oeffnen":
             return self.mac.oeffnen(a.get("pfad", ""))
         if name == "ordnen_planen":
@@ -1388,6 +1451,40 @@ class Werkzeuge:
     # [P6 Stimme] Anfang
     # [P6 Stimme] Ende
     # [P7 Start] Anfang
+    def _hardware_pruefen(self) -> dict:
+        """Das Werkzeug ``hardware_bericht``: der Rechnerbericht in einer Form, die Claude gut lesen kann."""
+        bericht = hardware_bericht(stimme=self.stimme, tools=self, **self.hardware_messhilfen)
+        return {"ok": True, "text": bericht["kurz"], "zeit": bericht["zeit"],
+                "werte": [{"name": w["name"], "status": w["status"], "text": w["text"]}
+                          for w in bericht["werte"]]}
+
+    def _kurzbefehl_ausfuehren(self, a: dict) -> dict:
+        """Das Werkzeug ``kurzbefehl_ausfuehren``.
+
+        Der Name muss in der Liste des Ordners stehen (sonst wird gar nicht erst gefragt).
+        Beim ersten Lauf eines Namens und nach fremdem Text fragt es nach; nach einem Ja
+        gilt der Name als bekannt. Im Hintergrund läuft nie ein Kurzbefehl. Die Ausgabe
+        des Kurzbefehls geht nie an Claude zurück - nur "gelaufen" oder ein Fehlertext.
+        """
+        if self.im_hintergrund():
+            return {"ok": False, "abgebrochen": True,
+                    "fehler": "Im Hintergrund führe ich keine Kurzbefehle aus – dabei sieht niemand zu."}
+        eingabe = a.get("eingabe") or ""
+        pruefung = kurzbefehl_pruefen(a.get("name"), eingabe, ausfuehren=self.steuerung_ausfuehren,
+                                      pruefer=parameter_pruefen)
+        if not pruefung["ok"]:
+            return pruefung
+        name = pruefung["name"]
+        erstmals = not kurzbefehl_bekannt(name, self.memory.db_pfad)
+        if erstmals or self.fremdes_gelesen():
+            entscheidung = self._freigabe("kurzbefehl_ausfuehren", dict(a, name=name))
+            if not entscheidung.get("erlaubt"):
+                return {"ok": False, "abgebrochen": True, "text": "Abgebrochen. %s" % entscheidung.get("grund", "")}
+            if erstmals:
+                kurzbefehl_merken(name, self.memory.db_pfad)
+        return kurzbefehl_ausfuehren(name, eingabe, ausfuehren=self.steuerung_ausfuehren,
+                                     pruefer=parameter_pruefen)
+
     def _kundennamen(self) -> list:
         """Firmennamen aus Kontakten und Interessenten - Ordnernamen für "nach_kunde"."""
         namen = []
@@ -1412,6 +1509,13 @@ class Werkzeuge:
             return {"ok": False,
                     "fehler": "'%s' ist keine registrierte Abfrage. Ich führe nur "
                               "diese aus: %s." % (was, ", ".join(sorted(SYSTEM_AKTIONEN)))}
+        if schluessel == "wlan":
+            # networksetup -getairportnetwork meldet ab macOS 15 "nicht verbunden", auch wenn man
+            # verbunden ist; der Name kommt deshalb aus dem Hardware-Bericht.
+            wlan = wlan_bericht(self.hardware_messhilfen.get("ausfuehren"), self.hardware_messhilfen.get("plattform"))
+            if wlan["status"] == "fehlt":
+                return {"ok": False, "fehler": wlan["text"]}
+            return {"ok": True, "was": SYSTEM_AKTIONEN[schluessel][1], "text": wlan["text"]}
         befehl, beschreibung = SYSTEM_AKTIONEN[schluessel]
         return self._befehl_ausfuehren(befehl, beschreibung)
 

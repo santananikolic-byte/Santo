@@ -20,6 +20,7 @@ Terminal spricht, nimmt ``hoeren``.
     python3 jarvis.py stimmen     ElevenLabs-Stimme aussuchen
     python3 jarvis.py test        Selbsttest
     python3 jarvis.py einrichten  geführte Ersteinrichtung
+    python3 jarvis.py hardware    den Mac prüfen: Last, Speicher, Platte, Netz, Wärme
     python3 jarvis.py zugang      einen Schlüssel eintragen oder ersetzen
     python3 jarvis.py zugang mail Gmail oder ein anderes Postfach verbinden
     python3 jarvis.py zugang telegram  Handy verbinden: schreiben und sprechen von unterwegs
@@ -66,6 +67,7 @@ from modules.webapp import JarvisWeb, STANDARD_PORT
 # [P6 Stimme] Anfang
 # [P6 Stimme] Ende
 # [P7 Start] Anfang
+from modules.hardware import hardware_bericht, hardware_text, hochfahren
 # [P7 Start] Ende
 
 # Die Anzeige des Dienstes hat ihren eigenen Anschluss - so kann die Web-App per
@@ -238,7 +240,13 @@ def dauerbetrieb(dienst: bool = False):
                          daemon=True, name="jarvis-telegram").start()
         print("[telegram] Ich höre auch auf Nachrichten vom Handy.")
 
-    stimme.sprich("Ich bin da. Sag Hey Jarvis, wenn du etwas brauchst.")
+    # Beim Hochfahren: den Mac prüfen und mit dem Tag begrüßen (einmal je Tag, sonst "wieder da").
+    try:
+        gruss = hochfahren(agent, stimme).get("begruessung") or "Ich bin da."
+    except Exception as fehler:
+        print("[hochfahren] %s" % fehler)
+        gruss = "Ich bin da."
+    stimme.sprich(gruss + " Sag Hey Jarvis, wenn du etwas brauchst.")
     print("\nIch höre zu. Abbrechen mit Strg und C.\n")
     mikro_gemeldet = 0.0
     mikro_seit = 0.0
@@ -1057,6 +1065,9 @@ def hauptprogramm(argumente=None) -> int:
     # [P6 Stimme] Anfang
     # [P6 Stimme] Ende
     # [P7 Start] Anfang
+    elif modus == "hardware":
+        print(hardware_text(hardware_bericht(stimme=Stimme(), tools=JarvisAgent().tools)))
+        return 0
     # [P7 Start] Ende
     elif modus in ("hilfe", "--help", "-h", "help"):
         print(__doc__)
