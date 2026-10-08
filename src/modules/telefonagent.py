@@ -169,7 +169,7 @@ TELEFON_GESPERRTE_VORWAHLEN = ("+43900", "+43930", "+43931", "+43939", "+49900",
 
 def _ta_sauber(wert, grenze: int = 200) -> str:
     """Ein Wert als eine saubere Zeile: ohne Steuerzeichen, gekürzt."""
-    text = re.sub(r"[\x00-\x1f\x7f  ]+", " ", str(wert if wert is not None else ""))
+    text = re.sub(r"[\x00-\x1f\x7f\u2028\u2029]+", " ", str(wert if wert is not None else ""))
     text = " ".join(text.split())
     return text[:grenze].strip()
 
