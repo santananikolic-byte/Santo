@@ -38,7 +38,12 @@ OHNE_BEGRUENDUNG = "(ohne Begründung – Jarvis hat keinen Grund genannt)"
 # selbst kommt später; die Liste steht schon hier, damit alle sie kennen.
 GESTE_GESPERRT = {"skript_ausfuehren", "bildschirm_bedienen", "browser_auftrag", "browser_schritt",
                   "datei_schreiben", "ordnen_ausfuehren", "ordnen_rueckgaengig",
-                  "autopilot_schalten"}
+                  "autopilot_schalten",
+                  # Was draußen etwas auslöst oder Termine ändert, bestätigt nur ein Klick oder die Stimme:
+                  # Ein erhobener Daumen kann ein Vorschlag annehmen, aber keinen Anruf, Kurzbefehl
+                  # oder keine Absage freigeben.
+                  "kurzbefehl_ausfuehren", "restaurant_anrufen", "termine_absagen",
+                  "termin_verschieben", "termin_wiederherstellen"}
 
 
 def argumente_kuerzen(argumente: dict) -> dict:

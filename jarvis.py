@@ -22,6 +22,7 @@ Betriebsarten:
     python3 jarvis.py stimmen     ElevenLabs-Stimme aussuchen
     python3 jarvis.py test        Selbsttest
     python3 jarvis.py einrichten  geführte Ersteinrichtung
+    python3 jarvis.py hardware    den Mac prüfen: Last, Speicher, Platte, Netz, Wärme
 
 Alle Daten bleiben lokal auf diesem Rechner.
 """
@@ -49,6 +50,7 @@ import json
 import math
 import mimetypes
 import os
+import platform
 import plistlib
 import queue
 import re
@@ -415,6 +417,12 @@ CALDAV_ZEITZONE = _text("CALDAV_ZEITZONE", "Europe/Vienna")
 # [P7 Start] Anfang
 # Für welche Plattformen die Inhalte-Planung Beiträge schreibt.
 INHALTE_PLATTFORMEN = _text("INHALTE_PLATTFORMEN", "instagram,facebook,google")
+# Beim Hochfahren begrüßt Jarvis mit dem Tag (Termine, Post, Wetter, Offenes) - einmal je Tag.
+BEGRUESSUNG_AN = _wahrheit("BEGRUESSUNG_AN", True)
+# Der Ordner der Kurzbefehle-App, aus dem Jarvis Kurzbefehle ausführt (Licht, Szenen, Fokus).
+KURZBEFEHL_ORDNER = _text("KURZBEFEHL_ORDNER", "Jarvis")
+# Auf welchem Bildschirm die Zentrale steht (0 = Hauptbildschirm, 1 = der zweite).
+ANZEIGE_BILDSCHIRM = _ganzzahl("ANZEIGE_BILDSCHIRM", 1)
 # [P7 Start] Ende
 
 
@@ -2044,7 +2052,12 @@ OHNE_BEGRUENDUNG = "(ohne Begründung – Jarvis hat keinen Grund genannt)"
 # selbst kommt später; die Liste steht schon hier, damit alle sie kennen.
 GESTE_GESPERRT = {"skript_ausfuehren", "bildschirm_bedienen", "browser_auftrag", "browser_schritt",
                   "datei_schreiben", "ordnen_ausfuehren", "ordnen_rueckgaengig",
-                  "autopilot_schalten"}
+                  "autopilot_schalten",
+                  # Was draußen etwas auslöst oder Termine ändert, bestätigt nur ein Klick oder die Stimme:
+                  # Ein erhobener Daumen kann ein Vorschlag annehmen, aber keinen Anruf, Kurzbefehl
+                  # oder keine Absage freigeben.
+                  "kurzbefehl_ausfuehren", "restaurant_anrufen", "termine_absagen",
+                  "termin_verschieben", "termin_wiederherstellen"}
 
 
 def argumente_kuerzen(argumente: dict) -> dict:
@@ -15354,19 +15367,1113 @@ class MacZugriff:
 
 
 # =========================================================================
-# hardware  -  Bericht über den Rechner und die angeschlossenen Geräte – wird in Paket P7 gebaut.
+# hardware  -  Bericht über den Rechner und das Hochfahren von Jarvis.
+# 
+# **Messen, nicht raten.** ``hardware_bericht`` fragt den Mac mit eingebauten
+# Programmen (``sysctl``, ``vm_stat``, ``pmset`` ...), jede Messung in einem
+# eigenen Faden mit Zeitlimit. Was nicht zu messen ist, steht als Lücke da -
+# "nicht messbar (Zeitüberschreitung)" oder "ohne Administratorrechte nicht
+# messbar" -, nie als erfundener Wert. Die Temperatur in Grad gibt es ohne
+# Administratorrechte nicht; Jarvis meldet stattdessen die Wärmestufe des
+# Systems. Auf einem anderen System als dem Mac melden alle Mac-Messungen
+# "Nur auf dem Mac messbar".
+# 
+# **Einspeisbar.** Jede Messung läuft über ``ausfuehren(befehl, timeout)``, das
+# ``(Rückgabecode, Ausgabe)`` zurückgibt (oder mit dem Fehlertext als drittem
+# Wert). Prüfungen speisen eigene Antworten ein; ohne Angabe laufen die echten
+# Programme, immer ohne Shell.
+# 
+# **Hochfahren.** ``hochfahren`` prüft den Rechner, begrüßt mit dem Tag (nur aus
+# echten Quellen, Erfundenes gibt es nicht) und schreibt die Schritte auf die
+# Anzeige. Die Begrüßung mit dem Tag kommt einmal je Tag; startet Jarvis am selben
+# Tag noch einmal (Absturz, Neustart des Dienstes), sagt er nur, dass er wieder da
+# ist, und nennt Auffälliges.
 # =========================================================================
 
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
 
+
+NUR_MAC_TEXT = "Nur auf dem Mac messbar"
+NICHT_MESSBAR_TEXT = "nicht messbar"
+# Wohin die Netzprüfung klopft: nur ein Verbindungsaufbau, es wird nichts gesendet.
+NETZ_PRUEFHOST = ("api.anthropic.com", 443)
+WLAN_CACHE_SEKUNDEN = 600
+GERAETE_CACHE_SEKUNDEN = 3600
+
+# Der Stand der langsamen Abfragen (system_profiler) - nur mit dem echten Ausführer.
+_WLAN_CACHE = {"zeit": 0.0, "text": None}
+_GERAETE_CACHE = {"zeit": 0.0, "daten": None}
+_CACHE_SPERRE = threading.Lock()
+# Zwei Fenster, die gleichzeitig hochfahren, begrüßen nicht doppelt.
+_HOCHFAHREN_SPERRE = threading.Lock()
+
+
+# ---------------------------------------------------------------------------
+# Systembefehle
+# ---------------------------------------------------------------------------
+
+def systembefehl(befehl, timeout=5.0, eingabe=None):
+    """Führt einen festen Befehl aus - ohne Shell. Gibt ``(Code, Ausgabe, Fehlertext)`` zurück.
+
+    Fehlendes Programm: Code 127. Zeitüberschreitung: Code 124. Ohne ``eingabe``
+    bekommt das Programm keine Tastatur (sonst könnte es auf eine Eingabe warten).
+    """
+    befehl = [str(teil) for teil in befehl]
+    optionen = {"capture_output": True, "text": True, "errors": "replace",
+                "timeout": timeout, "shell": False}
+    if eingabe is None:
+        optionen["stdin"] = subprocess.DEVNULL
+    else:
+        optionen["input"] = eingabe
+    try:
+        lauf = subprocess.run(befehl, **optionen)
+    except FileNotFoundError:
+        return 127, "", "Das Programm %s gibt es hier nicht." % befehl[0]
+    except subprocess.TimeoutExpired:
+        return 124, "", "Zeitüberschreitung"
+    except (OSError, subprocess.SubprocessError) as fehler:
+        return 126, "", str(fehler)
+    return (getattr(lauf, "returncode", 0), str(getattr(lauf, "stdout", "") or ""),
+            str(getattr(lauf, "stderr", "") or ""))
+
+
+def befehl_antwort(antwort) -> tuple:
+    """Macht aus der Antwort eines (eingespeisten) Ausführers ``(Code, Ausgabe, Fehlertext)``.
+
+    Erlaubt sind ``(Code, Ausgabe)``, ``(Code, Ausgabe, Fehler)`` und Objekte mit
+    ``returncode``/``stdout``/``stderr``.
+    """
+    if isinstance(antwort, (tuple, list)):
+        code = antwort[0] if antwort else 0
+        ausgabe = antwort[1] if len(antwort) > 1 else ""
+        fehler = antwort[2] if len(antwort) > 2 else ""
+    elif hasattr(antwort, "returncode"):
+        code = antwort.returncode
+        ausgabe = getattr(antwort, "stdout", "")
+        fehler = getattr(antwort, "stderr", "")
+    else:
+        code, ausgabe, fehler = 0, antwort, ""
+    return (code if isinstance(code, int) else 0), str(ausgabe or ""), str(fehler or "")
+
+
+def befehl_lauf(ausfuehren, befehl, timeout=5.0, eingabe=None) -> tuple:
+    """Ruft den Ausführer auf und gibt immer ``(Code, Ausgabe, Fehlertext)`` zurück.
+
+    Ein fehlendes Programm und eine Zeitüberschreitung sind Antworten, keine
+    Ausnahmen. Alles andere wirft weiter - der Aufrufer entscheidet.
+    """
+    try:
+        if eingabe is None:
+            antwort = ausfuehren(befehl, timeout)
+        else:
+            antwort = ausfuehren(befehl, timeout, eingabe=eingabe)
+    except FileNotFoundError:
+        return 127, "", "Das Programm %s gibt es hier nicht." % befehl[0]
+    except subprocess.TimeoutExpired:
+        return 124, "", "Zeitüberschreitung"
+    return befehl_antwort(antwort)
+
+
+# ---------------------------------------------------------------------------
+# Kleine Helfer
+# ---------------------------------------------------------------------------
+
+def hardware_kachel(name, wert, einheit, status, text, kurz="") -> dict:
+    """Eine Messung. ``kurz`` ist die Kurzform für den Satz "was auffällt" (intern)."""
+    kachel = {"name": name, "wert": wert, "einheit": einheit, "status": status, "text": text}
+    if kurz:
+        kachel["_kurz"] = kurz
+    return kachel
+
+
+def _dezimal(zahl, stellen=1) -> str:
+    """Eine Zahl auf Deutsch: Komma, und ohne überflüssige Nachkommastelle."""
+    try:
+        text = ("%." + str(stellen) + "f") % float(zahl)
+    except (TypeError, ValueError):
+        return "?"
+    if "." in text:
+        text = text.rstrip("0").rstrip(".")
+    return text.replace(".", ",")
+
+
+def _mehrzahl(zahl, eins, viele) -> str:
+    return "%d %s" % (zahl, eins if zahl == 1 else viele)
+
+
+def _dauer_text(sekunden) -> str:
+    """Eine Dauer, wie man sie sagt: "3 Tage 4 Stunden", "5 Stunden 12 Minuten"."""
+    minuten = int(max(0, sekunden) // 60)
+    stunden, minuten = divmod(minuten, 60)
+    tage, stunden = divmod(stunden, 24)
+    if tage:
+        return "%s %s" % (_mehrzahl(tage, "Tag", "Tage"), _mehrzahl(stunden, "Stunde", "Stunden"))
+    if stunden:
+        return "%s %s" % (_mehrzahl(stunden, "Stunde", "Stunden"), _mehrzahl(minuten, "Minute", "Minuten"))
+    return _mehrzahl(minuten, "Minute", "Minuten")
+
+
+def _fehlt(name, grund) -> dict:
+    return hardware_kachel(name, None, "", "fehlt", "%s (%s)" % (NICHT_MESSBAR_TEXT, grund))
+
+
+# ---------------------------------------------------------------------------
+# WLAN
+# ---------------------------------------------------------------------------
+
+def wlan_geraet_lesen(text: str) -> str:
+    """Das Gerät des WLANs aus ``networksetup -listallhardwareports`` ("en1"), sonst leer."""
+    ist_wlan = False
+    for zeile in str(text or "").splitlines():
+        zeile = zeile.strip()
+        if zeile.startswith("Hardware Port:"):
+            ist_wlan = zeile.split(":", 1)[1].strip().lower() in ("wi-fi", "airport", "wlan")
+        elif ist_wlan and zeile.startswith("Device:"):
+            return zeile.split(":", 1)[1].strip()
+    return ""
+
+
+def wlan_netz_lesen(text: str, geraet: str = "") -> tuple:
+    """Liest ``system_profiler SPAirPortDataType``. Gibt ``(verbunden, Netzname)`` zurück.
+
+    ``verbunden`` ist ``True``, ``False`` oder ``None`` (aus der Ausgabe nicht zu
+    sehen). Der Name steht unter "Current Network Information:"; ab macOS 14 steht
+    dort ohne Ortungserlaubnis "<redacted>" - das gilt als nicht lesbar.
+    """
+    zeilen = str(text or "").splitlines()
+    schnittstelle = ""
+    stati, namen = {}, {}
+    for nummer, zeile in enumerate(zeilen):
+        treffer = re.match(r"^\s+((?:en|awdl|llw|ap|p2p|bridge)\d+):\s*$", zeile)
+        if treffer:
+            schnittstelle = treffer.group(1)
+            continue
+        kurz = zeile.strip()
+        if kurz.startswith("Status:") and schnittstelle:
+            stati.setdefault(schnittstelle, kurz.split(":", 1)[1].strip().lower())
+        elif kurz == "Current Network Information:" and schnittstelle:
+            for folgezeile in zeilen[nummer + 1:nummer + 4]:
+                if folgezeile.strip():
+                    namen.setdefault(schnittstelle, folgezeile.strip().rstrip(":").strip())
+                    break
+    auswahl = geraet if geraet in namen or geraet in stati else ""
+    if not auswahl:
+        auswahl = next(iter(namen), "") or next((k for k in stati if k.startswith("en")), "")
+    name = namen.get(auswahl, "")
+    if name.lower() in ("<redacted>", "redacted", "<hidden>"):
+        name = ""
+    status = stati.get(auswahl, "")
+    if name:
+        return True, name
+    if status:
+        return status.startswith("connected"), ""
+    return None, ""
+
+
+def wlan_bericht(ausfuehren=None, plattform=None) -> dict:
+    """Das WLAN: Gerät, verbunden, Netzname. Gibt eine Messung wie in ``hardware_bericht`` zurück.
+
+    ``networksetup -getairportnetwork`` wird nie benutzt: Es meldet ab macOS 15
+    "nicht verbunden", auch wenn man verbunden ist. Das Gerät kommt aus
+    ``networksetup -listallhardwareports`` (auf einem iMac ist ``en0`` nicht
+    verlässlich das WLAN), der Name aus ``system_profiler`` (langsam, deshalb
+    zehn Minuten gemerkt - nur mit den echten Programmen).
+    """
+    if (plattform or sys.platform) != "darwin":
+        return hardware_kachel("WLAN", None, "", "fehlt", NUR_MAC_TEXT)
+    echt = ausfuehren is None
+    ausfuehren = ausfuehren or systembefehl
+    code, ausgabe, _ = befehl_lauf(ausfuehren, ["networksetup", "-listallhardwareports"], 5)
+    if code != 0:
+        return _fehlt("WLAN", "networksetup antwortet nicht")
+    geraet = wlan_geraet_lesen(ausgabe)
+    if not geraet:
+        return hardware_kachel("WLAN", None, "", "ok", "kein WLAN-Gerät")
+    roh = None
+    if echt:
+        with _CACHE_SPERRE:
+            if _WLAN_CACHE["text"] is not None and time.monotonic() - _WLAN_CACHE["zeit"] < WLAN_CACHE_SEKUNDEN:
+                roh = _WLAN_CACHE["text"]
+    if roh is None:
+        code, ausgabe, _ = befehl_lauf(ausfuehren, ["system_profiler", "SPAirPortDataType"], 15)
+        roh = ausgabe if code == 0 else ""
+        if echt and roh:
+            with _CACHE_SPERRE:
+                _WLAN_CACHE["text"], _WLAN_CACHE["zeit"] = roh, time.monotonic()
+    verbunden, name = wlan_netz_lesen(roh, geraet)
+    if verbunden is None:
+        # Aus der Ausgabe nicht zu sehen: hat das Gerät eine Adresse, ist es verbunden.
+        code, adresse, _ = befehl_lauf(ausfuehren, ["ipconfig", "getifaddr", geraet], 4)
+        verbunden = bool(code == 0 and adresse.strip())
+    kachel = hardware_kachel("WLAN", name or None, "", "ok",
+                             ("verbunden mit %s" % name) if name
+                             else ("verbunden (Name nicht lesbar)" if verbunden else "nicht verbunden"))
+    kachel["geraet"] = geraet
+    kachel["verbunden"] = bool(verbunden)
+    return kachel
+
+
+# ---------------------------------------------------------------------------
+# Die Messungen
+# ---------------------------------------------------------------------------
+
+class HardwareMessung:
+    """Alle Messungen eines Berichts. Jede Methode gibt eine Liste von Messungen zurück."""
+
+    def __init__(self, ausfuehren=None, plattform=None, netz=None, last=None, platte=None,
+                 jetzt=None, stimme=None, tools=None):
+        self.echt = ausfuehren is None
+        self.ausfuehren = ausfuehren or systembefehl
+        self.plattform = plattform or sys.platform
+        self.ist_mac = self.plattform == "darwin"
+        self.netz = netz
+        self.last = last
+        self.platte = platte
+        self.jetzt = jetzt or time.time
+        self.stimme = stimme
+        self.tools = tools
+        self.netzbetrieb = False
+
+    def _text(self, befehl, timeout=5.0) -> str:
+        code, ausgabe, _ = befehl_lauf(self.ausfuehren, befehl, timeout)
+        return ausgabe.strip() if code == 0 else ""
+
+    def rechner(self):
+        modell = self._text(["sysctl", "-n", "hw.model"])
+        chip = self._text(["sysctl", "-n", "machdep.cpu.brand_string"])
+        version = platform.mac_ver()[0]
+        teile = [t for t in (modell, chip, ("macOS %s" % version) if version else "") if t]
+        if not (modell or chip):
+            return [_fehlt("Rechner", "sysctl antwortet nicht")]
+        return [hardware_kachel("Rechner", modell or chip, "", "ok", ", ".join(teile))]
+
+    def last_messen(self):
+        if self.last is not None:
+            eins, kerne = self.last()
+        else:
+            eins, kerne = os.getloadavg()[0], os.cpu_count() or 1
+        je_kern = float(eins) / max(1, int(kerne))
+        angabe = "Auslastung %s je Kern" % _dezimal(je_kern, 2)
+        if je_kern < 0.7:
+            return [hardware_kachel("Last", round(je_kern, 2), "je Kern", "ok", "normal (%s)" % angabe)]
+        if je_kern < 1.5:
+            return [hardware_kachel("Last", round(je_kern, 2), "je Kern", "warnung", "hoch (%s)" % angabe,
+                                    "Last hoch")]
+        return [hardware_kachel("Last", round(je_kern, 2), "je Kern", "warnung", "sehr hoch (%s)" % angabe,
+                                "Last sehr hoch")]
+
+    def arbeitsspeicher(self):
+        gesamt_roh = self._text(["sysctl", "-n", "hw.memsize"])
+        code, vm, _ = befehl_lauf(self.ausfuehren, ["vm_stat"], 5)
+        if not gesamt_roh.isdigit() or code != 0:
+            return [_fehlt("Arbeitsspeicher", "sysctl oder vm_stat antwortet nicht")]
+        gesamt = int(gesamt_roh) / float(1024 ** 3)
+        seite = re.search(r"page size of (\d+) bytes", vm)
+
+        def seiten(titel):
+            treffer = re.search(r"^%s:\s+(\d+)" % re.escape(titel), vm, re.MULTILINE)
+            return int(treffer.group(1)) if treffer else None
+        aktiv, fest = seiten("Pages active"), seiten("Pages wired down")
+        if not seite or aktiv is None or fest is None:
+            return [hardware_kachel("Arbeitsspeicher", None, "GB", "fehlt",
+                                    "%s GB eingebaut, Belegung nicht lesbar" % _dezimal(gesamt))]
+        belegt = (aktiv + fest + (seiten("Pages occupied by compressor") or 0)) * int(seite.group(1))
+        belegt_gb = belegt / float(1024 ** 3)
+        return [hardware_kachel("Arbeitsspeicher", round(belegt_gb, 1), "GB", "ok",
+                                "%s von %s GB belegt" % (_dezimal(belegt_gb), _dezimal(gesamt)))]
+
+    def speicherdruck(self):
+        code, ausgabe, _ = befehl_lauf(self.ausfuehren, ["memory_pressure"], 5)
+        frei = re.findall(r"free percentage:\s*(\d+)\s*%", ausgabe)
+        if code != 0 or not frei:
+            return [_fehlt("Speicherdruck", "memory_pressure antwortet nicht")]
+        prozent = int(frei[-1])
+        if prozent < 20:
+            return [hardware_kachel("Speicherdruck", prozent, "% frei", "warnung",
+                                    "nur noch %d %% frei" % prozent, "Speicher %d %% frei" % prozent)]
+        return [hardware_kachel("Speicherdruck", prozent, "% frei", "ok", "%d %% frei" % prozent)]
+
+    def festplatte(self):
+        try:
+            if self.platte is not None:
+                gesamt, _, frei = self.platte()
+            else:
+                gesamt, _, frei = shutil.disk_usage(os.path.expanduser("~"))
+        except OSError as fehler:
+            return [_fehlt("Festplatte", str(fehler)[:50])]
+        prozent = int(round(100.0 * frei / gesamt)) if gesamt else 0
+        text = "%s GB frei von %s GB (%d %%)" % (_dezimal(frei / 1e9, 0), _dezimal(gesamt / 1e9, 0), prozent)
+        if prozent < 10:
+            return [hardware_kachel("Festplatte", round(frei / 1e9), "GB frei", "warnung", text,
+                                    "Festplatte nur %d %% frei" % prozent)]
+        return [hardware_kachel("Festplatte", round(frei / 1e9), "GB frei", "ok", text)]
+
+    def internet(self):
+        beginn = time.monotonic()
+        try:
+            if self.netz is not None:
+                self.netz(NETZ_PRUEFHOST[0], NETZ_PRUEFHOST[1], 3)
+            else:
+                socket.create_connection(NETZ_PRUEFHOST, 3).close()
+        except OSError:
+            return [hardware_kachel("Internet", None, "", "fehlt", "kein Internet", "kein Internet")]
+        millis = int(round((time.monotonic() - beginn) * 1000))
+        return [hardware_kachel("Internet", millis, "ms", "ok", "erreichbar (%d ms)" % millis)]
+
+    def wlan(self):
+        kachel = wlan_bericht(self.ausfuehren if not self.echt else None, self.plattform)
+        return [kachel]
+
+    def waerme(self):
+        code, ausgabe, _ = befehl_lauf(self.ausfuehren,
+                                       ["notifyutil", "-g", "com.apple.system.thermalpressurelevel"], 5)
+        stufe = re.search(r"(\d+)\s*$", ausgabe.strip())
+        grad = hardware_kachel("Temperatur", None, "", "fehlt", "ohne Administratorrechte nicht messbar")
+        if code != 0 or not stufe:
+            return [_fehlt("Wärme", "notifyutil antwortet nicht"), grad]
+        stufe = int(stufe.group(1))
+        if stufe <= 0:
+            kachel = hardware_kachel("Wärme", stufe, "Stufe", "ok", "normal")
+        elif stufe == 1:
+            kachel = hardware_kachel("Wärme", stufe, "Stufe", "ok", "erhöht", "Wärme erhöht")
+        elif stufe == 2:
+            kachel = hardware_kachel("Wärme", stufe, "Stufe", "warnung", "stark", "Wärme stark")
+        else:
+            kachel = hardware_kachel("Wärme", stufe, "Stufe", "warnung", "kritisch", "Wärme kritisch")
+        return [kachel, grad]
+
+    def laufzeit(self):
+        code, ausgabe, _ = befehl_lauf(self.ausfuehren, ["sysctl", "-n", "kern.boottime"], 5)
+        treffer = re.search(r"sec = (\d+)", ausgabe)
+        if code != 0 or not treffer:
+            return [_fehlt("Laufzeit", "kern.boottime nicht lesbar")]
+        sekunden = self.jetzt() - int(treffer.group(1))
+        if sekunden < 0:
+            return [_fehlt("Laufzeit", "Uhr und Startzeit passen nicht zusammen")]
+        return [hardware_kachel("Laufzeit", int(sekunden), "s", "ok", _dauer_text(sekunden))]
+
+    def batterie(self):
+        code, ausgabe, _ = befehl_lauf(self.ausfuehren, ["pmset", "-g", "batt"], 5)
+        if code != 0:
+            return [_fehlt("Batterie", "pmset antwortet nicht")]
+        if "InternalBattery" not in ausgabe:
+            self.netzbetrieb = True
+            return []
+        treffer = re.search(r"InternalBattery[^\n]*?(\d+)%;\s*([^;\n]+)", ausgabe)
+        if not treffer:
+            return [_fehlt("Batterie", "Stand nicht lesbar")]
+        prozent, zustand = int(treffer.group(1)), treffer.group(2).strip().lower()
+        wort = {"charging": "lädt", "discharging": "entlädt", "charged": "voll geladen",
+                "finishing charge": "wird voll", "ac attached": "am Netz"}.get(zustand, zustand)
+        if prozent < 20 and zustand.startswith("discharging"):
+            return [hardware_kachel("Batterie", prozent, "%", "warnung", "%d %%, %s" % (prozent, wort),
+                                    "Akku %d %%" % prozent)]
+        return [hardware_kachel("Batterie", prozent, "%", "ok", "%d %%, %s" % (prozent, wort))]
+
+    def _geraeteliste(self):
+        """Die Geräte aus ``system_profiler -json`` (Kamera, Audio, Bildschirme) oder ``None``."""
+        if self.echt:
+            with _CACHE_SPERRE:
+                if _GERAETE_CACHE["daten"] is not None \
+                        and time.monotonic() - _GERAETE_CACHE["zeit"] < GERAETE_CACHE_SEKUNDEN:
+                    return _GERAETE_CACHE["daten"]
+        code, ausgabe, _ = befehl_lauf(
+            self.ausfuehren, ["system_profiler", "SPCameraDataType", "SPAudioDataType",
+                              "SPDisplaysDataType", "-json"], 15)
+        if code != 0:
+            return None
+        try:
+            daten = json.loads(ausgabe)
+        except ValueError:
+            return None
+        if not isinstance(daten, dict):
+            return None
+        if self.echt:
+            with _CACHE_SPERRE:
+                _GERAETE_CACHE["daten"], _GERAETE_CACHE["zeit"] = daten, time.monotonic()
+        return daten
+
+    def geraete(self):
+        daten = self._geraeteliste()
+        if daten is None:
+            return [_fehlt("Kamera", "system_profiler antwortet nicht"),
+                    _fehlt("Mikrofon", "system_profiler antwortet nicht"),
+                    _fehlt("Bildschirme", "system_profiler antwortet nicht")]
+        kameras = len(daten.get("SPCameraDataType") or [])
+        mikrofone = 0
+        for gruppe in daten.get("SPAudioDataType") or []:
+            for geraet in (gruppe.get("_items") or []) if isinstance(gruppe, dict) else []:
+                eingang = geraet.get("coreaudio_device_input") if isinstance(geraet, dict) else None
+                if eingang:
+                    mikrofone += 1
+        bildschirme = 0
+        for grafik in daten.get("SPDisplaysDataType") or []:
+            if isinstance(grafik, dict):
+                bildschirme += len(grafik.get("spdisplays_ndrvs") or [])
+
+        def kachel(name, anzahl, eins, viele):
+            return hardware_kachel(name, anzahl, "", "ok",
+                                   _mehrzahl(anzahl, eins, viele) if anzahl else "keine gefunden")
+        return [kachel("Kamera", kameras, "Kamera", "Kameras"),
+                kachel("Mikrofon", mikrofone, "Mikrofon", "Mikrofone"),
+                kachel("Bildschirme", bildschirme, "Bildschirm", "Bildschirme")]
+
+    def dienste(self):
+        def sicher(frage):
+            try:
+                return bool(frage())
+            except Exception:
+                return False
+        claude = bool(ANTHROPIC_API_KEY)
+        teile = ["Claude %s" % ("ja" if claude else "nein"),
+                 "Gemini %s" % ("ja" if GEMINI_API_KEY else "nein")]
+        if self.stimme is not None:
+            try:
+                zustand = self.stimme.zustand() or {}
+            except Exception:
+                zustand = {}
+            if zustand.get("elevenlabs"):
+                stimme = "ElevenLabs"
+            elif zustand.get("fish"):
+                stimme = "Fish"
+            elif zustand.get("macos_say"):
+                stimme = "Systemstimme"
+            else:
+                stimme = "keine"
+            teile.append("Stimme %s" % stimme)
+            teile.append("Mikrofon-Zugriff %s" % ("ja" if zustand.get("mikrofon") else "nein"))
+        else:
+            teile.append("Stimme im Browser")
+        if self.tools is not None:
+            teile.append("Kalender %s" % ("ja" if sicher(self.tools.kalender.verfuegbar) else "nein"))
+            teile.append("Post %s" % ("ja" if sicher(self.tools.mail.lesen_moeglich) else "nein"))
+            teile.append("Telegram %s" % ("ja" if sicher(self.tools.telegram.verfuegbar) else "nein"))
+        if claude:
+            return [hardware_kachel("Dienste", None, "", "ok", ", ".join(teile))]
+        return [hardware_kachel("Dienste", None, "", "warnung", ", ".join(teile), "Claude-Schlüssel fehlt")]
+
+
+# (Messungen, Methode, nur auf dem Mac, langsam, Messung auch ohne Mac anlegen)
+HARDWARE_PROBEN = (
+    (("Rechner",), "rechner", True, False, True),
+    (("Last",), "last_messen", False, False, True),
+    (("Arbeitsspeicher",), "arbeitsspeicher", True, False, True),
+    (("Speicherdruck",), "speicherdruck", True, False, True),
+    (("Festplatte",), "festplatte", False, False, True),
+    (("Internet",), "internet", False, False, True),
+    (("WLAN",), "wlan", True, True, True),
+    (("Wärme", "Temperatur"), "waerme", True, False, True),
+    (("Laufzeit",), "laufzeit", True, False, True),
+    (("Batterie",), "batterie", True, False, False),
+    (("Kamera", "Mikrofon", "Bildschirme"), "geraete", True, True, True),
+    (("Dienste",), "dienste", False, False, True),
+)
+
+
+def hardware_bericht(ausfuehren=None, zeitlimit=2.0, stimme=None, tools=None, plattform=None,
+                     netz=None, last=None, platte=None, jetzt=None, zeitlimit_langsam=None) -> dict:
+    """Prüft den Rechner. Gibt ``{"zeit", "werte", "kurz", "auffaellig"}`` zurück.
+
+    ``werte`` ist eine Liste von ``{"name", "wert", "einheit", "status", "text"}``;
+    ``status`` ist ``ok``, ``warnung`` oder ``fehlt``. ``kurz`` ist ein Satz, der nur
+    nennt, was auffällt ("Speicher 18 % frei, Wärme erhöht, sonst alles in Ordnung.").
+
+    Jede Messung läuft in einem eigenen Faden und bekommt ``zeitlimit`` Sekunden;
+    die beiden langsamen Abfragen (WLAN-Name, Geräte über ``system_profiler``)
+    bekommen ``zeitlimit_langsam`` (Standard: das Dreifache). Wer nicht fertig
+    wird, steht als "nicht messbar (Zeitüberschreitung)" im Bericht. Die
+    übrigen Angaben sind für Prüfungen: ``ausfuehren(befehl, timeout)``, ``plattform``
+    (Standard ``sys.platform``), ``netz(host, port, timeout)``, ``last()`` ->
+    ``(Last, Kerne)``, ``platte()`` -> ``(gesamt, belegt, frei)``, ``jetzt()``.
+    """
+    try:
+        zeitlimit = float(zeitlimit)
+    except (TypeError, ValueError):
+        zeitlimit = 2.0
+    zeitlimit = zeitlimit if zeitlimit > 0 else 2.0
+    langsam = float(zeitlimit_langsam) if zeitlimit_langsam else zeitlimit * 3
+    messung = HardwareMessung(ausfuehren, plattform, netz, last, platte, jetzt, stimme, tools)
+
+    laeufe = []
+    for namen, methode, nur_mac, ist_langsam, immer in HARDWARE_PROBEN:
+        halter = {"kacheln": None, "fehler": ""}
+        faden = None
+        if nur_mac and not messung.ist_mac:
+            halter["kacheln"] = ([hardware_kachel(n, None, "", "fehlt", NUR_MAC_TEXT) for n in namen]
+                                 if immer else [])
+        else:
+            def laufen(halter=halter, methode=methode):
+                try:
+                    halter["kacheln"] = list(getattr(messung, methode)() or [])
+                except Exception as fehler:
+                    halter["fehler"] = "Fehler: %s" % str(fehler)[:50]
+            faden = threading.Thread(target=laufen, daemon=True, name="hardware-" + methode)
+        laeufe.append((namen, methode, halter, faden, ist_langsam))
+
+    beginn = time.monotonic()
+    for _, _, _, faden, _ in laeufe:
+        if faden is not None:
+            faden.start()
+    werte = []
+    for namen, methode, halter, faden, ist_langsam in laeufe:
+        if faden is not None:
+            frist = beginn + (langsam if ist_langsam else zeitlimit) - time.monotonic()
+            faden.join(max(0.0, frist))
+            if faden.is_alive():
+                if methode == "internet":
+                    halter["kacheln"] = [hardware_kachel("Internet", None, "", "fehlt",
+                                                         "kein Internet (keine Antwort)", "kein Internet")]
+                else:
+                    halter["kacheln"] = [_fehlt(n, "Zeitüberschreitung") for n in namen]
+            elif halter["kacheln"] is None:
+                halter["kacheln"] = [_fehlt(n, halter["fehler"] or "keine Antwort") for n in namen]
+        werte.extend(halter["kacheln"] or [])
+
+    if messung.netzbetrieb:
+        for kachel in werte:
+            if kachel["name"] == "Rechner" and kachel["status"] == "ok":
+                kachel["text"] += ", Netzbetrieb"
+    auffaellig = [k.pop("_kurz") for k in werte if "_kurz" in k]
+    luecken = sum(1 for k in werte if k["status"] == "fehlt" and k["text"].startswith(NICHT_MESSBAR_TEXT))
+    teile = list(auffaellig)
+    if not messung.ist_mac:
+        teile.insert(0, "kein Mac, die Mac-Messungen entfallen")
+    if luecken:
+        teile.append("%s nicht messbar" % _mehrzahl(luecken, "Messung", "Messungen"))
+    kurz = (", ".join(teile) + ", sonst alles in Ordnung.") if teile else "Alles in Ordnung."
+    kurz = kurz[0].upper() + kurz[1:]
+    zeit = datetime.fromtimestamp(messung.jetzt()).strftime("%Y-%m-%dT%H:%M:%S")
+    return {"zeit": zeit, "werte": werte, "kurz": kurz, "auffaellig": auffaellig}
+
+
+def hardware_text(bericht: dict) -> str:
+    """Der Bericht als Text für das Terminal (``python3 jarvis.py hardware``)."""
+    marken = {"ok": "[ok]", "warnung": "[!!]", "fehlt": "[--]"}
+    zeilen = ["%s %-16s %s" % (marken.get(k.get("status"), "[??]"), k.get("name", ""), k.get("text", ""))
+              for k in bericht.get("werte") or []]
+    zeilen += ["", str(bericht.get("kurz") or "")]
+    return "\n".join(zeilen)
+
+
+# ---------------------------------------------------------------------------
+# Hochfahren
+# ---------------------------------------------------------------------------
+
+def _schritte_aus(bericht: dict) -> list:
+    """Die Messungen als Zeilen für die Anzeige: ``ok`` ist ``True``, ``False`` oder ``None`` (Lücke)."""
+    zustand = {"ok": True, "warnung": False}
+    return [{"name": str(k.get("name", "")), "ok": zustand.get(k.get("status")),
+             "text": str(k.get("text", ""))} for k in (bericht.get("werte") or [])[:16]]
+
+
+def _auffaelliges_sagen(bericht: dict) -> str:
+    """Ein Satz mit dem, was auffällt - leer, wenn nichts."""
+    liste = bericht.get("auffaellig") or []
+    return ("Auffällig: %s." % ", ".join(liste)) if liste else ""
+
+
+def _hochfahren_zeigen(anzeige, schritte: list, begruessung: str, fertig: bool):
+    """Schreibt den Start auf die Anzeige. Sie darf nie etwas kaputt machen."""
+    if anzeige is None:
+        return
+    try:
+        anzeige.melden("hochfahren", {"schritte": schritte, "begruessung": begruessung,
+                                      "fertig": bool(fertig)})
+        anzeige.zeigen("hochfahren", {}, 60, "hochfahren")
+    except Exception as fehler:
+        print("[hochfahren] Anzeige nicht erreichbar: %s" % fehler)
+
+
+def hochfahren(agent, stimme=None, anzeige=None, **messen) -> dict:
+    """Prüft den Mac, begrüßt mit dem Tag und zeigt es auf der Anzeige.
+
+    Gibt ``{"ok", "neu", "schritte", "begruessung", "sprechstuecke"}`` zurück.
+    ``neu`` ist ``True``, wenn es heute das erste Hochfahren ist (Marke
+    ``hochgefahren.txt`` im Log-Ordner). Nur dann kommt die Begrüßung mit dem Tag;
+    sonst heißt es "Ich bin wieder da." und Auffälliges. ``anzeige`` braucht
+    ``melden`` und ``zeigen`` (Standard: die Werkzeuge des Agenten); ``messen`` geht
+    an ``hardware_bericht`` (für Prüfungen).
+    """
+    heute = date.today().isoformat()
+    marke = Path(LOG_VERZEICHNIS) / "hochgefahren.txt"
+    with _HOCHFAHREN_SPERRE:
+        try:
+            gelesen = marke.read_text(encoding="utf-8").strip()
+        except OSError:
+            gelesen = ""
+        neu = gelesen != heute
+        if neu:
+            try:
+                marke.parent.mkdir(parents=True, exist_ok=True)
+                marke.write_text(heute + "\n", encoding="utf-8")
+            except OSError as fehler:
+                print("[hochfahren] Die Tagesmarke ließ sich nicht schreiben: %s" % fehler)
+    werkzeuge = getattr(agent, "tools", None)
+    stimme = stimme if stimme is not None else getattr(agent, "stimme", None)
+    anzeige = anzeige if anzeige is not None else werkzeuge
+
+    try:
+        bericht = hardware_bericht(stimme=stimme, tools=werkzeuge, **messen)
+    except Exception as fehler:
+        print("[hochfahren] Der Rechnerbericht ließ sich nicht erstellen: %s" % fehler)
+        bericht = {"zeit": "", "werte": [], "auffaellig": [],
+                   "kurz": "Der Rechnerbericht ließ sich nicht erstellen."}
+    schritte = _schritte_aus(bericht)
+    # Die Zeilen laufen schon über die Anzeige, während die Begrüßung noch entsteht.
+    _hochfahren_zeigen(anzeige, schritte, "", False)
+
+    if neu and BEGRUESSUNG_AN:
+        try:
+            begruessung = str(agent.begruessung(bericht) or "").strip()
+        except Exception as fehler:
+            print("[hochfahren] Die Begrüßung ließ sich nicht bauen: %s" % fehler)
+            begruessung = ""
+        if not begruessung:
+            begruessung = "Hallo. Ich bin da. %s" % bericht["kurz"]
+    elif neu:
+        begruessung = " ".join(t for t in ("Ich bin da.", _auffaelliges_sagen(bericht)) if t)
+    else:
+        begruessung = " ".join(t for t in ("Ich bin wieder da.", _auffaelliges_sagen(bericht)) if t)
+
+    _hochfahren_zeigen(anzeige, schritte, begruessung, True)
+    return {"ok": True, "neu": neu, "schritte": schritte, "begruessung": begruessung,
+            "sprechstuecke": sprechstuecke(begruessung)}
+
+
 # =========================================================================
-# steuerung  -  Den Mac steuern: Kurzbefehle, Fenster, Lautstärke – wird in Paket P7 gebaut.
+# steuerung  -  Den Mac steuern: Kurzbefehle, Fensterlayouts, Lautstärke.
+# 
+# **Kurzbefehle.** Licht, Szenen und Fokus laufen über benannte Kurzbefehle in einem
+# Ordner der Kurzbefehle-App (Standard ``Jarvis``). Ausgeführt wird nur, was in der
+# *aktuellen* Liste dieses Ordners steht; ein erfundener oder fremder Name läuft
+# nie. Eine Eingabe geht über die Standardeingabe in den Kurzbefehl (nie über
+# Dateien: ``-i``/``-o`` brauchen seit macOS 13.2 Vollzugriff auf die Festplatte
+# und scheitern still). **Die Ausgabe eines Kurzbefehls wird nie weitergegeben** -
+# ein Kurzbefehl wie "Kontakte holen" wäre sonst eine Hintertür zu Kontakten,
+# Kalender und Nachrichten. Zurück kommt nur "gelaufen" oder ein Fehlertext. Ob
+# vorher gefragt wird (erster Lauf eines Namens, Lauf nach fremdem Text), regelt
+# das Werkzeug in ``tools.py``; hier liegt nur, was dafür gemerkt werden muss.
+# 
+# **Fenster.** Feste Layouts (zentrale, arbeiten, praesentation) öffnen die
+# Seiten von Jarvis als eigene Chrome-Fenster mit eigenem Profil, auf dem
+# gewünschten Bildschirm. Claude schreibt dabei nie freies AppleScript.
+# 
+# **Einspeisbar.** Alles läuft über ``ausfuehren(befehl, timeout)`` - Prüfungen
+# speisen eigene Antworten ein, nichts öffnet dabei ein Fenster.
 # =========================================================================
 
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+
+
+
+KURZBEFEHL_TIMEOUT = 60
+KURZBEFEHL_MAX_NAMEN = 60
+# Wie bei den übrigen Werkzeugen: Zeichen, die in einer Eingabe nichts zu suchen haben.
+KURZBEFEHL_VERBOTENE_ZEICHEN = set(";|&$`\n<>")
+KURZBEFEHL_FEHLT_TEXT = "Kurzbefehle gibt es erst ab macOS 12 – hier fehlt das Programm shortcuts."
+
+SCHEMA_KURZBEFEHLE = """
+CREATE TABLE IF NOT EXISTS kurzbefehle_bekannt (
+    name TEXT PRIMARY KEY,
+    erstmals TEXT NOT NULL
+);
+"""
+
+# Die Ports der Anzeige: der Dienst zeigt auf 8766 (nur die Zentrale und das Gehirn),
+# die Web-App auf 8765 (auch die Hauptseite). Wie run.anzeige_oeffnen: erst der Dienst.
+STEUERUNG_PORT_DIENST = 8766
+STEUERUNG_PORT_WEB = 8765
+FENSTER_ANZEIGESEITEN = ("/zentrale", "/gehirn")
+
+# Fensterlayouts. "rahmen" ist [links, oben, breite, hoehe] als Anteil des Bildschirms.
+# "bildschirm": 0 ist der Hauptbildschirm; "anzeige" steht für ANZEIGE_BILDSCHIRM (Standard 1).
+LAYOUTS = {
+    "zentrale": [{"seite": "/zentrale", "bildschirm": "anzeige", "rahmen": [0, 0, 1, 1]}],
+    "arbeiten": [{"seite": "/", "bildschirm": 0, "rahmen": [0.6, 0, 0.4, 1]},
+                 {"seite": "/zentrale", "bildschirm": "anzeige", "rahmen": [0, 0, 1, 1]}],
+    "praesentation": [{"seite": "/zentrale", "bildschirm": 0, "rahmen": [0, 0, 1, 1]}],
+}
+
+BEDIENUNGSHILFEN_HINWEIS = ("Für das Verschieben von Fenstern braucht Jarvis die Bedienungshilfen "
+                            "(Systemeinstellungen > Datenschutz & Sicherheit > Bedienungshilfen).")
+AUTOMATION_HINWEIS = ("Für das Verschieben von Fenstern braucht Jarvis die Erlaubnis für System Events "
+                      "(Systemeinstellungen > Datenschutz & Sicherheit > Automation).")
+
+# Die Bildschirme, wie macOS sie meldet (Ursprung unten links). Die Umrechnung auf
+# oben links macht bildschirme_lesen.
+BILDSCHIRME_JXA = (
+    'ObjC.import("AppKit");'
+    'var s = $.NSScreen.screens, a = [];'
+    'for (var i = 0; i < s.count; i++) {'
+    ' var f = s.objectAtIndex(i).frame;'
+    ' a.push({x: f.origin.x, y: f.origin.y, w: f.size.width, h: f.size.height});'
+    '}'
+    'JSON.stringify(a);'
+)
+
+
+def _eine_zeile(text, grenze=160) -> str:
+    kurz = " ".join(str(text or "").split())
+    return kurz if len(kurz) <= grenze else kurz[:grenze].rstrip() + " …"
+
+
+# ---------------------------------------------------------------------------
+# Kurzbefehle
+# ---------------------------------------------------------------------------
+
+def kurzbefehl_ordner(ordner=None) -> str:
+    return str(ordner or KURZBEFEHL_ORDNER or "Jarvis").strip() or "Jarvis"
+
+
+def kurzbefehle_liste(ordner=None, ausfuehren=None) -> dict:
+    """Die Kurzbefehle im Ordner der Kurzbefehle-App. Gibt ``{"ok", "namen", "text"}`` zurück."""
+    ordner = kurzbefehl_ordner(ordner)
+    code, ausgabe, fehler = befehl_lauf(ausfuehren or systembefehl,
+                                        ["shortcuts", "list", "-f", ordner], 15)
+    if code == 127:
+        return {"ok": False, "namen": [], "text": KURZBEFEHL_FEHLT_TEXT, "fehler": KURZBEFEHL_FEHLT_TEXT}
+    if code != 0:
+        text = ("Die Kurzbefehle ließen sich nicht lesen (%s). Gibt es in der Kurzbefehle-App "
+                "einen Ordner '%s'?" % (_eine_zeile(fehler or ausgabe, 100) or "Code %d" % code, ordner))
+        return {"ok": False, "namen": [], "text": text, "fehler": text}
+    namen = []
+    for zeile in ausgabe.splitlines():
+        zeile = zeile.strip()
+        if zeile and zeile not in namen:
+            namen.append(zeile)
+    if not namen:
+        return {"ok": True, "namen": [],
+                "text": "Im Ordner '%s' der Kurzbefehle-App liegt noch nichts. Leg dort Kurzbefehle wie "
+                        "'Licht Büro an' an – nur solche, die nichts nach außen schicken." % ordner}
+    sichtbar = namen[:KURZBEFEHL_MAX_NAMEN]
+    return {"ok": True, "namen": sichtbar,
+            "text": "Im Ordner '%s': %s%s." % (ordner, ", ".join(sichtbar),
+                                              (" und %d weitere" % (len(namen) - len(sichtbar)))
+                                              if len(namen) > len(sichtbar) else "")}
+
+
+def kurzbefehl_finden(name, namen) -> str:
+    """Der Name aus der Liste, der gemeint ist - sonst leer. Groß- und Kleinschreibung zählt nicht mit."""
+    name = str(name or "").strip()
+    if not name:
+        return ""
+    if name in namen:
+        return name
+    normal = " ".join(name.split()).casefold()
+    treffer = [n for n in namen if " ".join(n.split()).casefold() == normal]
+    return treffer[0] if len(treffer) == 1 else ""
+
+
+def kurzbefehl_eingabe_pruefen(text) -> tuple:
+    """Prüft die Eingabe eines Kurzbefehls. Gibt ``(ok, Meldung)`` zurück."""
+    text = str(text if text is not None else "")
+    if len(text) > 500:
+        return False, "Der Wert ist zu lang."
+    treffer = sorted({z for z in text if z in KURZBEFEHL_VERBOTENE_ZEICHEN})
+    if treffer:
+        return False, ("Der Wert enthält die Zeichen %s. Solche Werte führe ich grundsätzlich nicht aus."
+                       % ", ".join(repr(z) for z in treffer))
+    return True, ""
+
+
+def kurzbefehl_pruefen(name, eingabe="", ausfuehren=None, ordner=None, pruefer=None) -> dict:
+    """Darf dieser Kurzbefehl laufen? Der Name muss in der Liste des Ordners stehen.
+
+    Gibt ``{"ok": True, "name", "eingabe"}`` mit dem Namen aus der Liste zurück,
+    sonst ``{"ok": False, "fehler"}``. Gestartet wird hier nichts.
+    """
+    ordner = kurzbefehl_ordner(ordner)
+    liste = kurzbefehle_liste(ordner, ausfuehren)
+    if not liste["ok"]:
+        return {"ok": False, "fehler": liste["text"]}
+    echt = kurzbefehl_finden(name, liste["namen"])
+    if not echt:
+        vorhanden = ", ".join(liste["namen"]) if liste["namen"] else "noch keiner"
+        return {"ok": False,
+                "fehler": "Den Kurzbefehl '%s' gibt es im Ordner %s nicht. Vorhanden: %s."
+                          % (_eine_zeile(name, 60) or "(leer)", ordner, vorhanden)}
+    eingabe = "" if eingabe is None else str(eingabe)
+    if eingabe.strip():
+        ok, meldung = (pruefer or kurzbefehl_eingabe_pruefen)(eingabe)
+        if not ok:
+            return {"ok": False, "fehler": "Die Eingabe für den Kurzbefehl ist nicht zulässig. %s" % meldung}
+    else:
+        eingabe = ""
+    return {"ok": True, "name": echt, "eingabe": eingabe}
+
+
+def kurzbefehl_ausfuehren(name, eingabe="", ausfuehren=None, ordner=None, pruefer=None,
+                          timeout=KURZBEFEHL_TIMEOUT) -> dict:
+    """Führt einen Kurzbefehl aus dem Ordner aus: ``shortcuts run <Name>``, Eingabe über stdin.
+
+    Die Ausgabe des Kurzbefehls wird verworfen. Zurück kommt nur, ob er gelaufen ist.
+    """
+    pruefung = kurzbefehl_pruefen(name, eingabe, ausfuehren, ordner, pruefer)
+    if not pruefung["ok"]:
+        return pruefung
+    echt = pruefung["name"]
+    code, _verworfen, fehler = befehl_lauf(ausfuehren or systembefehl, ["shortcuts", "run", echt],
+                                           timeout, eingabe=pruefung["eingabe"])
+    if code == 127:
+        return {"ok": False, "fehler": KURZBEFEHL_FEHLT_TEXT}
+    if code == 124:
+        return {"ok": False, "name": echt,
+                "fehler": "Der Kurzbefehl '%s' hat nach %d Sekunden nicht geantwortet. Fragt er etwas "
+                          "ab? Dann einmal von Hand starten und die Rückfragen beantworten." % (echt, timeout)}
+    if code != 0:
+        grund = _eine_zeile(fehler, 160)
+        return {"ok": False, "name": echt,
+                "fehler": "Der Kurzbefehl ist fehlgeschlagen%s" % ((": " + grund) if grund else " (Code %d)." % code)}
+    return {"ok": True, "name": echt,
+            "text": "Der Kurzbefehl '%s' ist gelaufen. Was er getan hat, sehe ich nicht." % echt}
+
+
+def kurzbefehl_bekannt(name, db_pfad=None) -> bool:
+    """Wurde dieser Name schon einmal freigegeben? Im Zweifel ``False`` - dann wird gefragt."""
+    try:
+        db_schema_anlegen(SCHEMA_KURZBEFEHLE, db_pfad)
+        verbindung = db_verbindung(db_pfad)
+        try:
+            zeile = verbindung.execute("SELECT 1 FROM kurzbefehle_bekannt WHERE name = ?",
+                                       (str(name),)).fetchone()
+        finally:
+            verbindung.close()
+        return zeile is not None
+    except sqlite3.Error:
+        return False
+
+
+def kurzbefehl_merken(name, db_pfad=None) -> bool:
+    """Vermerkt einen Namen als freigegeben - danach läuft er ohne Rückfrage."""
+    try:
+        db_schema_anlegen(SCHEMA_KURZBEFEHLE, db_pfad)
+        verbindung = db_verbindung(db_pfad)
+        try:
+            verbindung.execute("INSERT OR IGNORE INTO kurzbefehle_bekannt (name, erstmals) VALUES (?, ?)",
+                               (str(name), zeitstempel()))
+            verbindung.commit()
+        finally:
+            verbindung.close()
+        return True
+    except sqlite3.Error as fehler:
+        print("[steuerung] Der Kurzbefehl ließ sich nicht vermerken: %s" % fehler)
+        return False
+
+
+# ---------------------------------------------------------------------------
+# Bildschirme und Fenster
+# ---------------------------------------------------------------------------
+
+def bildschirme_lesen(text) -> list:
+    """Liest die Ausgabe von ``BILDSCHIRME_JXA`` als ``[{"x", "y", "w", "h"}]``.
+
+    macOS misst von unten links, Fenster werden von oben links gesetzt: Die
+    Oberkante eines Bildschirms ist ``Höhe des Hauptbildschirms - (y + h)``.
+    Der erste Bildschirm ist der Hauptbildschirm. Unlesbares ergibt eine leere Liste.
+    """
+    zeilen = [z for z in str(text or "").strip().splitlines() if z.strip()]
+    daten = None
+    for kandidat in (str(text or "").strip(), zeilen[-1] if zeilen else ""):
+        try:
+            daten = json.loads(kandidat)
+            break
+        except ValueError:
+            continue
+    if not isinstance(daten, list):
+        return []
+    roh = []
+    for eintrag in daten:
+        try:
+            roh.append(tuple(float(eintrag[k]) for k in ("x", "y", "w", "h")))
+        except (TypeError, KeyError, ValueError):
+            return []
+    if not roh or any(w <= 0 or h <= 0 for _, _, w, h in roh):
+        return []
+    haupt = roh[0][3]
+    return [{"x": int(round(x)), "y": int(round(haupt - (y + h))), "w": int(round(w)), "h": int(round(h))}
+            for x, y, w, h in roh]
+
+
+def bildschirme(ausfuehren=None) -> list:
+    """Die Bildschirme mit Ursprung oben links: ``[{"x", "y", "w", "h"}]``, der Hauptbildschirm zuerst."""
+    code, ausgabe, _ = befehl_lauf(ausfuehren or systembefehl,
+                                   ["osascript", "-l", "JavaScript", "-e", BILDSCHIRME_JXA], 10)
+    return bildschirme_lesen(ausgabe) if code == 0 else []
+
+
+def steuerung_port_belegt(port) -> bool:
+    """Lauscht auf diesem Anschluss jemand?"""
+    try:
+        with socket.create_connection(("127.0.0.1", int(port)), timeout=0.5):
+            return True
+    except OSError:
+        return False
+
+
+def anzeige_port_waehlen(seite, port_belegt=None):
+    """Der Anschluss, auf dem diese Seite läuft - ``None``, wenn keiner.
+
+    Zentrale und Gehirn zeigt der Dienst (8766) oder die Web-App (8765), der
+    Dienst zuerst. Die Hauptseite gibt es nur in der Web-App.
+    """
+    belegt = port_belegt or steuerung_port_belegt
+    reihe = ((STEUERUNG_PORT_DIENST, STEUERUNG_PORT_WEB) if seite in FENSTER_ANZEIGESEITEN
+             else (STEUERUNG_PORT_WEB,))
+    for port in reihe:
+        if belegt(port):
+            return port
+    return None
+
+
+def chrome_vorhanden() -> bool:
+    """Ist Google Chrome installiert?"""
+    return any(os.path.isdir(os.path.expanduser(pfad)) for pfad in
+               ("/Applications/Google Chrome.app", "~/Applications/Google Chrome.app"))
+
+
+def layout_fenster(layout) -> list:
+    """Die Fenster eines Layouts, mit dem Bildschirm als Zahl (``ANZEIGE_BILDSCHIRM`` eingesetzt)."""
+    fenster = []
+    for eintrag in LAYOUTS.get(str(layout or "").strip().lower(), []):
+        kopie = dict(eintrag)
+        if kopie.get("bildschirm") == "anzeige":
+            kopie["bildschirm"] = max(0, int(ANZEIGE_BILDSCHIRM))
+        fenster.append(kopie)
+    return fenster
+
+
+def _korrektur_hinweis(text) -> str:
+    """Welche Erlaubnis fehlt, wenn System Events das Fenster nicht verschieben darf?"""
+    if "-1719" in text or "-25211" in text or "assistive" in text.lower():
+        return BEDIENUNGSHILFEN_HINWEIS
+    if "-1743" in text:
+        return AUTOMATION_HINWEIS
+    return ""
+
+
+def _fenster_nachziehen(ausfuehren, suchmuster, rahmen, pause) -> str:
+    """Rückt das neueste Fenster des Anzeige-Chrome mit System Events zurecht.
+
+    Gefunden wird nur der Chrome-Prozess mit dem eigenen Profil (``pgrep``, der älteste
+    Treffer ist der Hauptprozess): Ein Fenster des Chrome, in dem der Nutzer sonst
+    arbeitet, wird nie angefasst. Gibt einen Hinweis zurück, wenn eine Erlaubnis fehlt -
+    sonst leer; ohne gefundenen Prozess bleibt es bei der Position, die Chrome übernommen hat.
+    """
+    pid = ""
+    for _ in range(3):
+        pause(1.0)
+        code, ausgabe, _ = befehl_lauf(ausfuehren, ["pgrep", "-of", suchmuster], 5)
+        treffer = ausgabe.split()[0] if code == 0 and ausgabe.split() else ""
+        if treffer.isdigit():
+            pid = treffer
+            break
+    if not pid:
+        return ""
+    x, y, breite, hoehe = rahmen
+    skript = ["osascript",
+              "-e", 'tell application "System Events"',
+              "-e", "tell (first process whose unix id is %s)" % pid,
+              "-e", "set position of window 1 to {%d, %d}" % (x, y),
+              "-e", "set size of window 1 to {%d, %d}" % (breite, hoehe),
+              "-e", "end tell",
+              "-e", "end tell"]
+    code, ausgabe, fehler = befehl_lauf(ausfuehren, skript, 10)
+    return _korrektur_hinweis("%s %s" % (ausgabe, fehler)) if code != 0 else ""
+
+
+def fenster_anordnen(layout, ausfuehren=None, port_belegt=None, chrome_da=None, pause=None) -> dict:
+    """Ordnet die Fenster nach einem festen Layout (zentrale, arbeiten, praesentation).
+
+    Jede Seite von Jarvis öffnet als Chrome-Fenster mit eigenem Profil
+    (``--app``), auf dem Bildschirm des Layouts. Danach rückt System Events das
+    Fenster gerade, falls Chrome die Position nicht übernommen hat; ohne
+    Bedienungshilfen bleibt es bei Chromes Position, und es steht ein Hinweis da.
+    Gibt ``{"ok", "text", "fenster", "hinweise"}`` zurück.
+    """
+    name = str(layout or "").strip().lower()
+    if name not in LAYOUTS:
+        return {"ok": False, "fehler": "Das Layout '%s' kenne ich nicht. Möglich: %s."
+                                       % (_eine_zeile(layout, 40) or "(leer)", ", ".join(sorted(LAYOUTS)))}
+    ausf = ausfuehren or systembefehl
+    if not (chrome_da or chrome_vorhanden)():
+        return {"ok": False, "fehler": "Für Anzeige-Fenster brauche ich Google Chrome."}
+    schirme = bildschirme(ausf)
+    if not schirme:
+        return {"ok": False, "fehler": "Ich konnte die Bildschirme nicht auslesen – ohne sie setze ich "
+                                       "kein Fenster."}
+    pause = pause or time.sleep
+    hinweise, fenster = [], []
+    profil = "--user-data-dir=%s" % (PROFIL_VERZEICHNIS / "chrome-anzeige")
+    suchmuster = "user-data-dir=" + re.escape(str(PROFIL_VERZEICHNIS / "chrome-anzeige"))
+    korrigieren = True
+    for eintrag in layout_fenster(name):
+        seite = eintrag["seite"]
+        port = anzeige_port_waehlen(seite, port_belegt)
+        if port is None:
+            hinweise.append("Die Anzeige läuft gerade nicht – starte JARVIS oder den Dienst." if seite in FENSTER_ANZEIGESEITEN
+                            else "Die Hauptseite gibt es nur in der Web-App (Doppelklick auf JARVIS), "
+                                 "der Dienst zeigt nur die Zentrale.")
+            continue
+        index = eintrag["bildschirm"]
+        if index >= len(schirme):
+            hinweise.append("Bildschirm %d gibt es nicht – %s kommt auf den Hauptbildschirm."
+                            % (index, "die Seite " + seite))
+            index = 0
+        schirm = schirme[index]
+        links, oben, breite, hoehe = eintrag["rahmen"]
+        x, y = schirm["x"] + int(round(links * schirm["w"])), schirm["y"] + int(round(oben * schirm["h"]))
+        b, h = int(round(breite * schirm["w"])), int(round(hoehe * schirm["h"]))
+        befehl = ["open", "-na", "Google Chrome", "--args", profil, "--no-first-run",
+                  "--no-default-browser-check", "--app=http://localhost:%d%s" % (port, seite),
+                  "--window-position=%d,%d" % (x, y), "--window-size=%d,%d" % (b, h)]
+        code, ausgabe, fehler = befehl_lauf(ausf, befehl, 20)
+        if code != 0:
+            hinweise.append("Das Fenster %s ließ sich nicht öffnen: %s"
+                            % (seite, _eine_zeile(fehler or ausgabe, 100) or "Code %d" % code))
+            continue
+        fenster.append({"seite": seite, "bildschirm": index, "port": port,
+                        "position": [x, y], "groesse": [b, h]})
+        if korrigieren:
+            hinweis = _fenster_nachziehen(ausf, suchmuster, (x, y, b, h), pause)
+            if hinweis:
+                korrigieren = False
+                if hinweis not in hinweise:
+                    hinweise.append(hinweis)
+    if not fenster:
+        return {"ok": False, "fenster": [], "hinweise": hinweise,
+                "fehler": " ".join(hinweise) or "Es ließ sich kein Fenster öffnen."}
+    text = "%s: %s geöffnet." % (name, ", ".join("%s auf Bildschirm %d" % (f["seite"], f["bildschirm"])
+                                                  for f in fenster))
+    if hinweise:
+        text += " " + " ".join(hinweise)
+    return {"ok": True, "text": text, "fenster": fenster, "hinweise": hinweise}
+
+
+# ---------------------------------------------------------------------------
+# Lautstärke
+# ---------------------------------------------------------------------------
+
+def lautstaerke_setzen(prozent, ausfuehren=None) -> dict:
+    """Stellt die Lautstärke des Macs (0 bis 100) ein."""
+    wert = prozent
+    if isinstance(wert, str):
+        try:
+            wert = float(wert.strip().rstrip("%").strip())
+        except ValueError:
+            wert = None
+    if isinstance(wert, bool) or not isinstance(wert, (int, float)) or wert != wert \
+            or wert in (float("inf"), float("-inf")) or wert != int(wert) or not 0 <= int(wert) <= 100:
+        return {"ok": False, "fehler": "Die Lautstärke geht von 0 bis 100."}
+    wert = int(wert)
+    code, ausgabe, fehler = befehl_lauf(ausfuehren or systembefehl,
+                                        ["osascript", "-e", "set volume output volume %d" % wert], 8)
+    if code != 0:
+        return {"ok": False, "fehler": "Die Lautstärke ließ sich nicht ändern: %s"
+                                       % (_eine_zeile(fehler or ausgabe, 100) or "Code %d" % code)}
+    return {"ok": True, "prozent": wert, "text": "Die Lautstärke steht auf %d Prozent." % wert}
 
 
 # =========================================================================
@@ -21671,6 +22778,9 @@ class JarvisWeb:
         # [P6 Stimme] Anfang
         # [P6 Stimme] Ende
         # [P7 Start] Anfang
+        if pfad == "/api/hochfahren":
+            # Die Seite ruft das beim Laden: Mac prüfen, einmal je Tag mit dem Tag begrüßen.
+            return self._antworten(behandler, 200, hochfahren(self.agent))
         # [P7 Start] Ende
         return self._antworten(behandler, 404, {"fehler": "Das gibt es nicht."})
 
@@ -22945,7 +24055,6 @@ SYSTEM_AKTIONEN = {
 PARAMETER_AKTIONEN = {
     "ordner_zeigen": (["ls", "-la", "{pfad}"], "pfad", "Inhalt eines Ordners"),
     "programm_oeffnen": (["open", "-a", "{programm}"], "programm", "Programm starten"),
-    "datei_oeffnen": (["open", "{pfad}"], "pfad", "Datei öffnen"),
 }
 
 # Alles hier drin fragt vor der Ausführung nach einer Freigabe.
@@ -23141,6 +24250,34 @@ FREIGABE_ANGABEN["ordnen_ausfuehren"] = _angaben_ordnen
 FREIGABE_ANGABEN["ordnen_rueckgaengig"] = _angaben_ordnen_zurueck
 FREIGABE_AUFLOESEN["ordnen_ausfuehren"] = _aufloesen_ordnen
 FREIGABE_AUFLOESEN["ordnen_rueckgaengig"] = _aufloesen_ordnen
+
+
+def _start_kurz(wert, grenze=80):
+    """Ein Wert als eine Zeile, höchstens ``grenze`` Zeichen."""
+    text = " ".join(str(wert if wert is not None else "").split())
+    return text if len(text) <= grenze else text[:grenze].rstrip() + " …"
+
+
+def _angaben_kurzbefehl(a):
+    mit = " mit der Eingabe „%s“" % _start_kurz(a.get("eingabe")) if a.get("eingabe") else ""
+    wie = "Über die Kurzbefehle-App; was er tut, legt der Kurzbefehl selbst fest."
+    if a.get("kurzbefehl_nach_fremdem"):
+        wie += " Ich frage, weil ich gerade fremden Text gelesen habe."
+    elif a.get("kurzbefehl_erstmals"):
+        wie += " Das ist der erste Lauf dieses Kurzbefehls; danach läuft er ohne Rückfrage."
+    return "den Kurzbefehl „%s“ ausführen%s" % (_start_kurz(a.get("name")), mit), wie
+
+
+def _aufloesen_kurzbefehl(werkzeuge, argumente):
+    return {"kurzbefehl_erstmals": not kurzbefehl_bekannt(str(argumente.get("name") or ""),
+                                                          werkzeuge.memory.db_pfad),
+            "kurzbefehl_nach_fremdem": werkzeuge.fremdes_gelesen()}
+
+
+# Der Kurzbefehl steht nicht in FREIGABE_PFLICHTIG: Gefragt wird nur beim ersten Lauf eines
+# Namens und nach fremdem Text - das entscheidet Werkzeuge._kurzbefehl_ausfuehren.
+FREIGABE_ANGABEN["kurzbefehl_ausfuehren"] = _angaben_kurzbefehl
+FREIGABE_AUFLOESEN["kurzbefehl_ausfuehren"] = _aufloesen_kurzbefehl
 # [P7 Start] Ende
 
 
@@ -23221,6 +24358,9 @@ class Werkzeuge:
         self.inhalte = Inhalte(self.memory, self.werkstatt, anzeige=self)
         self.mac.db_pfad = self.memory.db_pfad
         self.mac.kunden_quelle = self._kundennamen
+        # Austauschbare Ausführer für Prüfungen: None heißt, die echten Programme laufen.
+        self.steuerung_ausfuehren = None
+        self.hardware_messhilfen = {}
         # [P7 Start] Ende
 
     def freigabe_kanal_setzen(self, kanal):
@@ -23744,6 +24884,24 @@ class Werkzeuge:
             # [P6 Stimme] Anfang
             # [P6 Stimme] Ende
             # [P7 Start] Anfang
+            # -- Start und Steuerung --
+            werkzeug("hardware_bericht",
+                     "Prüft den Rechner: Last, Speicher, Festplatte, Netz, WLAN, Wärme, Kamera, Mikrofon, "
+                     "Dienste. Nur lesend; was nicht messbar ist, steht als Lücke da.", {}),
+            werkzeug("kurzbefehle_liste",
+                     "Zeigt die Kurzbefehle im Ordner '%s' der Kurzbefehle-App (Licht, Szenen, Fokus)."
+                     % KURZBEFEHL_ORDNER, {}),
+            werkzeug("kurzbefehl_ausfuehren",
+                     "Führt einen Kurzbefehl aus dem Ordner '%s' aus – Licht, Szene, Fokus. Nur Namen aus "
+                     "kurzbefehle_liste. Der erste Lauf je Name fragt nach; was er tut, sehe ich nicht."
+                     % KURZBEFEHL_ORDNER,
+                     {"name": text, "eingabe": text, "begruendung": begruendung}, ["name", "begruendung"]),
+            werkzeug("fenster_anordnen",
+                     "Ordnet die Fenster nach einem festen Layout: zentrale (Zentrale auf dem zweiten "
+                     "Bildschirm), arbeiten, praesentation.",
+                     {"layout": {"type": "string", "enum": sorted(LAYOUTS)}}, ["layout"]),
+            werkzeug("lautstaerke_setzen", "Stellt die Lautstärke des Macs (0 bis 100).",
+                     {"prozent": ganz}, ["prozent"]),
             # -- Dateien und Inhalte --
             werkzeug("datei_oeffnen",
                      "Öffnet ein Dokument, Bild oder Medium (PDF, Word, Excel, Foto, Musik, Video) mit dem "
@@ -24277,6 +25435,18 @@ class Werkzeuge:
         # [P6 Stimme] Anfang
         # [P6 Stimme] Ende
         # [P7 Start] Anfang
+        if name == "hardware_bericht":
+            return self._hardware_pruefen()
+        if name == "kurzbefehle_liste":
+            return kurzbefehle_liste(ausfuehren=self.steuerung_ausfuehren)
+        if name == "kurzbefehl_ausfuehren":
+            return self._kurzbefehl_ausfuehren(a)
+        if name in ("fenster_anordnen", "lautstaerke_setzen"):
+            if self.im_hintergrund():
+                return {"ok": False, "fehler": "Im Hintergrund ändere ich weder Fenster noch Lautstärke."}
+            if name == "fenster_anordnen":
+                return fenster_anordnen(a.get("layout", ""), ausfuehren=self.steuerung_ausfuehren)
+            return lautstaerke_setzen(a.get("prozent"), ausfuehren=self.steuerung_ausfuehren)
         if name == "datei_oeffnen":
             return self.mac.oeffnen(a.get("pfad", ""))
         if name == "ordnen_planen":
@@ -24369,6 +25539,40 @@ class Werkzeuge:
     # [P6 Stimme] Anfang
     # [P6 Stimme] Ende
     # [P7 Start] Anfang
+    def _hardware_pruefen(self) -> dict:
+        """Das Werkzeug ``hardware_bericht``: der Rechnerbericht in einer Form, die Claude gut lesen kann."""
+        bericht = hardware_bericht(stimme=self.stimme, tools=self, **self.hardware_messhilfen)
+        return {"ok": True, "text": bericht["kurz"], "zeit": bericht["zeit"],
+                "werte": [{"name": w["name"], "status": w["status"], "text": w["text"]}
+                          for w in bericht["werte"]]}
+
+    def _kurzbefehl_ausfuehren(self, a: dict) -> dict:
+        """Das Werkzeug ``kurzbefehl_ausfuehren``.
+
+        Der Name muss in der Liste des Ordners stehen (sonst wird gar nicht erst gefragt).
+        Beim ersten Lauf eines Namens und nach fremdem Text fragt es nach; nach einem Ja
+        gilt der Name als bekannt. Im Hintergrund läuft nie ein Kurzbefehl. Die Ausgabe
+        des Kurzbefehls geht nie an Claude zurück - nur "gelaufen" oder ein Fehlertext.
+        """
+        if self.im_hintergrund():
+            return {"ok": False, "abgebrochen": True,
+                    "fehler": "Im Hintergrund führe ich keine Kurzbefehle aus – dabei sieht niemand zu."}
+        eingabe = a.get("eingabe") or ""
+        pruefung = kurzbefehl_pruefen(a.get("name"), eingabe, ausfuehren=self.steuerung_ausfuehren,
+                                      pruefer=parameter_pruefen)
+        if not pruefung["ok"]:
+            return pruefung
+        name = pruefung["name"]
+        erstmals = not kurzbefehl_bekannt(name, self.memory.db_pfad)
+        if erstmals or self.fremdes_gelesen():
+            entscheidung = self._freigabe("kurzbefehl_ausfuehren", dict(a, name=name))
+            if not entscheidung.get("erlaubt"):
+                return {"ok": False, "abgebrochen": True, "text": "Abgebrochen. %s" % entscheidung.get("grund", "")}
+            if erstmals:
+                kurzbefehl_merken(name, self.memory.db_pfad)
+        return kurzbefehl_ausfuehren(name, eingabe, ausfuehren=self.steuerung_ausfuehren,
+                                     pruefer=parameter_pruefen)
+
     def _kundennamen(self) -> list:
         """Firmennamen aus Kontakten und Interessenten - Ordnernamen für "nach_kunde"."""
         namen = []
@@ -24393,6 +25597,13 @@ class Werkzeuge:
             return {"ok": False,
                     "fehler": "'%s' ist keine registrierte Abfrage. Ich führe nur "
                               "diese aus: %s." % (was, ", ".join(sorted(SYSTEM_AKTIONEN)))}
+        if schluessel == "wlan":
+            # networksetup -getairportnetwork meldet ab macOS 15 "nicht verbunden", auch wenn man
+            # verbunden ist; der Name kommt deshalb aus dem Hardware-Bericht.
+            wlan = wlan_bericht(self.hardware_messhilfen.get("ausfuehren"), self.hardware_messhilfen.get("plattform"))
+            if wlan["status"] == "fehlt":
+                return {"ok": False, "fehler": wlan["text"]}
+            return {"ok": True, "was": SYSTEM_AKTIONEN[schluessel][1], "text": wlan["text"]}
         befehl, beschreibung = SYSTEM_AKTIONEN[schluessel]
         return self._befehl_ausfuehren(befehl, beschreibung)
 
@@ -24653,6 +25864,9 @@ ZUSATZREGELN = (
     # [P6 Stimme] Anfang
     # [P6 Stimme] Ende
     # [P7 Start] Anfang
+        "Licht, Szenen und Fokus gehen nur über Kurzbefehle: erst kurzbefehle_liste, dann "
+        "kurzbefehl_ausfuehren mit einem Namen aus der Liste. Was ein Kurzbefehl getan hat, siehst "
+        "du nicht - sag nur, dass er gelaufen ist.",
         "Dateien ordnest du immer erst mit ordnen_planen (zeigt nur den Plan); verschoben wird erst "
         "nach der Freigabe mit ordnen_ausfuehren. Beiträge für soziale Netze sind Entwürfe - "
         "veröffentlicht wird nie etwas von dir.",
@@ -25426,6 +26640,22 @@ class JarvisAgent:
     # [P6 Stimme] Anfang
     # [P6 Stimme] Ende
     # [P7 Start] Anfang
+    def begruessung(self, bericht: dict) -> str:
+        """Die Begrüßung beim Hochfahren: ein Satz zum Rechner, dann der Tag.
+
+        Die Fakten (Termine, Post, Wetter, Offenes) kommen aus denselben Quellen wie im
+        Morgenbriefing; was nicht abrufbar war, sagt Claude kurz, erfunden wird nichts.
+        Ohne Schlüssel gibt es die nackten Fakten.
+        """
+        bausteine = self._bausteine_sammeln(morgens=True)
+        kurz = str((bericht or {}).get("kurz") or "")
+        if not self.einsatzbereit():
+            return "Hallo. Ich bin da. " + kurz + "\n" + bausteine
+        auftrag = ("Begrüße %s beim Hochfahren in drei bis fünf gesprochenen Sätzen: ein Satz zum Rechner "
+                   "(nur Auffälliges), dann der Tag – Termine, Post, Wetter, Offenes. Erfinde nichts; was "
+                   "nicht abrufbar war, sag kurz.\n\nRechner: %s\n\nDaten:\n%s"
+                   % (NUTZER_NAME, kurz, bausteine))
+        return self.denken(auftrag, protokollieren=False, anzeigen=False)
     # [P7 Start] Ende
 
     # -- Übersicht ----------------------------------------------------------
@@ -25458,6 +26688,7 @@ class JarvisAgent:
 #     python3 jarvis.py stimmen     ElevenLabs-Stimme aussuchen
 #     python3 jarvis.py test        Selbsttest
 #     python3 jarvis.py einrichten  geführte Ersteinrichtung
+#     python3 jarvis.py hardware    den Mac prüfen: Last, Speicher, Platte, Netz, Wärme
 #     python3 jarvis.py zugang      einen Schlüssel eintragen oder ersetzen
 #     python3 jarvis.py zugang mail Gmail oder ein anderes Postfach verbinden
 #     python3 jarvis.py zugang telegram  Handy verbinden: schreiben und sprechen von unterwegs
@@ -25658,7 +26889,13 @@ def dauerbetrieb(dienst: bool = False):
                          daemon=True, name="jarvis-telegram").start()
         print("[telegram] Ich höre auch auf Nachrichten vom Handy.")
 
-    stimme.sprich("Ich bin da. Sag Hey Jarvis, wenn du etwas brauchst.")
+    # Beim Hochfahren: den Mac prüfen und mit dem Tag begrüßen (einmal je Tag, sonst "wieder da").
+    try:
+        gruss = hochfahren(agent, stimme).get("begruessung") or "Ich bin da."
+    except Exception as fehler:
+        print("[hochfahren] %s" % fehler)
+        gruss = "Ich bin da."
+    stimme.sprich(gruss + " Sag Hey Jarvis, wenn du etwas brauchst.")
     print("\nIch höre zu. Abbrechen mit Strg und C.\n")
     mikro_gemeldet = 0.0
     mikro_seit = 0.0
@@ -26477,6 +27714,9 @@ def hauptprogramm(argumente=None) -> int:
     # [P6 Stimme] Anfang
     # [P6 Stimme] Ende
     # [P7 Start] Anfang
+    elif modus == "hardware":
+        print(hardware_text(hardware_bericht(stimme=Stimme(), tools=JarvisAgent().tools)))
+        return 0
     # [P7 Start] Ende
     elif modus in ("hilfe", "--help", "-h", "help"):
         print(__doc__)
