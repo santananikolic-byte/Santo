@@ -287,6 +287,24 @@ CALDAV_ZEITZONE = _text("CALDAV_ZEITZONE", "Europe/Vienna")
 # [P5 Sicht] Anfang
 # [P5 Sicht] Ende
 # [P6 Stimme] Anfang
+# Welche Stimme spricht: auto (Fish Audio nur mit Schlüssel UND Stimmen-ID, sonst ElevenLabs,
+# sonst die Mac-Stimme), fish, elevenlabs oder mac.
+STIMME_ANBIETER = _text("STIMME_ANBIETER", "auto")
+FISH_API_KEY = _text("FISH_API_KEY")
+# Die Kennung der Fish-Stimme (fish.audio -> Stimme öffnen -> Adresse oder "Copy ID").
+FISH_STIMME_ID = _text("FISH_STIMME_ID")
+FISH_MODELL = _text("FISH_MODELL", "s2.1-pro")
+# normal (beste Qualität), balanced (weniger Wartezeit) oder low (am schnellsten).
+FISH_LATENZ = _text("FISH_LATENZ", "balanced")
+# Die Web-App spricht mit der Serverstimme (Fish/ElevenLabs) statt mit der Browserstimme.
+# Standardmäßig aus: das kostet bei jedem Satz Guthaben beim Stimmen-Anbieter.
+STIMME_IM_BROWSER = _wahrheit("STIMME_IM_BROWSER", False)
+# So viele Millisekunden vergehen vom Anzeigen des Pegels bis der Ton wirklich zu hören ist.
+STIMME_VORLAUF_MS = _ganzzahl("STIMME_VORLAUF_MS", 60)
+# Dolmetscher: welches Gehirn übersetzt (auto = Gemini wenn vorhanden, sonst Claude; gemini; claude).
+DOLMETSCHER_GEHIRN = _text("DOLMETSCHER_GEHIRN", "auto")
+# Welche Gastsprachen der Dolmetscher anbietet (Kürzel, kommagetrennt).
+DOLMETSCHER_SPRACHEN = _text("DOLMETSCHER_SPRACHEN", "tr,hr,sr,bs,sq,pl,ro,hu,en,uk,ru,ar")
 # [P6 Stimme] Ende
 # [P7 Start] Anfang
 # Für welche Plattformen die Inhalte-Planung Beiträge schreibt.
@@ -380,6 +398,7 @@ def konfig_uebersicht() -> dict:
         # [P5 Sicht] Anfang
         # [P5 Sicht] Ende
         # [P6 Stimme] Anfang
+        "Fish Audio": bool(FISH_API_KEY),
         # [P6 Stimme] Ende
         # [P7 Start] Anfang
         # [P7 Start] Ende

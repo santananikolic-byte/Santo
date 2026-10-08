@@ -104,11 +104,13 @@ def gehirn_waehlen(frage: str, gemini_da: bool = None, vorher: str = None) -> tu
 # -- Gemini -----------------------------------------------------------------
 
 def gemini_fragen(frage: str, systemtext: str, verlauf: list = None,
-                  timeout: int = 30) -> dict:
+                  timeout: int = 30, max_tokens: int = None) -> dict:
     """Fragt Gemini. Rückgabe: ``{"ok", "text", "tokens_ein", "tokens_aus"}``.
 
     Der Verlauf ist die Claude-Liste; übernommen wird nur Text - auch der
     Text aus Claudes Antworten. Werkzeugaufrufe und Ergebnisse bleiben draußen.
+    ``max_tokens`` hebt die Antwortgrenze für diesen Aufruf (etwa beim Übersetzen langer
+    Sätze); ohne Angabe gilt ``GEMINI_MAX_TOKENS``.
     """
     if not config.GEMINI_API_KEY:
         return {"ok": False, "fehler": "Kein Gemini-Schlüssel hinterlegt."}
@@ -132,7 +134,7 @@ def gemini_fragen(frage: str, systemtext: str, verlauf: list = None,
 
     koerper = {"systemInstruction": {"parts": [{"text": systemtext}]},
                "contents": inhalte,
-               "generationConfig": {"maxOutputTokens": config.GEMINI_MAX_TOKENS}}
+               "generationConfig": {"maxOutputTokens": int(max_tokens or config.GEMINI_MAX_TOKENS)}}
     anfrage = urllib.request.Request(
         GEMINI_URL % config.GEMINI_MODELL, data=json.dumps(koerper).encode("utf-8"),
         method="POST", headers={"x-goog-api-key": config.GEMINI_API_KEY,
