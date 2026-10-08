@@ -66,6 +66,7 @@ from modules.telefonagent import Telefonagent, auftraggeber, telefon_datum_lang,
 from modules.vorschlaege import Vorschlaege
 # [P4 Büro] Ende
 # [P5 Sicht] Anfang
+from modules.sicht import Handruhe, sicht_stand_bauen, sicht_stand_text
 # [P5 Sicht] Ende
 # [P6 Stimme] Anfang
 # [P6 Stimme] Ende
@@ -447,6 +448,7 @@ class Werkzeuge:
         self.kalender.memory = self.memory  # darin liegt der Papierkorb für abgesagte Termine
         # [P4 Büro] Ende
         # [P5 Sicht] Anfang
+        self.handruhe = Handruhe(self.memory, anzeige=self)
         # [P5 Sicht] Ende
         # [P6 Stimme] Anfang
         # [P6 Stimme] Ende
@@ -830,7 +832,8 @@ class Werkzeuge:
                      ["von", "nach"]),
             werkzeug("umschauen",
                      "Nimmt ein Einzelbild der Kamera auf und beschreibt, was zu sehen "
-                     "ist. Kein Dauervideo.",
+                     "ist. Kein Dauervideo auf dem Server; das Live-Bild gibt es nur auf der "
+                     "Seite Sicht im Browser.",
                      {"frage": text, "behalten": wahr}),
 
             # -- Browser --
@@ -993,6 +996,9 @@ class Werkzeuge:
                      {"id": ganz, "angenommen": wahr}, ["id", "angenommen"]),
             # [P4 Büro] Ende
             # [P5 Sicht] Anfang
+            werkzeug("sicht_stand",
+                     "Stand der Kamera-Seite Sicht: ob die Live-Kamera an ist, die Handerkennung geladen ist "
+                     "und die letzte Handruhe-Messung. Nur lesend; Selbstbeobachtung, kein Medizinprodukt.", {}),
             # [P5 Sicht] Ende
             # [P6 Stimme] Anfang
             # [P6 Stimme] Ende
@@ -1555,6 +1561,10 @@ class Werkzeuge:
             return self.vorschlaege.beantworten(a.get("id"), a.get("angenommen"))
         # [P4 Büro] Ende
         # [P5 Sicht] Anfang
+        if name == "sicht_stand":
+            stand = sicht_stand_bauen(self, schreiben=True, diskret=False)
+            return dict({"ok": True, "text": sicht_stand_text(stand)},
+                        **{k: stand[k] for k in ("an", "dateien_da", "geste", "handruhe_letzte", "erholung", "hinweis")})
         # [P5 Sicht] Ende
         # [P6 Stimme] Anfang
         # [P6 Stimme] Ende

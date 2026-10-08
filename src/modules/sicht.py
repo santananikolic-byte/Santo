@@ -106,16 +106,12 @@ _SICHT_SPERRE = threading.Lock()
 
 def sicht_ordner() -> Path:
     """Wo die Dateien liegen: ``modelle/sicht-<Version>`` (der Ordner ist nicht im Repository)."""
-    wurzel = getattr(config, "MODELL_VERZEICHNIS", None) or (config.BASIS / "modelle")
-    return Path(wurzel) / ("sicht-" + SICHT_VERSION)
+    return Path(config.MODELL_VERZEICHNIS) / ("sicht-" + SICHT_VERSION)
 
 
 def sicht_an() -> bool:
     """Ist die Live-Kamera eingeschaltet? Ohne ``SICHT_AN`` bleibt die Seite zu."""
-    try:
-        return bool(config.SICHT_AN)
-    except (AttributeError, NameError):
-        return False
+    return bool(config.SICHT_AN)
 
 
 def _sicht_soll(eintrag) -> tuple:
@@ -484,7 +480,7 @@ def messung_pruefen(daten) -> tuple:
     sauber["bilder"] = bilder
     laenge = daten.get("handlaenge_mm")
     if laenge is None:
-        laenge = getattr(config, "HANDLAENGE_MM", 95)
+        laenge = config.HANDLAENGE_MM
     if not _sicht_echte_zahl(laenge):
         return None, "Der Wert 'handlaenge_mm' ist keine Zahl."
     if laenge < 60 or laenge > 130:
@@ -675,11 +671,11 @@ class Handruhe:
                     erholung_stand = {"wert": antwort.get("wert"), "band": antwort.get("band"),
                                       "quelle": antwort.get("quelle"), "tag": antwort.get("tag")}
         try:
-            laenge = float(getattr(config, "HANDLAENGE_MM", 95))
+            laenge = float(config.HANDLAENGE_MM)
         except (TypeError, ValueError):
             laenge = 95.0
         return {"ok": True, "an": sicht_an(), "dateien_da": sicht_bereit(),
-                "geste": bool(getattr(config, "GESTEN_FREIGABE", False)),
+                "geste": bool(config.GESTEN_FREIGABE),
                 "handlaenge_mm": laenge, "schreiben": bool(schreiben), "diskret": bool(diskret),
                 "erholung": erholung_stand, "handruhe_letzte": letzte,
                 "vorschlag": vorschlag if (schreiben and not diskret) else None,
@@ -693,7 +689,7 @@ def sicht_stand_bauen(werkzeuge, schreiben: bool = True, diskret: bool = False) 
     """
     vorschlag = None
     vorschlaege = getattr(werkzeuge, "vorschlaege", None)
-    if schreiben and not diskret and getattr(config, "GESTEN_FREIGABE", False) \
+    if schreiben and not diskret and config.GESTEN_FREIGABE \
             and callable(getattr(vorschlaege, "letzter_offener", None)):
         try:
             letzter = vorschlaege.letzter_offener()
@@ -758,7 +754,7 @@ def vorschlag_per_geste(web, daten) -> tuple:
     einzeln nach Freigabe. Der Herkunftskopf ist schon von der Web-App geprüft.
     Gibt ``(Statuscode, Antwort)`` zurück.
     """
-    if not getattr(config, "GESTEN_FREIGABE", False):
+    if not config.GESTEN_FREIGABE:
         return 403, {"ok": False, "text": "Die Gesten-Freigabe ist ausgeschaltet."}
     vorschlaege = getattr(web.agent.tools, "vorschlaege", None)
     if not callable(getattr(vorschlaege, "letzter_offener", None)):

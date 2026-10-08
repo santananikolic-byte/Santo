@@ -18,6 +18,7 @@ Terminal spricht, nimmt ``hoeren``.
     python3 jarvis.py export      Buchhaltung als CSV
     python3 jarvis.py stimme      Stimmprofil einlernen
     python3 jarvis.py stimmen     ElevenLabs-Stimme aussuchen
+    python3 jarvis.py sicht       Kamera-Seite: laden (Handerkennung holen), an oder aus
     python3 jarvis.py test        Selbsttest
     python3 jarvis.py einrichten  geführte Ersteinrichtung
     python3 jarvis.py hardware    den Mac prüfen: Last, Speicher, Platte, Netz, Wärme
@@ -63,6 +64,7 @@ from modules.webapp import JarvisWeb, STANDARD_PORT
 # [P4 Büro] Anfang
 # [P4 Büro] Ende
 # [P5 Sicht] Anfang
+from modules.sicht import sicht_befehl
 # [P5 Sicht] Ende
 # [P6 Stimme] Anfang
 # [P6 Stimme] Ende
@@ -1066,6 +1068,8 @@ def hauptprogramm(argumente=None) -> int:
     # [P4 Büro] Anfang
     # [P4 Büro] Ende
     # [P5 Sicht] Anfang
+    elif modus == "sicht":
+        return sicht_befehl(argumente[1:])
     # [P5 Sicht] Ende
     # [P6 Stimme] Anfang
     # [P6 Stimme] Ende
