@@ -1449,9 +1449,9 @@ def pruefung_freier_dienst(agent):
             laenge = int(self.headers.get("Content-Length") or 0)
             anfrage = json.loads(self.rfile.read(laenge).decode("utf-8"))
             gesehen.append({"pfad": self.path, "kopf": dict(self.headers), "body": anfrage})
-            if modus["fehler"]:
-                roh = json.dumps({"error": {"message": "zu viel"}}).encode("utf-8")
-                self.send_response(modus["fehler"])
+            if modus["fehler"] or anfrage.get("model") in modus.get("voll", ()):
+                roh = json.dumps([{"error": {"message": "zu viel"}}]).encode("utf-8")
+                self.send_response(modus["fehler"] or 429)
             else:
                 hat_ergebnis = any(m.get("role") == "tool" for m in anfrage["messages"])
                 if hat_ergebnis:
@@ -1545,6 +1545,33 @@ def pruefung_freier_dienst(agent):
         pruefen("Die Gedanken-Signatur von Gemini geht unverändert zurück",
                 any(c.get("extra_content") == {"google": {"thought_signature": "SIG123"}}
                     for m in zweite["body"]["messages"] for c in m.get("tool_calls") or []))
+
+        # Modellkette: ist das erste Modell aufgebraucht, nimmt Jarvis das nächste
+        config.FREIER_DIENST_MODELL = "voll-modell,gut-modell"
+        modus["voll"] = {"voll-modell"}
+        vorher = len(gesehen)
+        agent.verlauf_leeren()
+        text = agent.denken("Bitte merk dir die Notiz Kette Nikolic")
+        modelle = [g["body"]["model"] for g in gesehen[vorher:]]
+        pruefen("Bei aufgebrauchtem Modell nimmt Jarvis das nächste der Kette",
+                text == "Notiert, Chef." and modelle[0] == "voll-modell"
+                and "gut-modell" in modelle, ", ".join(modelle))
+        vorher = len(gesehen)
+        agent.denken("Und noch eine Notiz Kette Zwei")
+        pruefen("Das aufgebrauchte Modell wird kurz übersprungen, nicht ständig neu versucht",
+                "voll-modell" not in [g["body"]["model"] for g in gesehen[vorher:]])
+        modus["voll"] = set()
+        config.FREIER_DIENST_MODELL = "llama-3.3-70b-versatile"
+        dienst_modul._PAUSE.clear()
+
+        # 429 beim Einrichten heißt: Schlüssel gültig, also speichern
+        config.FREIER_DIENST_SCHLUESSEL = ""
+        modus["fehler"] = 429
+        roh = senden({"dienst": "groq", "schluessel": "gsk_" + "k" * 30})
+        pruefen("Ein 429 beim Einrichten speichert den gültigen Schlüssel trotzdem",
+                json.loads(roh)["ok"] is True and config.FREIER_DIENST_SCHLUESSEL == "gsk_" + "k" * 30
+                and "Kontingent" in json.loads(roh)["text"])
+        modus["fehler"] = 0
 
         modus["fehler"] = 429
         meldung = agent.denken("Hallo")

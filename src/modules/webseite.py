@@ -246,12 +246,12 @@ body[data-zustand="wach"] .zustandstext{color:var(--akzent)}
         border-radius:9px;background:var(--tief);border:1px solid var(--rand-hell);
         color:var(--text);font-size:14px">
         <option value="groq" data-modell="llama-3.3-70b-versatile">Groq</option>
-        <option value="gemini" data-modell="gemini-flash-latest">Google Gemini</option>
+        <option value="gemini" data-modell="gemini-flash-latest,gemini-flash-lite-latest,gemini-3.8-flash,gemini-3.5-flash,gemini-3.1-flash-lite">Google Gemini</option>
         <option value="openrouter" data-modell="meta-llama/llama-3.3-70b-instruct:free">OpenRouter</option>
       </select>
       <input id="dienstModell" type="text" value="llama-3.3-70b-versatile"
              autocomplete="off" spellcheck="false" style="margin-bottom:8px"
-             title="Modellname - bei Bedarf ändern">
+             title="Modellnamen, durch Komma getrennt. Ist eines aufgebraucht, nimmt Jarvis das nächste.">
       <input id="dienstSchluessel" type="password" placeholder="Schlüssel einfügen"
              autocomplete="off" spellcheck="false">
     </div>

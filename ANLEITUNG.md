@@ -48,8 +48,32 @@ Wenn Claude Code fertig ist, liegt im Ordner eine Datei `JARVIS.command`.
 Doppelklick drauf (beim ersten Mal Rechtsklick → „Öffnen", weil macOS fremd­
 gestartete Programme erst bestätigen lässt).
 
-Beim ersten Start fragt er nach deinen Zugängen — E-Mail, Telegram, dein
-Anthropic-Schlüssel. Danach läuft er.
+Jarvis startet immer und öffnet sich im Browser (`http://localhost:8765`). Beim
+ersten Mal fragt ein Fenster, **womit er denken soll**. Du hast drei Wege, und
+keiner davon zwingt dich zu Guthaben:
+
+1. **Gratis-Schlüssel (der schnellste Weg, kostenlos).** Hol dir bei Google oder
+   Groq einen Schlüssel ohne Karte und ohne Guthaben:
+   `aistudio.google.com/apikey` (Google Gemini) oder `console.groq.com/keys`
+   (Groq). Wähl im Fenster den Anbieter, füg den Schlüssel ein, klick auf
+   „Gratis-Dienst nutzen“. Jarvis probiert ihn sofort aus.
+   Bei Google trägt er mehrere Modelle ein: Ist das Gratis-Kontingent eines
+   aufgebraucht, nimmt er automatisch das nächste. Grenzen pro Minute und Tag
+   gibt es trotzdem. Das Gespräch geht an den Anbieter.
+2. **Ein Modell auf deinem Rechner (Ollama).** Kostenlos und ohne Limit, aber
+   langsamer und schwächer. Ollama (`ollama.com/download`) muss installiert und
+   geöffnet sein.
+3. **Anthropic-Schlüssel.** Claude antwortet, das kostet Guthaben unter
+   `console.anthropic.com`.
+
+Danach fragt er nach den übrigen Zugängen — E-Mail, Telegram. Die sind
+freiwillig.
+
+**Ohne Fenster, per Terminal** (zum Beispiel für Google): Diese Zeilen tragen
+den Gratis-Schlüssel direkt ein. `DEIN-SCHLUESSEL` ersetzt du durch deinen:
+
+    cd ~/Jarvis
+    printf '\nFREIER_DIENST_URL=https://generativelanguage.googleapis.com/v1beta/openai\nFREIER_DIENST_MODELL=gemini-flash-latest,gemini-flash-lite-latest,gemini-3.8-flash,gemini-3.5-flash,gemini-3.1-flash-lite\nFREIER_DIENST_SCHLUESSEL=DEIN-SCHLUESSEL\n' >> config/.env
 
 Bei der E-Mail genügt deine Adresse. Die Servernamen kennt er selbst, und er
 meldet sich einmal an, um zu prüfen, ob es wirklich stimmt. Bei Gmail, iCloud

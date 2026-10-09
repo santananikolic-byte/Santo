@@ -39,9 +39,21 @@ auf `JARVIS.command`, dann *Öffnen*, dann im Fenster nochmal *Öffnen*.
 
 ### Was gebraucht wird
 
-Nur **ein einziger Schlüssel**: der von Anthropic. Die Einrichtung öffnet die
-Seite, nimmt den Schlüssel entgegen und probiert ihn sofort aus — ein Schlüssel,
-der erst beim ersten Gespräch auffällt, hilft niemandem.
+Jarvis braucht ein Gehirn, und dafür gibt es drei Wege. Das Startfenster im
+Browser (`http://localhost:8765`) führt durch alle drei und probiert jeden
+Zugang sofort aus — ein Schlüssel, der erst beim ersten Gespräch auffällt, hilft
+niemandem:
+
+1. **Gratis-Schlüssel** von Google Gemini (`aistudio.google.com/apikey`), Groq
+   (`console.groq.com/keys`) oder OpenRouter: ohne Karte, ohne Guthaben. Grenzen
+   pro Minute und Tag gelten; bei Google trägt Jarvis mehrere Modelle ein und
+   nimmt das nächste, wenn eines aufgebraucht ist. Das Gespräch geht an den
+   Anbieter.
+2. **Lokales Modell (Ollama)**: kostenlos, ohne Limit, nichts verlässt den
+   Rechner — dafür langsamer und schwächer.
+3. **Anthropic-Schlüssel**: Claude antwortet, kostet Guthaben.
+
+Der Vorrang bei mehreren: Anthropic, dann Gratis-Dienst, dann lokal.
 
 Alles andere ist freiwillig: Sprechen kann Jarvis mit der macOS-Stimme (gratis,
 schon da), zuhören mit lokaler Spracherkennung (gratis). Telegram, E-Mail und

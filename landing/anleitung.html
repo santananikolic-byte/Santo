@@ -305,7 +305,7 @@ footer {
     <ul class="zutaten">
       <li><b>Mac</b> mit Terminal</li>
       <li><b>Claude Code</b> installiert</li>
-      <li><b>1</b> Anthropic-Schlüssel</li>
+      <li><b>1</b> Gratis-Schlüssel (Google oder Groq)</li>
       <li>ungefähr <b>30</b> Minuten</li>
     </ul>
   </div>
@@ -400,9 +400,33 @@ wirklich ab, bevor du fertig meldest.</code></pre>
   <div class="bahn">
     <h2>Beim ersten Start</h2>
     <p>
-      Er fragt nach deinen Zugängen: dem Anthropic-Schlüssel, Telegram und
-      deinem Postfach. Nur der Schlüssel ist Pflicht, alles andere kannst du
-      überspringen und später nachholen.
+      Jarvis startet immer und öffnet sich im Browser unter
+      <code>localhost:8765</code>. Ein Fenster fragt, <b>womit er denken
+      soll</b>. Keiner der drei Wege zwingt dich zu Guthaben:
+    </p>
+    <h3>1 · Gratis-Schlüssel — der schnellste Weg, kostenlos</h3>
+    <p>
+      Hol dir bei Google (<code>aistudio.google.com/apikey</code>) oder Groq
+      (<code>console.groq.com/keys</code>) einen Schlüssel — ohne Karte, ohne
+      Guthaben. Im Fenster Anbieter wählen, Schlüssel einfügen, auf
+      „Gratis-Dienst nutzen“ klicken. Er probiert ihn sofort aus. Bei Google
+      trägt er mehrere Modelle ein: ist das Gratis-Kontingent eines aufgebraucht,
+      nimmt er automatisch das nächste. Grenzen pro Minute und Tag gibt es
+      trotzdem, und das Gespräch geht an den Anbieter.
+    </p>
+    <h3>2 · Ein Modell auf deinem Rechner</h3>
+    <p>
+      Über Ollama (<code>ollama.com/download</code>): kostenlos und ohne Limit,
+      aber langsamer und schwächer. Ollama muss installiert und geöffnet sein.
+    </p>
+    <h3>3 · Anthropic-Schlüssel</h3>
+    <p>
+      Dann antwortet Claude. Das kostet Guthaben unter
+      <code>console.anthropic.com</code>.
+    </p>
+    <p>
+      Danach fragt er nach Telegram und deinem Postfach. Beides ist freiwillig
+      und lässt sich später nachholen.
     </p>
 
     <h3>E-Mail</h3>

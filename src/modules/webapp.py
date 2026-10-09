@@ -395,7 +395,7 @@ class JarvisWeb:
             if vorgabe is None:
                 return self._antworten(behandler, 200, {
                     "ok": False, "text": "Diesen Dienst kenne ich nicht."})
-            if len(schluessel) < 10 or len(modell) > 100 or any(c.isspace() for c in modell):
+            if len(schluessel) < 10 or len(modell) > 300 or any(c.isspace() for c in modell):
                 return self._antworten(behandler, 200, {
                     "ok": False, "text": "Schlüssel oder Modellname sehen nicht richtig "
                                          "aus. Bitte vollständig kopieren."})

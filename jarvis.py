@@ -1338,13 +1338,22 @@ DIENST_VORGABEN = {
              "seite": "console.groq.com/keys"},
     "gemini": {"name": "Google Gemini",
                "url": "https://generativelanguage.googleapis.com/v1beta/openai",
-               "modell": "gemini-flash-latest",
+               # Mehrere Namen: Jeder hat bei Google sein eigenes Gratis-Kontingent.
+               # Ist eines aufgebraucht, nimmt Jarvis das nächste.
+               "modell": "gemini-flash-latest,gemini-flash-lite-latest,gemini-3.8-flash,"
+                         "gemini-3.5-flash,gemini-3.1-flash-lite",
                "seite": "aistudio.google.com/apikey"},
     "openrouter": {"name": "OpenRouter", "url": "https://openrouter.ai/api/v1",
                    "modell": "meta-llama/llama-3.3-70b-instruct:free",
                    "seite": "openrouter.ai/keys"},
 }
 DIENST_WERKZEUGE = 12
+_PAUSE = {}  # Modellname -> Zeitpunkt (monotonic), bis zu dem es pausiert wird
+
+
+def modelle_liste(text: str) -> list:
+    """Die Modellnamen aus dem Eintrag, durch Komma getrennt."""
+    return [m.strip() for m in (text or "").split(",") if m.strip()]
 
 
 def freier_dienst_aktiv() -> bool:
@@ -1482,12 +1491,23 @@ def _senden(url: str, schluessel: str, nutzlast: dict, timeout: int) -> dict:
 
 
 def freier_dienst_pruefen(url: str, schluessel: str, modell: str) -> dict:
-    """Probelauf mit einem winzigen Auftrag."""
+    """Probelauf mit einem winzigen Auftrag.
+
+    Ein 429 ("Kontingent aufgebraucht") heißt: der Schlüssel wurde erkannt. Das
+    zählt als gültig - sonst bliebe ein richtiger Schlüssel ungespeichert, nur
+    weil das Gratis-Kontingent gerade leer ist.
+    """
+    erstes = (modelle_liste(modell) or [""])[0]
     antwort = _senden(url, schluessel, {
-        "model": modell, "max_tokens": 8,
+        "model": erstes, "max_tokens": 8,
         "messages": [{"role": "user", "content": "Sag nur: ok"}]}, 60)
     if antwort["ok"]:
         return {"ok": True, "text": "Der Dienst antwortet. Jarvis nutzt ihn."}
+    if antwort.get("code") == 429:
+        return {"ok": True, "kontingent": True,
+                "text": "Der Schlüssel ist gültig. Das Gratis-Kontingent ist gerade "
+                        "aufgebraucht; Jarvis antwortet wieder, sobald es sich "
+                        "zurücksetzt."}
     return {"ok": False, "text": antwort["fehler"]}
 
 
@@ -1518,16 +1538,44 @@ def freier_dienst_anfragen(koerper: dict, timeout: int = 120) -> dict:
             "name": w["name"], "description": w.get("description", ""),
             "parameters": w.get("input_schema") or {"type": "object", "properties": {}}}}
             for w in gewaehlt]
-    antwort = _senden(FREIER_DIENST_URL, FREIER_DIENST_SCHLUESSEL,
-                      nutzlast, timeout)
-    if not antwort["ok"] and antwort.get("code") == 400 and "tools" in nutzlast:
-        nutzlast.pop("tools")  # Modell kann keine Werkzeuge: dann ohne
+    modelle = modelle_liste(FREIER_DIENST_MODELL)
+    jetzt = time.monotonic()
+    frei = [m for m in modelle if _PAUSE.get(m, 0) <= jetzt]
+    letzte = {"ok": False, "fehler": "Der Dienst hat nicht geantwortet.", "code": 0}
+    alle_voll = True
+    for modell in frei or modelle:  # sind alle pausiert, trotzdem alle versuchen
+        nutzlast["model"] = modell
+        mit_werkzeugen = "tools" in nutzlast
         antwort = _senden(FREIER_DIENST_URL, FREIER_DIENST_SCHLUESSEL,
                           nutzlast, timeout)
-    if not antwort["ok"]:
-        return {"ok": False, "fehler": antwort["fehler"]}
-    bloecke = antwort_umwandeln_freier_dienst(antwort["daten"]) or [{"type": "text", "text": ""}]
-    return {"ok": True, "daten": {"content": bloecke}}
+        if not antwort["ok"] and antwort.get("code") == 400 and mit_werkzeugen:
+            ohne = dict(nutzlast)
+            ohne.pop("tools")  # Modell kann keine Werkzeuge: dann ohne
+            antwort = _senden(FREIER_DIENST_URL, FREIER_DIENST_SCHLUESSEL,
+                              ohne, timeout)
+        if antwort["ok"]:
+            bloecke = antwort_umwandeln_freier_dienst(antwort["daten"]) or [{"type": "text", "text": ""}]
+            return {"ok": True, "daten": {"content": bloecke}}
+        letzte = antwort
+        code = antwort.get("code")
+        if code == 429:
+            _PAUSE[modell] = time.monotonic() + 60
+            print("[dienst] %s ist gerade ausgelastet, nehme das nächste" % modell)
+            continue
+        alle_voll = False
+        if code == 404:
+            _PAUSE[modell] = time.monotonic() + 3600
+            print("[dienst] %s gibt es nicht mehr, nehme das nächste" % modell)
+            continue
+        if code in (500, 502, 503, 504):
+            _PAUSE[modell] = time.monotonic() + 30
+            continue
+        break  # Schlüssel abgelehnt, kaputte Anfrage, kein Netz: ein anderes Modell hilft nicht
+    if letzte.get("code") == 429 and alle_voll:
+        return {"ok": False, "fehler": "Das Gratis-Kontingent ist bei allen eingetragenen "
+                "Modellen gerade aufgebraucht. Es setzt sich nach einer Minute (Minutenlimit) "
+                "oder über Nacht (Tageslimit) zurück."}
+    return {"ok": False, "fehler": letzte["fehler"]}
 
 
 # =========================================================================
@@ -7678,12 +7726,12 @@ body[data-zustand="wach"] .zustandstext{color:var(--akzent)}
         border-radius:9px;background:var(--tief);border:1px solid var(--rand-hell);
         color:var(--text);font-size:14px">
         <option value="groq" data-modell="llama-3.3-70b-versatile">Groq</option>
-        <option value="gemini" data-modell="gemini-flash-latest">Google Gemini</option>
+        <option value="gemini" data-modell="gemini-flash-latest,gemini-flash-lite-latest,gemini-3.8-flash,gemini-3.5-flash,gemini-3.1-flash-lite">Google Gemini</option>
         <option value="openrouter" data-modell="meta-llama/llama-3.3-70b-instruct:free">OpenRouter</option>
       </select>
       <input id="dienstModell" type="text" value="llama-3.3-70b-versatile"
              autocomplete="off" spellcheck="false" style="margin-bottom:8px"
-             title="Modellname - bei Bedarf ändern">
+             title="Modellnamen, durch Komma getrennt. Ist eines aufgebraucht, nimmt Jarvis das nächste.">
       <input id="dienstSchluessel" type="password" placeholder="Schlüssel einfügen"
              autocomplete="off" spellcheck="false">
     </div>
@@ -10135,7 +10183,7 @@ class JarvisWeb:
             if vorgabe is None:
                 return self._antworten(behandler, 200, {
                     "ok": False, "text": "Diesen Dienst kenne ich nicht."})
-            if len(schluessel) < 10 or len(modell) > 100 or any(c.isspace() for c in modell):
+            if len(schluessel) < 10 or len(modell) > 300 or any(c.isspace() for c in modell):
                 return self._antworten(behandler, 200, {
                     "ok": False, "text": "Schlüssel oder Modellname sehen nicht richtig "
                                          "aus. Bitte vollständig kopieren."})
