@@ -9,7 +9,7 @@ Mit der Erweiterung schickst du die Webseite, die gerade offen ist, an Jarvis:
   * "Frage zu dieser Seite" - z. B. "Suchen die eine Reinigungsfirma?"
   * "Vorlesen" - Jarvis liest die Antwort mit deutscher Stimme vor.
   * Rechtsklick auf markierten Text -> "Mit Jarvis besprechen".
-    Die Antwort erscheint unten rechts in der Seite.
+    Die Antwort erscheint im Jarvis-Fenster (nie in der fremden Seite).
 
 Funktioniert in Google Chrome, Microsoft Edge und Brave.
 

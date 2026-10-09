@@ -560,15 +560,21 @@ class Autopilot:
             if stufe and rechnung["gemahnt_am"] and rechnung["gemahnt_am"] > (
                     datetime.now() - timedelta(days=MAHNUNG_FRIST_TAGE + 3)).strftime("%Y-%m-%d"):
                 continue  # die letzte Mahnung läuft noch
-            naechste = MAHNSTUFEN[min(stufe, len(MAHNSTUFEN) - 1)]
+            if stufe >= len(MAHNSTUFEN):
+                weiter = ("Alle Mahnstufen sind durch. Als Nächstes bleibt ein Inkassobüro "
+                          "oder eine Mahnklage - frag dazu deinen Steuerberater oder Anwalt. "
+                          "Ist das Geld schon da, sag 'Rechnung %s ist bezahlt'."
+                          % rechnung["nummer"])
+            else:
+                weiter = ("Als Nächstes käme die %s. Sag 'Mahnung für %s', dann schreibe ich "
+                          "sie - oder 'Rechnung %s ist bezahlt', falls das Geld schon da ist."
+                          % (MAHNSTUFEN[stufe], rechnung["nummer"], rechnung["nummer"]))
             if self.aufgabe_anlegen(
                     "mahnung:%s:%d" % (rechnung["nummer"], stufe), "hinweis",
                     "Rechnung %s von %s ist seit %d Tagen offen (%.2f Euro)" % (
                         rechnung["nummer"], rechnung["kunde"], rechnung["ueberfaellig_tage"],
-                        rechnung["brutto"]),
-                    "Als Nächstes käme die %s. Sag 'Mahnung für %s', dann schreibe ich sie - "
-                    "oder 'Rechnung %s ist bezahlt', falls das Geld schon da ist."
-                    % (naechste, rechnung["nummer"], rechnung["nummer"]),
+                        rechnung["offen_betrag"]),
+                    weiter,
                     firma=rechnung["kunde"], grund="Offene Rechnung"):
                 anzahl += 1
         return anzahl

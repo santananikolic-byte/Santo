@@ -301,7 +301,8 @@ class Werkzeuge:
                      {"nummer": text, "spesen": zahl}, ["nummer"]),
             werkzeug("rechnung_stornieren",
                      "Storniert eine Rechnung mit einer Stornorechnung. Gelöscht wird nie "
-                     "etwas.", {"nummer": text, "grund": text}, ["nummer"]),
+                     "etwas. Ist schon Geld gekommen, nur mit rueckzahlung (er zahlt zurück).",
+                     {"nummer": text, "grund": text, "rueckzahlung": wahr}, ["nummer"]),
             werkzeug("rechnung_neu_schreiben",
                      "Schreibt das PDF einer Rechnung oder eines Angebots neu - etwa nachdem "
                      "Firmendaten ergänzt wurden. Fehlende Adresse, Mail oder UID des "
@@ -596,6 +597,18 @@ class Werkzeuge:
             # Beim Ausführen von Code muss der Code selbst in der Frage stehen.
             # Über einen blossen Dateinamen kann niemand entscheiden.
             details = self.werkstatt.freigabetext(argumente.get("name", ""))
+        elif name == "rechnung_senden":
+            # Wer zustimmt, muss sehen, welches Dokument an wen geht - nicht nur "Nr. 7".
+            bereit = self.rechnungen.versandfertig(argumente.get("nummer"),
+                                                   argumente.get("an", ""),
+                                                   argumente.get("was", ""))
+            if bereit.get("ok"):
+                eintrag = bereit["eintrag"]
+                details = "An: %s\nBetreff: %s\nKunde: %s, %s\nAnhang: %s" % (
+                    bereit["an"], bereit["betreff"], eintrag["kunde"],
+                    rechnung_euro(eintrag["brutto"]), os.path.basename(bereit["pdf"]))
+            else:
+                details = bereit.get("fehler", "")
         else:
             try:
                 details = json.dumps(argumente or {}, ensure_ascii=False)[:600]
@@ -775,7 +788,8 @@ class Werkzeuge:
         if name == "mahnung_erstellen":
             return self.rechnungen.mahnung_erstellen(a.get("nummer"), a.get("spesen"))
         if name == "rechnung_stornieren":
-            return self.rechnungen.stornieren(a.get("nummer"), a.get("grund", ""))
+            return self.rechnungen.stornieren(a.get("nummer"), a.get("grund", ""),
+                                              bool(a.get("rueckzahlung")))
         if name == "rechnung_neu_schreiben":
             return self.rechnungen.neu_schreiben(a.get("nummer"), a.get("adresse", ""),
                                                  a.get("email", ""), a.get("kunde_uid", ""))

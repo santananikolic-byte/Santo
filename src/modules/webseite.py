@@ -1286,7 +1286,9 @@ button:disabled{opacity:.5;cursor:default}
     var reihe0 = document.createElement("div"); reihe0.className = "reihe"; reihe0.style.marginTop = "2px";
     var titel = document.createElement("div"); titel.className = "titel"; titel.style.flex = "1";
     titel.textContent = r.kunde;
-    var betrag = document.createElement("span"); betrag.className = "betrag"; betrag.textContent = euro(r.brutto);
+    var teilweise = r.offen_betrag < r.brutto - 0.005;
+    var betrag = document.createElement("span"); betrag.className = "betrag";
+    betrag.textContent = teilweise ? "noch " + euro(r.offen_betrag) + " von " + euro(r.brutto) : euro(r.brutto);
     reihe0.appendChild(titel); reihe0.appendChild(betrag);
     var grund = document.createElement("div"); grund.className = "grund";
     grund.textContent = "vom " + datum(r.datum) + " · zahlbar bis " + datum(r.faellig);
@@ -1299,8 +1301,8 @@ button:disabled{opacity:.5;cursor:default}
     var reihe = document.createElement("div"); reihe.className = "reihe";
     if (r.datei) { reihe.appendChild(pdfLink(r.datei, "PDF ansehen")); }
     reihe.appendChild(knopf("Bezahlt", "haupt", rechnungAktion(r, "bezahlt",
-      "Ist Rechnung " + r.nummer + " über " + euro(r.brutto) + " bezahlt? Jarvis bucht dann die Einnahme.",
-      meldung, k)));
+      "Sind " + euro(r.offen_betrag) + " für Rechnung " + r.nummer +
+      " eingegangen? Jarvis bucht dann die Einnahme.", meldung, k)));
     if (r.ueberfaellig_tage > 0 && r.mahnstufe < 3) {
       reihe.appendChild(knopf(STUFEN[r.mahnstufe + 1] + " schreiben", "",
         rechnungAktion(r, "mahnen", "", meldung, null)));

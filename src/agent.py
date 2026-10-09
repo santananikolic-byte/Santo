@@ -424,6 +424,10 @@ class JarvisAgent:
             # Text in einem Bild kann eine untergeschobene Anweisung sein. Werkzeuge,
             # die Daten nach draußen tragen, gibt es in dieser Runde deshalb nicht.
             katalog = [w for w in katalog if w["name"] not in NACH_AUSSEN]
+        # Ausgeführt wird nur, was in dieser Runde angeboten wurde. Ein Modell kann
+        # auch einen Namen schicken, den es gar nicht bekommen hat - etwa weil eine
+        # Webseite ihn hineinschreibt.
+        angeboten = {w["name"] for w in katalog}
 
         for runde in range(MAX_RUNDEN):
             antwort = self._anfrage({
@@ -456,7 +460,11 @@ class JarvisAgent:
                 argumente = aufruf.get("input") or {}
                 print("[werkzeug] %s %s" % (name, json.dumps(argumente,
                                                              ensure_ascii=False)[:200]))
-                ergebnis = self.tools.run(name, argumente)
+                if name in angeboten:
+                    ergebnis = self.tools.run(name, argumente)
+                else:
+                    ergebnis = {"ok": False, "fehler": "Das Werkzeug %s ist in dieser Runde "
+                                                      "nicht erlaubt." % name}
                 satz = direkt_satz(name, argumente, ergebnis) if direkt is not None else ""
                 if satz:
                     direkt.append(satz)
@@ -528,7 +536,11 @@ class JarvisAgent:
             for aufruf in aufrufe:
                 name = aufruf.get("name", "")
                 print("[fachkraft] %s" % name)
-                ergebnis = self.tools.run(name, aufruf.get("input") or {})
+                if any(w["name"] == name for w in katalog):
+                    ergebnis = self.tools.run(name, aufruf.get("input") or {})
+                else:  # die Trennung der Fachkräfte gilt auch bei der Ausführung
+                    ergebnis = {"ok": False, "fehler": "Das Werkzeug %s gehört nicht zu "
+                                                      "dieser Fachkraft." % name}
                 try:
                     text = json.dumps(ergebnis, ensure_ascii=False,
                                       default=str)[:6000]

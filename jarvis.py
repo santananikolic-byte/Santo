@@ -5078,7 +5078,10 @@ CREATE TABLE IF NOT EXISTS rechnungen (
     vermerk TEXT DEFAULT '',
     status TEXT DEFAULT 'offen',
     bezahlt_am TEXT DEFAULT '',
+    bezahlt_betrag REAL DEFAULT 0,
     mahnstufe INTEGER DEFAULT 0,
+    mahn_spesen REAL DEFAULT 0,
+    mahn_frist TEXT DEFAULT '',
     gemahnt_am TEXT DEFAULT '',
     mahn_pdf TEXT DEFAULT '',
     pdf TEXT DEFAULT '',
@@ -5100,6 +5103,9 @@ VERMERK_KLEINUNTERNEHMER = ("Umsatzsteuerfrei aufgrund der Kleinunternehmerregel
 VERMERK_UMKEHR = ("Übergang der Steuerschuld gemäß § 19 Abs. 1a UStG (Bauleistung). "
                   "Die Umsatzsteuer ist vom Leistungsempfänger abzuführen.")
 DOKUMENT_ARTEN = {"rechnung": "Rechnung", "angebot": "Angebot", "storno": "Stornorechnung"}
+# Später dazugekommene Spalten - ältere Datenbanken bekommen sie beim Start.
+RECHNUNG_NEUE_SPALTEN = (("bezahlt_betrag", "REAL DEFAULT 0"), ("mahn_spesen", "REAL DEFAULT 0"),
+                         ("mahn_frist", "TEXT DEFAULT ''"))
 
 # Briefbogen: Ränder 2 cm, Akzentfarbe Petrol.
 BRIEF_LINKS = 56.7
@@ -5145,10 +5151,16 @@ def _zahl_lesen(wert):
     text = re.sub(r"[^\d,.\-]", "", str(wert or "")).rstrip("-").rstrip(",.")
     if not text or text in ("-", ".", ","):
         return None
-    if "," in text:  # deutsche Schreibweise: Punkt trennt Tausender, Komma Dezimalen
-        text = text.replace(".", "").replace(",", ".")
-    elif text.count(".") > 1:
-        text = text.replace(".", "")
+    if "," in text and "." in text:
+        # Was zuletzt steht, trennt die Cent: 1.250,50 (deutsch) oder 1,250.50 (englisch).
+        if text.rfind(",") > text.rfind("."):
+            text = text.replace(".", "").replace(",", ".")
+        else:
+            text = text.replace(",", "")
+    elif "," in text:  # deutsche Schreibweise: Komma trennt die Cent
+        text = text.replace(",", ".") if text.count(",") == 1 else text.replace(",", "")
+    elif re.fullmatch(r"-?\d{1,3}(\.\d{3})+", text):
+        text = text.replace(".", "")  # 1.250 oder 2.000.000: Tausenderpunkte
     try:
         return float(text)
     except ValueError:
@@ -5181,9 +5193,11 @@ def positionen_pruefen(positionen, preise_brutto: bool = False, satz: float = 0.
             return [], "Bei Position %d fehlt, was gemacht wurde." % nr
         if preis is None:
             return [], "Bei '%s' fehlt der Preis." % bezeichnung[:60]
+        brutto_zeile = round(menge * preis, 2)
         if preise_brutto and satz:
             preis = preis / (1.0 + satz / 100.0)
         ergebnis.append({
+            "_brutto": brutto_zeile,
             "bezeichnung": bezeichnung[:300],
             "menge": round(menge, 3),
             "einheit": " ".join(str(roh.get("einheit") or ("pauschal" if menge == 1 else
@@ -5194,6 +5208,16 @@ def positionen_pruefen(positionen, preise_brutto: bool = False, satz: float = 0.
         })
     if not ergebnis:
         return [], "Es fehlen die Positionen: was wurde gemacht, und zu welchem Preis?"
+    if preise_brutto and satz:
+        # Gesagt war ein Bruttopreis. Damit am Ende genau der herauskommt, wird die
+        # Steuer aus der Bruttosumme gerechnet und ein Rundungscent der letzten
+        # Position zugeschlagen - sonst würden aus 3 x 10 Euro brutto 29,99 Euro.
+        brutto = round(sum(p["_brutto"] for p in ergebnis), 2)
+        netto_ziel = round(brutto - round(brutto * satz / (100.0 + satz), 2), 2)
+        rest = round(netto_ziel - sum(p["betrag"] for p in ergebnis), 2)
+        ergebnis[-1]["betrag"] = round(ergebnis[-1]["betrag"] + rest, 2)
+    for position in ergebnis:
+        position.pop("_brutto", None)
     return ergebnis, ""
 
 
@@ -5236,6 +5260,11 @@ class Rechnungen:
         self.akquise = akquise
         self.ordner = str(ordner or RECHNUNGEN_VERZEICHNIS)
         db_schema_anlegen(SCHEMA_RECHNUNGEN, self.memory.db_pfad)
+        vorhanden = {z["name"] for z in self.memory._lesen("PRAGMA table_info(rechnungen)")}
+        for spalte, art in RECHNUNG_NEUE_SPALTEN:
+            if spalte not in vorhanden:
+                self.memory._schreiben("ALTER TABLE rechnungen ADD COLUMN %s %s"
+                                       % (spalte, art))
 
     # -- Grundlagen -----------------------------------------------------------
 
@@ -5293,39 +5322,59 @@ class Rechnungen:
         raise RuntimeError("Es ließ sich keine freie Nummer vergeben.")
 
     def finden(self, nummer: str):
-        """Ein Dokument über seine Nummer - auch ohne Jahr ('7' oder '007' heißt 2026-007)."""
-        nummer = " ".join(str(nummer or "").split()).upper().replace("NR.", "").strip()
-        nummer = nummer.replace("RECHNUNG", "").replace("ANGEBOT", "").strip(" .:#")
-        if not nummer:
+        """Ein Dokument über seine Nummer.
+
+        Versteht '2026-007', '2026-7', '7' (das jüngste Jahr) und für Angebote
+        'A2026-003', 'A3' oder 'Angebot 3'. Ein Angebot wird nie mit einer
+        Rechnung verwechselt.
+        """
+        text = " ".join(str(nummer or "").split()).upper()
+        angebot = "ANGEBOT" in text
+        for wort in ("STORNORECHNUNG", "RECHNUNG", "ANGEBOT", "NUMMER", "NR."):
+            text = text.replace(wort, " ")
+        text = text.strip(" .:#")
+        treffer = re.fullmatch(r"(A?)\s*(?:(\d{4})\s*-\s*)?(\d{1,4})", text)
+        if not treffer:
             return None
-        zeilen = self.memory._lesen("SELECT * FROM rechnungen WHERE upper(nummer)=?",
-                                    (nummer,))
-        if not zeilen and re.fullmatch(r"A?\d{1,4}", nummer):
-            angebot = nummer.startswith("A")
-            zahl = int(nummer.lstrip("A"))
+        angebot = angebot or bool(treffer.group(1))
+        bedingung = "art = 'angebot'" if angebot else "art != 'angebot'"
+        if treffer.group(2):
+            gesucht = "%s%s-%03d" % ("A" if angebot else "", treffer.group(2),
+                                     int(treffer.group(3)))
             zeilen = self.memory._lesen(
-                "SELECT * FROM rechnungen WHERE nummer LIKE ? AND art %s ORDER BY id DESC"
-                % ("= 'angebot'" if angebot else "!= 'angebot'"), ("%%-%03d" % zahl,))
+                "SELECT * FROM rechnungen WHERE upper(nummer)=? AND %s" % bedingung,
+                (gesucht,))
+        else:
+            zeilen = self.memory._lesen(
+                "SELECT * FROM rechnungen WHERE nummer LIKE ? AND %s ORDER BY id DESC"
+                % bedingung, ("%%-%03d" % int(treffer.group(3)),))
         return dict(zeilen[0]) if zeilen else None
 
     def _kunde_ergaenzen(self, kunde: str, adresse: str, email: str):
         """Fehlt Adresse oder Mail, schaut Jarvis in Kontakten und Interessenten nach."""
         if adresse and email:
             return adresse, email
+        # Nur ein Eintrag, dessen Name oder Firma genau der Kunde ist - und Adresse
+        # und Mail aus demselben. Sonst landet die Privatadresse einer Putzkraft, in
+        # deren Notiz "Praxis Huber" steht, auf der Rechnung an die Praxis.
+        gesucht = " ".join(kunde.split()).lower()
         quellen = []
         try:
-            quellen += self.memory.kontakt_suchen(kunde, limit=3)
+            quellen += self.memory._lesen(
+                "SELECT name, firma, email, adresse FROM kontakte WHERE lower(trim(name))=? "
+                "OR lower(trim(firma))=? ORDER BY id DESC LIMIT 5", (gesucht, gesucht))
         except sqlite3.Error:
             pass
         try:
             quellen += self.memory._lesen(
-                "SELECT firma AS name, email, adresse FROM leads WHERE firma LIKE ? "
-                "ORDER BY id DESC LIMIT 3", ("%%%s%%" % kunde,))
+                "SELECT firma AS name, firma, email, adresse FROM leads "
+                "WHERE lower(trim(firma))=? ORDER BY id DESC LIMIT 5", (gesucht,))
         except sqlite3.Error:
             pass  # ohne Akquise gibt es die Tabelle nicht
         for treffer in quellen:
-            adresse = adresse or (treffer.get("adresse") or "").strip()
-            email = email or (treffer.get("email") or "").strip()
+            if (treffer.get("adresse") or "").strip() or (treffer.get("email") or "").strip():
+                return (adresse or (treffer.get("adresse") or "").strip(),
+                        email or (treffer.get("email") or "").strip())
         return adresse, email
 
     # -- Rechnung -------------------------------------------------------------
@@ -5340,8 +5389,7 @@ class Rechnungen:
             return {"ok": False, "fehler": "An wen geht die Rechnung?"}
         umkehr = bool(steuerschuld_umkehr) and not KLEINUNTERNEHMER
         satz = 0.0 if umkehr else self._steuersatz()
-        liste, fehler = positionen_pruefen(positionen, preise_brutto,
-                                           self._steuersatz())
+        liste, fehler = positionen_pruefen(positionen, preise_brutto, satz)
         if fehler:
             return {"ok": False, "fehler": fehler}
         for position in liste:
@@ -5503,6 +5551,8 @@ class Rechnungen:
                 ueber = (datetime.strptime(heute, "%Y-%m-%d")
                          - datetime.strptime(eintrag["faellig"], "%Y-%m-%d")).days
             eintrag["ueberfaellig_tage"] = ueber
+            eintrag["offen_betrag"] = round(eintrag["brutto"]
+                                            - float(eintrag.get("bezahlt_betrag") or 0), 2)
             ergebnis.append(eintrag)
         return ergebnis
 
@@ -5511,7 +5561,7 @@ class Rechnungen:
         offen = self.liste("rechnung", "offen", 500)
         offen.sort(key=lambda r: (-r["ueberfaellig_tage"], r["faellig"]))
         ueber = [r for r in offen if r["ueberfaellig_tage"] > 0]
-        summe = round(sum(r["brutto"] for r in offen), 2)
+        summe = round(sum(r["offen_betrag"] for r in offen), 2)
         if not offen:
             text = "Alle Rechnungen sind bezahlt."
         else:
@@ -5521,7 +5571,7 @@ class Rechnungen:
             if ueber:
                 text += " Überfällig: %s." % "; ".join(
                     "%s an %s, %s, seit %d Tagen" % (r["nummer"], r["kunde"],
-                                                     rechnung_euro(r["brutto"]),
+                                                     rechnung_euro(r["offen_betrag"]),
                                                      r["ueberfaellig_tage"])
                     for r in ueber[:4])
         return {"ok": True, "anzahl": len(offen), "summe": summe,
@@ -5544,13 +5594,23 @@ class Rechnungen:
             datetime.strptime(datum, "%Y-%m-%d")
         except ValueError:
             datum = heute_datum()
+        schon = round(float(eintrag.get("bezahlt_betrag") or 0), 2)
+        rest = round(eintrag["brutto"] - schon, 2)
         gezahlt = _zahl_lesen(betrag)
-        gezahlt = eintrag["brutto"] if gezahlt is None or gezahlt <= 0 else round(gezahlt, 2)
-        self.memory._schreiben("UPDATE rechnungen SET status='bezahlt', bezahlt_am=? "
-                               "WHERE id=?", (datum, eintrag["id"]))
-        text = "Rechnung %s von %s ist bezahlt." % (eintrag["nummer"], eintrag["kunde"])
+        gezahlt = rest if gezahlt is None or gezahlt <= 0 else round(gezahlt, 2)
+        summe = round(schon + gezahlt, 2)
+        fertig = summe >= eintrag["brutto"] - 0.01
+        self.memory._schreiben(
+            "UPDATE rechnungen SET status=?, bezahlt_am=?, bezahlt_betrag=? WHERE id=?",
+            ("bezahlt" if fertig else "offen", datum, summe, eintrag["id"]))
+        if fertig:
+            text = "Rechnung %s von %s ist bezahlt." % (eintrag["nummer"], eintrag["kunde"])
+        else:
+            text = ("Teilzahlung zu Rechnung %s: %s eingegangen, offen bleiben %s."
+                    % (eintrag["nummer"], rechnung_euro(gezahlt),
+                       rechnung_euro(eintrag["brutto"] - summe)))
         if self.bookkeeping is not None:
-            # Teilzahlung: die Steuer anteilig, damit die Buchung zur Zahlung passt.
+            # Die Steuer anteilig, damit die Buchung genau zu dieser Zahlung passt.
             anteil = gezahlt / eintrag["brutto"] if eintrag["brutto"] else 1.0
             buchung = self.bookkeeping.buchung_eintragen(
                 "einnahme", datum, gezahlt, eintrag["kunde"], "Reinigungsleistung",
@@ -5559,10 +5619,11 @@ class Rechnungen:
                 notiz="Rechnung %s" % eintrag["nummer"])
             if buchung.get("ok"):
                 text += " %s als Einnahme gebucht." % rechnung_euro(gezahlt)
-        if abs(gezahlt - eintrag["brutto"]) >= 0.01:
+        if summe > eintrag["brutto"] + 0.01:
             text += " Achtung: Bezahlt wurden %s statt %s." % (
-                rechnung_euro(gezahlt), rechnung_euro(eintrag["brutto"]))
-        return {"ok": True, "nummer": eintrag["nummer"], "text": text}
+                rechnung_euro(summe), rechnung_euro(eintrag["brutto"]))
+        return {"ok": True, "nummer": eintrag["nummer"], "bezahlt": fertig,
+                "offen": round(max(eintrag["brutto"] - summe, 0.0), 2), "text": text}
 
     def mahnung_erstellen(self, nummer: str, spesen=None) -> dict:
         """Schreibt die nächste Mahnstufe als PDF: Erinnerung, 1. und 2. Mahnung."""
@@ -5573,15 +5634,15 @@ class Rechnungen:
             return {"ok": False, "fehler": "Rechnung %s ist nicht offen (%s)."
                                            % (eintrag["nummer"], eintrag["status"])}
         stufe = min(int(eintrag["mahnstufe"] or 0) + 1, len(MAHNSTUFEN))
-        spesen = _zahl_lesen(spesen) or 0.0
+        spesen = round(max(_zahl_lesen(spesen) or 0.0, 0.0), 2)
         frist = (datetime.now() + timedelta(days=MAHNUNG_FRIST_TAGE)).strftime("%Y-%m-%d")
-        pfad = os.path.join(self.ordner, "Mahnung%d_%s_%s.pdf" % (
-            stufe, eintrag["nummer"], _dateiname(eintrag["kunde"])))
-        self._ordner_anlegen()
-        self._mahnung_pdf(eintrag, stufe, round(max(spesen, 0.0), 2), frist).speichern(pfad)
+        eintrag.update(mahnstufe=stufe, mahn_spesen=spesen, mahn_frist=frist,
+                       gemahnt_am=heute_datum())
+        pfad = self._mahnung_schreiben(eintrag)
         self.memory._schreiben(
-            "UPDATE rechnungen SET mahnstufe=?, gemahnt_am=?, mahn_pdf=? WHERE id=?",
-            (stufe, heute_datum(), pfad, eintrag["id"]))
+            "UPDATE rechnungen SET mahnstufe=?, gemahnt_am=?, mahn_pdf=?, mahn_spesen=?, "
+            "mahn_frist=? WHERE id=?",
+            (stufe, heute_datum(), pfad, spesen, frist, eintrag["id"]))
         text = "%s zu Rechnung %s an %s ist fertig, neue Frist %s." % (
             MAHNSTUFEN[stufe - 1], eintrag["nummer"], eintrag["kunde"], rechnung_datum(frist))
         if eintrag["email"]:
@@ -5589,13 +5650,26 @@ class Rechnungen:
         return {"ok": True, "nummer": eintrag["nummer"], "stufe": stufe, "pdf": pfad,
                 "text": text}
 
-    def stornieren(self, nummer: str, grund: str = "") -> dict:
-        """Storniert eine Rechnung mit einer Stornorechnung - gelöscht wird nie etwas."""
+    def stornieren(self, nummer: str, grund: str = "", rueckzahlung: bool = False) -> dict:
+        """Storniert eine Rechnung mit einer Stornorechnung - gelöscht wird nie etwas.
+
+        Ist schon Geld gekommen, wäre die Einnahme sonst weiter gebucht. Dann nur
+        mit ``rueckzahlung``: Jarvis bucht die Rückzahlung, die Steuer mit.
+        """
         eintrag = self.finden(nummer)
         if eintrag is None or eintrag["art"] != "rechnung":
             return {"ok": False, "fehler": "Die Rechnung %s finde ich nicht." % nummer}
         if eintrag["status"] == "storniert":
             return {"ok": True, "text": "Rechnung %s ist schon storniert." % eintrag["nummer"]}
+        gezahlt = round(float(eintrag.get("bezahlt_betrag") or 0), 2)
+        if eintrag["status"] == "bezahlt" and not gezahlt:
+            gezahlt = eintrag["brutto"]  # vor der Teilzahlungs-Spalte abgehakt
+        if gezahlt and not rueckzahlung:
+            return {"ok": False, "fehler": "Auf Rechnung %s sind schon %s eingegangen. Ein "
+                                           "Storno heißt dann: Geld zurück. Sag 'storniere "
+                                           "mit Rückzahlung', dann buche ich die Rückzahlung "
+                                           "gleich mit." % (eintrag["nummer"],
+                                                            rechnung_euro(gezahlt))}
         positionen = json.loads(eintrag["positionen"] or "[]")
         for position in positionen:
             position["einzelpreis"] = -position["einzelpreis"]
@@ -5613,9 +5687,18 @@ class Rechnungen:
         pfad = self._pdf_schreiben(storno)
         self.memory._schreiben("UPDATE rechnungen SET status='storniert' WHERE id=?",
                                (eintrag["id"],))
-        return {"ok": True, "nummer": storno["nummer"], "pdf": pfad,
-                "text": "Rechnung %s ist storniert, die Stornorechnung hat die Nummer %s."
-                        % (eintrag["nummer"], storno["nummer"])}
+        text = ("Rechnung %s ist storniert, die Stornorechnung hat die Nummer %s."
+                % (eintrag["nummer"], storno["nummer"]))
+        if gezahlt and self.bookkeeping is not None:
+            anteil = gezahlt / eintrag["brutto"] if eintrag["brutto"] else 1.0
+            buchung = self.bookkeeping.buchung_eintragen(
+                "ausgabe", heute_datum(), gezahlt, eintrag["kunde"], "Rückzahlung",
+                eintrag["mwst_satz"], round(eintrag["mwst"] * anteil, 2), "Überweisung",
+                beleg_pfad=pfad, notiz="Storno %s zu Rechnung %s" % (storno["nummer"],
+                                                                     eintrag["nummer"]))
+            if buchung.get("ok"):
+                text += " Die Rückzahlung über %s ist gebucht." % rechnung_euro(gezahlt)
+        return {"ok": True, "nummer": storno["nummer"], "pdf": pfad, "text": text}
 
     def angebot_status(self, nummer: str, status: str) -> dict:
         """Ein Angebot als angenommen oder abgelehnt markieren."""
@@ -5652,22 +5735,26 @@ class Rechnungen:
                                            "und sag dann 'Rechnung %s neu schreiben'."
                                            % eintrag["nummer"]}
         mahnung = str(was or "").lower().startswith("mahn")
-        if mahnung and not eintrag["mahn_pdf"]:
+        if mahnung and not (eintrag["mahn_pdf"] and eintrag["mahnstufe"]):
             return {"ok": False, "fehler": "Zu Rechnung %s gibt es noch keine Mahnung."
                                            % eintrag["nummer"]}
-        pfad = eintrag["mahn_pdf"] if mahnung else eintrag["pdf"]
-        if not pfad or not os.path.isfile(pfad):
-            pfad = self._pdf_schreiben(eintrag) if not mahnung else ""
-        if not pfad:
-            return {"ok": False, "fehler": "Die PDF-Datei fehlt."}
+        if mahnung and (eintrag["art"] != "rechnung" or eintrag["status"] != "offen"):
+            return {"ok": False, "fehler": "Rechnung %s ist %s - da geht keine Mahnung mehr "
+                                           "raus." % (eintrag["nummer"], eintrag["status"])}
+        # Immer frisch schreiben: Wurden Firmendaten inzwischen ergänzt, soll nicht das
+        # alte PDF ohne sie hinausgehen. Nummer und Beträge stehen fest.
+        pfad = self._mahnung_schreiben(eintrag) if mahnung else self._pdf_schreiben(eintrag)
         gruss = "Mit freundlichen Grüßen\n%s\n%s" % (NUTZER_NAME, FIRMA)
         if mahnung:
             stufe = MAHNSTUFEN[max(1, int(eintrag["mahnstufe"])) - 1]
             betreff = "%s zu Rechnung %s" % (stufe, eintrag["nummer"])
+            offen = round(eintrag["brutto"] - float(eintrag.get("bezahlt_betrag") or 0)
+                          + float(eintrag.get("mahn_spesen") or 0), 2)
             text = ("Sehr geehrte Damen und Herren,\n\nanbei erhalten Sie unsere %s zu "
-                    "Rechnung %s über %s. Sollten Sie inzwischen bezahlt haben, betrachten "
-                    "Sie dieses Schreiben bitte als gegenstandslos.\n\n%s"
-                    % (stufe, eintrag["nummer"], rechnung_euro(eintrag["brutto"]), gruss))
+                    "Rechnung %s. Offen sind %s, bitte bis %s. Sollten Sie inzwischen bezahlt "
+                    "haben, betrachten Sie dieses Schreiben bitte als gegenstandslos.\n\n%s"
+                    % (stufe, eintrag["nummer"], rechnung_euro(offen),
+                       rechnung_datum(eintrag.get("mahn_frist") or ""), gruss))
         elif eintrag["art"] == "angebot":
             betreff = "Angebot %s - %s" % (eintrag["nummer"], FIRMA)
             text = ("Sehr geehrte Damen und Herren,\n\nvielen Dank für Ihr Interesse. Anbei "
@@ -5708,6 +5795,18 @@ class Rechnungen:
     def _ordner_anlegen(self):
         os.makedirs(self.ordner, exist_ok=True)
 
+    def _mahnung_schreiben(self, eintrag: dict) -> str:
+        """Schreibt die Mahnung der aktuellen Stufe - mit gemerkter Frist und Spesen."""
+        self._ordner_anlegen()
+        stufe = max(1, min(int(eintrag["mahnstufe"] or 1), len(MAHNSTUFEN)))
+        frist = eintrag.get("mahn_frist") or (
+            datetime.now() + timedelta(days=MAHNUNG_FRIST_TAGE)).strftime("%Y-%m-%d")
+        pfad = os.path.join(self.ordner, "Mahnung%d_%s_%s.pdf" % (
+            stufe, eintrag["nummer"], _dateiname(eintrag["kunde"])))
+        self._mahnung_pdf(eintrag, stufe, float(eintrag.get("mahn_spesen") or 0),
+                          frist).speichern(pfad)
+        return pfad
+
     def _pdf_schreiben(self, eintrag: dict) -> str:
         """Schreibt das PDF eines Dokuments und merkt sich den Pfad."""
         self._ordner_anlegen()
@@ -5744,13 +5843,17 @@ class Rechnungen:
         if NUTZER_NAME and NUTZER_NAME != "Chef":
             dok.text(BRIEF_LINKS, 79, "Inhaber: %s" % NUTZER_NAME, 8.5,
                      farbe=BRIEF_GRAU)
-        y = 52
-        for zeile in _zeilen(FIRMA_ADRESSE) + [
-                ("Tel. %s" % FIRMA_TELEFON) if FIRMA_TELEFON else "",
-                FIRMA_EMAIL]:
-            if zeile:
-                dok.text(BRIEF_RECHTS, y, zeile, 8.5, ausrichtung="rechts", farbe=BRIEF_GRAU)
-                y += 11
+        # Rechts oben höchstens fünf Zeilen, sonst stoßen sie an die Linie darunter.
+        adresse = _zeilen(FIRMA_ADRESSE)
+        kontakt = [z for z in (("Tel. %s" % FIRMA_TELEFON) if FIRMA_TELEFON
+                               else "", FIRMA_EMAIL) if z]
+        if len(adresse) + len(kontakt) > 5:
+            adresse = adresse[:1] + [", ".join(adresse[1:])]
+        zeilen = adresse + kontakt
+        y, abstand = (52, 11) if len(zeilen) <= 4 else (45, 10)
+        for zeile in zeilen[:5]:
+            dok.text(BRIEF_RECHTS, y, zeile[:70], 8.5, ausrichtung="rechts", farbe=BRIEF_GRAU)
+            y += abstand
         dok.linie(BRIEF_LINKS, 96, BRIEF_RECHTS, 96, 1.2, BRIEF_AKZENT)
 
         # Anschriftfeld - passt in das Fenster eines Kuverts.
@@ -5766,8 +5869,17 @@ class Rechnungen:
         for name, wert in angaben:
             if wert:
                 dok.text(352, y, name, 8.5, farbe=BRIEF_GRAU)
-                dok.text(BRIEF_RECHTS, y, wert, 9, ausrichtung="rechts")
-                y += 14
+                # Passt ein Wert (etwa ein ausführlicher Leistungszeitraum) nicht neben
+                # die Beschriftung, steht er umbrochen darunter - nie darüber gedruckt.
+                if pdf_textbreite(wert, 9) > BRIEF_RECHTS - 352 - pdf_textbreite(name, 8.5) - 8:
+                    y += 11
+                    zeilen = pdf_umbrechen(wert, BRIEF_RECHTS - 352, 9)[:4]
+                else:
+                    zeilen = [wert]
+                for zeile in zeilen:
+                    dok.text(BRIEF_RECHTS, y, zeile, 9, ausrichtung="rechts")
+                    y += 11
+                y += 3
         dok.text(BRIEF_LINKS, 262, "%s %s" % (titel, eintrag["nummer"]), 15, True)
         return dok
 
@@ -5921,11 +6033,15 @@ class Rechnungen:
                        rechnung_datum(eintrag["faellig"])),
                    "menge": 1, "einheit": "", "einzelpreis": eintrag["brutto"],
                    "betrag": eintrag["brutto"]}]
+        schon = round(float(eintrag.get("bezahlt_betrag") or 0), 2)
+        if schon:
+            posten.append({"bezeichnung": "Bereits bezahlt", "menge": 1, "einheit": "",
+                           "einzelpreis": -schon, "betrag": -schon})
         if spesen:
             posten.append({"bezeichnung": "Mahnspesen", "menge": 1, "einheit": "",
                            "einzelpreis": spesen, "betrag": spesen})
         y = self._tabelle(dok, y, posten)
-        gesamt = round(eintrag["brutto"] + spesen, 2)
+        gesamt = round(eintrag["brutto"] - schon + spesen, 2)
         y = self._platz(dok, y + 8, 30)
         dok.linie(330, y - 9, BRIEF_RECHTS, y - 9, 0.6)
         dok.text(334, y + 3, "Offener Betrag", 10.5, True)
@@ -10555,7 +10671,9 @@ button:disabled{opacity:.5;cursor:default}
     var reihe0 = document.createElement("div"); reihe0.className = "reihe"; reihe0.style.marginTop = "2px";
     var titel = document.createElement("div"); titel.className = "titel"; titel.style.flex = "1";
     titel.textContent = r.kunde;
-    var betrag = document.createElement("span"); betrag.className = "betrag"; betrag.textContent = euro(r.brutto);
+    var teilweise = r.offen_betrag < r.brutto - 0.005;
+    var betrag = document.createElement("span"); betrag.className = "betrag";
+    betrag.textContent = teilweise ? "noch " + euro(r.offen_betrag) + " von " + euro(r.brutto) : euro(r.brutto);
     reihe0.appendChild(titel); reihe0.appendChild(betrag);
     var grund = document.createElement("div"); grund.className = "grund";
     grund.textContent = "vom " + datum(r.datum) + " · zahlbar bis " + datum(r.faellig);
@@ -10568,8 +10686,8 @@ button:disabled{opacity:.5;cursor:default}
     var reihe = document.createElement("div"); reihe.className = "reihe";
     if (r.datei) { reihe.appendChild(pdfLink(r.datei, "PDF ansehen")); }
     reihe.appendChild(knopf("Bezahlt", "haupt", rechnungAktion(r, "bezahlt",
-      "Ist Rechnung " + r.nummer + " über " + euro(r.brutto) + " bezahlt? Jarvis bucht dann die Einnahme.",
-      meldung, k)));
+      "Sind " + euro(r.offen_betrag) + " für Rechnung " + r.nummer +
+      " eingegangen? Jarvis bucht dann die Einnahme.", meldung, k)));
     if (r.ueberfaellig_tage > 0 && r.mahnstufe < 3) {
       reihe.appendChild(knopf(STUFEN[r.mahnstufe + 1] + " schreiben", "",
         rechnungAktion(r, "mahnen", "", meldung, null)));
@@ -14101,15 +14219,21 @@ class Autopilot:
             if stufe and rechnung["gemahnt_am"] and rechnung["gemahnt_am"] > (
                     datetime.now() - timedelta(days=MAHNUNG_FRIST_TAGE + 3)).strftime("%Y-%m-%d"):
                 continue  # die letzte Mahnung läuft noch
-            naechste = MAHNSTUFEN[min(stufe, len(MAHNSTUFEN) - 1)]
+            if stufe >= len(MAHNSTUFEN):
+                weiter = ("Alle Mahnstufen sind durch. Als Nächstes bleibt ein Inkassobüro "
+                          "oder eine Mahnklage - frag dazu deinen Steuerberater oder Anwalt. "
+                          "Ist das Geld schon da, sag 'Rechnung %s ist bezahlt'."
+                          % rechnung["nummer"])
+            else:
+                weiter = ("Als Nächstes käme die %s. Sag 'Mahnung für %s', dann schreibe ich "
+                          "sie - oder 'Rechnung %s ist bezahlt', falls das Geld schon da ist."
+                          % (MAHNSTUFEN[stufe], rechnung["nummer"], rechnung["nummer"]))
             if self.aufgabe_anlegen(
                     "mahnung:%s:%d" % (rechnung["nummer"], stufe), "hinweis",
                     "Rechnung %s von %s ist seit %d Tagen offen (%.2f Euro)" % (
                         rechnung["nummer"], rechnung["kunde"], rechnung["ueberfaellig_tage"],
-                        rechnung["brutto"]),
-                    "Als Nächstes käme die %s. Sag 'Mahnung für %s', dann schreibe ich sie - "
-                    "oder 'Rechnung %s ist bezahlt', falls das Geld schon da ist."
-                    % (naechste, rechnung["nummer"], rechnung["nummer"]),
+                        rechnung["offen_betrag"]),
+                    weiter,
                     firma=rechnung["kunde"], grund="Offene Rechnung"):
                 anzahl += 1
         return anzahl
@@ -14392,7 +14516,8 @@ class Werkzeuge:
                      {"nummer": text, "spesen": zahl}, ["nummer"]),
             werkzeug("rechnung_stornieren",
                      "Storniert eine Rechnung mit einer Stornorechnung. Gelöscht wird nie "
-                     "etwas.", {"nummer": text, "grund": text}, ["nummer"]),
+                     "etwas. Ist schon Geld gekommen, nur mit rueckzahlung (er zahlt zurück).",
+                     {"nummer": text, "grund": text, "rueckzahlung": wahr}, ["nummer"]),
             werkzeug("rechnung_neu_schreiben",
                      "Schreibt das PDF einer Rechnung oder eines Angebots neu - etwa nachdem "
                      "Firmendaten ergänzt wurden. Fehlende Adresse, Mail oder UID des "
@@ -14687,6 +14812,18 @@ class Werkzeuge:
             # Beim Ausführen von Code muss der Code selbst in der Frage stehen.
             # Über einen blossen Dateinamen kann niemand entscheiden.
             details = self.werkstatt.freigabetext(argumente.get("name", ""))
+        elif name == "rechnung_senden":
+            # Wer zustimmt, muss sehen, welches Dokument an wen geht - nicht nur "Nr. 7".
+            bereit = self.rechnungen.versandfertig(argumente.get("nummer"),
+                                                   argumente.get("an", ""),
+                                                   argumente.get("was", ""))
+            if bereit.get("ok"):
+                eintrag = bereit["eintrag"]
+                details = "An: %s\nBetreff: %s\nKunde: %s, %s\nAnhang: %s" % (
+                    bereit["an"], bereit["betreff"], eintrag["kunde"],
+                    rechnung_euro(eintrag["brutto"]), os.path.basename(bereit["pdf"]))
+            else:
+                details = bereit.get("fehler", "")
         else:
             try:
                 details = json.dumps(argumente or {}, ensure_ascii=False)[:600]
@@ -14866,7 +15003,8 @@ class Werkzeuge:
         if name == "mahnung_erstellen":
             return self.rechnungen.mahnung_erstellen(a.get("nummer"), a.get("spesen"))
         if name == "rechnung_stornieren":
-            return self.rechnungen.stornieren(a.get("nummer"), a.get("grund", ""))
+            return self.rechnungen.stornieren(a.get("nummer"), a.get("grund", ""),
+                                              bool(a.get("rueckzahlung")))
         if name == "rechnung_neu_schreiben":
             return self.rechnungen.neu_schreiben(a.get("nummer"), a.get("adresse", ""),
                                                  a.get("email", ""), a.get("kunde_uid", ""))
@@ -15540,6 +15678,10 @@ class JarvisAgent:
             # Text in einem Bild kann eine untergeschobene Anweisung sein. Werkzeuge,
             # die Daten nach draußen tragen, gibt es in dieser Runde deshalb nicht.
             katalog = [w for w in katalog if w["name"] not in NACH_AUSSEN]
+        # Ausgeführt wird nur, was in dieser Runde angeboten wurde. Ein Modell kann
+        # auch einen Namen schicken, den es gar nicht bekommen hat - etwa weil eine
+        # Webseite ihn hineinschreibt.
+        angeboten = {w["name"] for w in katalog}
 
         for runde in range(MAX_RUNDEN):
             antwort = self._anfrage({
@@ -15572,7 +15714,11 @@ class JarvisAgent:
                 argumente = aufruf.get("input") or {}
                 print("[werkzeug] %s %s" % (name, json.dumps(argumente,
                                                              ensure_ascii=False)[:200]))
-                ergebnis = self.tools.run(name, argumente)
+                if name in angeboten:
+                    ergebnis = self.tools.run(name, argumente)
+                else:
+                    ergebnis = {"ok": False, "fehler": "Das Werkzeug %s ist in dieser Runde "
+                                                      "nicht erlaubt." % name}
                 satz = direkt_satz(name, argumente, ergebnis) if direkt is not None else ""
                 if satz:
                     direkt.append(satz)
@@ -15644,7 +15790,11 @@ class JarvisAgent:
             for aufruf in aufrufe:
                 name = aufruf.get("name", "")
                 print("[fachkraft] %s" % name)
-                ergebnis = self.tools.run(name, aufruf.get("input") or {})
+                if any(w["name"] == name for w in katalog):
+                    ergebnis = self.tools.run(name, aufruf.get("input") or {})
+                else:  # die Trennung der Fachkräfte gilt auch bei der Ausführung
+                    ergebnis = {"ok": False, "fehler": "Das Werkzeug %s gehört nicht zu "
+                                                      "dieser Fachkraft." % name}
                 try:
                     text = json.dumps(ergebnis, ensure_ascii=False,
                                       default=str)[:6000]
