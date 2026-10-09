@@ -7,6 +7,7 @@ nur zusätzlich gespiegelt: Die Wahrheit steht immer auf dem Rechner des Nutzers
 """
 
 import json
+import re
 import sqlite3
 import threading
 import urllib.error
@@ -75,6 +76,67 @@ def zeitstempel() -> str:
 def heute_datum() -> str:
     """Heutiges Datum als ``JJJJ-MM-TT``."""
     return datetime.now().strftime("%Y-%m-%d")
+
+
+WOCHENTAG_NAMEN = ["montag", "dienstag", "mittwoch", "donnerstag", "freitag", "samstag",
+              "sonntag"]
+WOCHENTAG_KUERZEL = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"]
+
+
+def datum_verstehen(text: str, jetzt: datetime = None) -> str:
+    """Macht aus "morgen", "Freitag", "in 3 Tagen" oder "12.10." ein Datum JJJJ-MM-TT.
+
+    Was nicht zu lesen ist, kommt unverändert zurück - lieber der Originaltext
+    als ein falsch geratenes Datum.
+    """
+    roh = (text or "").strip()
+    klein = roh.lower().replace("am ", "").replace("nächsten ", "").replace("naechsten ", "")
+    klein = klein.replace("kommenden ", "").strip(" .")
+    jetzt = jetzt or datetime.now()
+    if not klein:
+        return ""
+    feste = {"heute": 0, "morgen": 1, "übermorgen": 2, "uebermorgen": 2,
+             "nächste woche": 7, "naechste woche": 7}
+    if klein in feste:
+        return (jetzt + timedelta(days=feste[klein])).strftime("%Y-%m-%d")
+    if klein in WOCHENTAG_NAMEN:
+        abstand = (WOCHENTAG_NAMEN.index(klein) - jetzt.weekday()) % 7 or 7
+        return (jetzt + timedelta(days=abstand)).strftime("%Y-%m-%d")
+    treffer = re.match(r"in (\d+) tag(en)?$", klein)
+    if treffer:
+        return (jetzt + timedelta(days=int(treffer.group(1)))).strftime("%Y-%m-%d")
+    for muster in ("%Y-%m-%d", "%d.%m.%Y", "%d.%m.%y"):
+        try:
+            return datetime.strptime(klein, muster).strftime("%Y-%m-%d")
+        except ValueError:
+            pass
+    treffer = re.match(r"^(\d{1,2})\.(\d{1,2})\.?$", klein)
+    if treffer:
+        try:
+            tag = datetime(jetzt.year, int(treffer.group(2)), int(treffer.group(1)))
+        except ValueError:
+            return roh
+        if tag.date() < jetzt.date():  # "3.1." im Dezember meint das nächste Jahr
+            tag = tag.replace(year=jetzt.year + 1)
+        return tag.strftime("%Y-%m-%d")
+    return roh
+
+
+def datum_sprechen(datum: str, jetzt: datetime = None) -> str:
+    """Ein Datum so, wie man es sagt: "heute", "morgen", "Fr 16.10."."""
+    jetzt = jetzt or datetime.now()
+    try:
+        tag = datetime.strptime((datum or "")[:10], "%Y-%m-%d")
+    except ValueError:
+        return datum or ""
+    abstand = (tag.date() - jetzt.date()).days
+    if abstand == 0:
+        return "heute"
+    if abstand == 1:
+        return "morgen"
+    if abstand == -1:
+        return "gestern"
+    return "%s %d.%d." % (WOCHENTAG_KUERZEL[tag.weekday()], tag.day, tag.month)
 
 
 def db_verbindung(pfad: str = None) -> sqlite3.Connection:
@@ -237,6 +299,7 @@ class Memory:
         text = (text or "").strip()
         if not text:
             return {"ok": False, "fehler": "Der offene Punkt ist leer."}
+        faellig = datum_verstehen(faellig)
         nummer = self._schreiben(
             "INSERT INTO offene_punkte (text, faellig, erledigt, angelegt) VALUES (?,?,0,?)",
             (text, faellig, zeitstempel()))
@@ -247,7 +310,8 @@ class Memory:
         grenze = (datetime.now() - timedelta(days=tage)).strftime("%Y-%m-%d 00:00:00")
         return self._lesen(
             "SELECT * FROM offene_punkte WHERE erledigt=0 AND angelegt>=? "
-            "ORDER BY id DESC LIMIT ?", (grenze, limit))
+            # Fälliges zuerst (nach Datum), Punkte ohne Datum danach, Neueste oben.
+            "ORDER BY (faellig = '') ASC, faellig ASC, id DESC LIMIT ?", (grenze, limit))
 
     def punkt_erledigen(self, nummer: int) -> bool:
         """Hakt einen offenen Punkt ab."""

@@ -59,7 +59,11 @@ CREATE TABLE IF NOT EXISTS autopilot_laeufe (
 );
 """
 
-OVERPASS_URL = "https://overpass-api.de/api/interpreter"
+# Mehrere öffentliche Server: Ist einer ausgelastet oder weg, nimmt Jarvis den nächsten.
+OVERPASS_SERVER = ["https://overpass-api.de/api/interpreter",
+                   "https://overpass.kumi.systems/api/interpreter",
+                   "https://overpass.private.coffee/api/interpreter"]
+OVERPASS_URL = OVERPASS_SERVER[0]
 
 # Welche OpenStreetMap-Merkmale zu welcher Branche gehören.
 BRANCHEN_OSM = {
@@ -109,7 +113,7 @@ def osm_abfrage(ort: str, branchen: list, anzahl: int = 40) -> str:
     for branche in branchen:
         for schluessel, wert in BRANCHEN_OSM.get(branche, []):
             teile.append('nwr["%s"="%s"]["name"](area.a);' % (schluessel, wert))
-    return ('[out:json][timeout:50];'
+    return ('[out:json][timeout:35];'
             'area["name"="%s"]["boundary"="administrative"]->.a;'
             '(%s);out tags center %d;' % (_sauber(ort), "".join(teile), int(anzahl)))
 
@@ -131,19 +135,21 @@ def osm_betriebe(ort: str, branchen: list, anzahl: int = 40, url: str = None) ->
     if not branchen:
         return {"ok": False, "fehler": "Es ist keine bekannte Branche gewählt."}
     daten = urllib.parse.urlencode({"data": osm_abfrage(ort, branchen, anzahl)}).encode()
-    anfrage = urllib.request.Request(
-        url or OVERPASS_URL, data=daten, method="POST",
-        headers={"User-Agent": "Jarvis-Gebaeudereinigung/1.0",
-                 "Content-Type": "application/x-www-form-urlencoded"})
-    try:
-        with urllib.request.urlopen(anfrage, timeout=70) as antwort:
-            roh = json.loads(antwort.read().decode("utf-8"))
-    except urllib.error.HTTPError as fehler:
-        return {"ok": False, "fehler": "OpenStreetMap antwortet mit Fehler %d. "
-                "Das passiert, wenn der Dienst ausgelastet ist; beim nächsten "
-                "Lauf klappt es meist." % fehler.code}
-    except (urllib.error.URLError, OSError, ValueError) as fehler:
-        return {"ok": False, "fehler": "OpenStreetMap ist nicht erreichbar: %s" % fehler}
+    roh = None
+    for server in ([url] if url else OVERPASS_SERVER):
+        anfrage = urllib.request.Request(
+            server, data=daten, method="POST",
+            headers={"User-Agent": "Jarvis-Gebaeudereinigung/1.0",
+                     "Content-Type": "application/x-www-form-urlencoded"})
+        try:
+            with urllib.request.urlopen(anfrage, timeout=40) as antwort:
+                roh = json.loads(antwort.read().decode("utf-8"))
+            break
+        except (urllib.error.URLError, OSError, ValueError):
+            continue
+    if roh is None:
+        return {"ok": False, "fehler": "OpenStreetMap ist gerade nicht erreichbar. "
+                                       "Beim nächsten Lauf versuche ich es wieder."}
 
     betriebe = []
     for element in roh.get("elements", []):
@@ -185,8 +191,9 @@ def anruf_vorlage(betrieb: dict, ort: str = "") -> str:
 class Autopilot:
     """Arbeitet die Vorarbeit von selbst ab und legt sie zur Freigabe vor."""
 
-    def __init__(self, memory, akquise=None, mail=None, bookkeeping=None):
+    def __init__(self, memory, akquise=None, mail=None, bookkeeping=None, welt=None):
         self.memory = memory
+        self.welt = welt  # für die Websuche, wenn OpenStreetMap ausfällt
         self.akquise = akquise
         self.mail = mail
         self.bookkeeping = bookkeeping
@@ -350,7 +357,11 @@ class Autopilot:
         gefunden = osm_betriebe(einstellungen["ort"], einstellungen["branchen"],
                                 url=self.osm_url)
         if not gefunden.get("ok"):
-            return 0, gefunden.get("fehler", "")
+            # Zweiter Weg: Websuche, die Treffer zerlegt das Gehirn.
+            neue = self._betriebe_ueber_suche(agent, einstellungen)
+            if not neue:
+                return 0, gefunden.get("fehler", "")
+            return self._anrufe_anlegen(agent, neue, einstellungen["ort"])
         neue = []
         for betrieb in gefunden["betriebe"]:
             if len(neue) >= einstellungen["neue_pro_lauf"]:
@@ -368,7 +379,33 @@ class Autopilot:
         if not neue:
             return 0, ("Keine neuen Betriebe mit Telefon in %s gefunden."
                        % einstellungen["ort"]) if not gefunden["betriebe"] else ""
+        return self._anrufe_anlegen(agent, neue, einstellungen["ort"])
 
+    def _betriebe_ueber_suche(self, agent, einstellungen) -> list:
+        """Neue Betriebe über die Websuche - wenn OpenStreetMap nicht antwortet."""
+        if self.welt is None or self.akquise is None or agent is None \
+                or not getattr(agent, "einsatzbereit", lambda: False)():
+            return []
+        try:
+            ergebnis = self.akquise.leads_finden(
+                einstellungen["ort"], ", ".join(einstellungen["branchen"]),
+                einstellungen["neue_pro_lauf"], self.welt, agent)
+        except Exception:
+            return []
+        neue = []
+        for firma in (ergebnis.get("neu") or []) if ergebnis.get("ok") else []:
+            lead = self.akquise.lead_finden(firma)
+            if lead is None:
+                continue
+            neue.append({"firma": lead["firma"], "branche": lead["notiz"] or "",
+                         "adresse": lead["adresse"] or "", "telefon": lead["telefon"] or "",
+                         "email": lead["email"] or "", "webseite": "",
+                         "lead_id": lead["id"]})
+        return neue
+
+    def _anrufe_anlegen(self, agent, neue: list, ort: str):
+        """Zu jedem neuen Betrieb eine Anruf-Aufgabe mit Skript."""
+        einstellungen = {"ort": ort}
         skripte = self._skripte(agent, neue, einstellungen["ort"])
         for betrieb in neue:
             skript = skripte.get(betrieb["firma"]) or anruf_vorlage(betrieb, einstellungen["ort"])

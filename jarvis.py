@@ -462,6 +462,67 @@ def heute_datum() -> str:
     return datetime.now().strftime("%Y-%m-%d")
 
 
+WOCHENTAG_NAMEN = ["montag", "dienstag", "mittwoch", "donnerstag", "freitag", "samstag",
+              "sonntag"]
+WOCHENTAG_KUERZEL = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"]
+
+
+def datum_verstehen(text: str, jetzt: datetime = None) -> str:
+    """Macht aus "morgen", "Freitag", "in 3 Tagen" oder "12.10." ein Datum JJJJ-MM-TT.
+
+    Was nicht zu lesen ist, kommt unverändert zurück - lieber der Originaltext
+    als ein falsch geratenes Datum.
+    """
+    roh = (text or "").strip()
+    klein = roh.lower().replace("am ", "").replace("nächsten ", "").replace("naechsten ", "")
+    klein = klein.replace("kommenden ", "").strip(" .")
+    jetzt = jetzt or datetime.now()
+    if not klein:
+        return ""
+    feste = {"heute": 0, "morgen": 1, "übermorgen": 2, "uebermorgen": 2,
+             "nächste woche": 7, "naechste woche": 7}
+    if klein in feste:
+        return (jetzt + timedelta(days=feste[klein])).strftime("%Y-%m-%d")
+    if klein in WOCHENTAG_NAMEN:
+        abstand = (WOCHENTAG_NAMEN.index(klein) - jetzt.weekday()) % 7 or 7
+        return (jetzt + timedelta(days=abstand)).strftime("%Y-%m-%d")
+    treffer = re.match(r"in (\d+) tag(en)?$", klein)
+    if treffer:
+        return (jetzt + timedelta(days=int(treffer.group(1)))).strftime("%Y-%m-%d")
+    for muster in ("%Y-%m-%d", "%d.%m.%Y", "%d.%m.%y"):
+        try:
+            return datetime.strptime(klein, muster).strftime("%Y-%m-%d")
+        except ValueError:
+            pass
+    treffer = re.match(r"^(\d{1,2})\.(\d{1,2})\.?$", klein)
+    if treffer:
+        try:
+            tag = datetime(jetzt.year, int(treffer.group(2)), int(treffer.group(1)))
+        except ValueError:
+            return roh
+        if tag.date() < jetzt.date():  # "3.1." im Dezember meint das nächste Jahr
+            tag = tag.replace(year=jetzt.year + 1)
+        return tag.strftime("%Y-%m-%d")
+    return roh
+
+
+def datum_sprechen(datum: str, jetzt: datetime = None) -> str:
+    """Ein Datum so, wie man es sagt: "heute", "morgen", "Fr 16.10."."""
+    jetzt = jetzt or datetime.now()
+    try:
+        tag = datetime.strptime((datum or "")[:10], "%Y-%m-%d")
+    except ValueError:
+        return datum or ""
+    abstand = (tag.date() - jetzt.date()).days
+    if abstand == 0:
+        return "heute"
+    if abstand == 1:
+        return "morgen"
+    if abstand == -1:
+        return "gestern"
+    return "%s %d.%d." % (WOCHENTAG_KUERZEL[tag.weekday()], tag.day, tag.month)
+
+
 def db_verbindung(pfad: str = None) -> sqlite3.Connection:
     """Öffnet eine SQLite-Verbindung mit Zeilen-Zugriff über Spaltennamen."""
     verbindung = sqlite3.connect(pfad or DB_PFAD, timeout=15,
@@ -622,6 +683,7 @@ class Memory:
         text = (text or "").strip()
         if not text:
             return {"ok": False, "fehler": "Der offene Punkt ist leer."}
+        faellig = datum_verstehen(faellig)
         nummer = self._schreiben(
             "INSERT INTO offene_punkte (text, faellig, erledigt, angelegt) VALUES (?,?,0,?)",
             (text, faellig, zeitstempel()))
@@ -632,7 +694,8 @@ class Memory:
         grenze = (datetime.now() - timedelta(days=tage)).strftime("%Y-%m-%d 00:00:00")
         return self._lesen(
             "SELECT * FROM offene_punkte WHERE erledigt=0 AND angelegt>=? "
-            "ORDER BY id DESC LIMIT ?", (grenze, limit))
+            # Fälliges zuerst (nach Datum), Punkte ohne Datum danach, Neueste oben.
+            "ORDER BY (faellig = '') ASC, faellig ASC, id DESC LIMIT ?", (grenze, limit))
 
     def punkt_erledigen(self, nummer: int) -> bool:
         """Hakt einen offenen Punkt ab."""
@@ -4910,7 +4973,7 @@ class Privat:
         was = (was or "").strip()
         if not was:
             return {"ok": False, "fehler": "Woran soll ich erinnern?"}
-        datum = (datum or "").strip()
+        datum = datum_verstehen(datum)  # "morgen", "Freitag", "12.10." gehen auch
         try:
             datetime.strptime(datum, "%Y-%m-%d")
         except ValueError:
@@ -4928,8 +4991,10 @@ class Privat:
             (was, datum, wiederholung, (bereich or "privat").lower(), notiz,
              zeitstempel()))
         return {"ok": True, "id": nummer,
-                "text": "Gemerkt: %s am %s%s." % (was, datum,
-                        (", %s" % wiederholung) if wiederholung != "einmalig" else "")}
+                "text": ("Gemerkt: %s %s%s" % (was, datum_sprechen(datum),
+                         (", %s" % {"jaehrlich": "jedes Jahr", "monatlich": "jeden Monat",
+                                    "woechentlich": "jede Woche"}.get(wiederholung, wiederholung))
+                         if wiederholung != "einmalig" else "")).rstrip(".") + "."}
 
     def _naechster_termin(self, zeile, ab: datetime):
         """Wann eine Erinnerung das nächste Mal fällig ist."""
@@ -7930,7 +7995,8 @@ class Team:
             teile.append("%d Ausgaben ohne Beleg." % belege["anzahl"])
         punkte = (stand["bereiche"].get("offene_punkte") or {}).get("punkte") or []
         if punkte:
-            teile.append("%d Punkte offen, zuerst: %s" % (len(punkte), punkte[0]))
+            teile.append(("Ein Punkt offen: %s" % punkte[0]) if len(punkte) == 1 else
+                         "%d Punkte offen, zuerst: %s" % (len(punkte), punkte[0]))
         termine = stand["bereiche"].get("termine") or {}
         if termine.get("ok") and termine.get("anzahl"):
             teile.append("%d Termine in den nächsten zwei Tagen."
@@ -8020,6 +8086,9 @@ button{font-family:inherit;cursor:pointer;border:none;background:none;color:inhe
 .ticker a,.ticker .mini{color:var(--grau);text-decoration:none;font-size:10px;
                         letter-spacing:.12em}
 .ticker a:hover,.ticker .mini:hover{color:var(--kupfer)}
+.ticker .mini{text-transform:uppercase}
+#lage{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ticker .mini:disabled{opacity:.45;cursor:default}
 .ticker .mini.aktiv{color:var(--akzent);text-shadow:0 0 8px rgba(58,209,255,.6)}
 .blitz{position:fixed;inset:0;background:rgba(166,236,255,.18);pointer-events:none;
        opacity:0;transition:opacity .25s;z-index:50}
@@ -9074,7 +9143,10 @@ button:disabled{opacity:.5;cursor:default}
     </div>
   </div>
 
-  <h2>Aufgaben</h2>
+  <h2>Offene Punkte</h2>
+  <div id="punkte"></div>
+
+  <h2>Vom Autopilot</h2>
   <div id="liste"></div>
 
   <h2>Einstellungen</h2>
@@ -9175,10 +9247,31 @@ button:disabled{opacity:.5;cursor:default}
       var liste = el("liste"); liste.textContent = "";
       if (!d.aufgaben.length) {
         var l = document.createElement("div"); l.className = "leer";
-        l.textContent = "Nichts offen. Klick auf „Jetzt arbeiten“, dann sucht Jarvis neue Arbeit.";
+        l.textContent = "Nichts vom Autopilot. Klick auf „Jetzt arbeiten“, dann sucht Jarvis neue Arbeit.";
         liste.appendChild(l);
       }
       d.aufgaben.forEach(function (a) { liste.appendChild(karte(a)); });
+      var punkte = el("punkte"); punkte.textContent = "";
+      if (!d.punkte.length) {
+        var lp = document.createElement("div"); lp.className = "leer";
+        lp.textContent = "Keine offenen Punkte. Sag zum Beispiel: „Leg einen Punkt an: Freitag Berger anrufen“.";
+        punkte.appendChild(lp);
+      }
+      d.punkte.forEach(function (p) {
+        var k = document.createElement("div"); k.className = "karte";
+        var reihe = document.createElement("div"); reihe.className = "reihe"; reihe.style.marginTop = "0";
+        var t = document.createElement("div"); t.className = "titel"; t.style.flex = "1";
+        t.textContent = p.text;
+        var f = document.createElement("span"); f.className = "grund";
+        f.textContent = p.faellig ? "fällig " + p.faellig_text : "";
+        reihe.appendChild(t); reihe.appendChild(f);
+        reihe.appendChild(knopf("Erledigt", "", function () {
+          holen("/api/autopilot/punkt", {id: p.id}).then(function () {
+            k.style.opacity = ".45"; setTimeout(laden, 500);
+          });
+        }));
+        k.appendChild(reihe); punkte.appendChild(k);
+      });
       var e = d.einstellungen;
       ["ort", "name", "firma"].forEach(function (f) {
         if (document.activeElement !== el(f)) { el(f).value = e[f] || ""; }
@@ -11006,7 +11099,7 @@ class JarvisWeb:
                 "nutzer": NUTZER_NAME, "firma": FIRMA,
                 "modell": CLAUDE_MODEL,
                 "werkzeuge": len(werkzeuge.namen()),
-                "aufgaben": werkzeuge.autopilot.offen_anzahl(),
+                "aufgaben": werkzeuge.tagesueberblick()["anzahl"],
                 "rollen": [r["rolle"] for r in werkzeuge.team.rollen_liste()],
                 "dienste": konfig_uebersicht()})
         if pfad == "/api/meldungen":
@@ -11033,6 +11126,9 @@ class JarvisWeb:
             autopilot = werkzeuge.autopilot
             return self._antworten(behandler, 200, {
                 "ok": True, "aufgaben": autopilot.aufgaben(),
+                "punkte": [{"id": p["id"], "text": p["text"], "faellig": p["faellig"],
+                            "faellig_text": datum_sprechen(p["faellig"])}
+                           for p in werkzeuge.memory.punkte_offen(tage=3650)],
                 "einstellungen": autopilot.einstellungen(),
                 "letzter_lauf": autopilot.letzter_lauf(),
                 "laeuft": autopilot._laeuft.locked()})
@@ -11194,6 +11290,10 @@ class JarvisWeb:
                 daten.get("id"), str(daten.get("aktion") or ""),
                 None if text is None else str(text),
                 None if betreff is None else str(betreff)))
+        if pfad == "/api/autopilot/punkt":
+            erledigt = werkzeuge.memory.punkt_erledigen(daten.get("id"))
+            return self._antworten(behandler, 200, {
+                "ok": erledigt, "text": "Erledigt." if erledigt else "Diesen Punkt gibt es nicht."})
         if pfad == "/api/autopilot/einstellungen":
             branchen = daten.get("branchen")
             return self._antworten(behandler, 200, werkzeuge.autopilot.einstellungen_setzen(
@@ -12011,7 +12111,11 @@ CREATE TABLE IF NOT EXISTS autopilot_laeufe (
 );
 """
 
-OVERPASS_URL = "https://overpass-api.de/api/interpreter"
+# Mehrere öffentliche Server: Ist einer ausgelastet oder weg, nimmt Jarvis den nächsten.
+OVERPASS_SERVER = ["https://overpass-api.de/api/interpreter",
+                   "https://overpass.kumi.systems/api/interpreter",
+                   "https://overpass.private.coffee/api/interpreter"]
+OVERPASS_URL = OVERPASS_SERVER[0]
 
 # Welche OpenStreetMap-Merkmale zu welcher Branche gehören.
 BRANCHEN_OSM = {
@@ -12061,7 +12165,7 @@ def osm_abfrage(ort: str, branchen: list, anzahl: int = 40) -> str:
     for branche in branchen:
         for schluessel, wert in BRANCHEN_OSM.get(branche, []):
             teile.append('nwr["%s"="%s"]["name"](area.a);' % (schluessel, wert))
-    return ('[out:json][timeout:50];'
+    return ('[out:json][timeout:35];'
             'area["name"="%s"]["boundary"="administrative"]->.a;'
             '(%s);out tags center %d;' % (_sauber(ort), "".join(teile), int(anzahl)))
 
@@ -12083,19 +12187,21 @@ def osm_betriebe(ort: str, branchen: list, anzahl: int = 40, url: str = None) ->
     if not branchen:
         return {"ok": False, "fehler": "Es ist keine bekannte Branche gewählt."}
     daten = urllib.parse.urlencode({"data": osm_abfrage(ort, branchen, anzahl)}).encode()
-    anfrage = urllib.request.Request(
-        url or OVERPASS_URL, data=daten, method="POST",
-        headers={"User-Agent": "Jarvis-Gebaeudereinigung/1.0",
-                 "Content-Type": "application/x-www-form-urlencoded"})
-    try:
-        with urllib.request.urlopen(anfrage, timeout=70) as antwort:
-            roh = json.loads(antwort.read().decode("utf-8"))
-    except urllib.error.HTTPError as fehler:
-        return {"ok": False, "fehler": "OpenStreetMap antwortet mit Fehler %d. "
-                "Das passiert, wenn der Dienst ausgelastet ist; beim nächsten "
-                "Lauf klappt es meist." % fehler.code}
-    except (urllib.error.URLError, OSError, ValueError) as fehler:
-        return {"ok": False, "fehler": "OpenStreetMap ist nicht erreichbar: %s" % fehler}
+    roh = None
+    for server in ([url] if url else OVERPASS_SERVER):
+        anfrage = urllib.request.Request(
+            server, data=daten, method="POST",
+            headers={"User-Agent": "Jarvis-Gebaeudereinigung/1.0",
+                     "Content-Type": "application/x-www-form-urlencoded"})
+        try:
+            with urllib.request.urlopen(anfrage, timeout=40) as antwort:
+                roh = json.loads(antwort.read().decode("utf-8"))
+            break
+        except (urllib.error.URLError, OSError, ValueError):
+            continue
+    if roh is None:
+        return {"ok": False, "fehler": "OpenStreetMap ist gerade nicht erreichbar. "
+                                       "Beim nächsten Lauf versuche ich es wieder."}
 
     betriebe = []
     for element in roh.get("elements", []):
@@ -12137,8 +12243,9 @@ def anruf_vorlage(betrieb: dict, ort: str = "") -> str:
 class Autopilot:
     """Arbeitet die Vorarbeit von selbst ab und legt sie zur Freigabe vor."""
 
-    def __init__(self, memory, akquise=None, mail=None, bookkeeping=None):
+    def __init__(self, memory, akquise=None, mail=None, bookkeeping=None, welt=None):
         self.memory = memory
+        self.welt = welt  # für die Websuche, wenn OpenStreetMap ausfällt
         self.akquise = akquise
         self.mail = mail
         self.bookkeeping = bookkeeping
@@ -12302,7 +12409,11 @@ class Autopilot:
         gefunden = osm_betriebe(einstellungen["ort"], einstellungen["branchen"],
                                 url=self.osm_url)
         if not gefunden.get("ok"):
-            return 0, gefunden.get("fehler", "")
+            # Zweiter Weg: Websuche, die Treffer zerlegt das Gehirn.
+            neue = self._betriebe_ueber_suche(agent, einstellungen)
+            if not neue:
+                return 0, gefunden.get("fehler", "")
+            return self._anrufe_anlegen(agent, neue, einstellungen["ort"])
         neue = []
         for betrieb in gefunden["betriebe"]:
             if len(neue) >= einstellungen["neue_pro_lauf"]:
@@ -12320,7 +12431,33 @@ class Autopilot:
         if not neue:
             return 0, ("Keine neuen Betriebe mit Telefon in %s gefunden."
                        % einstellungen["ort"]) if not gefunden["betriebe"] else ""
+        return self._anrufe_anlegen(agent, neue, einstellungen["ort"])
 
+    def _betriebe_ueber_suche(self, agent, einstellungen) -> list:
+        """Neue Betriebe über die Websuche - wenn OpenStreetMap nicht antwortet."""
+        if self.welt is None or self.akquise is None or agent is None \
+                or not getattr(agent, "einsatzbereit", lambda: False)():
+            return []
+        try:
+            ergebnis = self.akquise.leads_finden(
+                einstellungen["ort"], ", ".join(einstellungen["branchen"]),
+                einstellungen["neue_pro_lauf"], self.welt, agent)
+        except Exception:
+            return []
+        neue = []
+        for firma in (ergebnis.get("neu") or []) if ergebnis.get("ok") else []:
+            lead = self.akquise.lead_finden(firma)
+            if lead is None:
+                continue
+            neue.append({"firma": lead["firma"], "branche": lead["notiz"] or "",
+                         "adresse": lead["adresse"] or "", "telefon": lead["telefon"] or "",
+                         "email": lead["email"] or "", "webseite": "",
+                         "lead_id": lead["id"]})
+        return neue
+
+    def _anrufe_anlegen(self, agent, neue: list, ort: str):
+        """Zu jedem neuen Betrieb eine Anruf-Aufgabe mit Skript."""
+        einstellungen = {"ort": ort}
         skripte = self._skripte(agent, neue, einstellungen["ort"])
         for betrieb in neue:
             skript = skripte.get(betrieb["firma"]) or anruf_vorlage(betrieb, einstellungen["ort"])
@@ -12516,6 +12653,19 @@ def parameter_pruefen(wert: str):
     return True, ""
 
 
+def punkte_satz(punkte: list) -> str:
+    """Offene Punkte als gesprochener Satz - mit Inhalt, nicht nur als Zahl."""
+    if not punkte:
+        return "Es ist nichts offen."
+    def eintrag(p):
+        return p["text"] + ((" (%s)" % datum_sprechen(p["faellig"])) if p["faellig"] else "")
+    if len(punkte) == 1:
+        return "Ein Punkt ist offen: %s." % eintrag(punkte[0])
+    namen = [eintrag(p) for p in punkte[:5]]
+    rest = (" und %d weitere" % (len(punkte) - 5)) if len(punkte) > 5 else ""
+    return "%d Punkte sind offen: %s%s." % (len(punkte), "; ".join(namen), rest)
+
+
 class Werkzeuge:
     """Der Katalog: Beschreibungen für Claude und die Ausführung dahinter."""
 
@@ -12536,7 +12686,8 @@ class Werkzeuge:
         self.telefon = Telefon(self.memory)
         self.mcp = MCPClient()
         self.welt = Welt(self.mcp)
-        self.autopilot = Autopilot(self.memory, self.akquise, self.mail, self.bookkeeping)
+        self.autopilot = Autopilot(self.memory, self.akquise, self.mail, self.bookkeeping,
+                                   self.welt)
         self.bildschirm = Bildschirm(agent)
         self.browser = Browser(agent)
         self.messenger = Messenger(self.telegram, self.mail, self.mcp, None)
@@ -12867,6 +13018,44 @@ class Werkzeuge:
         ]
         return eigene + self.mcp.alle_werkzeuge()
 
+    def tagesueberblick(self) -> dict:
+        """Was heute ansteht - alles an einer Stelle statt in vier Listen."""
+        heute = heute_datum()
+        punkte = self.memory.punkte_offen(tage=3650)
+        dran = [p for p in punkte if p["faellig"] and p["faellig"][:10] <= heute]
+        aufgaben = self.autopilot.aufgaben()
+        try:
+            erinnerungen = self.privat.erinnerungen_faellig(1).get("eintraege") or []
+        except Exception:
+            erinnerungen = []
+        nachfassen = self.akquise.nachfassliste().get("eintraege") or []
+        teile = []
+        if dran:
+            teile.append("Fällig: %s" % ", ".join(
+                "%s (%s)" % (p["text"], datum_sprechen(p["faellig"])) for p in dran[:5]))
+        if erinnerungen:
+            teile.append("Erinnerung: %s" % ", ".join(
+                str(e.get("was") or e.get("text") or "") for e in erinnerungen[:3]))
+        if nachfassen:
+            teile.append("Nachfassen: %s" % ", ".join(e["firma"] for e in nachfassen[:3]))
+        if aufgaben:
+            teile.append("Vom Autopilot: %s" % ", ".join(z["titel"] for z in aufgaben[:3]))
+        spaeter = [p for p in punkte if p not in dran]
+        if spaeter:
+            namen = ", ".join(p["text"] + ((" (%s)" % datum_sprechen(p["faellig"]))
+                                           if p["faellig"] else "") for p in spaeter[:3])
+            mehr = (" und %d weitere" % (len(spaeter) - 3)) if len(spaeter) > 3 else ""
+            teile.append(("Ohne Eile: %s%s" if teile else
+                          "Heute ist nichts fällig. Offen ohne Eile: %s%s") % (namen, mehr))
+        text = (". ".join(t.rstrip(".") for t in teile) + ".") if teile \
+            else "Heute steht nichts an."
+        return {"ok": True, "anzahl": len(dran) + len(aufgaben) + len(nachfassen),
+                "faellig": [{"id": p["id"], "text": p["text"], "faellig": p["faellig"]}
+                            for p in dran],
+                "aufgaben": [{"id": z["id"], "titel": z["titel"], "art": z["art"]}
+                             for z in aufgaben[:15]],
+                "text": text}
+
     def namen(self) -> list:
         """Alle Werkzeugnamen."""
         return [w["name"] for w in self.katalog()]
@@ -12973,12 +13162,11 @@ class Werkzeuge:
         if name == "punkt_anlegen":
             return self.memory.punkt_anlegen(a.get("text"), a.get("faellig", ""))
         if name == "punkte_offen":
-            punkte = self.memory.punkte_offen()
+            punkte = self.memory.punkte_offen(tage=3650)
             return {"ok": True, "anzahl": len(punkte),
                     "punkte": [{"id": p["id"], "text": p["text"],
                                 "faellig": p["faellig"]} for p in punkte],
-                    "text": ("%d Punkte offen." % len(punkte)) if punkte
-                            else "Es ist nichts offen."}
+                    "text": punkte_satz(punkte)}
         if name == "punkt_erledigen":
             erledigt = self.memory.punkt_erledigen(a.get("id"))
             return {"ok": erledigt,
@@ -13010,14 +13198,7 @@ class Werkzeuge:
         if name == "autopilot_starten":
             return self.autopilot.laufen(self.agent)
         if name == "heute_zu_tun":
-            offen = self.autopilot.aufgaben()
-            if not offen:
-                return {"ok": True, "anzahl": 0, "text": "Auf der Liste ist nichts offen."}
-            return {"ok": True, "anzahl": len(offen),
-                    "aufgaben": [{"id": z["id"], "titel": z["titel"], "art": z["art"]}
-                                 for z in offen[:15]],
-                    "text": "%d Aufgaben offen. Zuerst: %s." % (
-                        len(offen), "; ".join(z["titel"] for z in offen[:3]))}
+            return self.tagesueberblick()
         if name == "protokoll":
             return self.recall.protokoll(a.get("tag") or "heute", a.get("thema", ""),
                                          int(a.get("tage") or 1))

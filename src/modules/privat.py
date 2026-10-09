@@ -20,7 +20,8 @@ Das ist die Aufgabe dieses Moduls:
 from datetime import datetime, timedelta
 
 import config
-from modules.memory import Memory, db_schema_anlegen, heute_datum, zeitstempel
+from modules.memory import (Memory, datum_sprechen, datum_verstehen, db_schema_anlegen,
+                            heute_datum, zeitstempel)
 
 SCHEMA_PRIVAT = """
 CREATE TABLE IF NOT EXISTS fixkosten (
@@ -271,7 +272,7 @@ class Privat:
         was = (was or "").strip()
         if not was:
             return {"ok": False, "fehler": "Woran soll ich erinnern?"}
-        datum = (datum or "").strip()
+        datum = datum_verstehen(datum)  # "morgen", "Freitag", "12.10." gehen auch
         try:
             datetime.strptime(datum, "%Y-%m-%d")
         except ValueError:
@@ -289,8 +290,10 @@ class Privat:
             (was, datum, wiederholung, (bereich or "privat").lower(), notiz,
              zeitstempel()))
         return {"ok": True, "id": nummer,
-                "text": "Gemerkt: %s am %s%s." % (was, datum,
-                        (", %s" % wiederholung) if wiederholung != "einmalig" else "")}
+                "text": ("Gemerkt: %s %s%s" % (was, datum_sprechen(datum),
+                         (", %s" % {"jaehrlich": "jedes Jahr", "monatlich": "jeden Monat",
+                                    "woechentlich": "jede Woche"}.get(wiederholung, wiederholung))
+                         if wiederholung != "einmalig" else "")).rstrip(".") + "."}
 
     def _naechster_termin(self, zeile, ab: datetime):
         """Wann eine Erinnerung das nächste Mal fällig ist."""

@@ -32,7 +32,7 @@ from modules.computer_use import Bildschirm
 from modules.dashboard import Dashboard
 from modules.mail import Mail
 from modules.mcp_client import MCPClient
-from modules.memory import Memory, heute_datum
+from modules.memory import Memory, datum_sprechen, heute_datum
 from modules.privat import BEREICHE, Privat, WIEDERHOLUNGEN, RHYTHMEN
 from modules.messenger import Messenger
 from modules.autopilot import Autopilot
@@ -96,6 +96,19 @@ def parameter_pruefen(wert: str):
     return True, ""
 
 
+def punkte_satz(punkte: list) -> str:
+    """Offene Punkte als gesprochener Satz - mit Inhalt, nicht nur als Zahl."""
+    if not punkte:
+        return "Es ist nichts offen."
+    def eintrag(p):
+        return p["text"] + ((" (%s)" % datum_sprechen(p["faellig"])) if p["faellig"] else "")
+    if len(punkte) == 1:
+        return "Ein Punkt ist offen: %s." % eintrag(punkte[0])
+    namen = [eintrag(p) for p in punkte[:5]]
+    rest = (" und %d weitere" % (len(punkte) - 5)) if len(punkte) > 5 else ""
+    return "%d Punkte sind offen: %s%s." % (len(punkte), "; ".join(namen), rest)
+
+
 class Werkzeuge:
     """Der Katalog: Beschreibungen für Claude und die Ausführung dahinter."""
 
@@ -116,7 +129,8 @@ class Werkzeuge:
         self.telefon = Telefon(self.memory)
         self.mcp = MCPClient()
         self.welt = Welt(self.mcp)
-        self.autopilot = Autopilot(self.memory, self.akquise, self.mail, self.bookkeeping)
+        self.autopilot = Autopilot(self.memory, self.akquise, self.mail, self.bookkeeping,
+                                   self.welt)
         self.bildschirm = Bildschirm(agent)
         self.browser = Browser(agent)
         self.messenger = Messenger(self.telegram, self.mail, self.mcp, None)
@@ -447,6 +461,44 @@ class Werkzeuge:
         ]
         return eigene + self.mcp.alle_werkzeuge()
 
+    def tagesueberblick(self) -> dict:
+        """Was heute ansteht - alles an einer Stelle statt in vier Listen."""
+        heute = heute_datum()
+        punkte = self.memory.punkte_offen(tage=3650)
+        dran = [p for p in punkte if p["faellig"] and p["faellig"][:10] <= heute]
+        aufgaben = self.autopilot.aufgaben()
+        try:
+            erinnerungen = self.privat.erinnerungen_faellig(1).get("eintraege") or []
+        except Exception:
+            erinnerungen = []
+        nachfassen = self.akquise.nachfassliste().get("eintraege") or []
+        teile = []
+        if dran:
+            teile.append("Fällig: %s" % ", ".join(
+                "%s (%s)" % (p["text"], datum_sprechen(p["faellig"])) for p in dran[:5]))
+        if erinnerungen:
+            teile.append("Erinnerung: %s" % ", ".join(
+                str(e.get("was") or e.get("text") or "") for e in erinnerungen[:3]))
+        if nachfassen:
+            teile.append("Nachfassen: %s" % ", ".join(e["firma"] for e in nachfassen[:3]))
+        if aufgaben:
+            teile.append("Vom Autopilot: %s" % ", ".join(z["titel"] for z in aufgaben[:3]))
+        spaeter = [p for p in punkte if p not in dran]
+        if spaeter:
+            namen = ", ".join(p["text"] + ((" (%s)" % datum_sprechen(p["faellig"]))
+                                           if p["faellig"] else "") for p in spaeter[:3])
+            mehr = (" und %d weitere" % (len(spaeter) - 3)) if len(spaeter) > 3 else ""
+            teile.append(("Ohne Eile: %s%s" if teile else
+                          "Heute ist nichts fällig. Offen ohne Eile: %s%s") % (namen, mehr))
+        text = (". ".join(t.rstrip(".") for t in teile) + ".") if teile \
+            else "Heute steht nichts an."
+        return {"ok": True, "anzahl": len(dran) + len(aufgaben) + len(nachfassen),
+                "faellig": [{"id": p["id"], "text": p["text"], "faellig": p["faellig"]}
+                            for p in dran],
+                "aufgaben": [{"id": z["id"], "titel": z["titel"], "art": z["art"]}
+                             for z in aufgaben[:15]],
+                "text": text}
+
     def namen(self) -> list:
         """Alle Werkzeugnamen."""
         return [w["name"] for w in self.katalog()]
@@ -553,12 +605,11 @@ class Werkzeuge:
         if name == "punkt_anlegen":
             return self.memory.punkt_anlegen(a.get("text"), a.get("faellig", ""))
         if name == "punkte_offen":
-            punkte = self.memory.punkte_offen()
+            punkte = self.memory.punkte_offen(tage=3650)
             return {"ok": True, "anzahl": len(punkte),
                     "punkte": [{"id": p["id"], "text": p["text"],
                                 "faellig": p["faellig"]} for p in punkte],
-                    "text": ("%d Punkte offen." % len(punkte)) if punkte
-                            else "Es ist nichts offen."}
+                    "text": punkte_satz(punkte)}
         if name == "punkt_erledigen":
             erledigt = self.memory.punkt_erledigen(a.get("id"))
             return {"ok": erledigt,
@@ -590,14 +641,7 @@ class Werkzeuge:
         if name == "autopilot_starten":
             return self.autopilot.laufen(self.agent)
         if name == "heute_zu_tun":
-            offen = self.autopilot.aufgaben()
-            if not offen:
-                return {"ok": True, "anzahl": 0, "text": "Auf der Liste ist nichts offen."}
-            return {"ok": True, "anzahl": len(offen),
-                    "aufgaben": [{"id": z["id"], "titel": z["titel"], "art": z["art"]}
-                                 for z in offen[:15]],
-                    "text": "%d Aufgaben offen. Zuerst: %s." % (
-                        len(offen), "; ".join(z["titel"] for z in offen[:3]))}
+            return self.tagesueberblick()
         if name == "protokoll":
             return self.recall.protokoll(a.get("tag") or "heute", a.get("thema", ""),
                                          int(a.get("tage") or 1))

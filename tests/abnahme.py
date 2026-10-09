@@ -200,11 +200,15 @@ def pruefung_buchhaltung(agent):
             "%.2f Euro" % mwst_aus_brutto(130.40, 20))
 
     buch = agent.tools.bookkeeping
-    buch.buchung_eintragen("ausgabe", "2026-08-20", 130.40, "Baumarkt",
+    # Im laufenden Monat buchen: Das Command Center zeigt den aktuellen Monat,
+    # und ein fest eingetragenes Datum fällt sonst nach ein paar Wochen heraus.
+    heute = datetime.now().strftime("%Y-%m-%d")
+    monat = heute[:7]
+    buch.buchung_eintragen("ausgabe", heute, 130.40, "Baumarkt",
                            "Arbeitsmaterial", 20)
-    buch.buchung_eintragen("einnahme", "2026-08-21", 1200.00, "Berger GmbH",
+    buch.buchung_eintragen("einnahme", heute, 1200.00, "Berger GmbH",
                            "Sonstiges", 20)
-    auswertung = buch.auswertung("2026-08-01", "2026-08-31")
+    auswertung = buch.auswertung(monat + "-01", monat + "-31")
     pruefen("Auswertung zeigt Einnahmen, Ausgaben, Ergebnis, Zahllast",
             auswertung["einnahmen"] == 1200.0 and auswertung["ausgaben"] == 130.40
             and auswertung["ergebnis"] == 1069.60 and auswertung["zahllast"] == 178.27,
@@ -377,8 +381,11 @@ def pruefung_privat(agent):
             mit_lage.get("luecke") is not None,
             "Lücke %.2f je Monat" % (mit_lage.get("luecke") or 0))
 
+    # Deutsche Daten ("4.9.2026", "morgen") versteht Jarvis inzwischen; abgewiesen
+    # wird, was es nicht gibt oder nicht zu lesen ist.
     pruefen("Falsches Datum wird abgewiesen",
-            privat.erinnerung_anlegen("x", "4.9.2026").get("ok") is False)
+            privat.erinnerung_anlegen("x", "31.02.2026").get("ok") is False
+            and privat.erinnerung_anlegen("x", "irgendwann").get("ok") is False)
     privat.erinnerung_anlegen("Pickerl Firmenwagen", "2026-09-04", "jaehrlich", "firma")
     privat.erinnerung_anlegen("Geburtstag Mama", "2026-09-12", "jaehrlich")
     faellig = privat.erinnerungen_faellig(21, ab="2026-08-26")
@@ -2056,6 +2063,103 @@ def pruefung_sehen_und_terminal(agent):
             "Notiert: Merk dir: Terminaltest" in ausgabe and "FÄHIGKEITEN" in ausgabe)
 
 
+def pruefung_feinschliff(agent):
+    """Feinschliff: Datum verstehen, ganze Sätze, ein Tagesüberblick, Ausweichwege."""
+    abschnitt("Feinschliff")
+    import http.server
+    import urllib.request as _netz
+    from modules import autopilot as autopilot_modul
+    from modules.memory import datum_sprechen, datum_verstehen
+    from modules.tools import punkte_satz
+
+    freitag = datetime(2026, 10, 9)
+    pruefen("Datum verstehen: morgen, Wochentag, in 3 Tagen, 12.10.",
+            [datum_verstehen(t, freitag) for t in ("morgen", "am Montag", "in 3 Tagen", "12.10.")]
+            == ["2026-10-10", "2026-10-12", "2026-10-12", "2026-10-12"])
+    pruefen("Gleicher Wochentag meint nächste Woche, Unlesbares bleibt stehen",
+            datum_verstehen("Freitag", freitag) == "2026-10-16"
+            and datum_verstehen("irgendwann", freitag) == "irgendwann")
+    pruefen("Datum sprechen: heute, morgen, 'Fr 16.10.'",
+            [datum_sprechen(d, freitag) for d in ("2026-10-09", "2026-10-10", "2026-10-16")]
+            == ["heute", "morgen", "Fr 16.10."])
+    pruefen("Ein Punkt - kein '1 Punkte'",
+            punkte_satz([{"text": "Berger anrufen", "faellig": ""}]) == "Ein Punkt ist offen: Berger anrufen.")
+
+    for p in agent.memory.punkte_offen(tage=3650):
+        agent.memory.punkt_erledigen(p["id"])
+    agent.tools.run("punkt_anlegen", {"text": "Feinschliff heute", "faellig": "heute"})
+    agent.tools.run("punkt_anlegen", {"text": "Feinschliff später", "faellig": "in 5 Tagen"})
+    punkte = agent.memory.punkte_offen(tage=3650)
+    pruefen("Fälligkeit wird als Datum gespeichert, nicht als Wort",
+            all(len(p["faellig"]) == 10 and p["faellig"][4] == "-" for p in punkte))
+    agent.memory._schreiben("UPDATE offene_punkte SET angelegt='2020-01-01 10:00:00' WHERE text=?",
+                            ("Feinschliff später",))
+    ueberblick = agent.tools.run("heute_zu_tun", {})
+    pruefen("Tagesüberblick: Fälliges zuerst, alte offene Punkte gehen nicht verloren",
+            ueberblick["text"].startswith("Fällig: Feinschliff heute (heute)")
+            and "Feinschliff später" in ueberblick["text"], ueberblick["text"][:90])
+    erinnerung = agent.tools.run("erinnerung_anlegen", {"was": "Steuer", "datum": "morgen"})
+    pruefen("Erinnerung nimmt 'morgen' an und antwortet ohne doppelten Punkt",
+            erinnerung.get("ok") and erinnerung["text"] == "Gemerkt: Steuer morgen.",
+            erinnerung.get("text", erinnerung.get("fehler", "")))
+
+    # OpenStreetMap: fällt der erste Server aus, nimmt er den nächsten
+    class Overpass(http.server.BaseHTTPRequestHandler):
+        def log_message(self, *a):
+            pass
+
+        def do_POST(self):
+            self.rfile.read(int(self.headers["Content-Length"]))
+            roh = json.dumps({"elements": [{"tags": {"name": "Ausweich GmbH", "office": "lawyer",
+                                                     "phone": "+43 1 999"}}]}).encode()
+            self.send_response(200)
+            self.send_header("Content-Length", str(len(roh)))
+            self.end_headers()
+            self.wfile.write(roh)
+
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 11993), Overpass)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    alte_server = list(autopilot_modul.OVERPASS_SERVER)
+    autopilot_modul.OVERPASS_SERVER[:] = ["http://127.0.0.1:1/tot", "http://127.0.0.1:11993/api"]
+    try:
+        ergebnis = autopilot_modul.osm_betriebe("Teststadt", ["Kanzleien"])
+        pruefen("Fällt der erste OpenStreetMap-Server aus, nimmt er den nächsten",
+                ergebnis.get("ok") and ergebnis["betriebe"][0]["firma"] == "Ausweich GmbH")
+        autopilot_modul.OVERPASS_SERVER[:] = ["http://127.0.0.1:1/tot"]
+        ergebnis = autopilot_modul.osm_betriebe("Teststadt", ["Kanzleien"])
+        pruefen("Ohne Server eine verständliche Meldung statt 'Errno'",
+                not ergebnis["ok"] and "Errno" not in ergebnis["fehler"]
+                and "nächsten Lauf" in ergebnis["fehler"])
+    finally:
+        autopilot_modul.OVERPASS_SERVER[:] = alte_server
+        server.shutdown()
+
+    web = JarvisWeb(agent, port=8804)
+    web.starten(blockierend=False)
+    time.sleep(0.4)
+    try:
+        with _netz.urlopen("http://127.0.0.1:8804/api/autopilot", timeout=10) as r:
+            daten = json.loads(r.read().decode("utf-8"))
+        pruefen("'Heute zu tun' zeigt auch die offenen Punkte, mit gesprochenem Datum",
+                any(p["text"] == "Feinschliff heute" and p["faellig_text"] == "heute"
+                    for p in daten["punkte"]))
+        nummer = [p["id"] for p in daten["punkte"] if p["text"] == "Feinschliff heute"][0]
+        anfrage = _netz.Request("http://127.0.0.1:8804/api/autopilot/punkt",
+                                data=json.dumps({"id": nummer}).encode(),
+                                headers={"Content-Type": "application/json"})
+        with _netz.urlopen(anfrage, timeout=10) as r:
+            erledigt = json.loads(r.read().decode("utf-8"))
+        pruefen("Punkte lassen sich auf der Seite abhaken",
+                erledigt["ok"] and not any(p["id"] == nummer
+                                           for p in agent.memory.punkte_offen(tage=3650)))
+        with _netz.urlopen("http://127.0.0.1:8804/api/zustand", timeout=10) as r:
+            zustand = json.loads(r.read().decode("utf-8"))
+        pruefen("Die Zahl 'Heute zu tun' zählt mehr als nur den Autopilot",
+                zustand["aufgaben"] == agent.tools.tagesueberblick()["anzahl"])
+    finally:
+        web.stoppen()
+
+
 def pruefung_sicherheit(agent):
     abschnitt("Sicherheit")
     ergebnis = agent.tools.run("systeminfo", {"was": "rm -rf /"})
@@ -2206,6 +2310,7 @@ def main() -> int:
     pruefung_autopilot(agent)
     pruefung_netz_und_tempo(agent)
     pruefung_sehen_und_terminal(agent)
+    pruefung_feinschliff(agent)
     pruefung_routinen(agent)
     pruefung_zeitplan()
     pruefung_kalender()

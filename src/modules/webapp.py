@@ -31,7 +31,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
 import config
-from modules.memory import zeitstempel
+from modules.memory import datum_sprechen, zeitstempel
 from modules.freier_dienst import DIENST_VORGABEN, freier_dienst_pruefen
 from modules.lokal import STANDARD_MODELL, ollama_pruefen
 from modules.setup_wizard import schluessel_online_testen
@@ -305,7 +305,7 @@ class JarvisWeb:
                 "nutzer": config.NUTZER_NAME, "firma": config.FIRMA,
                 "modell": config.CLAUDE_MODEL,
                 "werkzeuge": len(werkzeuge.namen()),
-                "aufgaben": werkzeuge.autopilot.offen_anzahl(),
+                "aufgaben": werkzeuge.tagesueberblick()["anzahl"],
                 "rollen": [r["rolle"] for r in werkzeuge.team.rollen_liste()],
                 "dienste": config.konfig_uebersicht()})
         if pfad == "/api/meldungen":
@@ -332,6 +332,9 @@ class JarvisWeb:
             autopilot = werkzeuge.autopilot
             return self._antworten(behandler, 200, {
                 "ok": True, "aufgaben": autopilot.aufgaben(),
+                "punkte": [{"id": p["id"], "text": p["text"], "faellig": p["faellig"],
+                            "faellig_text": datum_sprechen(p["faellig"])}
+                           for p in werkzeuge.memory.punkte_offen(tage=3650)],
                 "einstellungen": autopilot.einstellungen(),
                 "letzter_lauf": autopilot.letzter_lauf(),
                 "laeuft": autopilot._laeuft.locked()})
@@ -493,6 +496,10 @@ class JarvisWeb:
                 daten.get("id"), str(daten.get("aktion") or ""),
                 None if text is None else str(text),
                 None if betreff is None else str(betreff)))
+        if pfad == "/api/autopilot/punkt":
+            erledigt = werkzeuge.memory.punkt_erledigen(daten.get("id"))
+            return self._antworten(behandler, 200, {
+                "ok": erledigt, "text": "Erledigt." if erledigt else "Diesen Punkt gibt es nicht."})
         if pfad == "/api/autopilot/einstellungen":
             branchen = daten.get("branchen")
             return self._antworten(behandler, 200, werkzeuge.autopilot.einstellungen_setzen(

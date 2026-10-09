@@ -58,6 +58,9 @@ button{font-family:inherit;cursor:pointer;border:none;background:none;color:inhe
 .ticker a,.ticker .mini{color:var(--grau);text-decoration:none;font-size:10px;
                         letter-spacing:.12em}
 .ticker a:hover,.ticker .mini:hover{color:var(--kupfer)}
+.ticker .mini{text-transform:uppercase}
+#lage{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ticker .mini:disabled{opacity:.45;cursor:default}
 .ticker .mini.aktiv{color:var(--akzent);text-shadow:0 0 8px rgba(58,209,255,.6)}
 .blitz{position:fixed;inset:0;background:rgba(166,236,255,.18);pointer-events:none;
        opacity:0;transition:opacity .25s;z-index:50}
@@ -1112,7 +1115,10 @@ button:disabled{opacity:.5;cursor:default}
     </div>
   </div>
 
-  <h2>Aufgaben</h2>
+  <h2>Offene Punkte</h2>
+  <div id="punkte"></div>
+
+  <h2>Vom Autopilot</h2>
   <div id="liste"></div>
 
   <h2>Einstellungen</h2>
@@ -1213,10 +1219,31 @@ button:disabled{opacity:.5;cursor:default}
       var liste = el("liste"); liste.textContent = "";
       if (!d.aufgaben.length) {
         var l = document.createElement("div"); l.className = "leer";
-        l.textContent = "Nichts offen. Klick auf „Jetzt arbeiten“, dann sucht Jarvis neue Arbeit.";
+        l.textContent = "Nichts vom Autopilot. Klick auf „Jetzt arbeiten“, dann sucht Jarvis neue Arbeit.";
         liste.appendChild(l);
       }
       d.aufgaben.forEach(function (a) { liste.appendChild(karte(a)); });
+      var punkte = el("punkte"); punkte.textContent = "";
+      if (!d.punkte.length) {
+        var lp = document.createElement("div"); lp.className = "leer";
+        lp.textContent = "Keine offenen Punkte. Sag zum Beispiel: „Leg einen Punkt an: Freitag Berger anrufen“.";
+        punkte.appendChild(lp);
+      }
+      d.punkte.forEach(function (p) {
+        var k = document.createElement("div"); k.className = "karte";
+        var reihe = document.createElement("div"); reihe.className = "reihe"; reihe.style.marginTop = "0";
+        var t = document.createElement("div"); t.className = "titel"; t.style.flex = "1";
+        t.textContent = p.text;
+        var f = document.createElement("span"); f.className = "grund";
+        f.textContent = p.faellig ? "fällig " + p.faellig_text : "";
+        reihe.appendChild(t); reihe.appendChild(f);
+        reihe.appendChild(knopf("Erledigt", "", function () {
+          holen("/api/autopilot/punkt", {id: p.id}).then(function () {
+            k.style.opacity = ".45"; setTimeout(laden, 500);
+          });
+        }));
+        k.appendChild(reihe); punkte.appendChild(k);
+      });
       var e = d.einstellungen;
       ["ort", "name", "firma"].forEach(function (f) {
         if (document.activeElement !== el(f)) { el(f).value = e[f] || ""; }
