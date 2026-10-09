@@ -104,9 +104,6 @@ CLAUDE_MAX_TOKENS = _ganzzahl("CLAUDE_MAX_TOKENS", 2000)
 
 # Lokales Modell (Ollama): kostenlos, ohne Schlüssel, läuft auf diesem Rechner.
 # Wird nur benutzt, wenn kein Anthropic-Schlüssel hinterlegt ist.
-# Claude Code als Gehirn: Jarvis denkt über das Abo, ohne API-Schlüssel.
-CLAUDE_CODE_NUTZEN = _wahrheit("CLAUDE_CODE_NUTZEN", False)
-CLAUDE_CODE_MODELL = _text("CLAUDE_CODE_MODELL")
 LOKALES_MODELL = _text("LOKALES_MODELL")
 OLLAMA_URL = _text("OLLAMA_URL", "http://127.0.0.1:11434")
 
@@ -247,7 +244,6 @@ def konfig_uebersicht() -> dict:
     """Zeigt an, welche Dienste eingerichtet sind - ohne Geheimnisse preiszugeben."""
     return {
         "Claude": bool(ANTHROPIC_API_KEY),
-        "Claude Code (Abo)": bool(CLAUDE_CODE_NUTZEN),
         "Lokales Modell": bool(LOKALES_MODELL),
         "ElevenLabs": bool(ELEVENLABS_API_KEY),
         "Whisper-API": bool(OPENAI_API_KEY),

@@ -1431,104 +1431,6 @@ def pruefung_lokales_modell(agent):
             pass
 
 
-def pruefung_claude_code(agent):
-    """Jarvis denkt über Claude Code (Abo) - ohne Schlüssel, ohne Guthaben."""
-    abschnitt("Claude Code als Gehirn")
-    import urllib.request as _netz
-    import modules.webapp as webapp_modul  # noqa: F401
-    from modules.claude_code import (antwort_umwandeln, auftrag_bauen,
-                                     claude_code_finden)
-
-    ordner = pathlib.Path(ARBEITSVERZEICHNIS) / "fakebin"
-    ordner.mkdir(exist_ok=True)
-    protokoll = pathlib.Path(ARBEITSVERZEICHNIS) / "cc_protokoll.json"
-    skript = ordner / "claude"
-    skript.write_text(
-        "#!%s\n"
-        "import json, os, sys\n"
-        "auftrag = sys.stdin.read()\n"
-        "eintrag = {'argv': sys.argv[1:], 'hatte_schluessel': 'ANTHROPIC_API_KEY' in os.environ,\n"
-        "           'auftrag': auftrag}\n"
-        "open(%r, 'a').write(json.dumps(eintrag) + '\\n')\n"
-        "if 'Antworte nur mit dem Wort: ok' in auftrag:\n"
-        "    antwort = 'ok'\n"
-        "elif 'Ergebnis von notiz_speichern' in auftrag:\n"
-        "    antwort = json.dumps({'antwort': 'Gespeichert, Chef.'})\n"
-        "else:\n"
-        "    antwort = 'Gern: ' + json.dumps({'werkzeug': 'notiz_speichern',\n"
-        "              'argumente': {'text': 'CC-Test Nikolic'}})\n"
-        "print(json.dumps({'type': 'result', 'is_error': False, 'result': antwort}))\n"
-        % (sys.executable, str(protokoll)), encoding="utf-8")
-    os.chmod(str(skript), 0o755)
-
-    alte_pfad = os.environ.get("PATH", "")
-    alt = (config.ANTHROPIC_API_KEY, config.CLAUDE_CODE_NUTZEN, config.LOKALES_MODELL,
-           config.ENV_DATEI, dict(config._ROHWERTE))
-    os.environ["PATH"] = str(ordner) + os.pathsep + alte_pfad
-    os.environ["ANTHROPIC_API_KEY"] = "sk-ant-darf-nicht-durchgereicht-werden"
-    config.ANTHROPIC_API_KEY = ""
-    config.CLAUDE_CODE_NUTZEN = False
-    config.LOKALES_MODELL = ""
-    config.ENV_DATEI = pathlib.Path(ARBEITSVERZEICHNIS) / "cc.env"
-    web = None
-    try:
-        pruefen("Das Programm claude wird gefunden", claude_code_finden() == str(skript))
-        pruefen("Ohne Einschalten ist Jarvis nicht einsatzbereit",
-                agent.einsatzbereit() is False)
-
-        web = JarvisWeb(agent, port=8800)
-        web.starten(blockierend=False)
-        time.sleep(0.5)
-        anfrage = _netz.Request("http://127.0.0.1:8800/api/claudecode", data=b"{}",
-                                headers={"Content-Type": "application/json"})
-        with _netz.urlopen(anfrage, timeout=30) as r:
-            antwort = json.loads(r.read().decode("utf-8"))
-        pruefen("Claude Code lässt sich im Browser einschalten",
-                antwort.get("ok") is True and agent.einsatzbereit()
-                and "CLAUDE_CODE_NUTZEN=ja" in config.ENV_DATEI.read_text("utf-8"),
-                antwort.get("text", ""))
-
-        agent.verlauf_leeren()
-        text = agent.denken("Bitte merk dir die Notiz CC-Test Nikolic")
-        pruefen("Jarvis antwortet über Claude Code durch die normale Denkschleife",
-                text == "Gespeichert, Chef.", text)
-        pruefen("Der Werkzeugaufruf aus der Antwort wurde ausgeführt",
-                any("CC-Test Nikolic" in n["text"]
-                    for n in agent.memory.notizen_suchen("CC-Test")))
-        laeufe = [json.loads(z) for z in protokoll.read_text("utf-8").splitlines()]
-        pruefen("Der API-Schlüssel wird Claude Code nie mitgegeben",
-                laeufe and not any(l["hatte_schluessel"] for l in laeufe),
-                "sonst würde es über den Schlüssel abrechnen statt über das Abo")
-        pruefen("Aufruf im Druckmodus mit JSON-Ausgabe",
-                all(l["argv"][:3] == ["-p", "--output-format", "json"] for l in laeufe))
-        pruefen("Der Auftrag enthält Werkzeugliste und Antwortformat",
-                "notiz_speichern(" in laeufe[-1]["auftrag"]
-                and '"antwort"' in laeufe[-1]["auftrag"])
-
-        bloecke = antwort_umwandeln("Text davor {\"aufrufe\": [{\"werkzeug\": \"a\"}, "
-                                    "{\"werkzeug\": \"b\", \"argumente\": {\"x\": 1}}]}")
-        pruefen("Mehrere Werkzeugaufrufe in einer Antwort werden gelesen",
-                [b["name"] for b in bloecke] == ["a", "b"] and bloecke[1]["input"] == {"x": 1})
-        pruefen("Antwort ohne JSON gilt als Antworttext",
-                antwort_umwandeln("Einfach Text")[0]["text"] == "Einfach Text")
-        pruefen("Auftrag ohne Werkzeuge bricht nicht",
-                "Deine Antwort als JSON" in auftrag_bauen({"messages": [], "system": "x"}))
-
-        os.environ["PATH"] = "/nonexistent"
-        fehler = agent.denken("Hallo")
-        pruefen("Ohne installiertes Claude Code kommt ein Hinweis statt eines Absturzes",
-                "nicht installiert" in fehler, fehler[:80])
-    finally:
-        os.environ["PATH"] = alte_pfad
-        os.environ.pop("ANTHROPIC_API_KEY", None)
-        if web is not None:
-            web.stoppen()
-        (config.ANTHROPIC_API_KEY, config.CLAUDE_CODE_NUTZEN, config.LOKALES_MODELL,
-         config.ENV_DATEI, rohwerte) = alt
-        config._ROHWERTE.clear()
-        config._ROHWERTE.update(rohwerte)
-
-
 def pruefung_sicherheit(agent):
     abschnitt("Sicherheit")
     ergebnis = agent.tools.run("systeminfo", {"was": "rm -rf /"})
@@ -1675,7 +1577,6 @@ def main() -> int:
     pruefung_protokoll(agent)
     pruefung_schluessel(agent)
     pruefung_lokales_modell(agent)
-    pruefung_claude_code(agent)
     pruefung_routinen(agent)
     pruefung_zeitplan()
     pruefung_kalender()
