@@ -35,6 +35,7 @@ from modules.mcp_client import MCPClient
 from modules.memory import Memory, heute_datum
 from modules.privat import BEREICHE, Privat, WIEDERHOLUNGEN, RHYTHMEN
 from modules.messenger import Messenger
+from modules.autopilot import Autopilot
 from modules.recall import Recall
 from modules.routines import Routines
 from modules.team import ROLLEN, Team
@@ -112,6 +113,7 @@ class Werkzeuge:
         self.telefon = Telefon(self.memory)
         self.mcp = MCPClient()
         self.welt = Welt(self.mcp)
+        self.autopilot = Autopilot(self.memory, self.akquise, self.mail, self.bookkeeping)
         self.bildschirm = Bildschirm(agent)
         self.browser = Browser(agent)
         self.messenger = Messenger(self.telegram, self.mail, self.mcp, None)
@@ -193,6 +195,12 @@ class Werkzeuge:
                       "datum": text}, ["zusammenfassung"]),
             werkzeug("rueckblick", "Gibt die Tagesberichte der letzten Tage zurück.",
                      {"tage": ganz}),
+            werkzeug("autopilot_starten",
+                     "Startet den Autopilot jetzt: neue Betriebe finden und Anruf-Skripte "
+                     "schreiben, Nachfassen, Antworten auf wichtige Mails entwerfen, "
+                     "Cashflow prüfen. Alles landet unter 'Heute zu tun'.", {}),
+            werkzeug("heute_zu_tun",
+                     "Liest vor, was auf der Liste 'Heute zu tun' offen ist.", {}),
             werkzeug("protokoll",
                      "Zeigt das Protokoll eines Tages aus dem Gesprächsverlauf: was "
                      "gesagt und getan wurde, was offen ist. Tag: heute, gestern oder "
@@ -570,6 +578,17 @@ class Werkzeuge:
                 a.get("offen", ""), a.get("datum", ""))
         if name == "rueckblick":
             return {"ok": True, "text": self.recall.rueckblick(int(a.get("tage") or 7))}
+        if name == "autopilot_starten":
+            return self.autopilot.laufen(self.agent)
+        if name == "heute_zu_tun":
+            offen = self.autopilot.aufgaben()
+            if not offen:
+                return {"ok": True, "anzahl": 0, "text": "Auf der Liste ist nichts offen."}
+            return {"ok": True, "anzahl": len(offen),
+                    "aufgaben": [{"id": z["id"], "titel": z["titel"], "art": z["art"]}
+                                 for z in offen[:15]],
+                    "text": "%d Aufgaben offen. Zuerst: %s." % (
+                        len(offen), "; ".join(z["titel"] for z in offen[:3]))}
         if name == "protokoll":
             return self.recall.protokoll(a.get("tag") or "heute", a.get("thema", ""),
                                          int(a.get("tage") or 1))

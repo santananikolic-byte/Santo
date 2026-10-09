@@ -180,6 +180,7 @@ body[data-zustand="wach"] .zustandstext{color:var(--akzent)}
   <span id="lage">Stand wird geholt …</span>
   <span class="rechts">
     <button class="mini" id="tippenAn" title="Notweg, falls das Mikrofon streikt">Tippen</button>
+    <a href="/autopilot" data-seite target="_blank" rel="noopener" id="zuTunLink">Heute zu tun</a>
     <a href="/protokoll" data-seite target="_blank" rel="noopener">Protokoll</a>
     <a href="/dashboard" data-seite target="_blank" rel="noopener">Cockpit</a>
     <a href="/sales" data-seite target="_blank" rel="noopener">Sales</a>
@@ -589,6 +590,7 @@ body[data-zustand="wach"] .zustandstext{color:var(--akzent)}
   function zustandHolen() {
     holen("/api/zustand").then(function (a) {
       el("pkt").className = "pkt " + (a.einsatzbereit ? "an" : "aus");
+      if (a.aufgaben) { el("zuTunLink").textContent = "Heute zu tun (" + a.aufgaben + ")"; }
       el("pkt").title = a.einsatzbereit ? a.werkzeuge + " Werkzeuge bereit"
                                         : "Kein Anthropic-Schlüssel";
       if (!a.einsatzbereit) {
@@ -836,6 +838,220 @@ h2{font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--grau
     clearTimeout(wartet); wartet = setTimeout(holen, 300);
   });
   holen();
+})();
+</script>
+</body>
+</html>
+"""
+
+
+AUTOPILOT_HTML = r"""<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#08090B">
+<link rel="icon" href="/symbol.svg" type="image/svg+xml">
+<title>Heute zu tun</title>
+<style>
+:root{--grund:#08090B;--panel:#0F1113;--tief:#0A0D14;--rand:#1C1F23;--rand-hell:#2A3036;
+  --akzent:#E8622C;--kupfer:#F0A882;--text:#F2EFEA;--gedaempft:#A0A6AC;--grau:#7E858C;
+  --gruen:#4CC38A;--rot:#E5484D;
+  --sans:-apple-system,BlinkMacSystemFont,"Helvetica Neue",Arial,sans-serif;
+  --mono:ui-monospace,"SF Mono",Menlo,monospace}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--grund);color:var(--text);font-family:var(--sans);
+  -webkit-font-smoothing:antialiased;padding:0 0 60px}
+header{padding:18px 20px;border-bottom:1px solid var(--rand);
+  background:linear-gradient(90deg,rgba(232,98,44,.13),transparent 68%)}
+header h1{font-size:18px;font-weight:600}
+header p{font-size:12px;color:var(--grau);margin-top:4px;letter-spacing:.04em}
+main{max-width:860px;margin:0 auto;padding:16px 20px}
+.karte{background:var(--panel);border:1px solid var(--rand);border-radius:10px;
+  padding:14px 16px;margin-bottom:12px}
+.karte.lauf{border-left:3px solid var(--akzent)}
+h2{font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--grau);
+  margin:20px 0 8px;font-weight:600}
+label{font-size:13px;color:var(--gedaempft)}
+input[type=text],textarea{width:100%;font:14px var(--sans);color:var(--text);
+  background:var(--tief);border:1px solid var(--rand-hell);border-radius:8px;padding:9px 11px}
+textarea{font:13px/1.5 var(--sans);min-height:120px;resize:vertical;margin-top:8px}
+.branchen{display:flex;flex-wrap:wrap;gap:6px 14px;margin:10px 0}
+.branchen label{display:flex;gap:6px;align-items:center}
+button,.knopf{font:inherit;font-size:13px;cursor:pointer;border-radius:8px;padding:8px 14px;
+  border:1px solid var(--rand-hell);background:var(--tief);color:var(--text);
+  text-decoration:none;display:inline-block}
+button.haupt{background:var(--akzent);border-color:var(--akzent);color:#1A0E08;font-weight:700}
+button:disabled{opacity:.5;cursor:default}
+.reihe{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;align-items:center}
+.art{font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--kupfer)}
+.titel{font-size:16px;font-weight:600;margin:3px 0}
+.grund{font-size:12px;color:var(--grau)}
+.meldung{font-size:13px;color:var(--gedaempft);min-height:18px;margin-top:8px}
+.meldung.fehler{color:var(--rot)}
+.leer{color:var(--grau);font-size:14px;padding:8px 0}
+:focus-visible{outline:2px solid var(--akzent);outline-offset:2px}
+</style>
+</head>
+<body>
+<header>
+  <h1 id="titel">Heute zu tun</h1>
+  <p id="unter"></p>
+</header>
+<main>
+  <div class="karte lauf">
+    <div id="laufText">Wird geholt …</div>
+    <div class="reihe">
+      <button class="haupt" id="jetzt">Jetzt arbeiten</button>
+      <span class="meldung" id="laufMeldung"></span>
+    </div>
+  </div>
+
+  <h2>Aufgaben</h2>
+  <div id="liste"></div>
+
+  <h2>Einstellungen</h2>
+  <div class="karte">
+    <label for="name">Dein Name (so stellt Jarvis dich in Skripten vor)</label>
+    <input id="name" type="text" autocomplete="off" style="margin-bottom:10px">
+    <label for="firma">Name deiner Firma</label>
+    <input id="firma" type="text" autocomplete="off" style="margin-bottom:10px">
+    <label for="ort">In welchem Ort oder Bezirk suchst du Kunden?</label>
+    <input id="ort" type="text" placeholder="zum Beispiel Linz oder Wien" autocomplete="off">
+    <div class="branchen" id="branchen"></div>
+    <label><input type="checkbox" id="an"> Von selbst arbeiten (<span id="uhrzeiten"></span>)</label>
+    <div class="reihe">
+      <button id="speichern">Speichern</button>
+      <span class="meldung" id="einstMeldung"></span>
+    </div>
+  </div>
+  <p class="grund" style="margin-top:14px">
+    Jarvis schickt Mails nie von selbst: Gesendet wird erst, wenn du auf
+    „Senden“ klickst. Neue Betriebe bekommen ein Anruf-Skript statt einer Mail,
+    weil Werbemails ohne Einwilligung in der Regel nicht erlaubt sind.
+  </p>
+</main>
+<script>
+(function () {
+  "use strict";
+  var SCHLUESSEL = {{SCHLUESSEL_JSON}};
+  var NUTZER = {{NUTZER_JSON}}, FIRMA = {{FIRMA_JSON}};
+  var ARTEN = {anruf: "Anrufen", nachfassen: "Nachfassen", antwort: "Mail beantworten",
+               hinweis: "Hinweis"};
+  var el = function (id) { return document.getElementById(id); };
+  var warten = null;
+
+  el("titel").textContent = "Heute zu tun · " + NUTZER;
+  el("unter").textContent = FIRMA + " · Jarvis arbeitet auf deinem iMac und legt hier alles ab";
+
+  function url(p) {
+    return p + (SCHLUESSEL ? (p.indexOf("?") < 0 ? "?" : "&") +
+      "schluessel=" + encodeURIComponent(SCHLUESSEL) : "");
+  }
+  function holen(p, k) {
+    var o = { headers: { "Content-Type": "application/json" } };
+    if (k !== undefined) { o.method = "POST"; o.body = JSON.stringify(k); }
+    return fetch(url(p), o).then(function (a) { return a.json(); });
+  }
+  function knopf(text, klasse, aktion) {
+    var b = document.createElement("button");
+    b.textContent = text; if (klasse) { b.className = klasse; }
+    b.addEventListener("click", aktion); return b;
+  }
+
+  function karte(a) {
+    var k = document.createElement("div"); k.className = "karte";
+    var art = document.createElement("div"); art.className = "art";
+    art.textContent = ARTEN[a.art] || a.art;
+    var titel = document.createElement("div"); titel.className = "titel"; titel.textContent = a.titel;
+    var grund = document.createElement("div"); grund.className = "grund"; grund.textContent = a.grund || "";
+    k.appendChild(art); k.appendChild(titel); k.appendChild(grund);
+    var betreff = null;
+    if (a.art === "antwort") {
+      betreff = document.createElement("input"); betreff.type = "text";
+      betreff.value = a.betreff || ""; betreff.style.marginTop = "8px";
+      k.appendChild(betreff);
+    }
+    var text = document.createElement("textarea"); text.value = a.text || "";
+    k.appendChild(text);
+    var meldung = document.createElement("div"); meldung.className = "meldung";
+    var reihe = document.createElement("div"); reihe.className = "reihe";
+    function machen(aktion) {
+      return function () {
+        meldung.className = "meldung"; meldung.textContent = "…";
+        holen("/api/autopilot/aktion", {id: a.id, aktion: aktion, text: text.value,
+                                        betreff: betreff ? betreff.value : undefined})
+          .then(function (r) {
+            meldung.textContent = r.text || "";
+            if (r.ok) { k.style.opacity = ".45"; setTimeout(laden, 700); }
+            else { meldung.className = "meldung fehler"; }
+          }).catch(function () { meldung.className = "meldung fehler";
+                                 meldung.textContent = "Der iMac antwortet nicht."; });
+      };
+    }
+    if (a.art === "antwort") {
+      reihe.appendChild(knopf("Senden an " + a.an, "haupt", machen("senden")));
+    }
+    if ((a.art === "anruf" || a.art === "nachfassen") && a.an) {
+      var tel = document.createElement("a"); tel.className = "knopf";
+      tel.href = "tel:" + a.an.replace(/[^+0-9]/g, ""); tel.textContent = "Anrufen " + a.an;
+      reihe.appendChild(tel);
+    }
+    if (a.art !== "antwort") { reihe.appendChild(knopf("Erledigt", "", machen("erledigt"))); }
+    reihe.appendChild(knopf("Verwerfen", "", machen("verwerfen")));
+    k.appendChild(reihe); k.appendChild(meldung);
+    return k;
+  }
+
+  function laden() {
+    holen("/api/autopilot").then(function (d) {
+      var liste = el("liste"); liste.textContent = "";
+      if (!d.aufgaben.length) {
+        var l = document.createElement("div"); l.className = "leer";
+        l.textContent = "Nichts offen. Klick auf „Jetzt arbeiten“, dann sucht Jarvis neue Arbeit.";
+        liste.appendChild(l);
+      }
+      d.aufgaben.forEach(function (a) { liste.appendChild(karte(a)); });
+      var e = d.einstellungen;
+      ["ort", "name", "firma"].forEach(function (f) {
+        if (document.activeElement !== el(f)) { el(f).value = e[f] || ""; }
+      });
+      el("an").checked = !!e.an; el("uhrzeiten").textContent = e.uhrzeiten;
+      var kasten = el("branchen");
+      if (!kasten.childNodes.length) {
+        e.alle_branchen.forEach(function (b) {
+          var lab = document.createElement("label"); var c = document.createElement("input");
+          c.type = "checkbox"; c.value = b; c.checked = e.branchen.indexOf(b) >= 0;
+          lab.appendChild(c); lab.appendChild(document.createTextNode(b)); kasten.appendChild(lab);
+        });
+      }
+      var lauf = d.letzter_lauf || {};
+      el("laufText").textContent = d.laeuft ? "Jarvis arbeitet gerade …" :
+        (lauf.ergebnis ? "Zuletzt (" + (lauf.ende || lauf.start || "").slice(0, 16) + "): " +
+         lauf.ergebnis : "Jarvis hat noch nicht gearbeitet.");
+      el("jetzt").disabled = !!d.laeuft;
+      clearTimeout(warten);
+      if (d.laeuft) { warten = setTimeout(laden, 4000); }
+    }).catch(function () { el("laufText").textContent = "Der iMac antwortet nicht."; });
+  }
+
+  el("jetzt").addEventListener("click", function () {
+    el("jetzt").disabled = true;
+    holen("/api/autopilot/laufen", {}).then(function (r) {
+      el("laufMeldung").textContent = r.text || ""; setTimeout(laden, 1500);
+    });
+  });
+  el("speichern").addEventListener("click", function () {
+    var gewaehlt = Array.prototype.filter.call(
+      document.querySelectorAll("#branchen input"), function (c) { return c.checked; })
+      .map(function (c) { return c.value; });
+    holen("/api/autopilot/einstellungen", {ort: el("ort").value, branchen: gewaehlt,
+                                           an: el("an").checked, name: el("name").value,
+                                           firma: el("firma").value}).then(function (r) {
+      el("einstMeldung").textContent = r.text || ""; laden();
+    });
+  });
+  laden();
 })();
 </script>
 </body>

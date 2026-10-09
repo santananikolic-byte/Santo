@@ -109,6 +109,14 @@ FREIER_DIENST_URL = _text("FREIER_DIENST_URL")
 FREIER_DIENST_SCHLUESSEL = _text("FREIER_DIENST_SCHLUESSEL")
 FREIER_DIENST_MODELL = _text("FREIER_DIENST_MODELL")
 LOKALES_MODELL = _text("LOKALES_MODELL")
+
+# Autopilot: arbeitet von selbst und legt alles unter "Heute zu tun" ab.
+AUTOPILOT_AN = _wahrheit("AUTOPILOT_AN", True)
+AUTOPILOT_ORT = _text("AUTOPILOT_ORT")
+AUTOPILOT_BRANCHEN = _text("AUTOPILOT_BRANCHEN",
+                           "Arztpraxen,Steuerberater,Kanzleien,Autohäuser,Fitnessstudios")
+AUTOPILOT_UHRZEITEN = _text("AUTOPILOT_UHRZEITEN", "08:30,13:30")
+AUTOPILOT_NEUE_LEADS = _ganzzahl("AUTOPILOT_NEUE_LEADS", 5)
 OLLAMA_URL = _text("OLLAMA_URL", "http://127.0.0.1:11434")
 
 # Nutzer

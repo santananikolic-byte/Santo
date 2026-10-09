@@ -222,6 +222,14 @@ FREIER_DIENST_URL = _text("FREIER_DIENST_URL")
 FREIER_DIENST_SCHLUESSEL = _text("FREIER_DIENST_SCHLUESSEL")
 FREIER_DIENST_MODELL = _text("FREIER_DIENST_MODELL")
 LOKALES_MODELL = _text("LOKALES_MODELL")
+
+# Autopilot: arbeitet von selbst und legt alles unter "Heute zu tun" ab.
+AUTOPILOT_AN = _wahrheit("AUTOPILOT_AN", True)
+AUTOPILOT_ORT = _text("AUTOPILOT_ORT")
+AUTOPILOT_BRANCHEN = _text("AUTOPILOT_BRANCHEN",
+                           "Arztpraxen,Steuerberater,Kanzleien,Autohäuser,Fitnessstudios")
+AUTOPILOT_UHRZEITEN = _text("AUTOPILOT_UHRZEITEN", "08:30,13:30")
+AUTOPILOT_NEUE_LEADS = _ganzzahl("AUTOPILOT_NEUE_LEADS", 5)
 OLLAMA_URL = _text("OLLAMA_URL", "http://127.0.0.1:11434")
 
 # Nutzer
@@ -7660,6 +7668,7 @@ body[data-zustand="wach"] .zustandstext{color:var(--akzent)}
   <span id="lage">Stand wird geholt …</span>
   <span class="rechts">
     <button class="mini" id="tippenAn" title="Notweg, falls das Mikrofon streikt">Tippen</button>
+    <a href="/autopilot" data-seite target="_blank" rel="noopener" id="zuTunLink">Heute zu tun</a>
     <a href="/protokoll" data-seite target="_blank" rel="noopener">Protokoll</a>
     <a href="/dashboard" data-seite target="_blank" rel="noopener">Cockpit</a>
     <a href="/sales" data-seite target="_blank" rel="noopener">Sales</a>
@@ -8069,6 +8078,7 @@ body[data-zustand="wach"] .zustandstext{color:var(--akzent)}
   function zustandHolen() {
     holen("/api/zustand").then(function (a) {
       el("pkt").className = "pkt " + (a.einsatzbereit ? "an" : "aus");
+      if (a.aufgaben) { el("zuTunLink").textContent = "Heute zu tun (" + a.aufgaben + ")"; }
       el("pkt").title = a.einsatzbereit ? a.werkzeuge + " Werkzeuge bereit"
                                         : "Kein Anthropic-Schlüssel";
       if (!a.einsatzbereit) {
@@ -8316,6 +8326,220 @@ h2{font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--grau
     clearTimeout(wartet); wartet = setTimeout(holen, 300);
   });
   holen();
+})();
+</script>
+</body>
+</html>
+"""
+
+
+AUTOPILOT_HTML = r"""<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#08090B">
+<link rel="icon" href="/symbol.svg" type="image/svg+xml">
+<title>Heute zu tun</title>
+<style>
+:root{--grund:#08090B;--panel:#0F1113;--tief:#0A0D14;--rand:#1C1F23;--rand-hell:#2A3036;
+  --akzent:#E8622C;--kupfer:#F0A882;--text:#F2EFEA;--gedaempft:#A0A6AC;--grau:#7E858C;
+  --gruen:#4CC38A;--rot:#E5484D;
+  --sans:-apple-system,BlinkMacSystemFont,"Helvetica Neue",Arial,sans-serif;
+  --mono:ui-monospace,"SF Mono",Menlo,monospace}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--grund);color:var(--text);font-family:var(--sans);
+  -webkit-font-smoothing:antialiased;padding:0 0 60px}
+header{padding:18px 20px;border-bottom:1px solid var(--rand);
+  background:linear-gradient(90deg,rgba(232,98,44,.13),transparent 68%)}
+header h1{font-size:18px;font-weight:600}
+header p{font-size:12px;color:var(--grau);margin-top:4px;letter-spacing:.04em}
+main{max-width:860px;margin:0 auto;padding:16px 20px}
+.karte{background:var(--panel);border:1px solid var(--rand);border-radius:10px;
+  padding:14px 16px;margin-bottom:12px}
+.karte.lauf{border-left:3px solid var(--akzent)}
+h2{font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--grau);
+  margin:20px 0 8px;font-weight:600}
+label{font-size:13px;color:var(--gedaempft)}
+input[type=text],textarea{width:100%;font:14px var(--sans);color:var(--text);
+  background:var(--tief);border:1px solid var(--rand-hell);border-radius:8px;padding:9px 11px}
+textarea{font:13px/1.5 var(--sans);min-height:120px;resize:vertical;margin-top:8px}
+.branchen{display:flex;flex-wrap:wrap;gap:6px 14px;margin:10px 0}
+.branchen label{display:flex;gap:6px;align-items:center}
+button,.knopf{font:inherit;font-size:13px;cursor:pointer;border-radius:8px;padding:8px 14px;
+  border:1px solid var(--rand-hell);background:var(--tief);color:var(--text);
+  text-decoration:none;display:inline-block}
+button.haupt{background:var(--akzent);border-color:var(--akzent);color:#1A0E08;font-weight:700}
+button:disabled{opacity:.5;cursor:default}
+.reihe{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;align-items:center}
+.art{font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--kupfer)}
+.titel{font-size:16px;font-weight:600;margin:3px 0}
+.grund{font-size:12px;color:var(--grau)}
+.meldung{font-size:13px;color:var(--gedaempft);min-height:18px;margin-top:8px}
+.meldung.fehler{color:var(--rot)}
+.leer{color:var(--grau);font-size:14px;padding:8px 0}
+:focus-visible{outline:2px solid var(--akzent);outline-offset:2px}
+</style>
+</head>
+<body>
+<header>
+  <h1 id="titel">Heute zu tun</h1>
+  <p id="unter"></p>
+</header>
+<main>
+  <div class="karte lauf">
+    <div id="laufText">Wird geholt …</div>
+    <div class="reihe">
+      <button class="haupt" id="jetzt">Jetzt arbeiten</button>
+      <span class="meldung" id="laufMeldung"></span>
+    </div>
+  </div>
+
+  <h2>Aufgaben</h2>
+  <div id="liste"></div>
+
+  <h2>Einstellungen</h2>
+  <div class="karte">
+    <label for="name">Dein Name (so stellt Jarvis dich in Skripten vor)</label>
+    <input id="name" type="text" autocomplete="off" style="margin-bottom:10px">
+    <label for="firma">Name deiner Firma</label>
+    <input id="firma" type="text" autocomplete="off" style="margin-bottom:10px">
+    <label for="ort">In welchem Ort oder Bezirk suchst du Kunden?</label>
+    <input id="ort" type="text" placeholder="zum Beispiel Linz oder Wien" autocomplete="off">
+    <div class="branchen" id="branchen"></div>
+    <label><input type="checkbox" id="an"> Von selbst arbeiten (<span id="uhrzeiten"></span>)</label>
+    <div class="reihe">
+      <button id="speichern">Speichern</button>
+      <span class="meldung" id="einstMeldung"></span>
+    </div>
+  </div>
+  <p class="grund" style="margin-top:14px">
+    Jarvis schickt Mails nie von selbst: Gesendet wird erst, wenn du auf
+    „Senden“ klickst. Neue Betriebe bekommen ein Anruf-Skript statt einer Mail,
+    weil Werbemails ohne Einwilligung in der Regel nicht erlaubt sind.
+  </p>
+</main>
+<script>
+(function () {
+  "use strict";
+  var SCHLUESSEL = {{SCHLUESSEL_JSON}};
+  var NUTZER = {{NUTZER_JSON}}, FIRMA = {{FIRMA_JSON}};
+  var ARTEN = {anruf: "Anrufen", nachfassen: "Nachfassen", antwort: "Mail beantworten",
+               hinweis: "Hinweis"};
+  var el = function (id) { return document.getElementById(id); };
+  var warten = null;
+
+  el("titel").textContent = "Heute zu tun · " + NUTZER;
+  el("unter").textContent = FIRMA + " · Jarvis arbeitet auf deinem iMac und legt hier alles ab";
+
+  function url(p) {
+    return p + (SCHLUESSEL ? (p.indexOf("?") < 0 ? "?" : "&") +
+      "schluessel=" + encodeURIComponent(SCHLUESSEL) : "");
+  }
+  function holen(p, k) {
+    var o = { headers: { "Content-Type": "application/json" } };
+    if (k !== undefined) { o.method = "POST"; o.body = JSON.stringify(k); }
+    return fetch(url(p), o).then(function (a) { return a.json(); });
+  }
+  function knopf(text, klasse, aktion) {
+    var b = document.createElement("button");
+    b.textContent = text; if (klasse) { b.className = klasse; }
+    b.addEventListener("click", aktion); return b;
+  }
+
+  function karte(a) {
+    var k = document.createElement("div"); k.className = "karte";
+    var art = document.createElement("div"); art.className = "art";
+    art.textContent = ARTEN[a.art] || a.art;
+    var titel = document.createElement("div"); titel.className = "titel"; titel.textContent = a.titel;
+    var grund = document.createElement("div"); grund.className = "grund"; grund.textContent = a.grund || "";
+    k.appendChild(art); k.appendChild(titel); k.appendChild(grund);
+    var betreff = null;
+    if (a.art === "antwort") {
+      betreff = document.createElement("input"); betreff.type = "text";
+      betreff.value = a.betreff || ""; betreff.style.marginTop = "8px";
+      k.appendChild(betreff);
+    }
+    var text = document.createElement("textarea"); text.value = a.text || "";
+    k.appendChild(text);
+    var meldung = document.createElement("div"); meldung.className = "meldung";
+    var reihe = document.createElement("div"); reihe.className = "reihe";
+    function machen(aktion) {
+      return function () {
+        meldung.className = "meldung"; meldung.textContent = "…";
+        holen("/api/autopilot/aktion", {id: a.id, aktion: aktion, text: text.value,
+                                        betreff: betreff ? betreff.value : undefined})
+          .then(function (r) {
+            meldung.textContent = r.text || "";
+            if (r.ok) { k.style.opacity = ".45"; setTimeout(laden, 700); }
+            else { meldung.className = "meldung fehler"; }
+          }).catch(function () { meldung.className = "meldung fehler";
+                                 meldung.textContent = "Der iMac antwortet nicht."; });
+      };
+    }
+    if (a.art === "antwort") {
+      reihe.appendChild(knopf("Senden an " + a.an, "haupt", machen("senden")));
+    }
+    if ((a.art === "anruf" || a.art === "nachfassen") && a.an) {
+      var tel = document.createElement("a"); tel.className = "knopf";
+      tel.href = "tel:" + a.an.replace(/[^+0-9]/g, ""); tel.textContent = "Anrufen " + a.an;
+      reihe.appendChild(tel);
+    }
+    if (a.art !== "antwort") { reihe.appendChild(knopf("Erledigt", "", machen("erledigt"))); }
+    reihe.appendChild(knopf("Verwerfen", "", machen("verwerfen")));
+    k.appendChild(reihe); k.appendChild(meldung);
+    return k;
+  }
+
+  function laden() {
+    holen("/api/autopilot").then(function (d) {
+      var liste = el("liste"); liste.textContent = "";
+      if (!d.aufgaben.length) {
+        var l = document.createElement("div"); l.className = "leer";
+        l.textContent = "Nichts offen. Klick auf „Jetzt arbeiten“, dann sucht Jarvis neue Arbeit.";
+        liste.appendChild(l);
+      }
+      d.aufgaben.forEach(function (a) { liste.appendChild(karte(a)); });
+      var e = d.einstellungen;
+      ["ort", "name", "firma"].forEach(function (f) {
+        if (document.activeElement !== el(f)) { el(f).value = e[f] || ""; }
+      });
+      el("an").checked = !!e.an; el("uhrzeiten").textContent = e.uhrzeiten;
+      var kasten = el("branchen");
+      if (!kasten.childNodes.length) {
+        e.alle_branchen.forEach(function (b) {
+          var lab = document.createElement("label"); var c = document.createElement("input");
+          c.type = "checkbox"; c.value = b; c.checked = e.branchen.indexOf(b) >= 0;
+          lab.appendChild(c); lab.appendChild(document.createTextNode(b)); kasten.appendChild(lab);
+        });
+      }
+      var lauf = d.letzter_lauf || {};
+      el("laufText").textContent = d.laeuft ? "Jarvis arbeitet gerade …" :
+        (lauf.ergebnis ? "Zuletzt (" + (lauf.ende || lauf.start || "").slice(0, 16) + "): " +
+         lauf.ergebnis : "Jarvis hat noch nicht gearbeitet.");
+      el("jetzt").disabled = !!d.laeuft;
+      clearTimeout(warten);
+      if (d.laeuft) { warten = setTimeout(laden, 4000); }
+    }).catch(function () { el("laufText").textContent = "Der iMac antwortet nicht."; });
+  }
+
+  el("jetzt").addEventListener("click", function () {
+    el("jetzt").disabled = true;
+    holen("/api/autopilot/laufen", {}).then(function (r) {
+      el("laufMeldung").textContent = r.text || ""; setTimeout(laden, 1500);
+    });
+  });
+  el("speichern").addEventListener("click", function () {
+    var gewaehlt = Array.prototype.filter.call(
+      document.querySelectorAll("#branchen input"), function (c) { return c.checked; })
+      .map(function (c) { return c.value; });
+    holen("/api/autopilot/einstellungen", {ort: el("ort").value, branchen: gewaehlt,
+                                           an: el("an").checked, name: el("name").value,
+                                           firma: el("firma").value}).then(function (r) {
+      el("einstMeldung").textContent = r.text || ""; laden();
+    });
+  });
+  laden();
 })();
 </script>
 </body>
@@ -9671,6 +9895,10 @@ class Scheduler:
         if BRIEFING_ABENDS:
             self.job_anlegen("abendrueckblick", BRIEFING_ABENDS,
                              self._abendrueckblick, "Abendrückblick")
+        if AUTOPILOT_AN:
+            for uhrzeit in [u.strip() for u in AUTOPILOT_UHRZEITEN.split(",") if u.strip()]:
+                self.job_anlegen("autopilot:%s" % uhrzeit, uhrzeit, self._autopilot,
+                                 "Autopilot")
 
     def routinen_einhaengen(self):
         """Hängt alle Routinen mit Uhrzeit in den Zeitplan."""
@@ -9792,6 +10020,12 @@ class Scheduler:
         if self.agent is None:
             return "Guten Morgen. Ich bin da, aber noch nicht eingerichtet."
         return self.agent.briefing_morgens()
+
+    def _autopilot(self) -> str:
+        """Der Autopilot arbeitet von selbst und meldet, was er vorbereitet hat."""
+        if self.agent is None or not AUTOPILOT_AN:
+            return ""
+        return self.agent.tools.autopilot.laufen(self.agent).get("text", "")
 
     def _abendrueckblick(self) -> str:
         """Der Text, den Jarvis abends von sich aus sagt."""
@@ -10065,6 +10299,7 @@ class JarvisWeb:
                 "nutzer": NUTZER_NAME, "firma": FIRMA,
                 "modell": CLAUDE_MODEL,
                 "werkzeuge": len(werkzeuge.namen()),
+                "aufgaben": werkzeuge.autopilot.offen_anzahl(),
                 "rollen": [r["rolle"] for r in werkzeuge.team.rollen_liste()],
                 "dienste": konfig_uebersicht()})
         if pfad == "/api/meldungen":
@@ -10087,6 +10322,19 @@ class JarvisWeb:
             return self._antworten(behandler, 200, werkzeuge.recall.protokoll(
                 (frage.get("tag") or ["heute"])[0],
                 (frage.get("thema") or [""])[0], tage))
+        if pfad == "/api/autopilot":
+            autopilot = werkzeuge.autopilot
+            return self._antworten(behandler, 200, {
+                "ok": True, "aufgaben": autopilot.aufgaben(),
+                "einstellungen": autopilot.einstellungen(),
+                "letzter_lauf": autopilot.letzter_lauf(),
+                "laeuft": autopilot._laeuft.locked()})
+        if pfad == "/autopilot":
+            return self._html(behandler, (
+                AUTOPILOT_HTML
+                .replace("{{SCHLUESSEL_JSON}}", _fuer_skript(self.token or ""))
+                .replace("{{NUTZER_JSON}}", _fuer_skript(NUTZER_NAME))
+                .replace("{{FIRMA_JSON}}", _fuer_skript(FIRMA))))
         if pfad == "/protokoll":
             return self._html(behandler, (
                 PROTOKOLL_HTML
@@ -10212,6 +10460,35 @@ class JarvisWeb:
                 "ok": True, "einsatzbereit": self.agent.einsatzbereit(),
                 "text": probe["text"] + " Es kostet nichts. Antworten dauern "
                         "auf diesem Rechner länger als bei Claude."})
+
+        if pfad == "/api/autopilot/laufen":
+            autopilot = werkzeuge.autopilot
+            if autopilot._laeuft.locked():
+                return self._antworten(behandler, 200, {
+                    "ok": False, "text": "Jarvis arbeitet gerade schon."})
+
+            def arbeiten():
+                # Im Hintergrund: Die Seite bleibt bedienbar, auch wenn der
+                # Gratis-Dienst langsam ist.
+                ergebnis = autopilot.laufen(self.agent)
+                self.melden(ergebnis.get("text", ""))
+            threading.Thread(target=arbeiten, daemon=True).start()
+            return self._antworten(behandler, 200, {
+                "ok": True, "text": "Jarvis arbeitet. Das dauert ein bis drei Minuten."})
+        if pfad == "/api/autopilot/aktion":
+            text = daten.get("text")
+            betreff = daten.get("betreff")
+            return self._antworten(behandler, 200, werkzeuge.autopilot.aufgabe_erledigen(
+                daten.get("id"), str(daten.get("aktion") or ""),
+                None if text is None else str(text),
+                None if betreff is None else str(betreff)))
+        if pfad == "/api/autopilot/einstellungen":
+            branchen = daten.get("branchen")
+            return self._antworten(behandler, 200, werkzeuge.autopilot.einstellungen_setzen(
+                daten.get("ort"),
+                [str(b) for b in branchen] if isinstance(branchen, list) else None,
+                None if daten.get("an") is None else bool(daten.get("an")),
+                daten.get("name"), daten.get("firma")))
 
         if pfad == "/api/verlauf/neu":
             self.agent.verlauf_leeren()
@@ -10968,6 +11245,493 @@ def einrichtung_starten(stimme=None) -> dict:
 
 
 # =========================================================================
+# autopilot  -  Autopilot - Jarvis arbeitet von selbst, ohne dass man ihn anstößt.
+# 
+# Zweimal am Tag (und auf Knopfdruck) macht er die Vorarbeit, die sonst liegen
+# bleibt, und legt das Ergebnis auf die Seite "Heute zu tun":
+# 
+# 1. **Neue Betriebe** aus OpenStreetMap - kostenlos, ohne Schlüssel - für den
+#    eigenen Ort und die gewählten Branchen. Zu jedem schreibt er ein kurzes
+#    Anruf-Skript.
+# 2. **Nachfassen**: Wer laut Pipeline heute dran ist.
+# 3. **Posteingang**: Zu wichtigen Mails entwirft er eine Antwort.
+# 4. **Cashflow**: Läuft ein Monat ins Minus, sagt er es.
+# 
+# **Was er bewusst nicht tut: von selbst Mails an fremde Firmen schicken.**
+# Werbemails ohne Einwilligung sind in Österreich und Deutschland in der Regel
+# unzulässig, und ein Postfach, das Kaltmails verschickt, wird schnell gesperrt.
+# Gesendet wird erst, wenn der Nutzer auf der Seite klickt - der Klick ist die
+# Freigabe. Neue Betriebe bekommen deshalb ein Anruf-Skript, keine Mail.
+# 
+# **Robust ohne Gehirn:** Ist der Gratis-Dienst gerade ausgelastet, nimmt er
+# Vorlagen statt selbst geschriebener Texte. Die Arbeit bleibt nicht liegen, nur
+# weil ein Kontingent leer ist.
+# =========================================================================
+
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+
+
+SCHEMA_AUTOPILOT = """
+CREATE TABLE IF NOT EXISTS autopilot_aufgaben (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    schluessel TEXT NOT NULL,
+    art TEXT NOT NULL,
+    titel TEXT NOT NULL,
+    firma TEXT DEFAULT '',
+    an TEXT DEFAULT '',
+    betreff TEXT DEFAULT '',
+    text TEXT DEFAULT '',
+    grund TEXT DEFAULT '',
+    lead_id INTEGER DEFAULT 0,
+    status TEXT DEFAULT 'offen',
+    angelegt TEXT NOT NULL,
+    erledigt_am TEXT DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_autopilot_status ON autopilot_aufgaben(status);
+CREATE INDEX IF NOT EXISTS idx_autopilot_schluessel ON autopilot_aufgaben(schluessel);
+CREATE TABLE IF NOT EXISTS autopilot_laeufe (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    start TEXT NOT NULL,
+    ende TEXT DEFAULT '',
+    ergebnis TEXT DEFAULT ''
+);
+"""
+
+OVERPASS_URL = "https://overpass-api.de/api/interpreter"
+
+# Welche OpenStreetMap-Merkmale zu welcher Branche gehören.
+BRANCHEN_OSM = {
+    "Arztpraxen": [("amenity", "doctors"), ("amenity", "dentist")],
+    "Physiotherapie": [("healthcare", "physiotherapist")],
+    "Apotheken": [("amenity", "pharmacy")],
+    "Steuerberater": [("office", "tax_advisor"), ("office", "accountant")],
+    "Kanzleien": [("office", "lawyer"), ("office", "notary")],
+    "Versicherungen": [("office", "insurance")],
+    "Immobilien": [("office", "estate_agent")],
+    "Autohäuser": [("shop", "car")],
+    "Fitnessstudios": [("leisure", "fitness_centre")],
+    "Hotels": [("tourism", "hotel")],
+    "Kindergärten": [("amenity", "kindergarten")],
+    "Restaurants": [("amenity", "restaurant")],
+}
+STANDARD_BRANCHEN = "Arztpraxen,Steuerberater,Kanzleien,Autohäuser,Fitnessstudios"
+
+# Worauf es der jeweiligen Branche bei der Reinigung ankommt - für Skript und Vorlage.
+BRANCHEN_PUNKT = {
+    "Arztpraxen": "Hygiene und Desinfektion nach Plan, auch außerhalb der Sprechzeiten",
+    "Physiotherapie": "saubere Behandlungsräume und Desinfektion der Liegen",
+    "Apotheken": "gepflegte Verkaufsräume, gereinigt vor Öffnung",
+    "Steuerberater": "diskrete Büroreinigung nach Feierabend",
+    "Kanzleien": "diskrete Reinigung, Akten bleiben unberührt",
+    "Versicherungen": "gepflegte Büros und Besprechungsräume",
+    "Immobilien": "gepflegtes Büro und Endreinigung von Objekten",
+    "Autohäuser": "glänzender Schauraum und saubere Glasflächen",
+    "Fitnessstudios": "Hygiene in Duschen, Umkleiden und an den Geräten",
+    "Hotels": "Unterstützung bei Zimmern und öffentlichen Bereichen",
+    "Kindergärten": "gründliche Reinigung mit kindgerechten Mitteln",
+    "Restaurants": "Gastraum und Sanitär, gereinigt vor Öffnung",
+}
+
+ARTEN = {"anruf": "Anrufen", "nachfassen": "Nachfassen", "antwort": "Mail beantworten",
+         "hinweis": "Hinweis"}
+
+
+def _sauber(text: str) -> str:
+    """Entfernt Zeichen, die eine Overpass-Abfrage aufbrechen könnten."""
+    return "".join(z for z in (text or "") if z not in '"\\;[](){}').strip()
+
+
+def osm_abfrage(ort: str, branchen: list, anzahl: int = 40) -> str:
+    """Baut die Overpass-Abfrage für die Branchen in einem Ort."""
+    teile = []
+    for branche in branchen:
+        for schluessel, wert in BRANCHEN_OSM.get(branche, []):
+            teile.append('nwr["%s"="%s"]["name"](area.a);' % (schluessel, wert))
+    return ('[out:json][timeout:50];'
+            'area["name"="%s"]["boundary"="administrative"]->.a;'
+            '(%s);out tags center %d;' % (_sauber(ort), "".join(teile), int(anzahl)))
+
+
+def _branche_von(tags: dict) -> str:
+    for branche, merkmale in BRANCHEN_OSM.items():
+        for schluessel, wert in merkmale:
+            if tags.get(schluessel) == wert:
+                return branche
+    return ""
+
+
+def osm_betriebe(ort: str, branchen: list, anzahl: int = 40, url: str = None) -> dict:
+    """Holt Betriebe aus OpenStreetMap. Kostenlos, ohne Schlüssel."""
+    ort = _sauber(ort)
+    branchen = [b for b in branchen if b in BRANCHEN_OSM]
+    if not ort:
+        return {"ok": False, "fehler": "Es ist kein Ort eingestellt."}
+    if not branchen:
+        return {"ok": False, "fehler": "Es ist keine bekannte Branche gewählt."}
+    daten = urllib.parse.urlencode({"data": osm_abfrage(ort, branchen, anzahl)}).encode()
+    anfrage = urllib.request.Request(
+        url or OVERPASS_URL, data=daten, method="POST",
+        headers={"User-Agent": "Jarvis-Gebaeudereinigung/1.0",
+                 "Content-Type": "application/x-www-form-urlencoded"})
+    try:
+        with urllib.request.urlopen(anfrage, timeout=70) as antwort:
+            roh = json.loads(antwort.read().decode("utf-8"))
+    except urllib.error.HTTPError as fehler:
+        return {"ok": False, "fehler": "OpenStreetMap antwortet mit Fehler %d. "
+                "Das passiert, wenn der Dienst ausgelastet ist; beim nächsten "
+                "Lauf klappt es meist." % fehler.code}
+    except (urllib.error.URLError, OSError, ValueError) as fehler:
+        return {"ok": False, "fehler": "OpenStreetMap ist nicht erreichbar: %s" % fehler}
+
+    betriebe = []
+    for element in roh.get("elements", []):
+        tags = element.get("tags") or {}
+        name = (tags.get("name") or "").strip()
+        if not name:
+            continue
+        strasse = " ".join(t for t in (tags.get("addr:street", ""),
+                                       tags.get("addr:housenumber", "")) if t)
+        ortsteil = " ".join(t for t in (tags.get("addr:postcode", ""),
+                                        tags.get("addr:city", "")) if t)
+        betriebe.append({
+            "firma": name, "branche": _branche_von(tags),
+            "adresse": ", ".join(t for t in (strasse, ortsteil) if t),
+            "telefon": tags.get("phone") or tags.get("contact:phone") or "",
+            "email": tags.get("email") or tags.get("contact:email") or "",
+            "webseite": tags.get("website") or tags.get("contact:website") or "",
+        })
+    # Wer eine Telefonnummer hat, kommt zuerst - angerufen wird zuerst.
+    betriebe.sort(key=lambda b: (not b["telefon"], not b["email"]))
+    return {"ok": True, "betriebe": betriebe}
+
+
+def anruf_vorlage(betrieb: dict, ort: str = "") -> str:
+    """Ein Anruf-Skript ohne Gehirn - damit nie etwas liegen bleibt."""
+    punkt = BRANCHEN_PUNKT.get(betrieb.get("branche", ""), "zuverlässige Reinigung")
+    return (
+        "Guten Tag, hier spricht %s von %s. Wir reinigen Betriebe hier%s. "
+        "Darf ich kurz fragen, wer bei Ihnen die Reinigung macht und ob Sie "
+        "damit zufrieden sind?\n\n"
+        "Falls Interesse: Bei %s kommt es vor allem auf %s an. Ich schaue mir die "
+        "Räume gern kostenlos an und schicke Ihnen danach ein festes Angebot. "
+        "Wann passt es Ihnen diese Woche?\n\n"
+        "Falls kein Interesse: Darf ich mich in ein paar Monaten noch einmal melden?"
+        % (NUTZER_NAME, FIRMA, (" in %s" % ort) if ort else "",
+           betrieb.get("firma", "Ihnen"), punkt))
+
+
+class Autopilot:
+    """Arbeitet die Vorarbeit von selbst ab und legt sie zur Freigabe vor."""
+
+    def __init__(self, memory, akquise=None, mail=None, bookkeeping=None):
+        self.memory = memory
+        self.akquise = akquise
+        self.mail = mail
+        self.bookkeeping = bookkeeping
+        self._laeuft = threading.Lock()
+        self.osm_url = None  # für Tests umstellbar
+        db_schema_anlegen(SCHEMA_AUTOPILOT, memory.db_pfad)
+
+    # -- Einstellungen -------------------------------------------------------
+
+    @staticmethod
+    def einstellungen() -> dict:
+        branchen = [b.strip() for b in (AUTOPILOT_BRANCHEN or STANDARD_BRANCHEN)
+                    .split(",") if b.strip() in BRANCHEN_OSM]
+        return {"an": bool(AUTOPILOT_AN), "ort": AUTOPILOT_ORT,
+                "name": NUTZER_NAME, "firma": FIRMA,
+                "branchen": branchen, "alle_branchen": list(BRANCHEN_OSM),
+                "uhrzeiten": AUTOPILOT_UHRZEITEN,
+                "neue_pro_lauf": int(AUTOPILOT_NEUE_LEADS)}
+
+    @staticmethod
+    def einstellungen_setzen(ort=None, branchen=None, an=None, name=None,
+                             firma=None) -> dict:
+        if name is not None and _sauber(str(name)):
+            env_setzen("NUTZER_NAME", _sauber(str(name))[:60])
+        if firma is not None and _sauber(str(firma)):
+            env_setzen("FIRMA", _sauber(str(firma))[:80])
+        if ort is not None:
+            env_setzen("AUTOPILOT_ORT", _sauber(str(ort))[:80])
+        if branchen is not None:
+            gueltig = [b for b in branchen if b in BRANCHEN_OSM]
+            env_setzen("AUTOPILOT_BRANCHEN", ",".join(gueltig) or STANDARD_BRANCHEN)
+        if an is not None:
+            env_setzen("AUTOPILOT_AN", "ja" if an else "nein")
+        return {"ok": True, "text": "Gespeichert.", "einstellungen": Autopilot.einstellungen()}
+
+    # -- Aufgaben ------------------------------------------------------------
+
+    def aufgabe_anlegen(self, schluessel: str, art: str, titel: str, text: str = "",
+                        firma: str = "", an: str = "", betreff: str = "", grund: str = "",
+                        lead_id: int = 0) -> int:
+        """Legt eine Aufgabe an - aber nie zweimal dieselbe."""
+        if self.memory._lesen("SELECT id FROM autopilot_aufgaben WHERE schluessel=? LIMIT 1",
+                              (schluessel,)):
+            return 0
+        return self.memory._schreiben(
+            "INSERT INTO autopilot_aufgaben (schluessel, art, titel, firma, an, betreff, "
+            "text, grund, lead_id, status, angelegt) VALUES (?,?,?,?,?,?,?,?,?,'offen',?)",
+            (schluessel, art, titel[:200], firma, an, betreff[:200], text[:6000],
+             grund[:500], int(lead_id or 0), zeitstempel()))
+
+    def aufgaben(self, status: str = "offen", limit: int = 100) -> list:
+        zeilen = self.memory._lesen(
+            "SELECT * FROM autopilot_aufgaben WHERE status=? ORDER BY "
+            "CASE art WHEN 'antwort' THEN 0 WHEN 'nachfassen' THEN 1 WHEN 'anruf' THEN 2 "
+            "ELSE 3 END, id DESC LIMIT ?", (status, int(limit)))
+        return [dict(z) for z in zeilen]
+
+    def offen_anzahl(self) -> int:
+        zeilen = self.memory._lesen(
+            "SELECT count(*) AS n FROM autopilot_aufgaben WHERE status='offen'")
+        return zeilen[0]["n"] if zeilen else 0
+
+    def aufgabe_erledigen(self, nummer: int, aktion: str, text: str = None,
+                          betreff: str = None) -> dict:
+        """Senden, Erledigt oder Verwerfen - der Klick des Nutzers ist die Freigabe."""
+        zeilen = self.memory._lesen("SELECT * FROM autopilot_aufgaben WHERE id=?",
+                                    (int(nummer or 0),))
+        if not zeilen:
+            return {"ok": False, "text": "Diese Aufgabe gibt es nicht."}
+        aufgabe = dict(zeilen[0])
+        if aufgabe["status"] != "offen":
+            return {"ok": False, "text": "Diese Aufgabe ist schon erledigt."}
+        text = aufgabe["text"] if text is None else str(text)
+        betreff = aufgabe["betreff"] if betreff is None else str(betreff)
+
+        if aktion == "senden":
+            if aufgabe["art"] != "antwort":
+                return {"ok": False, "text": "Senden gibt es nur für Antworten auf Mails."}
+            if self.mail is None or not self.mail.senden_moeglich():
+                return {"ok": False, "text": "Der Mailversand ist nicht eingerichtet."}
+            ergebnis = self.mail.senden(aufgabe["an"], betreff, text)
+            if not ergebnis.get("ok"):
+                return {"ok": False, "text": ergebnis.get("fehler", "Senden fehlgeschlagen.")}
+            status = "gesendet"
+        elif aktion == "erledigt":
+            status = "erledigt"
+            if aufgabe["art"] == "anruf" and aufgabe["lead_id"] and self.akquise is not None:
+                # Angerufen: der Betrieb ist jetzt kontaktiert, Nachfassen läuft an.
+                self.akquise.lead_weiterstufen(aufgabe["firma"], "kontaktiert",
+                                               "angerufen (Autopilot)")
+        elif aktion == "verwerfen":
+            status = "verworfen"
+        else:
+            return {"ok": False, "text": "Unbekannte Aktion."}
+
+        self.memory._schreiben(
+            "UPDATE autopilot_aufgaben SET status=?, text=?, betreff=?, erledigt_am=? "
+            "WHERE id=?", (status, text, betreff, zeitstempel(), aufgabe["id"]))
+        self.memory.aktion_protokollieren("autopilot_%s" % aktion,
+                                          {"aufgabe": aufgabe["titel"]}, status)
+        return {"ok": True, "status": status,
+                "text": {"gesendet": "Gesendet.", "erledigt": "Erledigt.",
+                         "verworfen": "Verworfen."}[status]}
+
+    # -- Ein Lauf --------------------------------------------------------------
+
+    def laufen(self, agent=None) -> dict:
+        """Ein kompletter Arbeitsdurchgang. Läuft nie zweimal gleichzeitig."""
+        if not self._laeuft.acquire(blocking=False):
+            return {"ok": False, "text": "Der Autopilot arbeitet gerade schon."}
+        lauf = self.memory._schreiben("INSERT INTO autopilot_laeufe (start) VALUES (?)",
+                                      (zeitstempel(),))
+        zaehler, hinweise = {}, []
+        try:
+            for name, schritt in (("anruf", self._neue_betriebe),
+                                  ("nachfassen", self._nachfassen),
+                                  ("antwort", self._posteingang),
+                                  ("hinweis", self._cashflow)):
+                try:
+                    anzahl, hinweis = schritt(agent)
+                except Exception as fehler:  # ein Schritt darf die anderen nicht stoppen
+                    anzahl, hinweis = 0, "%s: %s" % (ARTEN[name], fehler)
+                zaehler[name] = anzahl
+                if hinweis:
+                    hinweise.append(hinweis)
+            neu = sum(zaehler.values())
+            teile = []
+            if zaehler.get("anruf"):
+                teile.append("%d neue Betriebe zum Anrufen" % zaehler["anruf"])
+            if zaehler.get("nachfassen"):
+                teile.append("%d zum Nachfassen" % zaehler["nachfassen"])
+            if zaehler.get("antwort"):
+                teile.append("%d Mails zu beantworten" % zaehler["antwort"])
+            if zaehler.get("hinweis"):
+                teile.append("%d Hinweise zum Geld" % zaehler["hinweis"])
+            text = ("Autopilot: %s. Alles liegt unter 'Heute zu tun'." % ", ".join(teile)
+                    if teile else "Autopilot: Nichts Neues. Offen sind %d Aufgaben."
+                    % self.offen_anzahl())
+            if hinweise:
+                text += " Hinweis: " + " | ".join(hinweise)
+            self.memory._schreiben("UPDATE autopilot_laeufe SET ende=?, ergebnis=? WHERE id=?",
+                                   (zeitstempel(), text, lauf))
+            self.memory.aktion_protokollieren("autopilot", zaehler, text)
+            return {"ok": True, "neu": neu, "zaehler": zaehler, "hinweise": hinweise,
+                    "offen": self.offen_anzahl(), "text": text}
+        finally:
+            self._laeuft.release()
+
+    def letzter_lauf(self) -> dict:
+        zeilen = self.memory._lesen("SELECT * FROM autopilot_laeufe ORDER BY id DESC LIMIT 1")
+        return dict(zeilen[0]) if zeilen else {}
+
+    # -- Die Schritte -------------------------------------------------------------
+
+    def _neue_betriebe(self, agent):
+        einstellungen = self.einstellungen()
+        if not einstellungen["ort"]:
+            return 0, "Kein Ort eingestellt - trag ihn auf der Seite 'Heute zu tun' ein."
+        if self.akquise is None:
+            return 0, ""
+        gefunden = osm_betriebe(einstellungen["ort"], einstellungen["branchen"],
+                                url=self.osm_url)
+        if not gefunden.get("ok"):
+            return 0, gefunden.get("fehler", "")
+        neue = []
+        for betrieb in gefunden["betriebe"]:
+            if len(neue) >= einstellungen["neue_pro_lauf"]:
+                break
+            if not betrieb["telefon"] and not betrieb["email"]:
+                continue  # niemand erreichbar - nutzlos
+            ergebnis = self.akquise.lead_anlegen(
+                betrieb["firma"], telefon=betrieb["telefon"], email=betrieb["email"],
+                adresse=betrieb["adresse"], quelle="OpenStreetMap %s" % einstellungen["ort"],
+                notiz=" ".join(t for t in (betrieb["branche"], betrieb["webseite"]) if t),
+                naechster_schritt="anrufen und fragen, wer die Reinigung macht")
+            if ergebnis.get("ok"):
+                betrieb["lead_id"] = ergebnis["id"]
+                neue.append(betrieb)
+        if not neue:
+            return 0, ("Keine neuen Betriebe mit Telefon in %s gefunden."
+                       % einstellungen["ort"]) if not gefunden["betriebe"] else ""
+
+        skripte = self._skripte(agent, neue, einstellungen["ort"])
+        for betrieb in neue:
+            skript = skripte.get(betrieb["firma"]) or anruf_vorlage(betrieb, einstellungen["ort"])
+            details = ["Telefon: %s" % (betrieb["telefon"] or "keins eingetragen")]
+            if betrieb["adresse"]:
+                details.append("Adresse: %s" % betrieb["adresse"])
+            if betrieb["webseite"]:
+                details.append("Webseite: %s" % betrieb["webseite"])
+            if betrieb["email"]:
+                details.append("E-Mail: %s (anschreiben erst nach Einwilligung, "
+                               "zum Beispiel wenn sie am Telefon Ja sagen)" % betrieb["email"])
+            self.aufgabe_anlegen(
+                "lead:%d" % betrieb["lead_id"], "anruf",
+                "%s anrufen" % betrieb["firma"], skript + "\n\n" + "\n".join(details),
+                firma=betrieb["firma"], an=betrieb["telefon"],
+                grund="Neu aus OpenStreetMap, %s" % (betrieb["branche"] or "Betrieb"),
+                lead_id=betrieb["lead_id"])
+        return len(neue), ""
+
+    @staticmethod
+    def _skripte(agent, betriebe: list, ort: str) -> dict:
+        """Lässt die Skripte vom Gehirn schreiben - eine Anfrage für alle."""
+        if agent is None or not getattr(agent, "einsatzbereit", lambda: False)():
+            return {}
+        liste = "\n".join("- %s (%s)" % (b["firma"], b["branche"] or "Betrieb")
+                          for b in betriebe)
+        auftrag = (
+            "Schreib Anruf-Skripte für eine Gebäudereinigung. Der Anrufer heißt %s, die "
+            "Firma heißt %s, sie arbeitet in %s. Benutze genau diese Namen, keine "
+            "Platzhalter in eckigen Klammern.\n"
+            "Für jeden Betrieb: drei bis fünf gesprochene Sätze, per Sie, freundlich, "
+            "konkret für die Branche. Ziel ist ein kostenloser Besichtigungstermin.\n"
+            "Wichtig: Sprich neutral an ('Guten Tag'), rate keine Namen, Titel oder "
+            "Anrede. Behaupte nichts über die eigene Firma (keine Spezialisierung, keine "
+            "Zertifikate, keine Preise), was hier nicht steht.\n\n"
+            "Betriebe:\n%s\n\nAntworte nur als JSON: "
+            '{"skripte": [{"firma": "...", "skript": "..."}]}'
+            % (NUTZER_NAME, FIRMA, ort, liste))
+        try:
+            antwort = agent.json_anfrage(auftrag, max_tokens=3000)
+        except Exception:
+            return {}
+        if not antwort.get("ok"):
+            return {}
+        ergebnis = {}
+        for eintrag in (antwort.get("daten") or {}).get("skripte") or []:
+            if isinstance(eintrag, dict) and eintrag.get("firma") and eintrag.get("skript"):
+                ergebnis[str(eintrag["firma"])] = str(eintrag["skript"]).strip()
+        return ergebnis
+
+    def _nachfassen(self, agent):
+        if self.akquise is None:
+            return 0, ""
+        liste = self.akquise.nachfassliste()
+        anzahl = 0
+        for eintrag in (liste.get("eintraege") or [])[:15]:
+            text = "Nächster Schritt: %s\nTelefon: %s%s" % (
+                eintrag.get("schritt") or "melden", eintrag.get("telefon") or "unbekannt",
+                ("\nSeit %d Tagen überfällig." % eintrag["seit_tagen"])
+                if eintrag.get("seit_tagen") else "")
+            if self.aufgabe_anlegen("nachfassen:%d:%s" % (eintrag["id"], heute_datum()),
+                                    "nachfassen", "%s nachfassen" % eintrag["firma"], text,
+                                    firma=eintrag["firma"], an=eintrag.get("telefon", ""),
+                                    grund="Stufe: %s" % eintrag.get("stufe", ""),
+                                    lead_id=eintrag["id"]):
+                anzahl += 1
+        return anzahl, ""
+
+    def _posteingang(self, agent):
+        if self.mail is None or not self.mail.lesen_moeglich():
+            return 0, ""
+        post = self.mail.ungelesene(15)
+        if not post.get("ok"):
+            return 0, post.get("fehler", "")
+        anzahl = 0
+        for mail in (post.get("wichtig") or [])[:3]:
+            adresse = email.utils.parseaddr(mail.get("absender", ""))[1]
+            schluessel = "mail:%s:%s" % (adresse, mail.get("betreff", ""))
+            if self.memory._lesen("SELECT id FROM autopilot_aufgaben WHERE schluessel=?",
+                                  (schluessel,)):
+                continue
+            entwurf = ""
+            if agent is not None and getattr(agent, "einsatzbereit", lambda: False)():
+                antwort = agent.text_anfrage(
+                    "Schreib eine kurze, höfliche Antwort auf diese Mail im Namen von %s, "
+                    "%s (Gebäudereinigung). Per Sie, sachlich. Versprich nichts, was nicht "
+                    "in der Mail steht; Termine nur vorschlagen. Nur den Mailtext, ohne "
+                    "Betreff.\n\nVon: %s\nBetreff: %s\nText: %s"
+                    % (NUTZER_NAME, FIRMA, mail.get("absender", ""),
+                       mail.get("betreff", ""), mail.get("auszug", "")), max_tokens=1500)
+                if antwort.get("ok"):
+                    entwurf = antwort.get("text", "")
+            betreff = mail.get("betreff", "")
+            if not betreff.lower().startswith("re:"):
+                betreff = "Re: " + betreff
+            if self.aufgabe_anlegen(
+                    schluessel, "antwort" if (entwurf and "@" in adresse) else "hinweis",
+                    "Antwort an %s" % (mail.get("absender") or adresse),
+                    entwurf or "Diese Mail wartet auf eine Antwort:\n%s" % mail.get("auszug", ""),
+                    an=adresse, betreff=betreff,
+                    grund="Wichtige Mail: %s" % mail.get("betreff", "")):
+                anzahl += 1
+        return anzahl, ""
+
+    def _cashflow(self, agent):
+        if self.akquise is None:
+            return 0, ""
+        prognose = self.akquise.cashflow_prognose(3, self.bookkeeping)
+        anzahl = 0
+        for monat in prognose.get("monate") or []:
+            if monat["ergebnis"] < 0:
+                if self.aufgabe_anlegen(
+                        "cash:%s" % monat["monat"], "hinweis",
+                        "Im %s fehlen etwa %.0f Euro" % (monat["monat"], -monat["ergebnis"]),
+                        "Erwartete Einnahmen %.0f Euro, Kosten %.0f Euro. Jeder gewonnene "
+                        "Auftrag schließt die Lücke - deshalb heute die Anrufe."
+                        % (monat["einnahmen"], monat["kosten"]),
+                        grund="Cashflow-Prognose"):
+                    anzahl += 1
+        return anzahl, ""
+
+
+# =========================================================================
 # tools  -  Werkzeugkatalog - alles, was Claude tatsächlich tun kann.
 # 
 # Zwei Sicherheitsentscheidungen stecken in diesem Modul, und sie sind nicht
@@ -11058,6 +11822,7 @@ class Werkzeuge:
         self.telefon = Telefon(self.memory)
         self.mcp = MCPClient()
         self.welt = Welt(self.mcp)
+        self.autopilot = Autopilot(self.memory, self.akquise, self.mail, self.bookkeeping)
         self.bildschirm = Bildschirm(agent)
         self.browser = Browser(agent)
         self.messenger = Messenger(self.telegram, self.mail, self.mcp, None)
@@ -11139,6 +11904,12 @@ class Werkzeuge:
                       "datum": text}, ["zusammenfassung"]),
             werkzeug("rueckblick", "Gibt die Tagesberichte der letzten Tage zurück.",
                      {"tage": ganz}),
+            werkzeug("autopilot_starten",
+                     "Startet den Autopilot jetzt: neue Betriebe finden und Anruf-Skripte "
+                     "schreiben, Nachfassen, Antworten auf wichtige Mails entwerfen, "
+                     "Cashflow prüfen. Alles landet unter 'Heute zu tun'.", {}),
+            werkzeug("heute_zu_tun",
+                     "Liest vor, was auf der Liste 'Heute zu tun' offen ist.", {}),
             werkzeug("protokoll",
                      "Zeigt das Protokoll eines Tages aus dem Gesprächsverlauf: was "
                      "gesagt und getan wurde, was offen ist. Tag: heute, gestern oder "
@@ -11516,6 +12287,17 @@ class Werkzeuge:
                 a.get("offen", ""), a.get("datum", ""))
         if name == "rueckblick":
             return {"ok": True, "text": self.recall.rueckblick(int(a.get("tage") or 7))}
+        if name == "autopilot_starten":
+            return self.autopilot.laufen(self.agent)
+        if name == "heute_zu_tun":
+            offen = self.autopilot.aufgaben()
+            if not offen:
+                return {"ok": True, "anzahl": 0, "text": "Auf der Liste ist nichts offen."}
+            return {"ok": True, "anzahl": len(offen),
+                    "aufgaben": [{"id": z["id"], "titel": z["titel"], "art": z["art"]}
+                                 for z in offen[:15]],
+                    "text": "%d Aufgaben offen. Zuerst: %s." % (
+                        len(offen), "; ".join(z["titel"] for z in offen[:3]))}
         if name == "protokoll":
             return self.recall.protokoll(a.get("tag") or "heute", a.get("thema", ""),
                                          int(a.get("tage") or 1))

@@ -61,6 +61,34 @@ Kalender kann man einrichten, muss man aber nicht.
 
 ---
 
+## Autopilot: Er arbeitet von selbst
+
+Unter **„Heute zu tun“** (Link oben auf der Jarvis-Seite, oder
+`http://localhost:8765/autopilot`) trägst du einmal ein: deinen Namen, deine
+Firma, den **Ort**, in dem du Kunden suchst, und die **Branchen** (Arztpraxen,
+Steuerberater, Kanzleien, Autohäuser, Fitnessstudios …).
+
+Danach arbeitet Jarvis zweimal am Tag von selbst (08:30 und 13:30) und auf
+Knopfdruck („Jetzt arbeiten“):
+
+- **Neue Betriebe** aus OpenStreetMap (kostenlos, ohne Schlüssel), mit Telefon,
+  Adresse, Webseite – und zu jedem ein **Anruf-Skript**. Sie landen in der
+  Pipeline.
+- **Nachfassen**: wer heute dran ist.
+- **Posteingang**: Antwortentwürfe für wichtige Mails.
+- **Cashflow**: Warnung, wenn ein Monat ins Minus läuft.
+
+Alles steht auf der Seite. Dort rufst du an, hakst ab oder klickst **Senden**.
+**Jarvis schickt nie von selbst Mails** – gesendet wird erst nach deinem Klick.
+Neue Betriebe bekommen ein Anruf-Skript statt einer Werbemail, weil Werbemails
+an Firmen ohne Einwilligung in Österreich und Deutschland in der Regel
+unzulässig sind. Ist das Gratis-Kontingent gerade leer, nimmt er Vorlagen –
+die Arbeit bleibt nicht liegen.
+
+Per Sprache: „Jarvis, Autopilot starten“ oder „Was ist heute zu tun?“
+
+---
+
 ## Die Web-App
 
 Der Normalfall: `python3 jarvis.py` startet einen kleinen Server und öffnet

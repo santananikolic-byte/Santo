@@ -1589,6 +1589,188 @@ def pruefung_freier_dienst(agent):
         config._ROHWERTE.update(rohwerte)
 
 
+def pruefung_autopilot(agent):
+    """Der Autopilot arbeitet von selbst und legt alles zur Freigabe vor."""
+    abschnitt("Autopilot")
+    import http.server
+    import urllib.request as _netz
+    from modules.autopilot import osm_abfrage
+    from modules.scheduler import Scheduler
+
+    abfragen = []
+
+    class FalschesOSM(http.server.BaseHTTPRequestHandler):
+        def log_message(self, *a):
+            pass
+
+        def do_POST(self):
+            laenge = int(self.headers.get("Content-Length") or 0)
+            abfragen.append(self.rfile.read(laenge).decode("utf-8"))
+            roh = json.dumps({"elements": [
+                {"tags": {"name": "Praxis Dr. Hofer", "amenity": "doctors",
+                          "phone": "+43 732 111", "addr:street": "Hauptstraße",
+                          "addr:housenumber": "5", "addr:city": "Teststadt"}},
+                {"tags": {"name": "Steuerbüro Lang", "office": "tax_advisor",
+                          "email": "info@lang.example", "website": "https://lang.example"}},
+                {"tags": {"name": "Niemand Erreichbar GmbH", "office": "lawyer"}},
+                {"tags": {"amenity": "doctors"}},
+            ]}).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(roh)))
+            self.end_headers()
+            self.wfile.write(roh)
+
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 11996), FalschesOSM)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+
+    class FalschePost:
+        def __init__(self):
+            self.gesendet = []
+
+        def lesen_moeglich(self):
+            return True
+
+        def senden_moeglich(self):
+            return True
+
+        def ungelesene(self, limit=15):
+            mail = {"id": "1", "betreff": "Angebot für unser Büro?",
+                    "absender": "Maria Huber <huber@firma.example>",
+                    "auszug": "Können Sie uns ein Angebot für 200 qm machen?",
+                    "einstufung": "wichtig"}
+            return {"ok": True, "mails": [mail], "wichtig": [mail]}
+
+        def senden(self, an, betreff, text):
+            self.gesendet.append((an, betreff, text))
+            return {"ok": True, "text": "raus"}
+
+    autopilot = agent.tools.autopilot
+    post = FalschePost()
+    alte_post, autopilot.mail = autopilot.mail, post
+    autopilot.osm_url = "http://127.0.0.1:11996/api/interpreter"
+    alt = (config.ANTHROPIC_API_KEY, config.FREIER_DIENST_SCHLUESSEL, config.LOKALES_MODELL,
+           config.AUTOPILOT_ORT, config.AUTOPILOT_BRANCHEN, config.AUTOPILOT_AN,
+           config.ENV_DATEI, dict(config._ROHWERTE))
+    config.ANTHROPIC_API_KEY = config.FREIER_DIENST_SCHLUESSEL = config.LOKALES_MODELL = ""
+    config.ENV_DATEI = pathlib.Path(ARBEITSVERZEICHNIS) / "autopilot.env"
+    web = None
+    try:
+        abfrage = osm_abfrage('Linz"];out;', ["Arztpraxen"])
+        pruefen("Der Ort kann die OpenStreetMap-Abfrage nicht aufbrechen",
+                'Linz"' not in abfrage and '"Linz' in abfrage)
+
+        autopilot.einstellungen_setzen("", ["Arztpraxen", "Steuerberater"], True)
+        ergebnis = autopilot.laufen(agent)
+        pruefen("Ohne Ort sagt der Autopilot, was fehlt",
+                ergebnis["ok"] and "Kein Ort" in ergebnis["text"], ergebnis["text"][:90])
+
+        autopilot.einstellungen_setzen("Teststadt", ["Arztpraxen", "Steuerberater"], True)
+        pruefen("Einstellungen landen in der .env",
+                "AUTOPILOT_ORT=Teststadt" in config.ENV_DATEI.read_text("utf-8"))
+        ergebnis = autopilot.laufen(agent)
+        offen = autopilot.aufgaben()
+        anrufe = [a for a in offen if a["art"] == "anruf"]
+        pruefen("Neue Betriebe aus OpenStreetMap werden zu Anruf-Aufgaben",
+                sorted(a["firma"] for a in anrufe) == ["Praxis Dr. Hofer", "Steuerbüro Lang"],
+                ergebnis["text"][:90])
+        pruefen("Betriebe ohne Telefon und Mail werden übersprungen",
+                not any("Niemand" in a["titel"] for a in offen))
+        hofer = [a for a in anrufe if a["firma"] == "Praxis Dr. Hofer"][0]
+        pruefen("Ohne Gehirn gibt es eine Vorlage statt nichts",
+                config.NUTZER_NAME in hofer["text"] and "Hygiene" in hofer["text"]
+                and hofer["an"] == "+43 732 111")
+        pruefen("Die Abfrage fragt nach den gewählten Branchen im Ort",
+                "doctors" in __import__("urllib.parse").parse.unquote_plus(abfragen[-1])
+                and "Teststadt" in __import__("urllib.parse").parse.unquote_plus(abfragen[-1]))
+        lang = [a for a in anrufe if a["firma"] == "Steuerbüro Lang"][0]
+        pruefen("Bei Mailadressen steht der Hinweis auf die Einwilligung",
+                "Einwilligung" in lang["text"])
+        pruefen("Die Betriebe stehen in der Pipeline",
+                agent.tools.akquise.lead_finden("Praxis Dr. Hofer") is not None)
+        pruefen("Die wichtige Mail ohne Gehirn wird ein Hinweis, keine erfundene Antwort",
+                any(a["art"] == "hinweis" and "Huber" in a["titel"] for a in offen))
+
+        vorher = len(autopilot.aufgaben())
+        autopilot.laufen(agent)
+        pruefen("Ein zweiter Lauf legt nichts doppelt an", len(autopilot.aufgaben()) == vorher)
+
+        # Mit Gehirn: Antwortentwurf, und Senden erst nach dem Klick
+        hinweis = [a for a in autopilot.aufgaben() if "Huber" in a["titel"]][0]
+        autopilot.aufgabe_erledigen(hinweis["id"], "verwerfen")
+        agent.memory._schreiben("DELETE FROM autopilot_aufgaben WHERE id=?", (hinweis["id"],))
+        agent.einsatzbereit = lambda: True
+        agent.text_anfrage = lambda *a, **k: {"ok": True, "text": "Sehr geehrte Frau Huber, gern."}
+        agent.json_anfrage = lambda *a, **k: {"ok": False}
+        autopilot.laufen(agent)
+        antwort = [a for a in autopilot.aufgaben() if a["art"] == "antwort"]
+        pruefen("Mit Gehirn entwirft er die Antwort auf die wichtige Mail",
+                len(antwort) == 1 and antwort[0]["an"] == "huber@firma.example"
+                and antwort[0]["betreff"].startswith("Re: "))
+        pruefen("Nichts wird von selbst gesendet", post.gesendet == [])
+        erledigt = autopilot.aufgabe_erledigen(antwort[0]["id"], "senden",
+                                               "Sehr geehrte Frau Huber, gern - Montag?")
+        pruefen("Erst der Klick sendet, mit dem bearbeiteten Text",
+                erledigt["ok"] and post.gesendet[-1][0] == "huber@firma.example"
+                and "Montag" in post.gesendet[-1][2])
+        pruefen("Eine erledigte Aufgabe lässt sich nicht nochmal senden",
+                autopilot.aufgabe_erledigen(antwort[0]["id"], "senden")["ok"] is False)
+        r = autopilot.aufgabe_erledigen(hofer["id"], "erledigt")
+        lead = agent.tools.akquise.lead_finden("Praxis Dr. Hofer")
+        pruefen("Anruf erledigt: Betrieb rückt auf 'kontaktiert'",
+                r["ok"] and lead["stufe"] == "kontaktiert")
+
+        # Nachfassen
+        agent.memory._schreiben("UPDATE leads SET naechster_kontakt=? WHERE firma=?",
+                                ((datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d"),
+                                 "Praxis Dr. Hofer"))
+        autopilot.laufen(agent)
+        pruefen("Fällige Interessenten werden zu Nachfass-Aufgaben",
+                any(a["art"] == "nachfassen" and a["firma"] == "Praxis Dr. Hofer"
+                    for a in autopilot.aufgaben()))
+
+        pruefen("Sprachbefehl 'heute_zu_tun' liest die Liste vor",
+                agent.tools.run("heute_zu_tun", {}).get("ok") is True)
+        zeitplan = Scheduler(agent=agent)
+        zeitplan.standardjobs_anlegen()
+        pruefen("Der Autopilot steht von selbst im Zeitplan",
+                any(n.startswith("autopilot:") for n in zeitplan.jobs))
+
+        web = JarvisWeb(agent, port=8802)
+        web.starten(blockierend=False)
+        time.sleep(0.5)
+        with _netz.urlopen("http://127.0.0.1:8802/api/autopilot", timeout=10) as r:
+            daten = json.loads(r.read().decode("utf-8"))
+        pruefen("/api/autopilot liefert Aufgaben und Einstellungen",
+                daten["ok"] and daten["aufgaben"] and daten["einstellungen"]["ort"] == "Teststadt")
+        with _netz.urlopen("http://127.0.0.1:8802/autopilot", timeout=10) as r:
+            seite = r.read().decode("utf-8")
+        pruefen("Die Seite 'Heute zu tun' ist persönlich und setzt Text nie als HTML",
+                config.NUTZER_NAME in seite and "innerHTML" not in seite and "{{" not in seite)
+        anfrage = _netz.Request("http://127.0.0.1:8802/api/autopilot/laufen", data=b"{}",
+                                headers={"Content-Type": "application/json"})
+        with _netz.urlopen(anfrage, timeout=10) as r:
+            gestartet = json.loads(r.read().decode("utf-8"))
+        for _ in range(40):
+            if not autopilot._laeuft.locked():
+                break
+            time.sleep(0.25)
+        pruefen("'Jetzt arbeiten' läuft im Hintergrund, die Seite hängt nicht",
+                gestartet["ok"] and not autopilot._laeuft.locked())
+    finally:
+        for name in ("einsatzbereit", "text_anfrage", "json_anfrage"):
+            agent.__dict__.pop(name, None)
+        if web is not None:
+            web.stoppen()
+        server.shutdown()
+        autopilot.mail, autopilot.osm_url = alte_post, None
+        (config.ANTHROPIC_API_KEY, config.FREIER_DIENST_SCHLUESSEL, config.LOKALES_MODELL,
+         config.AUTOPILOT_ORT, config.AUTOPILOT_BRANCHEN, config.AUTOPILOT_AN,
+         config.ENV_DATEI, rohwerte) = alt
+        config._ROHWERTE.clear()
+        config._ROHWERTE.update(rohwerte)
+
+
 def pruefung_sicherheit(agent):
     abschnitt("Sicherheit")
     ergebnis = agent.tools.run("systeminfo", {"was": "rm -rf /"})
@@ -1736,6 +1918,7 @@ def main() -> int:
     pruefung_schluessel(agent)
     pruefung_lokales_modell(agent)
     pruefung_freier_dienst(agent)
+    pruefung_autopilot(agent)
     pruefung_routinen(agent)
     pruefung_zeitplan()
     pruefung_kalender()

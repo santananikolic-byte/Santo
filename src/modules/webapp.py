@@ -35,7 +35,7 @@ from modules.memory import zeitstempel
 from modules.freier_dienst import DIENST_VORGABEN, freier_dienst_pruefen
 from modules.lokal import STANDARD_MODELL, ollama_pruefen
 from modules.setup_wizard import schluessel_online_testen
-from modules.webseite import PROTOKOLL_HTML, SEITE_HTML
+from modules.webseite import AUTOPILOT_HTML, PROTOKOLL_HTML, SEITE_HTML
 
 STANDARD_PORT = 8765
 MAX_KOERPER = 512 * 1024
@@ -277,6 +277,7 @@ class JarvisWeb:
                 "nutzer": config.NUTZER_NAME, "firma": config.FIRMA,
                 "modell": config.CLAUDE_MODEL,
                 "werkzeuge": len(werkzeuge.namen()),
+                "aufgaben": werkzeuge.autopilot.offen_anzahl(),
                 "rollen": [r["rolle"] for r in werkzeuge.team.rollen_liste()],
                 "dienste": config.konfig_uebersicht()})
         if pfad == "/api/meldungen":
@@ -299,6 +300,19 @@ class JarvisWeb:
             return self._antworten(behandler, 200, werkzeuge.recall.protokoll(
                 (frage.get("tag") or ["heute"])[0],
                 (frage.get("thema") or [""])[0], tage))
+        if pfad == "/api/autopilot":
+            autopilot = werkzeuge.autopilot
+            return self._antworten(behandler, 200, {
+                "ok": True, "aufgaben": autopilot.aufgaben(),
+                "einstellungen": autopilot.einstellungen(),
+                "letzter_lauf": autopilot.letzter_lauf(),
+                "laeuft": autopilot._laeuft.locked()})
+        if pfad == "/autopilot":
+            return self._html(behandler, (
+                AUTOPILOT_HTML
+                .replace("{{SCHLUESSEL_JSON}}", _fuer_skript(self.token or ""))
+                .replace("{{NUTZER_JSON}}", _fuer_skript(config.NUTZER_NAME))
+                .replace("{{FIRMA_JSON}}", _fuer_skript(config.FIRMA))))
         if pfad == "/protokoll":
             return self._html(behandler, (
                 PROTOKOLL_HTML
@@ -424,6 +438,35 @@ class JarvisWeb:
                 "ok": True, "einsatzbereit": self.agent.einsatzbereit(),
                 "text": probe["text"] + " Es kostet nichts. Antworten dauern "
                         "auf diesem Rechner länger als bei Claude."})
+
+        if pfad == "/api/autopilot/laufen":
+            autopilot = werkzeuge.autopilot
+            if autopilot._laeuft.locked():
+                return self._antworten(behandler, 200, {
+                    "ok": False, "text": "Jarvis arbeitet gerade schon."})
+
+            def arbeiten():
+                # Im Hintergrund: Die Seite bleibt bedienbar, auch wenn der
+                # Gratis-Dienst langsam ist.
+                ergebnis = autopilot.laufen(self.agent)
+                self.melden(ergebnis.get("text", ""))
+            threading.Thread(target=arbeiten, daemon=True).start()
+            return self._antworten(behandler, 200, {
+                "ok": True, "text": "Jarvis arbeitet. Das dauert ein bis drei Minuten."})
+        if pfad == "/api/autopilot/aktion":
+            text = daten.get("text")
+            betreff = daten.get("betreff")
+            return self._antworten(behandler, 200, werkzeuge.autopilot.aufgabe_erledigen(
+                daten.get("id"), str(daten.get("aktion") or ""),
+                None if text is None else str(text),
+                None if betreff is None else str(betreff)))
+        if pfad == "/api/autopilot/einstellungen":
+            branchen = daten.get("branchen")
+            return self._antworten(behandler, 200, werkzeuge.autopilot.einstellungen_setzen(
+                daten.get("ort"),
+                [str(b) for b in branchen] if isinstance(branchen, list) else None,
+                None if daten.get("an") is None else bool(daten.get("an")),
+                daten.get("name"), daten.get("firma")))
 
         if pfad == "/api/verlauf/neu":
             self.agent.verlauf_leeren()

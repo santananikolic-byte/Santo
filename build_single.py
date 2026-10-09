@@ -70,6 +70,7 @@ BAULISTE = [
     "modules/scheduler",
     "modules/webapp",
     "modules/setup_wizard",
+    "modules/autopilot",
     "modules/tools",
     "agent",
     "run",
