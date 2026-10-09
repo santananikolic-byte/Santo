@@ -1431,6 +1431,132 @@ def pruefung_lokales_modell(agent):
             pass
 
 
+def pruefung_freier_dienst(agent):
+    """Jarvis denkt über einen Gratis-Schlüssel - ohne Anthropic, ohne Guthaben."""
+    abschnitt("Gratis-Dienst (OpenAI-kompatibel)")
+    import http.server
+    import urllib.request as _netz
+    import modules.freier_dienst as dienst_modul
+
+    gesehen = []
+    modus = {"fehler": 0}
+
+    class FalscherDienst(http.server.BaseHTTPRequestHandler):
+        def log_message(self, *a):
+            pass
+
+        def do_POST(self):
+            laenge = int(self.headers.get("Content-Length") or 0)
+            anfrage = json.loads(self.rfile.read(laenge).decode("utf-8"))
+            gesehen.append({"pfad": self.path, "kopf": dict(self.headers), "body": anfrage})
+            if modus["fehler"]:
+                roh = json.dumps({"error": {"message": "zu viel"}}).encode("utf-8")
+                self.send_response(modus["fehler"])
+            else:
+                hat_ergebnis = any(m.get("role") == "tool" for m in anfrage["messages"])
+                if hat_ergebnis:
+                    nachricht = {"role": "assistant", "content": "Notiert, Chef."}
+                elif "Sag nur: ok" in json.dumps(anfrage["messages"]):
+                    nachricht = {"role": "assistant", "content": "ok"}
+                else:
+                    nachricht = {"role": "assistant", "content": None, "tool_calls": [{
+                        "id": "call_1", "type": "function",
+                        "function": {"name": "notiz_speichern",
+                                     "arguments": json.dumps({"text": "Dienst-Test Nikolic"})}}]}
+                roh = json.dumps({"choices": [{"message": nachricht}]}).encode("utf-8")
+                self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(roh)))
+            self.end_headers()
+            self.wfile.write(roh)
+
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 11997), FalscherDienst)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+
+    vorgabe = dienst_modul.DIENST_VORGABEN["groq"]
+    alte_url = vorgabe["url"]
+    vorgabe["url"] = "http://127.0.0.1:11997/openai/v1"
+    alt = (config.ANTHROPIC_API_KEY, config.FREIER_DIENST_URL, config.FREIER_DIENST_SCHLUESSEL,
+           config.FREIER_DIENST_MODELL, config.LOKALES_MODELL, config.ENV_DATEI,
+           dict(config._ROHWERTE))
+    config.ANTHROPIC_API_KEY = ""
+    config.FREIER_DIENST_URL = config.FREIER_DIENST_SCHLUESSEL = config.FREIER_DIENST_MODELL = ""
+    config.LOKALES_MODELL = ""
+    config.ENV_DATEI = pathlib.Path(ARBEITSVERZEICHNIS) / "dienst.env"
+    web = None
+    try:
+        pruefen("Ohne Schlüssel und Dienst ist Jarvis nicht einsatzbereit",
+                agent.einsatzbereit() is False)
+        web = JarvisWeb(agent, port=8801)
+        web.starten(blockierend=False)
+        time.sleep(0.5)
+
+        def senden(nutzlast):
+            anfrage = _netz.Request("http://127.0.0.1:8801/api/dienst",
+                                    data=json.dumps(nutzlast).encode("utf-8"),
+                                    headers={"Content-Type": "application/json"})
+            with _netz.urlopen(anfrage, timeout=20) as r:
+                return r.read().decode("utf-8")
+
+        pruefen("Unbekannter Anbieter wird abgewiesen",
+                json.loads(senden({"dienst": "evil", "schluessel": "x" * 20}))["ok"] is False)
+        pruefen("Zu kurzer Schlüssel wird abgewiesen",
+                json.loads(senden({"dienst": "groq", "schluessel": "abc"}))["ok"] is False)
+        modus["fehler"] = 401
+        roh = senden({"dienst": "groq", "schluessel": "gsk_" + "f" * 30})
+        pruefen("Abgelehnter Schlüssel wird nicht gespeichert",
+                json.loads(roh)["ok"] is False and not config.ENV_DATEI.exists()
+                and not agent.einsatzbereit())
+        modus["fehler"] = 0
+
+        echter = "gsk_" + "g" * 30
+        roh = senden({"dienst": "groq", "schluessel": echter[:10] + "\n" + echter[10:]})
+        pruefen("Gültiger Schlüssel wird gespeichert und sofort benutzt",
+                json.loads(roh)["ok"] is True and agent.einsatzbereit()
+                and config.FREIER_DIENST_SCHLUESSEL == echter
+                and ("FREIER_DIENST_SCHLUESSEL=" + echter) in config.ENV_DATEI.read_text("utf-8"))
+        pruefen("Die Antwort verrät den Schlüssel nicht", echter not in roh)
+        pruefen("Die Adresse stammt aus der Anbieterliste, nicht aus der Anfrage",
+                config.FREIER_DIENST_URL == "http://127.0.0.1:11997/openai/v1")
+
+        agent.verlauf_leeren()
+        text = agent.denken("Bitte merk dir die Notiz Dienst-Test Nikolic")
+        pruefen("Jarvis antwortet über den Gratis-Dienst durch die normale Denkschleife",
+                text == "Notiert, Chef.", text)
+        pruefen("Der Werkzeugaufruf des Dienstes wurde ausgeführt",
+                any("Dienst-Test Nikolic" in n["text"]
+                    for n in agent.memory.notizen_suchen("Dienst-Test")))
+        erste, zweite = gesehen[-2], gesehen[-1]
+        pruefen("Schlüssel kommt als Bearer-Kopf an, mit eigener Kennung",
+                erste["kopf"].get("Authorization") == "Bearer " + echter
+                and erste["kopf"].get("User-Agent") == "Jarvis/1.0"
+                and erste["pfad"].endswith("/chat/completions"))
+        pruefen("Nur wenige, passende Werkzeuge gehen mit",
+                0 < len(erste["body"]["tools"]) <= 16,
+                "%d von %d" % (len(erste["body"]["tools"]), len(agent.tools.katalog())))
+        pruefen("Das Werkzeugergebnis geht mit der Aufrufnummer zurück",
+                any(m.get("role") == "tool" and m.get("tool_call_id") == "call_1"
+                    for m in zweite["body"]["messages"]))
+        pruefen("Werkzeugaufruf des Assistenten steht im OpenAI-Format im Verlauf",
+                any(m.get("tool_calls") and m["tool_calls"][0]["function"]["name"]
+                    == "notiz_speichern" for m in zweite["body"]["messages"]))
+
+        modus["fehler"] = 429
+        meldung = agent.denken("Hallo")
+        pruefen("Ein erschöpftes Kontingent wird verständlich gemeldet",
+                "Kontingent" in meldung, meldung[:80])
+        modus["fehler"] = 0
+    finally:
+        vorgabe["url"] = alte_url
+        if web is not None:
+            web.stoppen()
+        server.shutdown()
+        (config.ANTHROPIC_API_KEY, config.FREIER_DIENST_URL, config.FREIER_DIENST_SCHLUESSEL,
+         config.FREIER_DIENST_MODELL, config.LOKALES_MODELL, config.ENV_DATEI, rohwerte) = alt
+        config._ROHWERTE.clear()
+        config._ROHWERTE.update(rohwerte)
+
+
 def pruefung_sicherheit(agent):
     abschnitt("Sicherheit")
     ergebnis = agent.tools.run("systeminfo", {"was": "rm -rf /"})
@@ -1577,6 +1703,7 @@ def main() -> int:
     pruefung_protokoll(agent)
     pruefung_schluessel(agent)
     pruefung_lokales_modell(agent)
+    pruefung_freier_dienst(agent)
     pruefung_routinen(agent)
     pruefung_zeitplan()
     pruefung_kalender()

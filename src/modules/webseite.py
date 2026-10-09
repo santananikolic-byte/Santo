@@ -235,7 +235,32 @@ body[data-zustand="wach"] .zustandstext{color:var(--akzent)}
   <div class="frage">
     <div class="kopf"><h2>Womit soll Jarvis denken?</h2></div>
     <div class="inhalt">
-      <div class="aktion">Kostenlos, ohne Anthropic</div>
+      <div class="aktion">Kostenlos mit einem Gratis-Schlüssel</div>
+      <p class="sagen" style="padding:0 0 10px;text-align:left">
+        Der schnellste Weg ohne Kosten und ohne Anthropic: Hol dir bei einem
+        Dienst mit Gratis-Kontingent einen Schlüssel (ohne Karte, ohne Guthaben).
+        <b>Groq:</b> console.groq.com/keys &middot; <b>Google:</b>
+        aistudio.google.com/apikey. Grenzen pro Minute und Tag gelten, und das
+        Gespräch geht an diesen Anbieter.</p>
+      <select id="dienstWahl" style="width:100%;padding:11px;margin-bottom:8px;
+        border-radius:9px;background:var(--tief);border:1px solid var(--rand-hell);
+        color:var(--text);font-size:14px">
+        <option value="groq" data-modell="llama-3.3-70b-versatile">Groq</option>
+        <option value="gemini" data-modell="gemini-2.5-flash">Google Gemini</option>
+        <option value="openrouter" data-modell="meta-llama/llama-3.3-70b-instruct:free">OpenRouter</option>
+      </select>
+      <input id="dienstModell" type="text" value="llama-3.3-70b-versatile"
+             autocomplete="off" spellcheck="false" style="margin-bottom:8px"
+             title="Modellname - bei Bedarf ändern">
+      <input id="dienstSchluessel" type="password" placeholder="Schlüssel einfügen"
+             autocomplete="off" spellcheck="false">
+    </div>
+    <p class="meldung" id="dienstMeldung"></p>
+    <div class="knoepfe">
+      <button class="ja" id="dienstSpeichern">Gratis-Dienst nutzen</button>
+    </div>
+    <div class="inhalt" style="border-top:1px solid var(--rand)">
+      <div class="aktion">Oder auf diesem Rechner (Ollama)</div>
       <p class="sagen" style="padding:0 0 10px;text-align:left">
         Jarvis denkt mit einem Modell, das auf diesem Rechner läuft (Ollama,
         <b>ollama.com</b>). Kein Konto, kein Guthaben, kein Limit. Dafür ist es
@@ -246,7 +271,7 @@ body[data-zustand="wach"] .zustandstext{color:var(--akzent)}
     </div>
     <p class="meldung" id="lokalMeldung"></p>
     <div class="knoepfe">
-      <button class="ja" id="lokalSpeichern">Lokales Modell nutzen</button>
+      <button class="nein" id="lokalSpeichern">Lokales Modell nutzen</button>
     </div>
     <div class="inhalt" style="border-top:1px solid var(--rand)">
       <p class="sagen" style="padding:0 0 10px;text-align:left">
@@ -612,6 +637,33 @@ body[data-zustand="wach"] .zustandstext{color:var(--akzent)}
       meldung.textContent = "Der Server antwortet nicht.";
     });
   }
+  function dienstSpeichern() {
+    var meldung = el("dienstMeldung");
+    if (!el("dienstSchluessel").value.trim()) { return; }
+    meldung.className = "meldung"; meldung.textContent = "Ich probiere den Dienst aus …";
+    el("dienstSpeichern").disabled = true;
+    holen("/api/dienst", { dienst: el("dienstWahl").value,
+                           modell: el("dienstModell").value,
+                           schluessel: el("dienstSchluessel").value }).then(function (a) {
+      el("dienstSpeichern").disabled = false;
+      meldung.textContent = a.text || "";
+      if (a.ok) {
+        el("dienstSchluessel").value = "";
+        el("schluesselDialog").classList.remove("zeigen");
+        el("antwort").textContent = ""; el("antwort").className = "antwort";
+        zustandHolen();
+      } else { meldung.className = "meldung fehler"; }
+    }).catch(function () {
+      el("dienstSpeichern").disabled = false;
+      meldung.className = "meldung fehler";
+      meldung.textContent = "Der Server antwortet nicht.";
+    });
+  }
+  el("dienstSpeichern").addEventListener("click", dienstSpeichern);
+  el("dienstWahl").addEventListener("change", function () {
+    var o = el("dienstWahl").options[el("dienstWahl").selectedIndex];
+    el("dienstModell").value = o.getAttribute("data-modell") || "";
+  });
   el("lokalSpeichern").addEventListener("click", lokalSpeichern);
   el("schluesselSpeichern").addEventListener("click", schluesselSpeichern);
   el("schluesselFeld").addEventListener("keydown", function (e) {

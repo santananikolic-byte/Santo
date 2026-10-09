@@ -217,6 +217,10 @@ CLAUDE_MAX_TOKENS = _ganzzahl("CLAUDE_MAX_TOKENS", 2000)
 
 # Lokales Modell (Ollama): kostenlos, ohne Schlüssel, läuft auf diesem Rechner.
 # Wird nur benutzt, wenn kein Anthropic-Schlüssel hinterlegt ist.
+# Kostenloser Online-Dienst (Groq, Gemini, OpenRouter): Gratis-Schlüssel statt Anthropic.
+FREIER_DIENST_URL = _text("FREIER_DIENST_URL")
+FREIER_DIENST_SCHLUESSEL = _text("FREIER_DIENST_SCHLUESSEL")
+FREIER_DIENST_MODELL = _text("FREIER_DIENST_MODELL")
 LOKALES_MODELL = _text("LOKALES_MODELL")
 OLLAMA_URL = _text("OLLAMA_URL", "http://127.0.0.1:11434")
 
@@ -357,6 +361,7 @@ def konfig_uebersicht() -> dict:
     """Zeigt an, welche Dienste eingerichtet sind - ohne Geheimnisse preiszugeben."""
     return {
         "Claude": bool(ANTHROPIC_API_KEY),
+        "Gratis-Dienst": bool(FREIER_DIENST_SCHLUESSEL),
         "Lokales Modell": bool(LOKALES_MODELL),
         "ElevenLabs": bool(ELEVENLABS_API_KEY),
         "Whisper-API": bool(OPENAI_API_KEY),
@@ -1165,14 +1170,14 @@ def werkzeuge_auswaehlen(katalog: list, frage: str, anzahl: int = MAX_WERKZEUGE,
     return gewaehlt[:anzahl + len(GRUNDSTOCK)]
 
 
-def _text_aus(inhalt) -> str:
+def _text_aus_lokal(inhalt) -> str:
     if isinstance(inhalt, str):
         return inhalt
     return "\n".join(b.get("text", "") for b in inhalt or []
                      if isinstance(b, dict) and b.get("type") == "text")
 
 
-def nachrichten_umwandeln(system: str, nachrichten: list) -> list:
+def nachrichten_umwandeln_lokal(system: str, nachrichten: list) -> list:
     """Claude-Nachrichten in das Format von Ollama übersetzen."""
     ergebnis = []
     if system:
@@ -1187,7 +1192,7 @@ def nachrichten_umwandeln(system: str, nachrichten: list) -> list:
                     namen[block.get("id")] = block.get("name", "")
                     aufrufe.append({"function": {"name": block.get("name", ""),
                                                  "arguments": block.get("input") or {}}})
-            eintrag = {"role": "assistant", "content": _text_aus(inhalt)}
+            eintrag = {"role": "assistant", "content": _text_aus_lokal(inhalt)}
             if aufrufe:
                 eintrag["tool_calls"] = aufrufe
             ergebnis.append(eintrag)
@@ -1199,10 +1204,10 @@ def nachrichten_umwandeln(system: str, nachrichten: list) -> list:
                 if block.get("type") == "tool_result":
                     ergebnis.append({"role": "tool",
                                      "tool_name": namen.get(block.get("tool_use_id"), ""),
-                                     "content": _text_aus(block.get("content"))})
+                                     "content": _text_aus_lokal(block.get("content"))})
                 elif block.get("type") == "image":
                     bilder.append((block.get("source") or {}).get("data", ""))
-            text = _text_aus(inhalt)
+            text = _text_aus_lokal(inhalt)
             if text or bilder:
                 eintrag = {"role": "user", "content": text}
                 if bilder:
@@ -1213,7 +1218,7 @@ def nachrichten_umwandeln(system: str, nachrichten: list) -> list:
     return ergebnis
 
 
-def antwort_umwandeln(daten: dict) -> list:
+def antwort_umwandeln_lokal(daten: dict) -> list:
     """Die Antwort von Ollama als Inhaltsblöcke im Claude-Format."""
     nachricht = daten.get("message") or {}
     bloecke = []
@@ -1238,7 +1243,7 @@ def antwort_umwandeln(daten: dict) -> list:
 def _letzte_frage(nachrichten: list) -> str:
     for nachricht in reversed(nachrichten):
         if nachricht.get("role") == "user":
-            text = _text_aus(nachricht.get("content"))
+            text = _text_aus_lokal(nachricht.get("content"))
             if text:
                 return text
     return ""
@@ -1255,7 +1260,7 @@ def lokal_anfragen(koerper: dict, timeout: int = 900) -> dict:
         if katalog else []
     nutzlast = {
         "model": LOKALES_MODELL,
-        "messages": nachrichten_umwandeln(koerper.get("system", ""), nachrichten),
+        "messages": nachrichten_umwandeln_lokal(koerper.get("system", ""), nachrichten),
         "stream": False,
         "keep_alive": "30m",
         "options": {"num_predict": int(koerper.get("max_tokens") or 1000),
@@ -1274,7 +1279,7 @@ def lokal_anfragen(koerper: dict, timeout: int = 900) -> dict:
         try:
             with urllib.request.urlopen(anfrage, timeout=timeout) as antwort:
                 daten = json.loads(antwort.read().decode("utf-8"))
-            bloecke = antwort_umwandeln(daten)
+            bloecke = antwort_umwandeln_lokal(daten)
             if not bloecke:
                 bloecke = [{"type": "text", "text": ""}]
             return {"ok": True, "daten": {"content": bloecke}}
@@ -1298,6 +1303,219 @@ def lokal_anfragen(koerper: dict, timeout: int = 900) -> dict:
         except ValueError as fehler:
             return {"ok": False, "fehler": "Die Antwort war unlesbar: %s" % fehler}
     return {"ok": False, "fehler": "Das lokale Modell hat nicht geantwortet."}
+
+
+# =========================================================================
+# freier_dienst  -  Kostenloser Online-Dienst - Jarvis denkt über einen Gratis-Zugang statt über Anthropic.
+# 
+# Mehrere Anbieter bieten ein kostenloses Kontingent an und sprechen dieselbe
+# "OpenAI-kompatible" Schnittstelle. Wer dort einen Schlüssel holt (ohne
+# Guthaben, ohne Karte), kann Jarvis damit betreiben.
+# 
+# **Was man wissen muss, bevor man das benutzt:**
+# 
+# * Gratis-Kontingente haben Grenzen pro Minute und pro Tag. Sind sie erreicht,
+#   muss man warten. Die Bedingungen ändern die Anbieter von sich aus.
+# * Das Gespräch geht an diesen Anbieter - samt allem, was Jarvis dafür aus Mails,
+#   Kunden oder Buchhaltung nachschlägt. Bei manchen Gratis-Tarifen dürfen
+#   Anbieter Eingaben auch zur Verbesserung ihrer Modelle nutzen. Wer das nicht
+#   will, nimmt das lokale Modell.
+# * Die Modellnamen wechseln. Deshalb lässt sich das Modell im Fenster ändern.
+# 
+# Wie beim lokalen Modell gehen nur die zur Frage passenden Werkzeuge mit - das
+# spart Kontingent, denn alle sechzig zu schicken kostet jedes Mal Tausende
+# Token.
+# =========================================================================
+
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+
+
+DIENST_VORGABEN = {
+    "groq": {"name": "Groq", "url": "https://api.groq.com/openai/v1",
+             "modell": "llama-3.3-70b-versatile",
+             "seite": "console.groq.com/keys"},
+    "gemini": {"name": "Google Gemini",
+               "url": "https://generativelanguage.googleapis.com/v1beta/openai",
+               "modell": "gemini-2.5-flash",
+               "seite": "aistudio.google.com/apikey"},
+    "openrouter": {"name": "OpenRouter", "url": "https://openrouter.ai/api/v1",
+                   "modell": "meta-llama/llama-3.3-70b-instruct:free",
+                   "seite": "openrouter.ai/keys"},
+}
+DIENST_WERKZEUGE = 12
+
+
+def freier_dienst_aktiv() -> bool:
+    """Ist ein kostenloser Online-Dienst eingestellt?"""
+    return bool(FREIER_DIENST_URL and FREIER_DIENST_SCHLUESSEL
+                and FREIER_DIENST_MODELL)
+
+
+def _text_aus_freier_dienst(inhalt) -> str:
+    if isinstance(inhalt, str):
+        return inhalt
+    return "\n".join(b.get("text", "") for b in inhalt or []
+                     if isinstance(b, dict) and b.get("type") == "text")
+
+
+def nachrichten_umwandeln_freier_dienst(system: str, nachrichten: list) -> list:
+    """Claude-Nachrichten in das Format der OpenAI-kompatiblen Schnittstelle."""
+    ergebnis = []
+    if system:
+        ergebnis.append({"role": "system", "content": system})
+    for nachricht in nachrichten:
+        rolle, inhalt = nachricht.get("role"), nachricht.get("content")
+        if rolle == "assistant":
+            aufrufe = []
+            for block in inhalt if isinstance(inhalt, list) else []:
+                if isinstance(block, dict) and block.get("type") == "tool_use":
+                    aufrufe.append({"id": block.get("id"), "type": "function",
+                                    "function": {"name": block.get("name", ""),
+                                                 "arguments": json.dumps(
+                                                     block.get("input") or {},
+                                                     ensure_ascii=False)}})
+            eintrag = {"role": "assistant", "content": _text_aus_freier_dienst(inhalt) or None}
+            if aufrufe:
+                eintrag["tool_calls"] = aufrufe
+            ergebnis.append(eintrag)
+        elif isinstance(inhalt, list):
+            bilder = []
+            for block in inhalt:
+                if not isinstance(block, dict):
+                    continue
+                if block.get("type") == "tool_result":
+                    ergebnis.append({"role": "tool", "tool_call_id": block.get("tool_use_id"),
+                                     "content": _text_aus_freier_dienst(block.get("content"))
+                                     if not isinstance(block.get("content"), str)
+                                     else block.get("content")})
+                elif block.get("type") == "image":
+                    quelle = block.get("source") or {}
+                    bilder.append("data:%s;base64,%s" % (quelle.get("media_type", "image/jpeg"),
+                                                         quelle.get("data", "")))
+            text = _text_aus_freier_dienst(inhalt)
+            if bilder:
+                teile = [{"type": "text", "text": text or "Was siehst du?"}]
+                teile += [{"type": "image_url", "image_url": {"url": b}} for b in bilder]
+                ergebnis.append({"role": "user", "content": teile})
+            elif text:
+                ergebnis.append({"role": "user", "content": text})
+        else:
+            ergebnis.append({"role": "user", "content": inhalt or ""})
+    return ergebnis
+
+
+def antwort_umwandeln_freier_dienst(daten: dict) -> list:
+    """Die Antwort als Inhaltsblöcke im Claude-Format."""
+    wahl = (daten.get("choices") or [{}])[0]
+    nachricht = wahl.get("message") or {}
+    bloecke = []
+    text = (nachricht.get("content") or "").strip()
+    if text:
+        bloecke.append({"type": "text", "text": text})
+    for nr, aufruf in enumerate(nachricht.get("tool_calls") or []):
+        funktion = aufruf.get("function") or {}
+        argumente = funktion.get("arguments") or {}
+        if isinstance(argumente, str):
+            try:
+                argumente = json.loads(argumente) if argumente.strip() else {}
+            except ValueError:
+                argumente = {}
+        if not isinstance(argumente, dict):
+            argumente = {}
+        bloecke.append({"type": "tool_use", "id": aufruf.get("id") or "dienst_%d" % nr,
+                        "name": funktion.get("name", ""), "input": argumente})
+    return bloecke
+
+
+def _senden(url: str, schluessel: str, nutzlast: dict, timeout: int) -> dict:
+    anfrage = urllib.request.Request(
+        url.rstrip("/") + "/chat/completions", data=json.dumps(nutzlast).encode("utf-8"),
+        method="POST", headers={
+            "Authorization": "Bearer %s" % schluessel,
+            "Content-Type": "application/json",
+            # Manche Anbieter sperren die Standardkennung von Python.
+            "User-Agent": "Jarvis/1.0"})
+    try:
+        with urllib.request.urlopen(anfrage, timeout=timeout) as antwort:
+            return {"ok": True, "daten": json.loads(antwort.read().decode("utf-8"))}
+    except urllib.error.HTTPError as fehler:
+        try:
+            roh = json.loads(fehler.read().decode("utf-8"))
+            meldung = roh.get("error", roh)
+            meldung = meldung.get("message", str(meldung)) if isinstance(meldung, dict) \
+                else str(meldung)
+        except (ValueError, OSError, AttributeError):
+            meldung = str(fehler)
+        if fehler.code in (401, 403):
+            return {"ok": False, "code": fehler.code,
+                    "fehler": "Der Dienst lehnt den Schlüssel ab. Bitte neu kopieren "
+                              "oder einen neuen holen."}
+        if fehler.code == 429:
+            return {"ok": False, "code": 429,
+                    "fehler": "Das kostenlose Kontingent ist gerade aufgebraucht. "
+                              "Bitte in einer Minute noch einmal, oder morgen, wenn es "
+                              "das Tageslimit war."}
+        if fehler.code == 404:
+            return {"ok": False, "code": 404,
+                    "fehler": "Das Modell %s kennt der Dienst nicht (mehr). Trage im "
+                              "Fenster ein anderes ein." % nutzlast.get("model")}
+        return {"ok": False, "code": fehler.code,
+                "fehler": "Der Dienst meldet einen Fehler (%d): %s"
+                          % (fehler.code, meldung[:300]), "meldung": meldung}
+    except (urllib.error.URLError, OSError) as fehler:
+        return {"ok": False, "code": 0,
+                "fehler": "Keine Verbindung zum Dienst: %s. Ist das Internet da?" % fehler}
+    except ValueError as fehler:
+        return {"ok": False, "code": 0, "fehler": "Die Antwort war unlesbar: %s" % fehler}
+
+
+def freier_dienst_pruefen(url: str, schluessel: str, modell: str) -> dict:
+    """Probelauf mit einem winzigen Auftrag."""
+    antwort = _senden(url, schluessel, {
+        "model": modell, "max_tokens": 8,
+        "messages": [{"role": "user", "content": "Sag nur: ok"}]}, 60)
+    if antwort["ok"]:
+        return {"ok": True, "text": "Der Dienst antwortet. Jarvis nutzt ihn."}
+    return {"ok": False, "text": antwort["fehler"]}
+
+
+def freier_dienst_anfragen(koerper: dict, timeout: int = 120) -> dict:
+    """Beantwortet eine Anfrage im Claude-Format über den kostenlosen Dienst."""
+    nachrichten = koerper.get("messages") or []
+    katalog = koerper.get("tools") or []
+    letzte = ""
+    for nachricht in reversed(nachrichten):
+        if nachricht.get("role") == "user" and _text_aus_freier_dienst(nachricht.get("content")):
+            letzte = _text_aus_freier_dienst(nachricht.get("content"))
+            break
+    benutzt = tuple(b.get("name", "") for n in nachrichten
+                    if isinstance(n.get("content"), list) for b in n["content"]
+                    if isinstance(b, dict) and b.get("type") == "tool_use")
+    gewaehlt = werkzeuge_auswaehlen(katalog, letzte, DIENST_WERKZEUGE, benutzt) \
+        if katalog else []
+    nutzlast = {
+        "model": FREIER_DIENST_MODELL,
+        "messages": nachrichten_umwandeln_freier_dienst(koerper.get("system", ""), nachrichten),
+        "max_tokens": int(koerper.get("max_tokens") or 1000),
+        "temperature": 0.3,
+    }
+    if gewaehlt:
+        nutzlast["tools"] = [{"type": "function", "function": {
+            "name": w["name"], "description": w.get("description", ""),
+            "parameters": w.get("input_schema") or {"type": "object", "properties": {}}}}
+            for w in gewaehlt]
+    antwort = _senden(FREIER_DIENST_URL, FREIER_DIENST_SCHLUESSEL,
+                      nutzlast, timeout)
+    if not antwort["ok"] and antwort.get("code") == 400 and "tools" in nutzlast:
+        nutzlast.pop("tools")  # Modell kann keine Werkzeuge: dann ohne
+        antwort = _senden(FREIER_DIENST_URL, FREIER_DIENST_SCHLUESSEL,
+                          nutzlast, timeout)
+    if not antwort["ok"]:
+        return {"ok": False, "fehler": antwort["fehler"]}
+    bloecke = antwort_umwandeln_freier_dienst(antwort["daten"]) or [{"type": "text", "text": ""}]
+    return {"ok": True, "daten": {"content": bloecke}}
 
 
 # =========================================================================
@@ -7437,7 +7655,32 @@ body[data-zustand="wach"] .zustandstext{color:var(--akzent)}
   <div class="frage">
     <div class="kopf"><h2>Womit soll Jarvis denken?</h2></div>
     <div class="inhalt">
-      <div class="aktion">Kostenlos, ohne Anthropic</div>
+      <div class="aktion">Kostenlos mit einem Gratis-Schlüssel</div>
+      <p class="sagen" style="padding:0 0 10px;text-align:left">
+        Der schnellste Weg ohne Kosten und ohne Anthropic: Hol dir bei einem
+        Dienst mit Gratis-Kontingent einen Schlüssel (ohne Karte, ohne Guthaben).
+        <b>Groq:</b> console.groq.com/keys &middot; <b>Google:</b>
+        aistudio.google.com/apikey. Grenzen pro Minute und Tag gelten, und das
+        Gespräch geht an diesen Anbieter.</p>
+      <select id="dienstWahl" style="width:100%;padding:11px;margin-bottom:8px;
+        border-radius:9px;background:var(--tief);border:1px solid var(--rand-hell);
+        color:var(--text);font-size:14px">
+        <option value="groq" data-modell="llama-3.3-70b-versatile">Groq</option>
+        <option value="gemini" data-modell="gemini-2.5-flash">Google Gemini</option>
+        <option value="openrouter" data-modell="meta-llama/llama-3.3-70b-instruct:free">OpenRouter</option>
+      </select>
+      <input id="dienstModell" type="text" value="llama-3.3-70b-versatile"
+             autocomplete="off" spellcheck="false" style="margin-bottom:8px"
+             title="Modellname - bei Bedarf ändern">
+      <input id="dienstSchluessel" type="password" placeholder="Schlüssel einfügen"
+             autocomplete="off" spellcheck="false">
+    </div>
+    <p class="meldung" id="dienstMeldung"></p>
+    <div class="knoepfe">
+      <button class="ja" id="dienstSpeichern">Gratis-Dienst nutzen</button>
+    </div>
+    <div class="inhalt" style="border-top:1px solid var(--rand)">
+      <div class="aktion">Oder auf diesem Rechner (Ollama)</div>
       <p class="sagen" style="padding:0 0 10px;text-align:left">
         Jarvis denkt mit einem Modell, das auf diesem Rechner läuft (Ollama,
         <b>ollama.com</b>). Kein Konto, kein Guthaben, kein Limit. Dafür ist es
@@ -7448,7 +7691,7 @@ body[data-zustand="wach"] .zustandstext{color:var(--akzent)}
     </div>
     <p class="meldung" id="lokalMeldung"></p>
     <div class="knoepfe">
-      <button class="ja" id="lokalSpeichern">Lokales Modell nutzen</button>
+      <button class="nein" id="lokalSpeichern">Lokales Modell nutzen</button>
     </div>
     <div class="inhalt" style="border-top:1px solid var(--rand)">
       <p class="sagen" style="padding:0 0 10px;text-align:left">
@@ -7814,6 +8057,33 @@ body[data-zustand="wach"] .zustandstext{color:var(--akzent)}
       meldung.textContent = "Der Server antwortet nicht.";
     });
   }
+  function dienstSpeichern() {
+    var meldung = el("dienstMeldung");
+    if (!el("dienstSchluessel").value.trim()) { return; }
+    meldung.className = "meldung"; meldung.textContent = "Ich probiere den Dienst aus …";
+    el("dienstSpeichern").disabled = true;
+    holen("/api/dienst", { dienst: el("dienstWahl").value,
+                           modell: el("dienstModell").value,
+                           schluessel: el("dienstSchluessel").value }).then(function (a) {
+      el("dienstSpeichern").disabled = false;
+      meldung.textContent = a.text || "";
+      if (a.ok) {
+        el("dienstSchluessel").value = "";
+        el("schluesselDialog").classList.remove("zeigen");
+        el("antwort").textContent = ""; el("antwort").className = "antwort";
+        zustandHolen();
+      } else { meldung.className = "meldung fehler"; }
+    }).catch(function () {
+      el("dienstSpeichern").disabled = false;
+      meldung.className = "meldung fehler";
+      meldung.textContent = "Der Server antwortet nicht.";
+    });
+  }
+  el("dienstSpeichern").addEventListener("click", dienstSpeichern);
+  el("dienstWahl").addEventListener("change", function () {
+    var o = el("dienstWahl").options[el("dienstWahl").selectedIndex];
+    el("dienstModell").value = o.getAttribute("data-modell") || "";
+  });
   el("lokalSpeichern").addEventListener("click", lokalSpeichern);
   el("schluesselSpeichern").addEventListener("click", schluesselSpeichern);
   el("schluesselFeld").addEventListener("keydown", function (e) {
@@ -9845,6 +10115,29 @@ class JarvisWeb:
             return self._antworten(behandler, 200,
                                    {"ok": False, "text": probe.get("text", "Fehlgeschlagen.")})
 
+        if pfad == "/api/dienst":
+            # Nur bekannte Anbieter: die Adresse kommt aus der Liste, nie aus der Anfrage.
+            vorgabe = DIENST_VORGABEN.get(str(daten.get("dienst") or ""))
+            schluessel = "".join(str(daten.get("schluessel") or "").split())
+            modell = str(daten.get("modell") or "").strip() or (vorgabe or {}).get("modell", "")
+            if vorgabe is None:
+                return self._antworten(behandler, 200, {
+                    "ok": False, "text": "Diesen Dienst kenne ich nicht."})
+            if len(schluessel) < 10 or len(modell) > 100 or any(c.isspace() for c in modell):
+                return self._antworten(behandler, 200, {
+                    "ok": False, "text": "Schlüssel oder Modellname sehen nicht richtig "
+                                         "aus. Bitte vollständig kopieren."})
+            probe = freier_dienst_pruefen(vorgabe["url"], schluessel, modell)
+            if not probe.get("ok"):
+                return self._antworten(behandler, 200, {"ok": False, "text": probe["text"]})
+            env_setzen("FREIER_DIENST_URL", vorgabe["url"])
+            env_setzen("FREIER_DIENST_MODELL", modell)
+            env_setzen("FREIER_DIENST_SCHLUESSEL", schluessel)
+            return self._antworten(behandler, 200, {
+                "ok": True, "einsatzbereit": self.agent.einsatzbereit(),
+                "text": probe["text"] + " Gespräche gehen dabei an %s; das Gratis-Kontingent "
+                                        "hat Grenzen." % vorgabe["name"]})
+
         if pfad == "/api/lokal":
             modell = str(daten.get("modell") or STANDARD_MODELL).strip()
             if not modell or len(modell) > 80 or any(c.isspace() for c in modell):
@@ -11537,7 +11830,8 @@ class JarvisAgent:
 
     def einsatzbereit(self) -> bool:
         """Ist ein Anthropic-Schlüssel oder ein lokales Modell eingestellt?"""
-        return bool(ANTHROPIC_API_KEY) or lokales_modell_aktiv()
+        return (bool(ANTHROPIC_API_KEY) or freier_dienst_aktiv()
+                or lokales_modell_aktiv())
 
     def stimme_setzen(self, stimme):
         """Hängt die Sprachausgabe ein."""
@@ -11571,6 +11865,8 @@ class JarvisAgent:
                     "fehler": "Es ist kein Anthropic-Schlüssel hinterlegt. Starte die "
                               "Einrichtung mit: python3 jarvis.py einrichten"}
         if not ANTHROPIC_API_KEY:
+            if freier_dienst_aktiv():
+                return freier_dienst_anfragen(koerper)
             return lokal_anfragen(koerper)
         daten = json.dumps(koerper).encode("utf-8")
         anfrage = urllib.request.Request(API_URL, data=daten, method="POST", headers={

@@ -43,6 +43,7 @@ BAULISTE = [
     "modules/memory",
     "modules/recall",
     "modules/lokal",
+    "modules/freier_dienst",
     "modules/voice",
     "modules/speaker",
     "modules/mail",

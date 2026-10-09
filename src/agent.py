@@ -19,6 +19,7 @@ from datetime import datetime
 
 import config
 from modules.memory import heute_datum
+from modules.freier_dienst import freier_dienst_aktiv, freier_dienst_anfragen
 from modules.lokal import lokal_anfragen, lokales_modell_aktiv
 from modules.recall import Recall
 from modules.tools import Werkzeuge
@@ -115,7 +116,8 @@ class JarvisAgent:
 
     def einsatzbereit(self) -> bool:
         """Ist ein Anthropic-Schlüssel oder ein lokales Modell eingestellt?"""
-        return bool(config.ANTHROPIC_API_KEY) or lokales_modell_aktiv()
+        return (bool(config.ANTHROPIC_API_KEY) or freier_dienst_aktiv()
+                or lokales_modell_aktiv())
 
     def stimme_setzen(self, stimme):
         """Hängt die Sprachausgabe ein."""
@@ -149,6 +151,8 @@ class JarvisAgent:
                     "fehler": "Es ist kein Anthropic-Schlüssel hinterlegt. Starte die "
                               "Einrichtung mit: python3 jarvis.py einrichten"}
         if not config.ANTHROPIC_API_KEY:
+            if freier_dienst_aktiv():
+                return freier_dienst_anfragen(koerper)
             return lokal_anfragen(koerper)
         daten = json.dumps(koerper).encode("utf-8")
         anfrage = urllib.request.Request(API_URL, data=daten, method="POST", headers={

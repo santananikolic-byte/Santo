@@ -32,6 +32,7 @@ from urllib.parse import parse_qs, urlparse
 
 import config
 from modules.memory import zeitstempel
+from modules.freier_dienst import DIENST_VORGABEN, freier_dienst_pruefen
 from modules.lokal import STANDARD_MODELL, ollama_pruefen
 from modules.setup_wizard import schluessel_online_testen
 from modules.webseite import PROTOKOLL_HTML, SEITE_HTML
@@ -385,6 +386,29 @@ class JarvisWeb:
                             + " Der Schlüssel ist gespeichert."})
             return self._antworten(behandler, 200,
                                    {"ok": False, "text": probe.get("text", "Fehlgeschlagen.")})
+
+        if pfad == "/api/dienst":
+            # Nur bekannte Anbieter: die Adresse kommt aus der Liste, nie aus der Anfrage.
+            vorgabe = DIENST_VORGABEN.get(str(daten.get("dienst") or ""))
+            schluessel = "".join(str(daten.get("schluessel") or "").split())
+            modell = str(daten.get("modell") or "").strip() or (vorgabe or {}).get("modell", "")
+            if vorgabe is None:
+                return self._antworten(behandler, 200, {
+                    "ok": False, "text": "Diesen Dienst kenne ich nicht."})
+            if len(schluessel) < 10 or len(modell) > 100 or any(c.isspace() for c in modell):
+                return self._antworten(behandler, 200, {
+                    "ok": False, "text": "Schlüssel oder Modellname sehen nicht richtig "
+                                         "aus. Bitte vollständig kopieren."})
+            probe = freier_dienst_pruefen(vorgabe["url"], schluessel, modell)
+            if not probe.get("ok"):
+                return self._antworten(behandler, 200, {"ok": False, "text": probe["text"]})
+            config.env_setzen("FREIER_DIENST_URL", vorgabe["url"])
+            config.env_setzen("FREIER_DIENST_MODELL", modell)
+            config.env_setzen("FREIER_DIENST_SCHLUESSEL", schluessel)
+            return self._antworten(behandler, 200, {
+                "ok": True, "einsatzbereit": self.agent.einsatzbereit(),
+                "text": probe["text"] + " Gespräche gehen dabei an %s; das Gratis-Kontingent "
+                                        "hat Grenzen." % vorgabe["name"]})
 
         if pfad == "/api/lokal":
             modell = str(daten.get("modell") or STANDARD_MODELL).strip()

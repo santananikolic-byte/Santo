@@ -104,6 +104,10 @@ CLAUDE_MAX_TOKENS = _ganzzahl("CLAUDE_MAX_TOKENS", 2000)
 
 # Lokales Modell (Ollama): kostenlos, ohne Schlüssel, läuft auf diesem Rechner.
 # Wird nur benutzt, wenn kein Anthropic-Schlüssel hinterlegt ist.
+# Kostenloser Online-Dienst (Groq, Gemini, OpenRouter): Gratis-Schlüssel statt Anthropic.
+FREIER_DIENST_URL = _text("FREIER_DIENST_URL")
+FREIER_DIENST_SCHLUESSEL = _text("FREIER_DIENST_SCHLUESSEL")
+FREIER_DIENST_MODELL = _text("FREIER_DIENST_MODELL")
 LOKALES_MODELL = _text("LOKALES_MODELL")
 OLLAMA_URL = _text("OLLAMA_URL", "http://127.0.0.1:11434")
 
@@ -244,6 +248,7 @@ def konfig_uebersicht() -> dict:
     """Zeigt an, welche Dienste eingerichtet sind - ohne Geheimnisse preiszugeben."""
     return {
         "Claude": bool(ANTHROPIC_API_KEY),
+        "Gratis-Dienst": bool(FREIER_DIENST_SCHLUESSEL),
         "Lokales Modell": bool(LOKALES_MODELL),
         "ElevenLabs": bool(ELEVENLABS_API_KEY),
         "Whisper-API": bool(OPENAI_API_KEY),
