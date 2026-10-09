@@ -7435,31 +7435,32 @@ body[data-zustand="wach"] .zustandstext{color:var(--akzent)}
 
 <div class="schleier" id="schluesselDialog">
   <div class="frage">
-    <div class="kopf"><h2>Anthropic-Schlüssel</h2></div>
+    <div class="kopf"><h2>Womit soll Jarvis denken?</h2></div>
     <div class="inhalt">
-      <div class="aktion">Ein Schritt fehlt</div>
-      <p class="sagen" style="padding:0 0 12px;text-align:left">
-        Ohne Schlüssel kann ich nicht denken. Hol ihn auf
-        <b>console.anthropic.com</b> unter Settings &rarr; API Keys, kopiere ihn
-        und füge ihn hier ein. Er bleibt auf diesem Rechner.</p>
-      <input id="schluesselFeld" type="password" placeholder="sk-ant-…"
-             autocomplete="off" spellcheck="false">
-    </div>
-    <p class="meldung" id="schluesselMeldung"></p>
-    <div class="knoepfe">
-      <button class="ja" id="schluesselSpeichern">Speichern</button>
-    </div>
-    <div class="inhalt" style="border-top:1px solid var(--rand)">
+      <div class="aktion">Kostenlos, ohne Anthropic</div>
       <p class="sagen" style="padding:0 0 10px;text-align:left">
-        <b>Kein Schlüssel, keine Kosten?</b> Dann denkt Jarvis mit einem
-        Modell auf diesem Rechner (Ollama, ollama.com). Das ist kostenlos und
-        ohne Limit, aber langsamer und schwächer als Claude.</p>
+        Jarvis denkt mit einem Modell, das auf diesem Rechner läuft (Ollama,
+        <b>ollama.com</b>). Kein Konto, kein Guthaben, kein Limit. Dafür ist es
+        langsamer und schwächer als Claude. Ollama muss installiert und
+        geöffnet sein.</p>
       <input id="lokalFeld" type="text" value="qwen2.5:3b" autocomplete="off"
              spellcheck="false">
     </div>
     <p class="meldung" id="lokalMeldung"></p>
     <div class="knoepfe">
-      <button class="nein" id="lokalSpeichern">Lokales Modell nutzen</button>
+      <button class="ja" id="lokalSpeichern">Lokales Modell nutzen</button>
+    </div>
+    <div class="inhalt" style="border-top:1px solid var(--rand)">
+      <p class="sagen" style="padding:0 0 10px;text-align:left">
+        <b>Nur wenn du willst:</b> Mit einem Anthropic-Schlüssel antwortet
+        Claude, schneller und klüger. Das kostet Guthaben auf
+        console.anthropic.com. Das brauchst du für den Weg oben nicht.</p>
+      <input id="schluesselFeld" type="password" placeholder="sk-ant-…"
+             autocomplete="off" spellcheck="false">
+    </div>
+    <p class="meldung" id="schluesselMeldung"></p>
+    <div class="knoepfe">
+      <button class="nein" id="schluesselSpeichern">Schlüssel speichern</button>
     </div>
   </div>
 </div>
