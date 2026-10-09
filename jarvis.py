@@ -7119,6 +7119,11 @@ body[data-zustand="wach"] .zustandstext{color:var(--akzent)}
 .frage .knoepfe button{flex:1;padding:15px;border-radius:10px;font-weight:700;font-size:16px}
 .frage .ja{background:var(--akzent);color:#1A0E08}
 .frage .nein{background:var(--tief);border:1px solid var(--rand-hell);color:var(--text)}
+.frage input{width:100%;padding:13px 14px;border-radius:9px;font:14px var(--mono);
+  background:var(--tief);border:1px solid var(--rand-hell);color:var(--text);
+  user-select:text;-webkit-user-select:text}
+.frage .meldung{padding:0 20px 4px;font-size:13px;min-height:20px;color:var(--gedaempft)}
+.frage .meldung.fehler{color:var(--rot)}
 
 @media(max-width:640px){
   .ticker{gap:12px;padding:8px 12px;font-size:10px}
@@ -7182,6 +7187,25 @@ body[data-zustand="wach"] .zustandstext{color:var(--akzent)}
     <div class="knoepfe">
       <button class="nein" id="fNein">Nein</button>
       <button class="ja" id="fJa">Ja, mach</button>
+    </div>
+  </div>
+</div>
+
+<div class="schleier" id="schluesselDialog">
+  <div class="frage">
+    <div class="kopf"><h2>Anthropic-Schlüssel</h2></div>
+    <div class="inhalt">
+      <div class="aktion">Ein Schritt fehlt</div>
+      <p class="sagen" style="padding:0 0 12px;text-align:left">
+        Ohne Schlüssel kann ich nicht denken. Hol ihn auf
+        <b>console.anthropic.com</b> unter Settings &rarr; API Keys, kopiere ihn
+        und füge ihn hier ein. Er bleibt auf diesem Rechner.</p>
+      <input id="schluesselFeld" type="password" placeholder="sk-ant-…"
+             autocomplete="off" spellcheck="false">
+    </div>
+    <p class="meldung" id="schluesselMeldung"></p>
+    <div class="knoepfe">
+      <button class="ja" id="schluesselSpeichern">Speichern</button>
     </div>
   </div>
 </div>
@@ -7490,12 +7514,37 @@ body[data-zustand="wach"] .zustandstext{color:var(--akzent)}
       el("pkt").title = a.einsatzbereit ? a.werkzeuge + " Werkzeuge bereit"
                                         : "Kein Anthropic-Schlüssel";
       if (!a.einsatzbereit) {
+        el("schluesselDialog").classList.add("zeigen");
         el("antwort").textContent = "Es ist kein Anthropic-Schlüssel hinterlegt. " +
           "Ohne ihn kann ich nicht denken.";
         el("antwort").className = "antwort fehler";
       }
     }).catch(function () {});
   }
+  function schluesselSpeichern() {
+    var feld = el("schluesselFeld"), meldung = el("schluesselMeldung");
+    if (!feld.value.trim()) { return; }
+    meldung.className = "meldung"; meldung.textContent = "Ich probiere den Schlüssel aus …";
+    el("schluesselSpeichern").disabled = true;
+    holen("/api/schluessel", { schluessel: feld.value }).then(function (a) {
+      el("schluesselSpeichern").disabled = false;
+      meldung.textContent = a.text || "";
+      if (a.ok) {
+        feld.value = "";
+        el("schluesselDialog").classList.remove("zeigen");
+        el("antwort").textContent = ""; el("antwort").className = "antwort";
+        zustandHolen();
+      } else { meldung.className = "meldung fehler"; }
+    }).catch(function () {
+      el("schluesselSpeichern").disabled = false;
+      meldung.className = "meldung fehler";
+      meldung.textContent = "Der Server antwortet nicht.";
+    });
+  }
+  el("schluesselSpeichern").addEventListener("click", schluesselSpeichern);
+  el("schluesselFeld").addEventListener("keydown", function (e) {
+    if (e.key === "Enter") { schluesselSpeichern(); }
+  });
   function setzeZahl(nr, wert, name, klasse) {
     el("z" + nr).textContent = wert;
     el("z" + nr).className = "wert" + (klasse ? " " + klasse : "");
@@ -9503,6 +9552,25 @@ class JarvisWeb:
             return self._antworten(behandler, 200,
                                    werkzeuge.run(name, daten.get("argumente") or {}))
 
+        if pfad == "/api/schluessel":
+            # Den Schlüssel nie zurückgeben oder protokollieren - er geht nur in
+            # die .env auf diesem Rechner.
+            schluessel = "".join(str(daten.get("schluessel") or "").split())
+            if not schluessel.startswith("sk-") or len(schluessel) < 20:
+                return self._antworten(behandler, 200, {
+                    "ok": False,
+                    "text": "Das sieht nicht nach einem Schlüssel aus. Er beginnt "
+                            "mit sk- und ist lang. Bitte vollständig kopieren."})
+            probe = schluessel_online_testen(schluessel)
+            if probe.get("ok") or probe.get("grund") == "guthaben":
+                env_setzen("ANTHROPIC_API_KEY", schluessel)
+                return self._antworten(behandler, 200, {
+                    "ok": True, "einsatzbereit": self.agent.einsatzbereit(),
+                    "text": probe["text"] if probe.get("ok") else probe["text"]
+                            + " Der Schlüssel ist gespeichert."})
+            return self._antworten(behandler, 200,
+                                   {"ok": False, "text": probe.get("text", "Fehlgeschlagen.")})
+
         if pfad == "/api/verlauf/neu":
             self.agent.verlauf_leeren()
             return self._antworten(behandler, 200,
@@ -9637,6 +9705,52 @@ STARTROUTINEN = [
 ]
 
 
+def schluessel_online_testen(schluessel: str) -> dict:
+    """Prüft einen Schlüssel mit einem echten, winzigen Aufruf."""
+    koerper = json.dumps({
+        "model": CLAUDE_MODEL, "max_tokens": 8,
+        "messages": [{"role": "user", "content": "Sag nur: ok"}],
+    }).encode("utf-8")
+    anfrage = urllib.request.Request(
+        "https://api.anthropic.com/v1/messages", data=koerper, method="POST",
+        headers={"x-api-key": schluessel, "anthropic-version": "2023-06-01",
+                 "content-type": "application/json"})
+    try:
+        with urllib.request.urlopen(anfrage, timeout=45) as antwort:
+            antwort.read()
+        return {"ok": True, "text": "Der Schlüssel funktioniert."}
+    except urllib.error.HTTPError as fehler:
+        try:
+            inhalt = fehler.read().decode("utf-8")
+            meldung = (json.loads(inhalt).get("error") or {}).get("message", inhalt)
+        except (ValueError, OSError):
+            meldung = str(fehler)
+        if fehler.code == 401:
+            return {"ok": False, "grund": "schluessel",
+                    "text": "Der Schlüssel wird abgelehnt. Vermutlich ist beim "
+                            "Kopieren etwas verloren gegangen. Bitte noch einmal "
+                            "vollständig kopieren."}
+        if fehler.code == 400 and "credit" in meldung.lower():
+            return {"ok": False, "grund": "guthaben",
+                    "text": "Der Schlüssel stimmt, aber auf dem Konto ist kein "
+                            "Guthaben. Bitte auf der Anthropic-Seite unter Billing "
+                            "etwas aufladen."}
+        if fehler.code == 429:
+            return {"ok": False, "grund": "zuviel",
+                    "text": "Zu viele Anfragen auf einmal. Ich warte kurz und "
+                            "versuche es noch einmal."}
+        if fehler.code == 404:
+            return {"ok": False, "grund": "modell",
+                    "text": "Das eingestellte Modell %s kennt die Schnittstelle "
+                            "nicht." % CLAUDE_MODEL}
+        return {"ok": False, "grund": "sonstiges",
+                "text": "Die Prüfung ist fehlgeschlagen: %s" % meldung[:200]}
+    except (urllib.error.URLError, OSError) as fehler:
+        return {"ok": False, "grund": "netz",
+                "text": "Keine Verbindung zu Anthropic. Ist das Internet da? (%s)"
+                        % fehler}
+
+
 class Einrichtung:
     """Führt den Nutzer Schritt für Schritt durch die Ersteinrichtung."""
 
@@ -9719,48 +9833,7 @@ class Einrichtung:
 
     def schluessel_testen(self, schluessel: str) -> dict:
         """Prüft einen Schlüssel mit einem echten, winzigen Aufruf."""
-        koerper = json.dumps({
-            "model": CLAUDE_MODEL, "max_tokens": 8,
-            "messages": [{"role": "user", "content": "Sag nur: ok"}],
-        }).encode("utf-8")
-        anfrage = urllib.request.Request(
-            "https://api.anthropic.com/v1/messages", data=koerper, method="POST",
-            headers={"x-api-key": schluessel, "anthropic-version": "2023-06-01",
-                     "content-type": "application/json"})
-        try:
-            with urllib.request.urlopen(anfrage, timeout=45) as antwort:
-                antwort.read()
-            return {"ok": True, "text": "Der Schlüssel funktioniert."}
-        except urllib.error.HTTPError as fehler:
-            try:
-                inhalt = fehler.read().decode("utf-8")
-                meldung = (json.loads(inhalt).get("error") or {}).get("message", inhalt)
-            except (ValueError, OSError):
-                meldung = str(fehler)
-            if fehler.code == 401:
-                return {"ok": False, "grund": "schluessel",
-                        "text": "Der Schlüssel wird abgelehnt. Vermutlich ist beim "
-                                "Kopieren etwas verloren gegangen. Bitte noch einmal "
-                                "vollständig kopieren."}
-            if fehler.code == 400 and "credit" in meldung.lower():
-                return {"ok": False, "grund": "guthaben",
-                        "text": "Der Schlüssel stimmt, aber auf dem Konto ist kein "
-                                "Guthaben. Bitte auf der Anthropic-Seite unter Billing "
-                                "etwas aufladen."}
-            if fehler.code == 429:
-                return {"ok": False, "grund": "zuviel",
-                        "text": "Zu viele Anfragen auf einmal. Ich warte kurz und "
-                                "versuche es noch einmal."}
-            if fehler.code == 404:
-                return {"ok": False, "grund": "modell",
-                        "text": "Das eingestellte Modell %s kennt die Schnittstelle "
-                                "nicht." % CLAUDE_MODEL}
-            return {"ok": False, "grund": "sonstiges",
-                    "text": "Die Prüfung ist fehlgeschlagen: %s" % meldung[:200]}
-        except (urllib.error.URLError, OSError) as fehler:
-            return {"ok": False, "grund": "netz",
-                    "text": "Keine Verbindung zu Anthropic. Ist das Internet da? (%s)"
-                            % fehler}
+        return schluessel_online_testen(schluessel)
 
     def schritt_schluessel(self) -> bool:
         """Holt den Schlüssel und prüft ihn - bis zu vier Versuche."""
@@ -12181,10 +12254,12 @@ def hauptprogramm(argumente=None) -> int:
     vorlage_schreiben()
 
     if modus in ("", "start", "web", "browser", "app"):
-        if not EINRICHTUNG_FERTIG and not ANTHROPIC_API_KEY:
-            print("Jarvis ist noch nicht eingerichtet. Ich starte die Einrichtung.")
-            einrichtung_starten()
-            return 0
+        # Auch ohne Schlüssel startet der Webserver: den Schlüssel trägt man im
+        # Browser ein. Eine Einrichtung im Terminal, die den Server gar nicht
+        # erst startet, lässt den Nutzer vor einer toten Adresse stehen.
+        if not ANTHROPIC_API_KEY:
+            print("Noch kein Anthropic-Schlüssel - den trägst du gleich im "
+                  "Browser ein.")
         return webbetrieb(argumente[1:] if argumente else [])
     elif modus in ("hoeren", "hören", "dauerbetrieb", "sprechen"):
         if not EINRICHTUNG_FERTIG and not ANTHROPIC_API_KEY:

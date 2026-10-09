@@ -32,6 +32,7 @@ from urllib.parse import parse_qs, urlparse
 
 import config
 from modules.memory import zeitstempel
+from modules.setup_wizard import schluessel_online_testen
 from modules.webseite import PROTOKOLL_HTML, SEITE_HTML
 
 STANDARD_PORT = 8765
@@ -364,6 +365,25 @@ class JarvisWeb:
                                        {"fehler": "Das Werkzeug gibt es nicht."})
             return self._antworten(behandler, 200,
                                    werkzeuge.run(name, daten.get("argumente") or {}))
+
+        if pfad == "/api/schluessel":
+            # Den Schlüssel nie zurückgeben oder protokollieren - er geht nur in
+            # die .env auf diesem Rechner.
+            schluessel = "".join(str(daten.get("schluessel") or "").split())
+            if not schluessel.startswith("sk-") or len(schluessel) < 20:
+                return self._antworten(behandler, 200, {
+                    "ok": False,
+                    "text": "Das sieht nicht nach einem Schlüssel aus. Er beginnt "
+                            "mit sk- und ist lang. Bitte vollständig kopieren."})
+            probe = schluessel_online_testen(schluessel)
+            if probe.get("ok") or probe.get("grund") == "guthaben":
+                config.env_setzen("ANTHROPIC_API_KEY", schluessel)
+                return self._antworten(behandler, 200, {
+                    "ok": True, "einsatzbereit": self.agent.einsatzbereit(),
+                    "text": probe["text"] if probe.get("ok") else probe["text"]
+                            + " Der Schlüssel ist gespeichert."})
+            return self._antworten(behandler, 200,
+                                   {"ok": False, "text": probe.get("text", "Fehlgeschlagen.")})
 
         if pfad == "/api/verlauf/neu":
             self.agent.verlauf_leeren()

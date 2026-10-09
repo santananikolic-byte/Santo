@@ -132,28 +132,16 @@ fi
 
 # --- 5. Einrichten oder starten -------------------------------------------
 
-BRAUCHT_EINRICHTUNG="ja"
-if [ -f "$ENV_DATEI" ] && grep -q "^ANTHROPIC_API_KEY=sk-" "$ENV_DATEI" 2>/dev/null; then
-    BRAUCHT_EINRICHTUNG="nein"
+if ! { [ -f "$ENV_DATEI" ] && grep -q "^ANTHROPIC_API_KEY=sk-" "$ENV_DATEI" 2>/dev/null; }; then
+    echo ""
+    echo "  Es ist noch kein Anthropic-Schluessel hinterlegt."
+    echo "  Kein Problem: Jarvis startet trotzdem, und im Browser"
+    echo "  erscheint ein Feld, in das du den Schluessel einfuegst."
+    echo "  (Die gefuehrte Einrichtung mit Sprache gibt es weiter unter"
+    echo "   EXTRAS.command oder:  python3 jarvis.py einrichten)"
 fi
 
 echo ""
-if [ "$BRAUCHT_EINRICHTUNG" = "ja" ]; then
-    echo "  Jarvis ist noch nicht eingerichtet. Ich starte die Einrichtung."
-    echo "  Ich lese dir alles vor - du musst nichts mitlesen."
-    echo ""
-    "$PYTHON" "$PROJEKT/jarvis.py" einrichten
-    echo ""
-    echo "  ============================================================"
-    echo "   WICHTIG: Schließe dieses Fenster jetzt komplett und starte"
-    echo "   JARVIS.command danach neu. Sonst greifen die erteilten"
-    echo "   Rechte nicht."
-    echo "  ============================================================"
-    echo ""
-    read -r -p "  Enter zum Schließen "
-    exit 0
-fi
-
 echo "  Ich starte und oeffne mich im Browser. Abbrechen mit Strg und C."
 echo ""
 "$PYTHON" "$PROJEKT/jarvis.py" "$@"

@@ -158,6 +158,11 @@ body[data-zustand="wach"] .zustandstext{color:var(--akzent)}
 .frage .knoepfe button{flex:1;padding:15px;border-radius:10px;font-weight:700;font-size:16px}
 .frage .ja{background:var(--akzent);color:#1A0E08}
 .frage .nein{background:var(--tief);border:1px solid var(--rand-hell);color:var(--text)}
+.frage input{width:100%;padding:13px 14px;border-radius:9px;font:14px var(--mono);
+  background:var(--tief);border:1px solid var(--rand-hell);color:var(--text);
+  user-select:text;-webkit-user-select:text}
+.frage .meldung{padding:0 20px 4px;font-size:13px;min-height:20px;color:var(--gedaempft)}
+.frage .meldung.fehler{color:var(--rot)}
 
 @media(max-width:640px){
   .ticker{gap:12px;padding:8px 12px;font-size:10px}
@@ -221,6 +226,25 @@ body[data-zustand="wach"] .zustandstext{color:var(--akzent)}
     <div class="knoepfe">
       <button class="nein" id="fNein">Nein</button>
       <button class="ja" id="fJa">Ja, mach</button>
+    </div>
+  </div>
+</div>
+
+<div class="schleier" id="schluesselDialog">
+  <div class="frage">
+    <div class="kopf"><h2>Anthropic-Schlüssel</h2></div>
+    <div class="inhalt">
+      <div class="aktion">Ein Schritt fehlt</div>
+      <p class="sagen" style="padding:0 0 12px;text-align:left">
+        Ohne Schlüssel kann ich nicht denken. Hol ihn auf
+        <b>console.anthropic.com</b> unter Settings &rarr; API Keys, kopiere ihn
+        und füge ihn hier ein. Er bleibt auf diesem Rechner.</p>
+      <input id="schluesselFeld" type="password" placeholder="sk-ant-…"
+             autocomplete="off" spellcheck="false">
+    </div>
+    <p class="meldung" id="schluesselMeldung"></p>
+    <div class="knoepfe">
+      <button class="ja" id="schluesselSpeichern">Speichern</button>
     </div>
   </div>
 </div>
@@ -529,12 +553,37 @@ body[data-zustand="wach"] .zustandstext{color:var(--akzent)}
       el("pkt").title = a.einsatzbereit ? a.werkzeuge + " Werkzeuge bereit"
                                         : "Kein Anthropic-Schlüssel";
       if (!a.einsatzbereit) {
+        el("schluesselDialog").classList.add("zeigen");
         el("antwort").textContent = "Es ist kein Anthropic-Schlüssel hinterlegt. " +
           "Ohne ihn kann ich nicht denken.";
         el("antwort").className = "antwort fehler";
       }
     }).catch(function () {});
   }
+  function schluesselSpeichern() {
+    var feld = el("schluesselFeld"), meldung = el("schluesselMeldung");
+    if (!feld.value.trim()) { return; }
+    meldung.className = "meldung"; meldung.textContent = "Ich probiere den Schlüssel aus …";
+    el("schluesselSpeichern").disabled = true;
+    holen("/api/schluessel", { schluessel: feld.value }).then(function (a) {
+      el("schluesselSpeichern").disabled = false;
+      meldung.textContent = a.text || "";
+      if (a.ok) {
+        feld.value = "";
+        el("schluesselDialog").classList.remove("zeigen");
+        el("antwort").textContent = ""; el("antwort").className = "antwort";
+        zustandHolen();
+      } else { meldung.className = "meldung fehler"; }
+    }).catch(function () {
+      el("schluesselSpeichern").disabled = false;
+      meldung.className = "meldung fehler";
+      meldung.textContent = "Der Server antwortet nicht.";
+    });
+  }
+  el("schluesselSpeichern").addEventListener("click", schluesselSpeichern);
+  el("schluesselFeld").addEventListener("keydown", function (e) {
+    if (e.key === "Enter") { schluesselSpeichern(); }
+  });
   function setzeZahl(nr, wert, name, klasse) {
     el("z" + nr).textContent = wert;
     el("z" + nr).className = "wert" + (klasse ? " " + klasse : "");

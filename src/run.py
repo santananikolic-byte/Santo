@@ -661,10 +661,12 @@ def hauptprogramm(argumente=None) -> int:
     vorlage_schreiben()
 
     if modus in ("", "start", "web", "browser", "app"):
-        if not config.EINRICHTUNG_FERTIG and not config.ANTHROPIC_API_KEY:
-            print("Jarvis ist noch nicht eingerichtet. Ich starte die Einrichtung.")
-            einrichtung_starten()
-            return 0
+        # Auch ohne Schlüssel startet der Webserver: den Schlüssel trägt man im
+        # Browser ein. Eine Einrichtung im Terminal, die den Server gar nicht
+        # erst startet, lässt den Nutzer vor einer toten Adresse stehen.
+        if not config.ANTHROPIC_API_KEY:
+            print("Noch kein Anthropic-Schlüssel - den trägst du gleich im "
+                  "Browser ein.")
         return webbetrieb(argumente[1:] if argumente else [])
     elif modus in ("hoeren", "hören", "dauerbetrieb", "sprechen"):
         if not config.EINRICHTUNG_FERTIG and not config.ANTHROPIC_API_KEY:

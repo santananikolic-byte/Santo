@@ -1235,6 +1235,79 @@ def pruefung_protokoll(agent):
         agent.tools.freigabe_kanal_setzen(None)
 
 
+def pruefung_schluessel(agent):
+    """Der Schlüssel lässt sich im Browser eintragen - ohne ihn läuft der Server trotzdem."""
+    abschnitt("Schlüssel im Browser")
+    import urllib.request as _netz
+    import modules.webapp as webapp_modul
+
+    alte_env, alter_schluessel = config.ENV_DATEI, config.ANTHROPIC_API_KEY
+    alte_rohwerte = dict(config._ROHWERTE)
+    alter_test = webapp_modul.schluessel_online_testen
+    config.ENV_DATEI = pathlib.Path(ARBEITSVERZEICHNIS) / "schluessel.env"
+    config.ANTHROPIC_API_KEY = ""
+    config._ROHWERTE.pop("ANTHROPIC_API_KEY", None)
+    probe = {"ergebnis": {"ok": True, "text": "Der Schlüssel funktioniert."}}
+    webapp_modul.schluessel_online_testen = lambda k: probe["ergebnis"]
+
+    web = JarvisWeb(agent, port=8798)
+    web.starten(blockierend=False)
+    time.sleep(0.5)
+
+    def senden(schluessel):
+        anfrage = _netz.Request("http://127.0.0.1:8798/api/schluessel",
+                                data=json.dumps({"schluessel": schluessel}).encode("utf-8"),
+                                headers={"Content-Type": "application/json"})
+        with _netz.urlopen(anfrage, timeout=8) as r:
+            return r.read().decode("utf-8")
+
+    try:
+        with _netz.urlopen("http://127.0.0.1:8798/api/zustand", timeout=8) as r:
+            zustand = json.loads(r.read().decode("utf-8"))
+        pruefen("Ohne Schlüssel läuft der Server und meldet nicht einsatzbereit",
+                zustand.get("einsatzbereit") is False)
+        with _netz.urlopen("http://127.0.0.1:8798/", timeout=8) as r:
+            seite = r.read().decode("utf-8")
+        pruefen("Die Startseite hat ein Feld für den Schlüssel",
+                "schluesselDialog" in seite and 'type="password"' in seite)
+
+        roh = senden("kaputt")
+        pruefen("Ein offensichtlich falscher Schlüssel wird abgewiesen, nichts gespeichert",
+                json.loads(roh)["ok"] is False and not config.ENV_DATEI.exists())
+
+        probe["ergebnis"] = {"ok": False, "grund": "schluessel",
+                             "text": "Der Schlüssel wird abgelehnt."}
+        roh = senden("sk-ant-" + "x" * 40)
+        pruefen("Ein abgelehnter Schlüssel wird nicht gespeichert",
+                json.loads(roh)["ok"] is False and not config.ENV_DATEI.exists()
+                and not agent.einsatzbereit())
+
+        probe["ergebnis"] = {"ok": True, "text": "Der Schlüssel funktioniert."}
+        echter = "sk-ant-" + "y" * 40
+        roh = senden("  " + echter[:20] + "\n" + echter[20:] + " ")
+        antwort = json.loads(roh)
+        pruefen("Ein gültiger Schlüssel wird gespeichert und sofort benutzt",
+                antwort["ok"] is True and agent.einsatzbereit()
+                and config.ANTHROPIC_API_KEY == echter
+                and ("ANTHROPIC_API_KEY=" + echter) in config.ENV_DATEI.read_text("utf-8"),
+                "Leerzeichen und Umbruch aus dem Kopieren werden entfernt")
+        pruefen("Die Antwort verrät den Schlüssel nicht", echter not in roh)
+        pruefen("Die Schlüsseldatei ist nur für den Nutzer lesbar",
+                oct(os.stat(str(config.ENV_DATEI)).st_mode & 0o777) == "0o600")
+    finally:
+        web.stoppen()
+        webapp_modul.schluessel_online_testen = alter_test
+        config.ENV_DATEI = alte_env
+        config.ANTHROPIC_API_KEY = alter_schluessel
+        config._ROHWERTE.clear()
+        config._ROHWERTE.update(alte_rohwerte)
+
+    pruefen("Ohne Schlüssel startet JARVIS.command den Server statt nur der Einrichtung",
+            "einrichten" not in open(os.path.join(WURZEL, "JARVIS.command"),
+                                     encoding="utf-8").read().split("# --- 5.")[1]
+            .split('"$PYTHON" "$PROJEKT/jarvis.py" "$@"')[0].replace("python3 jarvis.py einrichten", ""))
+
+
 def pruefung_sicherheit(agent):
     abschnitt("Sicherheit")
     ergebnis = agent.tools.run("systeminfo", {"was": "rm -rf /"})
@@ -1379,6 +1452,7 @@ def main() -> int:
     pruefung_browser(agent)
     pruefung_webapp(agent)
     pruefung_protokoll(agent)
+    pruefung_schluessel(agent)
     pruefung_routinen(agent)
     pruefung_zeitplan()
     pruefung_kalender()
