@@ -1454,6 +1454,17 @@ def pruefung_freier_dienst(agent):
                 self.send_response(modus["fehler"] or 429)
             else:
                 hat_ergebnis = any(m.get("role") == "tool" for m in anfrage["messages"])
+                alles = json.dumps(anfrage["messages"], ensure_ascii=False)
+                if ("Behauptungstest" in alles and "kein Werkzeug aufgerufen" not in alles
+                        and not hat_ergebnis):
+                    nachricht = {"role": "assistant", "content": "Habe ich notiert."}
+                    roh = json.dumps({"choices": [{"message": nachricht}]}).encode("utf-8")
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json")
+                    self.send_header("Content-Length", str(len(roh)))
+                    self.end_headers()
+                    self.wfile.write(roh)
+                    return
                 if hat_ergebnis:
                     nachricht = {"role": "assistant", "content": "Notiert, Chef."}
                 elif "Sag nur: ok" in json.dumps(anfrage["messages"]):
@@ -1545,6 +1556,29 @@ def pruefung_freier_dienst(agent):
         pruefen("Die Gedanken-Signatur von Gemini geht unverändert zurück",
                 any(c.get("extra_content") == {"google": {"thought_signature": "SIG123"}}
                     for m in zweite["body"]["messages"] for c in m.get("tool_calls") or []))
+
+        # Behauptung ohne Werkzeug: das Modell muss nachbessern
+        agent.verlauf_leeren()
+        vorher = len(gesehen)
+        text = agent.denken("Merk dir den Behauptungstest Dienst-Test Nikolic")
+        pruefen("Behauptet das Modell eine Tat ohne Werkzeug, muss es nachbessern",
+                len(gesehen) - vorher >= 3 and text == "Notiert, Chef.", text)
+        pruefen("Die Werkzeugpflicht steht als letzte Anweisung vor der Frage",
+                any(m.get("role") == "system" and "Werkzeug" in m.get("content", "")
+                    for m in gesehen[vorher]["body"]["messages"][-2:]))
+
+        from modules.lokal import werkzeuge_auswaehlen
+        namen = [w["name"] for w in werkzeuge_auswaehlen(
+            agent.tools.katalog(), "Leg einen offenen Punkt an: Berger anrufen", 12)]
+        pruefen("Abhaken wird nur angeboten, wenn danach gefragt ist",
+                "punkt_erledigen" not in namen and "punkt_anlegen" in namen)
+        namen = [w["name"] for w in werkzeuge_auswaehlen(
+            agent.tools.katalog(), "Punkt Rechnung Meier ist erledigt", 12)]
+        pruefen("Wer 'erledigt' sagt, bekommt das Abhaken", "punkt_erledigen" in namen)
+        pruefen("Alte, langsame Modell-Reihenfolge wird auf die schnelle umgestellt",
+                dienst_modul.modelle_liste("gemini-flash-latest,gemini-flash-lite-latest,"
+                                           "gemini-3.8-flash,gemini-3.5-flash,gemini-3.1-flash-lite")[0]
+                == "gemini-flash-lite-latest")
 
         # Modellkette: ist das erste Modell aufgebraucht, nimmt Jarvis das nächste
         config.FREIER_DIENST_MODELL = "voll-modell,gut-modell"

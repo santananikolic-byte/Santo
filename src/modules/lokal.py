@@ -28,6 +28,15 @@ STANDARD_MODELL = "qwen2.5:3b"
 GRUNDSTOCK = ("notiz_speichern", "gedaechtnis_durchsuchen", "protokoll", "punkte_offen")
 MAX_WERKZEUGE = 10
 
+# Werkzeuge, die etwas abschließen oder streichen. Kleine Modelle rufen sie
+# gern "vorsorglich" mit auf (offenen Punkt anlegen -> nebenbei Punkt 1
+# abhaken). Deshalb gibt es sie nur, wenn die Frage es selbst verlangt.
+VORSICHT = {
+    "punkt_erledigen": ("erledig", "abhak", "fertig", "geschafft", "streich", "erlédig"),
+    "erinnerung_erledigen": ("erledig", "abhak", "fertig", "geschafft", "streich"),
+    "fixkosten_streichen": ("streich", "kündig", "lösch", "entfern", "nicht mehr"),
+}
+
 
 def lokales_modell_aktiv() -> bool:
     """Ist ein lokales Modell eingestellt?"""
@@ -66,6 +75,8 @@ def werkzeuge_auswaehlen(katalog: list, frage: str, anzahl: int = MAX_WERKZEUGE,
     bewertet = []
     for nr, werkzeug in enumerate(katalog):
         name = werkzeug.get("name", "")
+        if name in VORSICHT and not any(w in (frage or "").lower() for w in VORSICHT[name]):
+            continue
         text = (name + " " + werkzeug.get("description", "")).lower()
         punkte = sum(2 if w in name.lower() else 1 for w in woerter if w in text)
         if name in benutzt:

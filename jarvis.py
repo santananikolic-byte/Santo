@@ -1125,6 +1125,15 @@ STANDARD_MODELL = "qwen2.5:3b"
 GRUNDSTOCK = ("notiz_speichern", "gedaechtnis_durchsuchen", "protokoll", "punkte_offen")
 MAX_WERKZEUGE = 10
 
+# Werkzeuge, die etwas abschließen oder streichen. Kleine Modelle rufen sie
+# gern "vorsorglich" mit auf (offenen Punkt anlegen -> nebenbei Punkt 1
+# abhaken). Deshalb gibt es sie nur, wenn die Frage es selbst verlangt.
+VORSICHT = {
+    "punkt_erledigen": ("erledig", "abhak", "fertig", "geschafft", "streich", "erlédig"),
+    "erinnerung_erledigen": ("erledig", "abhak", "fertig", "geschafft", "streich"),
+    "fixkosten_streichen": ("streich", "kündig", "lösch", "entfern", "nicht mehr"),
+}
+
 
 def lokales_modell_aktiv() -> bool:
     """Ist ein lokales Modell eingestellt?"""
@@ -1163,6 +1172,8 @@ def werkzeuge_auswaehlen(katalog: list, frage: str, anzahl: int = MAX_WERKZEUGE,
     bewertet = []
     for nr, werkzeug in enumerate(katalog):
         name = werkzeug.get("name", "")
+        if name in VORSICHT and not any(w in (frage or "").lower() for w in VORSICHT[name]):
+            continue
         text = (name + " " + werkzeug.get("description", "")).lower()
         punkte = sum(2 if w in name.lower() else 1 for w in woerter if w in text)
         if name in benutzt:
@@ -1347,20 +1358,42 @@ DIENST_VORGABEN = {
     "gemini": {"name": "Google Gemini",
                "url": "https://generativelanguage.googleapis.com/v1beta/openai",
                # Mehrere Namen: Jeder hat bei Google sein eigenes Gratis-Kontingent.
-               # Ist eines aufgebraucht, nimmt Jarvis das nächste.
-               "modell": "gemini-flash-latest,gemini-flash-lite-latest,gemini-3.8-flash,"
-                         "gemini-3.5-flash,gemini-3.1-flash-lite",
+               # Die Lite-Modelle zuerst: Sie antworten in etwa einer Sekunde, die
+               # großen denken vorher nach und brauchen 4 bis 25 Sekunden.
+               "modell": "gemini-flash-lite-latest,gemini-3.5-flash-lite,gemini-3.1-flash-lite,gemini-flash-latest,gemini-3.8-flash",
                "seite": "aistudio.google.com/apikey"},
     "openrouter": {"name": "OpenRouter", "url": "https://openrouter.ai/api/v1",
                    "modell": "meta-llama/llama-3.3-70b-instruct:free",
                    "seite": "openrouter.ai/keys"},
 }
 DIENST_WERKZEUGE = 12
+
+# Kleine, schnelle Modelle behaupten manchmal, etwas getan zu haben, ohne das
+# Werkzeug aufzurufen ("Habe ich notiert" - und nichts ist gespeichert). Daran
+# erkennt Jarvis eine solche Behauptung und schickt das Modell einmal zurück.
+BEHAUPTUNG = re.compile(
+    r"\b(notiert|gespeichert|vermerkt|angelegt|eingetragen|hinterlegt|gesendet|"
+    r"verschickt|abgeschickt|erledigt|abgehakt|gebucht|erstellt|aufgenommen|gestartet)\b",
+    re.IGNORECASE)
+WERKZEUG_PFLICHT = (
+    "Regel ohne Ausnahme: Sollst du etwas speichern, anlegen, eintragen, senden, buchen, "
+    "starten oder nachschlagen, rufst du dafür das passende Werkzeug auf. Behaupte nie, "
+    "etwas getan zu haben, ohne dass ein Werkzeug es getan hat.")
 _PAUSE = {}  # Modellname -> Zeitpunkt (monotonic), bis zu dem es pausiert wird
+_FEHLSCHLAEGE = {}  # Modellname -> wie oft hintereinander "Kontingent leer"
+
+# Frühere Voreinstellungen, die schon in .env-Dateien stehen: Sie hatten die
+# langsamen Modelle vorn. Sie werden beim Lesen auf die schnelle Reihenfolge
+# umgestellt - niemand muss dafür etwas neu eintragen.
+ALTE_VORGABEN = {
+    "gemini-flash-latest": "gemini-flash-lite-latest,gemini-3.5-flash-lite,gemini-3.1-flash-lite,gemini-flash-latest,gemini-3.8-flash",
+    "gemini-flash-latest,gemini-flash-lite-latest,gemini-3.8-flash,gemini-3.5-flash,gemini-3.1-flash-lite": "gemini-flash-lite-latest,gemini-3.5-flash-lite,gemini-3.1-flash-lite,gemini-flash-latest,gemini-3.8-flash",
+}
 
 
 def modelle_liste(text: str) -> list:
     """Die Modellnamen aus dem Eintrag, durch Komma getrennt."""
+    text = ALTE_VORGABEN.get((text or "").replace(" ", ""), text)
     return [m.strip() for m in (text or "").split(",") if m.strip()]
 
 
@@ -1519,7 +1552,38 @@ def freier_dienst_pruefen(url: str, schluessel: str, modell: str) -> dict:
     return {"ok": False, "text": antwort["fehler"]}
 
 
-def freier_dienst_anfragen(koerper: dict, timeout: int = 120) -> dict:
+def _behauptung_pruefen(bloecke: list, nutzlast: dict, timeout: int) -> list:
+    """Behauptet das Modell eine Tat ohne Werkzeugaufruf, muss es nachbessern.
+
+    Nur in der ersten Runde einer Frage (vorher kein Werkzeugergebnis) und nur
+    einmal - eine zweite Nachfrage würde die Antwort spürbar verzögern.
+    """
+    if "tools" not in nutzlast or any(b.get("type") == "tool_use" for b in bloecke):
+        return bloecke
+    letzte_frage = max((i for i, m in enumerate(nutzlast["messages"])
+                        if m.get("role") == "user"), default=-1)
+    if any(m.get("role") == "tool" for m in nutzlast["messages"][letzte_frage + 1:]):
+        return bloecke  # in dieser Runde hat schon ein Werkzeug gearbeitet
+    text = " ".join(b.get("text", "") for b in bloecke if b.get("type") == "text")
+    if not BEHAUPTUNG.search(text):
+        return bloecke
+    nachfrage = dict(nutzlast)
+    nachfrage["messages"] = nutzlast["messages"] + [
+        {"role": "assistant", "content": text},
+        {"role": "user", "content": "Du hast dafür kein Werkzeug aufgerufen, also ist nichts "
+                                    "passiert. Ruf jetzt das passende Werkzeug auf."}]
+    zweite = _senden(FREIER_DIENST_URL, FREIER_DIENST_SCHLUESSEL,
+                     nachfrage, timeout)
+    if zweite["ok"]:
+        neu = antwort_umwandeln_freier_dienst(zweite["daten"])
+        if any(b.get("type") == "tool_use" for b in neu):
+            return neu
+    # Kein Werkzeug auch beim zweiten Mal: dann wenigstens nicht lügen.
+    return [{"type": "text", "text": "Das habe ich noch nicht erledigt - sag es mir bitte "
+                                     "noch einmal etwas genauer."}]
+
+
+def freier_dienst_anfragen(koerper: dict, timeout: int = 45) -> dict:
     """Beantwortet eine Anfrage im Claude-Format über den kostenlosen Dienst."""
     nachrichten = koerper.get("messages") or []
     katalog = koerper.get("tools") or []
@@ -1542,6 +1606,7 @@ def freier_dienst_anfragen(koerper: dict, timeout: int = 120) -> dict:
         "temperature": 0.3,
     }
     if gewaehlt:
+        nutzlast["messages"].append({"role": "system", "content": WERKZEUG_PFLICHT})
         nutzlast["tools"] = [{"type": "function", "function": {
             "name": w["name"], "description": w.get("description", ""),
             "parameters": w.get("input_schema") or {"type": "object", "properties": {}}}}
@@ -1562,12 +1627,17 @@ def freier_dienst_anfragen(koerper: dict, timeout: int = 120) -> dict:
             antwort = _senden(FREIER_DIENST_URL, FREIER_DIENST_SCHLUESSEL,
                               ohne, timeout)
         if antwort["ok"]:
+            _FEHLSCHLAEGE.pop(modell, None)
             bloecke = antwort_umwandeln_freier_dienst(antwort["daten"]) or [{"type": "text", "text": ""}]
+            bloecke = _behauptung_pruefen(bloecke, nutzlast, timeout)
             return {"ok": True, "daten": {"content": bloecke}}
         letzte = antwort
         code = antwort.get("code")
         if code == 429:
-            _PAUSE[modell] = time.monotonic() + 60
+            # Erst eine Minute (Minutenlimit), wiederholt länger (Tageslimit) -
+            # sonst kostet ein leeres Modell bei jeder Frage einen Umweg.
+            _FEHLSCHLAEGE[modell] = _FEHLSCHLAEGE.get(modell, 0) + 1
+            _PAUSE[modell] = time.monotonic() + min(60 * 4 ** (_FEHLSCHLAEGE[modell] - 1), 3600)
             print("[dienst] %s ist gerade ausgelastet, nehme das nächste" % modell)
             continue
         alle_voll = False
@@ -7735,7 +7805,7 @@ body[data-zustand="wach"] .zustandstext{color:var(--akzent)}
         border-radius:9px;background:var(--tief);border:1px solid var(--rand-hell);
         color:var(--text);font-size:14px">
         <option value="groq" data-modell="llama-3.3-70b-versatile">Groq</option>
-        <option value="gemini" data-modell="gemini-flash-latest,gemini-flash-lite-latest,gemini-3.8-flash,gemini-3.5-flash,gemini-3.1-flash-lite">Google Gemini</option>
+        <option value="gemini" data-modell="gemini-flash-lite-latest,gemini-3.5-flash-lite,gemini-3.1-flash-lite,gemini-flash-latest,gemini-3.8-flash">Google Gemini</option>
         <option value="openrouter" data-modell="meta-llama/llama-3.3-70b-instruct:free">OpenRouter</option>
       </select>
       <input id="dienstModell" type="text" value="llama-3.3-70b-versatile"
