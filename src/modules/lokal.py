@@ -18,6 +18,7 @@ kleiner Grundstock.
 """
 
 import json
+import re
 import urllib.error
 import urllib.request
 
@@ -27,6 +28,7 @@ from modules.recall import schluesselwoerter
 STANDARD_MODELL = "qwen2.5:3b"
 GRUNDSTOCK = ("notiz_speichern", "gedaechtnis_durchsuchen", "protokoll", "punkte_offen")
 MAX_WERKZEUGE = 10
+ADRESSE_IM_TEXT = re.compile(r"https?://|www\.|\b[\w-]+\.(at|de|com|ch|eu|net|org|info)\b", re.I)
 
 # Werkzeuge, die etwas abschließen oder streichen. Kleine Modelle rufen sie
 # gern "vorsorglich" mit auf (offenen Punkt anlegen -> nebenbei Punkt 1
@@ -81,6 +83,8 @@ def werkzeuge_auswaehlen(katalog: list, frage: str, anzahl: int = MAX_WERKZEUGE,
         punkte = sum(2 if w in name.lower() else 1 for w in woerter if w in text)
         if name in benutzt:
             punkte += 3
+        if name == "webseite_lesen" and ADRESSE_IM_TEXT.search(frage or ""):
+            punkte += 10  # eine Adresse im Satz heißt: Seite lesen
         if name in GRUNDSTOCK:
             punkte += 1
         bewertet.append((punkte, -nr, werkzeug))

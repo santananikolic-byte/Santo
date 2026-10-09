@@ -16,21 +16,25 @@ SEITE_HTML = r"""<!DOCTYPE html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#08090B">
+<meta name="theme-color" content="#03080F">
 <link rel="icon" href="/symbol.svg" type="image/svg+xml">
 <title>Jarvis</title>
 <style>
 :root{
-  --grund:#08090B; --tief:#0A0D14; --panel:#0F1113; --rand:#1C1F23;
-  --rand-hell:#2A3036; --akzent:#E8622C; --kupfer:#F0A882; --text:#F2EFEA;
-  --gedaempft:#A0A6AC; --grau:#7E858C; --gruen:#4CC38A; --rot:#E5484D;
+  --grund:#03080F; --tief:#050D16; --panel:#071420; --rand:#0E2A3C;
+  --rand-hell:#16425C; --akzent:#3AD1FF; --kupfer:#A6ECFF; --text:#E4F7FF;
+  --gedaempft:#8DB4C6; --grau:#5D8799; --gruen:#4CC38A; --rot:#E5484D;
   --sans:-apple-system,BlinkMacSystemFont,"Helvetica Neue",Arial,sans-serif;
   --mono:ui-monospace,"SF Mono",Menlo,monospace;
 }
 *{box-sizing:border-box;margin:0;padding:0}
 html,body{height:100%;overflow:hidden}
 body{
-  background:radial-gradient(ellipse 120% 80% at 50% 120%,#0E1220 0%,var(--grund) 62%);
+  background:
+    radial-gradient(ellipse 70% 55% at 50% 45%,rgba(58,209,255,.10) 0%,transparent 70%),
+    repeating-linear-gradient(0deg,rgba(58,209,255,.035) 0 1px,transparent 1px 44px),
+    repeating-linear-gradient(90deg,rgba(58,209,255,.035) 0 1px,transparent 1px 44px),
+    radial-gradient(ellipse 120% 80% at 50% 120%,#062238 0%,var(--grund) 62%);
   color:var(--text);font-family:var(--sans);-webkit-font-smoothing:antialiased;
   display:flex;flex-direction:column;user-select:none;
 }
@@ -42,7 +46,7 @@ button{font-family:inherit;cursor:pointer;border:none;background:none;color:inhe
   flex:none;display:flex;gap:22px;flex-wrap:wrap;align-items:center;
   padding:10px 20px;font-size:11px;letter-spacing:.11em;text-transform:uppercase;
   color:var(--grau);border-bottom:1px solid var(--rand);
-  background:linear-gradient(90deg,rgba(232,98,44,.13),transparent 68%);
+  background:linear-gradient(90deg,rgba(58,209,255,.13),transparent 68%);
 }
 .ticker b{color:var(--akzent);font-weight:600}
 .ticker b.rot{color:var(--rot)}
@@ -67,23 +71,26 @@ main{flex:1;display:flex;flex-direction:column;align-items:center;
 .kugel .ring3{inset:19%;opacity:.35}
 .kugel .kern{
   width:42%;height:42%;border-radius:50%;
-  background:radial-gradient(circle at 34% 30%,#F3B593,#D9764B 46%,#A34F2C);
-  box-shadow:0 0 40px -6px rgba(232,98,44,.5);transition:transform .35s,box-shadow .35s;
+  background:radial-gradient(circle,#F4FDFF 0%,#A6ECFF 20%,#3AD1FF 42%,#0B6E99 62%,
+             rgba(6,40,64,.9) 70%);
+  border:2px solid rgba(166,236,255,.55);
+  box-shadow:0 0 40px -2px rgba(58,209,255,.65),inset 0 0 22px rgba(255,255,255,.35);
+  transition:transform .35s,box-shadow .35s;
 }
 .kugel .welle{position:absolute;inset:0;border-radius:50%;border:1px solid var(--akzent);
               opacity:0;pointer-events:none}
 
 /* Zustände */
 body[data-zustand="schlaeft"] .kugel .kern{transform:scale(.82);
-  box-shadow:0 0 26px -10px rgba(232,98,44,.4);filter:saturate(.55)}
-body[data-zustand="wach"] .ring{border-color:rgba(232,98,44,.55)}
+  box-shadow:0 0 26px -10px rgba(58,209,255,.4);filter:saturate(.55)}
+body[data-zustand="wach"] .ring{border-color:rgba(58,209,255,.55)}
 body[data-zustand="wach"] .kugel .kern{transform:scale(1.08);
-  box-shadow:0 0 70px -4px rgba(232,98,44,.75)}
+  box-shadow:0 0 70px -4px rgba(58,209,255,.75)}
 body[data-zustand="wach"] .welle{animation:welle 1.7s ease-out infinite}
 body[data-zustand="wach"] .welle.w2{animation-delay:.55s}
 body[data-zustand="wach"] .welle.w3{animation-delay:1.1s}
 @keyframes welle{0%{opacity:.55;transform:scale(.55)}100%{opacity:0;transform:scale(1.05)}}
-body[data-zustand="denkt"] .ring{border-color:rgba(232,98,44,.45);
+body[data-zustand="denkt"] .ring{border-color:rgba(58,209,255,.45);
   border-top-color:var(--akzent);animation:dreh 1.1s linear infinite}
 body[data-zustand="denkt"] .ring2{animation:dreh 1.6s linear infinite reverse}
 body[data-zustand="denkt"] .ring3{animation:dreh 2.2s linear infinite}
@@ -92,6 +99,26 @@ body[data-zustand="spricht"] .kugel .kern{animation:reden .5s ease-in-out infini
 @keyframes reden{from{transform:scale(1)}to{transform:scale(1.16)}}
 body[data-zustand="aus"] .kugel .kern{filter:grayscale(.85) saturate(.3);transform:scale(.75)}
 
+/* HUD: drehende Ringe um den Kern */
+.kugel .hud{position:absolute;inset:-9%;width:118%;height:118%;color:var(--akzent);
+            pointer-events:none;filter:drop-shadow(0 0 6px rgba(58,209,255,.45))}
+.kugel .hud1{animation:dreh 60s linear infinite}
+.kugel .hud2{animation:dreh 34s linear infinite reverse}
+body[data-zustand="denkt"] .kugel .hud1{animation-duration:5s}
+body[data-zustand="denkt"] .kugel .hud2{animation-duration:3.4s}
+body[data-zustand="aus"] .kugel .hud{opacity:.35;filter:none}
+.ring{border-style:dashed}
+.hud-ecke{position:absolute;top:22px;font-family:var(--mono);color:var(--gedaempft);
+          text-transform:uppercase;letter-spacing:.16em;font-size:10px;line-height:1.7}
+.hud-ecke.links{left:26px}
+.hud-ecke.rechts{right:26px;text-align:right}
+.hud-ecke .hud-wert{font-size:30px;letter-spacing:.04em;color:var(--akzent);
+                    text-shadow:0 0 14px rgba(58,209,255,.55);font-weight:300}
+.hud-ecke::before{content:"";display:block;width:42px;height:1px;background:var(--akzent);
+                  margin-bottom:8px;box-shadow:0 0 8px var(--akzent)}
+.hud-ecke.rechts::before{margin-left:auto}
+.hud-ecke a{color:inherit;text-decoration:none}
+.hud-ecke a:hover{color:var(--kupfer)}
 .zustandstext{font-size:12px;letter-spacing:.22em;text-transform:uppercase;
               color:var(--grau);text-align:center;min-height:16px}
 body[data-zustand="wach"] .zustandstext{color:var(--akzent)}
@@ -131,7 +158,7 @@ body[data-zustand="wach"] .zustandstext{color:var(--akzent)}
 .tippen input{flex:1;background:var(--panel);border:1px solid var(--rand-hell);
               border-radius:11px;padding:12px 15px;color:var(--text);
               font-family:inherit;font-size:15px}
-.tippen button{background:var(--akzent);color:#1A0E08;border-radius:11px;
+.tippen button{background:var(--akzent);color:#02121C;border-radius:11px;
                padding:12px 20px;font-weight:700}
 
 /* ---- Freigabe ---- */
@@ -140,9 +167,9 @@ body[data-zustand="wach"] .zustandstext{color:var(--akzent)}
 .schleier.zeigen{display:grid}
 .frage{background:var(--panel);border:1px solid var(--akzent);border-radius:16px;
        max-width:620px;width:100%;overflow:hidden;
-       box-shadow:0 30px 90px -24px rgba(232,98,44,.5)}
+       box-shadow:0 30px 90px -24px rgba(58,209,255,.5)}
 .frage .kopf{display:flex;align-items:center;gap:12px;padding:13px 20px;
-             background:rgba(232,98,44,.12);border-bottom:1px solid var(--rand)}
+             background:rgba(58,209,255,.12);border-bottom:1px solid var(--rand)}
 .frage .kopf h2{font-size:12px;letter-spacing:.18em;text-transform:uppercase;
                 color:var(--akzent);font-weight:700}
 .frage .rest{margin-left:auto;font-family:var(--mono);font-size:12px;color:var(--grau)}
@@ -156,7 +183,7 @@ body[data-zustand="wach"] .zustandstext{color:var(--akzent)}
 .frage .sagen b{color:var(--akzent)}
 .frage .knoepfe{display:flex;gap:11px;padding:12px 20px 20px}
 .frage .knoepfe button{flex:1;padding:15px;border-radius:10px;font-weight:700;font-size:16px}
-.frage .ja{background:var(--akzent);color:#1A0E08}
+.frage .ja{background:var(--akzent);color:#02121C}
 .frage .nein{background:var(--tief);border:1px solid var(--rand-hell);color:var(--text)}
 .frage{max-height:92vh;overflow-y:auto}
 .frage input{width:100%;padding:13px 14px;border-radius:9px;font:14px var(--mono);
@@ -166,6 +193,7 @@ body[data-zustand="wach"] .zustandstext{color:var(--akzent)}
 .frage .meldung.fehler{color:var(--rot)}
 
 @media(max-width:640px){
+  .hud-ecke{display:none}
   .ticker{gap:12px;padding:8px 12px;font-size:10px}
   .ticker .rechts{width:100%;margin-left:0;justify-content:flex-start}
   .zahl{padding:9px 10px}.zahl .wert{font-size:15px}
@@ -188,10 +216,33 @@ body[data-zustand="wach"] .zustandstext{color:var(--akzent)}
 </div>
 
 <main>
+  <div class="hud-ecke links">
+    <div class="hud-wert" id="uhr">--:--</div>
+    <div id="datum"></div>
+    <div id="hudGehirn"></div>
+  </div>
+  <div class="hud-ecke rechts">
+    <div class="hud-wert"><a href="/autopilot" data-seite target="_blank" rel="noopener"
+         id="hudAufgaben">–</a></div>
+    <div>Heute zu tun</div>
+    <div id="hudSystem">Online</div>
+  </div>
   <div class="kugel" id="kugel" role="button" tabindex="0"
        title="Antippen weckt Jarvis auch ohne Weckwort">
     <span class="ring"></span><span class="ring ring2"></span><span class="ring ring3"></span>
     <span class="welle"></span><span class="welle w2"></span><span class="welle w3"></span>
+    <svg class="hud hud1" viewBox="0 0 200 200" aria-hidden="true">
+      <circle cx="100" cy="100" r="97" fill="none" stroke="currentColor" stroke-width="1"
+              stroke-dasharray="1 5"/>
+      <circle cx="100" cy="100" r="90" fill="none" stroke="currentColor" stroke-width="3"
+              stroke-dasharray="46 14" opacity=".55"/>
+    </svg>
+    <svg class="hud hud2" viewBox="0 0 200 200" aria-hidden="true">
+      <circle cx="100" cy="100" r="81" fill="none" stroke="currentColor" stroke-width="1.6"
+              stroke-dasharray="120 40 20 40" opacity=".75"/>
+      <circle cx="100" cy="100" r="73" fill="none" stroke="currentColor" stroke-width=".8"
+              stroke-dasharray="2 3" opacity=".5"/>
+    </svg>
     <span class="kern"></span>
   </div>
   <div class="zustandstext" id="zustandstext">Mikrofon wird gefragt …</div>
@@ -587,16 +638,31 @@ body[data-zustand="wach"] .zustandstext{color:var(--akzent)}
       el("lage").textContent = a.text || "Kein Stand abrufbar.";
     }).catch(function () { el("lage").textContent = "Server antwortet nicht."; });
   }
+  function uhrStellen() {
+    var jetzt = new Date();
+    el("uhr").textContent = ("0" + jetzt.getHours()).slice(-2) + ":" +
+                            ("0" + jetzt.getMinutes()).slice(-2);
+    el("datum").textContent = jetzt.toLocaleDateString("de-AT", {
+      weekday: "long", day: "numeric", month: "long"});
+  }
+  uhrStellen();
+  setInterval(uhrStellen, 15000);
+
   function zustandHolen() {
     holen("/api/zustand").then(function (a) {
       el("pkt").className = "pkt " + (a.einsatzbereit ? "an" : "aus");
       if (a.aufgaben) { el("zuTunLink").textContent = "Heute zu tun (" + a.aufgaben + ")"; }
+      el("hudAufgaben").textContent = String(a.aufgaben || 0);
+      var gehirn = Object.keys(a.dienste || {}).filter(function (k) {
+        return a.dienste[k] && ["Claude", "Gratis-Dienst", "Lokales Modell"].indexOf(k) >= 0;
+      })[0];
+      el("hudGehirn").textContent = "Gehirn: " + (gehirn || "fehlt");
       el("pkt").title = a.einsatzbereit ? a.werkzeuge + " Werkzeuge bereit"
                                         : "Kein Anthropic-Schlüssel";
       if (!a.einsatzbereit) {
         el("schluesselDialog").classList.add("zeigen");
-        el("antwort").textContent = "Es ist kein Anthropic-Schlüssel hinterlegt. " +
-          "Ohne ihn kann ich nicht denken.";
+        el("antwort").textContent = "Ich habe noch kein Gehirn. Trag im Fenster einen Gratis-Schlüssel ein, " +
+          "dann denke ich mit.";
         el("antwort").className = "antwort fehler";
       }
     }).catch(function () {});
@@ -714,12 +780,12 @@ PROTOKOLL_HTML = r"""<!DOCTYPE html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#08090B">
+<meta name="theme-color" content="#03080F">
 <link rel="icon" href="/symbol.svg" type="image/svg+xml">
 <title>Jarvis Protokoll</title>
 <style>
-:root{--grund:#08090B;--panel:#0F1113;--rand:#1C1F23;--akzent:#E8622C;
-  --kupfer:#F0A882;--text:#F2EFEA;--gedaempft:#A0A6AC;--grau:#7E858C;
+:root{--grund:#03080F;--panel:#071420;--rand:#0E2A3C;--akzent:#3AD1FF;
+  --kupfer:#A6ECFF;--text:#E4F7FF;--gedaempft:#8DB4C6;--grau:#5D8799;
   --gruen:#4CC38A;--rot:#E5484D;
   --sans:-apple-system,BlinkMacSystemFont,"Helvetica Neue",Arial,sans-serif;
   --mono:ui-monospace,"SF Mono",Menlo,monospace}
@@ -727,7 +793,7 @@ PROTOKOLL_HTML = r"""<!DOCTYPE html>
 body{background:var(--grund);color:var(--text);font-family:var(--sans);
   -webkit-font-smoothing:antialiased;padding:0 0 60px}
 header{padding:18px 20px;border-bottom:1px solid var(--rand);
-  background:linear-gradient(90deg,rgba(232,98,44,.13),transparent 68%)}
+  background:linear-gradient(90deg,rgba(58,209,255,.13),transparent 68%)}
 header h1{font-size:18px;font-weight:600}
 header p{font-size:12px;color:var(--grau);margin-top:4px;letter-spacing:.06em}
 .leiste{display:flex;gap:8px;flex-wrap:wrap;padding:14px 20px;align-items:center}
@@ -850,12 +916,12 @@ AUTOPILOT_HTML = r"""<!DOCTYPE html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#08090B">
+<meta name="theme-color" content="#03080F">
 <link rel="icon" href="/symbol.svg" type="image/svg+xml">
 <title>Heute zu tun</title>
 <style>
-:root{--grund:#08090B;--panel:#0F1113;--tief:#0A0D14;--rand:#1C1F23;--rand-hell:#2A3036;
-  --akzent:#E8622C;--kupfer:#F0A882;--text:#F2EFEA;--gedaempft:#A0A6AC;--grau:#7E858C;
+:root{--grund:#03080F;--panel:#071420;--tief:#050D16;--rand:#0E2A3C;--rand-hell:#16425C;
+  --akzent:#3AD1FF;--kupfer:#A6ECFF;--text:#E4F7FF;--gedaempft:#8DB4C6;--grau:#5D8799;
   --gruen:#4CC38A;--rot:#E5484D;
   --sans:-apple-system,BlinkMacSystemFont,"Helvetica Neue",Arial,sans-serif;
   --mono:ui-monospace,"SF Mono",Menlo,monospace}
@@ -863,7 +929,7 @@ AUTOPILOT_HTML = r"""<!DOCTYPE html>
 body{background:var(--grund);color:var(--text);font-family:var(--sans);
   -webkit-font-smoothing:antialiased;padding:0 0 60px}
 header{padding:18px 20px;border-bottom:1px solid var(--rand);
-  background:linear-gradient(90deg,rgba(232,98,44,.13),transparent 68%)}
+  background:linear-gradient(90deg,rgba(58,209,255,.13),transparent 68%)}
 header h1{font-size:18px;font-weight:600}
 header p{font-size:12px;color:var(--grau);margin-top:4px;letter-spacing:.04em}
 main{max-width:860px;margin:0 auto;padding:16px 20px}
@@ -881,7 +947,7 @@ textarea{font:13px/1.5 var(--sans);min-height:120px;resize:vertical;margin-top:8
 button,.knopf{font:inherit;font-size:13px;cursor:pointer;border-radius:8px;padding:8px 14px;
   border:1px solid var(--rand-hell);background:var(--tief);color:var(--text);
   text-decoration:none;display:inline-block}
-button.haupt{background:var(--akzent);border-color:var(--akzent);color:#1A0E08;font-weight:700}
+button.haupt{background:var(--akzent);border-color:var(--akzent);color:#02121C;font-weight:700}
 button:disabled{opacity:.5;cursor:default}
 .reihe{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;align-items:center}
 .art{font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--kupfer)}

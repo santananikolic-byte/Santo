@@ -1310,6 +1310,8 @@ def pruefung_schluessel(agent):
 
 def pruefung_lokales_modell(agent):
     """Jarvis denkt ohne Schlüssel und ohne Kosten mit einem Modell auf dem Rechner."""
+    import agent as agent_modul
+    agent_modul.DIREKT_ANTWORT.discard("notiz_speichern")  # hier wird die zweite Runde geprüft
     abschnitt("Lokales Modell (Ollama)")
     import http.server
     import urllib.request as _netz
@@ -1433,6 +1435,8 @@ def pruefung_lokales_modell(agent):
 
 def pruefung_freier_dienst(agent):
     """Jarvis denkt über einen Gratis-Schlüssel - ohne Anthropic, ohne Guthaben."""
+    import agent as agent_modul
+    agent_modul.DIREKT_ANTWORT.discard("notiz_speichern")  # hier wird die zweite Runde geprüft
     abschnitt("Gratis-Dienst (OpenAI-kompatibel)")
     import http.server
     import urllib.request as _netz
@@ -1805,6 +1809,106 @@ def pruefung_autopilot(agent):
         config._ROHWERTE.update(rohwerte)
 
 
+def pruefung_netz_und_tempo(agent):
+    """Seiten lesen ohne Zusatzprogramme, sichere Adressen, Direktantwort, neues Design."""
+    abschnitt("Seiten lesen, Tempo, Design")
+    import http.server
+    import urllib.error as _fehler
+    import urllib.request as _netz
+    import agent as agent_modul
+    from modules import netz
+    from modules.lokal import werkzeuge_auswaehlen
+    from modules.webseite import SEITE_HTML
+
+    teile = netz.seite_zerlegen(
+        "<html><head><title>Praxis Hofer</title><script>var x='geheim';</script></head>"
+        "<body><nav>Menü Start Kontakt</nav><h1>Willkommen</h1><p>Rufen Sie an: "
+        "+43 732 123456 oder schreiben Sie an <a href='mailto:office@hofer.example'>uns</a>."
+        "</p><a href='/team'>Unser Team</a><footer>Impressum</footer></body></html>",
+        "https://hofer.example/")
+    pruefen("Seite wird zu Text: Titel, Inhalt, ohne Skript und Menü",
+            teile["titel"] == "Praxis Hofer" and "Willkommen" in teile["text"]
+            and "geheim" not in teile["text"] and "Menü" not in teile["text"])
+    pruefen("Mailadressen, Telefonnummern und Links werden herausgezogen",
+            teile["mails"] == ["office@hofer.example"] and "+43 732 123456" in teile["telefone"]
+            and teile["links"][0]["adresse"] == "https://hofer.example/team")
+
+    gesperrt = [netz.adresse_pruefen(a)[1] for a in (
+        "http://127.0.0.1:8765/api/zustand", "http://localhost/", "http://192.168.0.1/",
+        "file:///etc/passwd", "https://example.com/?d=" + "x" * 500)]
+    pruefen("Eigenes Netz, Dateien und überlange Adressen werden nicht gelesen",
+            all(gesperrt), "; ".join(g[:30] for g in gesperrt))
+    try:
+        netz._GepruefteWeiterleitung().redirect_request(
+            _netz.Request("https://example.com/"), None, 302, "Found", {},
+            "http://127.0.0.1:8765/api/zustand")
+        umgeleitet = True
+    except _fehler.URLError:
+        umgeleitet = False
+    pruefen("Eine Weiterleitung ins eigene Netz wird abgelehnt", umgeleitet is False)
+
+    treffer = netz._ddg_zerlegen(
+        '<div class="result results_links web-result"><div class="links_main">'
+        '<a class="result__a" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fhofer.example%2F&amp;rut=1">'
+        'Praxis Hofer</a><a class="result__snippet" href="x">Allgemeinmedizin <b>Linz</b></a>'
+        '</div></div>')
+    pruefen("Suchtreffer von DuckDuckGo werden gelesen",
+            treffer and treffer[0]["adresse"] == "https://hofer.example/"
+            and "Linz" in treffer[0]["auszug"])
+    pruefen("Recherche ohne Such-Dienst bricht nicht ab",
+            isinstance(agent.tools.run("recherche", {"frage": "Test"}), dict))
+    namen = [w["name"] for w in werkzeuge_auswaehlen(
+        agent.tools.katalog(), "Lies mal www.hofer.example und sag mir die Öffnungszeiten", 10)]
+    pruefen("Steht eine Adresse im Satz, wird das Seitenlesen angeboten",
+            namen[:1] == ["webseite_lesen"], ", ".join(namen[:4]))
+
+    # Direktantwort: einfache Aktion, eine Anfrage statt zwei
+    gesehen = []
+
+    class Dienst(http.server.BaseHTTPRequestHandler):
+        def log_message(self, *a):
+            pass
+
+        def do_POST(self):
+            gesehen.append(self.rfile.read(int(self.headers["Content-Length"])))
+            roh = json.dumps({"choices": [{"message": {"role": "assistant", "content": None,
+                              "tool_calls": [{"id": "c1", "type": "function", "function": {
+                                  "name": "punkt_anlegen",
+                                  "arguments": json.dumps({"text": "Tempo-Test"})}}]}}]}).encode()
+            self.send_response(200)
+            self.send_header("Content-Length", str(len(roh)))
+            self.end_headers()
+            self.wfile.write(roh)
+
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 11995), Dienst)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    alt = (config.ANTHROPIC_API_KEY, config.FREIER_DIENST_URL, config.FREIER_DIENST_SCHLUESSEL,
+           config.FREIER_DIENST_MODELL)
+    config.ANTHROPIC_API_KEY = ""
+    config.FREIER_DIENST_URL = "http://127.0.0.1:11995/v1"
+    config.FREIER_DIENST_SCHLUESSEL = "x" * 20
+    config.FREIER_DIENST_MODELL = "schnell"
+    try:
+        agent.verlauf_leeren()
+        text = agent.denken("Leg einen offenen Punkt an: Tempo-Test")
+        pruefen("Einfache Aktion: Jarvis antwortet direkt, ohne zweite Runde",
+                len(gesehen) == 1 and "Tempo-Test" in [p["text"] for p in agent.memory.punkte_offen()]
+                and bool(text), "%d Anfrage(n): %s" % (len(gesehen), text[:60]))
+    finally:
+        server.shutdown()
+        (config.ANTHROPIC_API_KEY, config.FREIER_DIENST_URL, config.FREIER_DIENST_SCHLUESSEL,
+         config.FREIER_DIENST_MODELL) = alt
+    pruefen("Mit Claude bleibt die zweite Runde (Direktantwort nur für Gratis-Gehirne)",
+            "if direkt and not config.ANTHROPIC_API_KEY" in open(
+                os.path.join(WURZEL, "src", "agent.py"), encoding="utf-8").read())
+    pruefen("Neues Design: Jarvis-Ringe, Uhr und Aufgabenanzeige",
+            'class="hud hud1"' in SEITE_HTML and 'id="uhr"' in SEITE_HTML
+            and 'id="hudAufgaben"' in SEITE_HTML and "#3AD1FF" in SEITE_HTML)
+    pruefen("Keine alten Meldungen 'kein Anthropic-Schlüssel' mehr in der Oberfläche",
+            "Anthropic-Schlüssel hinterlegt" not in SEITE_HTML)
+    del agent_modul
+
+
 def pruefung_sicherheit(agent):
     abschnitt("Sicherheit")
     ergebnis = agent.tools.run("systeminfo", {"was": "rm -rf /"})
@@ -1953,6 +2057,7 @@ def main() -> int:
     pruefung_lokales_modell(agent)
     pruefung_freier_dienst(agent)
     pruefung_autopilot(agent)
+    pruefung_netz_und_tempo(agent)
     pruefung_routinen(agent)
     pruefung_zeitplan()
     pruefung_kalender()

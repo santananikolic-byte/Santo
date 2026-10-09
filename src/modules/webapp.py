@@ -44,9 +44,11 @@ MAX_KOERPER = 512 * 1024
 # Fehler in die Konsole. Ein kleines SVG kostet nichts und räumt das weg.
 SYMBOL_SVG = (
     '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">'
-    '<rect width="64" height="64" rx="14" fill="#0F1113"/>'
-    '<circle cx="32" cy="32" r="17" fill="none" stroke="#E8622C" stroke-width="5"/>'
-    '<circle cx="32" cy="32" r="6" fill="#E8622C"/></svg>')
+    '<rect width="64" height="64" rx="14" fill="#03080F"/>'
+    '<circle cx="32" cy="32" r="21" fill="none" stroke="#3AD1FF" stroke-width="2" '
+    'stroke-dasharray="10 4"/>'
+    '<circle cx="32" cy="32" r="14" fill="none" stroke="#3AD1FF" stroke-width="4"/>'
+    '<circle cx="32" cy="32" r="6" fill="#A6ECFF"/></svg>')
 
 
 def _fuer_skript(wert: str) -> str:
@@ -355,8 +357,8 @@ class JarvisWeb:
             if not self.agent.einsatzbereit():
                 return self._antworten(behandler, 200, {
                     "ok": False,
-                    "antwort": "Es ist kein Anthropic-Schlüssel hinterlegt. "
-                               "Ohne ihn kann ich nicht denken."})
+                    "antwort": "Ich habe noch kein Gehirn. Trag im Startfenster einen "
+                               "Gratis-Schlüssel ein, dann denke ich mit."})
             # Nur ein Gedanke gleichzeitig: sonst mischen sich zwei Gespräche
             # im selben Verlauf.
             with self._denkt:

@@ -61,6 +61,20 @@ Kalender kann man einrichten, muss man aber nicht.
 
 ---
 
+## Seiten lesen und suchen – ohne Zusatzprogramme
+
+„Jarvis, lies www.beispiel.at und sag mir die Öffnungszeiten“: Er holt die
+Seite selbst und zerlegt sie in Text, Mailadressen, Telefonnummern und Links –
+ohne Playwright, ohne Chromium. Gesucht wird der Reihe nach über den
+Such-Dienst (falls eingerichtet), die Google-Suche deines Gemini-Schlüssels,
+DuckDuckGo und Mojeek. Adressen im eigenen Netz (Router, 127.0.0.1) liest er
+nie, auch nicht über eine Weiterleitung.
+
+Einfache Aufträge („Leg einen Punkt an …“, „Notier …“) bestätigt er direkt,
+ohne das Gehirn ein zweites Mal zu fragen – das spart die Hälfte der Zeit.
+
+---
+
 ## Autopilot: Er arbeitet von selbst
 
 Unter **„Heute zu tun“** (Link oben auf der Jarvis-Seite, oder

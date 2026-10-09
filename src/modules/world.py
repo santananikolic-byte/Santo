@@ -17,6 +17,7 @@ import urllib.parse
 import urllib.request
 
 import config
+from modules.netz import suche_als_text, websuche
 
 GEO_URL = "https://geocoding-api.open-meteo.com/v1/search"
 WETTER_URL = "https://api.open-meteo.com/v1/forecast"
@@ -145,20 +146,25 @@ class Welt:
         return ""
 
     def recherche(self, frage: str) -> dict:
-        """Sucht im Web über den Such-MCP."""
+        """Sucht im Web: Such-Dienst, Google über Gemini, DuckDuckGo, Mojeek.
+
+        Früher ging das nur mit Brave-Schlüssel. Jetzt ist der Such-Dienst nur
+        noch der erste von mehreren Wegen.
+        """
         frage = (frage or "").strip()
         if not frage:
             return {"ok": False, "fehler": "Sag mir, wonach ich suchen soll."}
+        such_mcp = None
         werkzeug = self._such_werkzeug()
-        if not werkzeug:
-            return {"ok": False,
-                    "fehler": "Für die Recherche fehlt der Such-Dienst. In "
-                              "config/mcp_servers.json den Eintrag 'suche' auf "
-                              "\"aus\": false stellen und einen Brave-Schlüssel eintragen."}
-        ergebnis = self.mcp.aufrufen(werkzeug, {"query": frage, "count": 6})
+        if werkzeug:
+            def such_mcp(f):
+                return self.mcp.aufrufen(werkzeug, {"query": f, "count": 6})
+        ergebnis = websuche(frage, 6, such_mcp)
         if not ergebnis.get("ok"):
             return ergebnis
-        return {"ok": True, "frage": frage, "text": ergebnis["text"][:4000]}
+        return {"ok": True, "frage": frage, "weg": ergebnis["weg"],
+                "treffer": ergebnis.get("treffer", []),
+                "text": suche_als_text(ergebnis)[:4000]}
 
     def flug_suchen(self, von: str, nach: str, wann: str = "") -> dict:
         """Sucht Flugverbindungen und nennt sie. Gebucht wird hier nichts."""

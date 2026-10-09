@@ -57,6 +57,7 @@ BAULISTE = [
     "modules/routines",
     "modules/camera",
     "modules/mcp_client",
+    "modules/netz",
     "modules/world",
     "modules/browser",
     "modules/messenger",

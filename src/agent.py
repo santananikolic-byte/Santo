@@ -98,6 +98,44 @@ def json_aus_text(rohtext: str):
     return None
 
 
+# Werkzeuge, deren eigene Meldung als Antwort genügt ("Notiz gespeichert.").
+# Alles, was gelesen und zusammengefasst werden muss, gehört nicht hierher.
+DIREKT_ANTWORT = {
+    "notiz_speichern", "punkt_anlegen", "punkt_erledigen", "kontakt_anlegen",
+    "erinnerung_anlegen", "erinnerung_erledigen", "kennzahl_setzen", "lead_anlegen",
+    "lead_weiterstufen", "buchung_eintragen", "termin_anlegen", "programm_oeffnen",
+    "autopilot_starten", "heute_zu_tun", "punkte_offen", "mail_senden",
+    "nachricht_senden", "sms_senden", "anrufen", "tagesbericht_speichern",
+    "fixkosten_anlegen", "routine_anlegen",
+}
+
+
+# Werkzeuge, die als Meldung nur den Inhalt zurückgeben ("Berger anrufen"),
+# bekommen für die Direktantwort einen ganzen Satz.
+DIREKT_SAETZE = {
+    "notiz_speichern": "Notiert: {text}",
+    "punkt_anlegen": "Offener Punkt angelegt: {text}",
+    "kontakt_anlegen": "Kontakt {name} ist angelegt.",
+    "kennzahl_setzen": "{name} ist festgehalten.",
+    "tagesbericht_speichern": "Der Tagesbericht ist gespeichert.",
+}
+
+
+def direkt_satz(name: str, argumente: dict, ergebnis: dict) -> str:
+    """Der Satz, mit dem Jarvis eine einfache Aktion selbst bestätigt - oder ''."""
+    if name not in DIREKT_ANTWORT or not ergebnis.get("ok"):
+        return ""
+    vorlage = DIREKT_SAETZE.get(name)
+    if vorlage:
+        satz = vorlage
+        for feld in ("text", "name"):
+            satz = satz.replace("{%s}" % feld, str((argumente or {}).get(feld, "")).strip())
+        if name == "punkt_anlegen" and (argumente or {}).get("faellig"):
+            satz += " (fällig %s)" % str(argumente["faellig"]).strip()
+        return satz if satz.endswith((".", "!", "?", ")")) else satz + "."
+    return str(ergebnis.get("text") or "").strip()
+
+
 class JarvisAgent:
     """Die Denkschleife: fragt Claude, führt Werkzeuge aus, antwortet gesprochen."""
 
@@ -148,8 +186,8 @@ class JarvisAgent:
         """
         if not self.einsatzbereit():
             return {"ok": False,
-                    "fehler": "Es ist kein Anthropic-Schlüssel hinterlegt. Starte die "
-                              "Einrichtung mit: python3 jarvis.py einrichten"}
+                    "fehler": "Es ist noch kein Gehirn eingerichtet. Trag im Browser "
+                              "einen Gratis-Schlüssel ein (localhost:8765)."}
         if not config.ANTHROPIC_API_KEY:
             if freier_dienst_aktiv():
                 return freier_dienst_anfragen(koerper)
@@ -280,8 +318,8 @@ class JarvisAgent:
         if not eingabe:
             return ""
         if not self.einsatzbereit():
-            return ("Es ist kein Anthropic-Schlüssel hinterlegt. Starte einmal die "
-                    "Einrichtung, dann kann ich dir antworten.")
+            return ("Es ist noch kein Gehirn eingerichtet. Trag im Browser einen "
+                    "Gratis-Schlüssel ein, dann kann ich dir antworten.")
 
         if protokollieren:
             self.memory.verlauf_anhaengen("user", eingabe)
@@ -316,12 +354,18 @@ class JarvisAgent:
                 return text or "Dazu habe ich nichts zu sagen."
 
             ergebnisse = []
+            direkt = []
             for aufruf in werkzeugaufrufe:
                 name = aufruf.get("name", "")
                 argumente = aufruf.get("input") or {}
                 print("[werkzeug] %s %s" % (name, json.dumps(argumente,
                                                              ensure_ascii=False)[:200]))
                 ergebnis = self.tools.run(name, argumente)
+                satz = direkt_satz(name, argumente, ergebnis) if direkt is not None else ""
+                if satz:
+                    direkt.append(satz)
+                else:
+                    direkt = None
                 try:
                     text = json.dumps(ergebnis, ensure_ascii=False, default=str)[:6000]
                 except (TypeError, ValueError):
@@ -331,6 +375,17 @@ class JarvisAgent:
                                    "is_error": not bool(ergebnis.get("ok"))})
             self.verlauf.append({"role": "user", "content": ergebnisse})
             self._verlauf_kuerzen()
+
+            # Einfache Aktionen sagen selbst, was passiert ist. Bei den langsamen
+            # Gratis-Gehirnen spart das die zweite Runde - Jarvis handelt, statt
+            # das Ergebnis noch einmal umformulieren zu lassen.
+            if direkt and not config.ANTHROPIC_API_KEY and len(" ".join(direkt)) <= 400:
+                text = " ".join(direkt)
+                self.verlauf.append({"role": "assistant",
+                                     "content": [{"type": "text", "text": text}]})
+                if protokollieren:
+                    self.memory.verlauf_anhaengen("assistant", text)
+                return text
 
         return ("Ich habe es %d Mal versucht und komme nicht weiter. Sag mir bitte "
                 "genauer, was du brauchst." % MAX_RUNDEN)
@@ -345,7 +400,7 @@ class JarvisAgent:
         Fachkraft den Kontext des Chefs zumüllen.
         """
         if not self.einsatzbereit():
-            return ("Es ist kein Anthropic-Schlüssel hinterlegt.")
+            return ("Es ist noch kein Gehirn eingerichtet.")
 
         katalog = self.tools.katalog()
         if werkzeugnamen:
@@ -463,9 +518,9 @@ class JarvisAgent:
     @staticmethod
     def _briefing_ohne_claude(bausteine: str, morgens: bool) -> str:
         """Rückfallebene ohne Schlüssel: die nackten Fakten, nichts Erfundenes."""
-        kopf = ("Guten Morgen. Ohne Anthropic-Schlüssel kann ich nur die nackten Zahlen "
+        kopf = ("Guten Morgen. Ohne eingerichtetes Gehirn kann ich nur die nackten Zahlen "
                 "vorlesen." if morgens else
-                "Feierabend. Ohne Anthropic-Schlüssel kann ich nur die nackten Zahlen "
+                "Feierabend. Ohne eingerichtetes Gehirn kann ich nur die nackten Zahlen "
                 "vorlesen.")
         return "%s\n%s" % (kopf, bausteine)
 

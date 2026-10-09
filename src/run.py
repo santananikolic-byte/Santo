@@ -87,8 +87,8 @@ def dauerbetrieb():
         return chatbetrieb(agent, stimme)
 
     if not agent.einsatzbereit():
-        stimme.sprich("Es ist kein Anthropic-Schlüssel hinterlegt. Starte bitte einmal "
-                      "die Einrichtung.")
+        stimme.sprich("Es ist noch kein Gehirn eingerichtet. Öffne Jarvis im Browser "
+                      "und trag einen Gratis-Schlüssel ein.")
         print("Starte die Einrichtung mit: python3 jarvis.py einrichten")
 
     stimme.sprich("Ich bin da. Sag Hey Jarvis, wenn du etwas brauchst.")
@@ -665,8 +665,8 @@ def hauptprogramm(argumente=None) -> int:
         # Browser ein. Eine Einrichtung im Terminal, die den Server gar nicht
         # erst startet, lässt den Nutzer vor einer toten Adresse stehen.
         if not config.ANTHROPIC_API_KEY:
-            print("Noch kein Anthropic-Schlüssel - den trägst du gleich im "
-                  "Browser ein.")
+            print("Noch kein Gehirn eingerichtet - das machst du gleich im "
+                  "Browser.")
         return webbetrieb(argumente[1:] if argumente else [])
     elif modus in ("hoeren", "hören", "dauerbetrieb", "sprechen"):
         if not config.EINRICHTUNG_FERTIG and not config.ANTHROPIC_API_KEY:

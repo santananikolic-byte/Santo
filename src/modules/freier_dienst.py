@@ -57,7 +57,8 @@ BEHAUPTUNG = re.compile(
 WERKZEUG_PFLICHT = (
     "Regel ohne Ausnahme: Sollst du etwas speichern, anlegen, eintragen, senden, buchen, "
     "starten oder nachschlagen, rufst du dafür das passende Werkzeug auf. Behaupte nie, "
-    "etwas getan zu haben, ohne dass ein Werkzeug es getan hat.")
+    "etwas getan zu haben, ohne dass ein Werkzeug es getan hat. Ist der Auftrag klar, "
+    "handle sofort ohne Rückfrage. Antworte in höchstens zwei Sätzen.")
 _PAUSE = {}  # Modellname -> Zeitpunkt (monotonic), bis zu dem es pausiert wird
 _FEHLSCHLAEGE = {}  # Modellname -> wie oft hintereinander "Kontingent leer"
 

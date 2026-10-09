@@ -36,6 +36,7 @@ from modules.memory import Memory, heute_datum
 from modules.privat import BEREICHE, Privat, WIEDERHOLUNGEN, RHYTHMEN
 from modules.messenger import Messenger
 from modules.autopilot import Autopilot
+from modules.netz import webseite_lesen
 from modules.recall import Recall
 from modules.routines import Routines
 from modules.team import ROLLEN, Team
@@ -195,6 +196,10 @@ class Werkzeuge:
                       "datum": text}, ["zusammenfassung"]),
             werkzeug("rueckblick", "Gibt die Tagesberichte der letzten Tage zurück.",
                      {"tage": ganz}),
+            werkzeug("webseite_lesen",
+                     "Liest eine Webseite und gibt ihren Text, Mailadressen, Telefonnummern "
+                     "und Links zurück. Für jede Frage zu einer Adresse oder Seite.",
+                     {"adresse": text, "frage": text}, ["adresse"]),
             werkzeug("autopilot_starten",
                      "Startet den Autopilot jetzt: neue Betriebe finden und Anruf-Skripte "
                      "schreiben, Nachfassen, Antworten auf wichtige Mails entwerfen, "
@@ -446,7 +451,7 @@ class Werkzeuge:
 
     # -- Freigabe -----------------------------------------------------------
 
-    def braucht_freigabe(self, name: str) -> bool:
+    def braucht_freigabe(self, name: str, argumente: dict = None) -> bool:
         """Muss vor diesem Werkzeug gefragt werden?"""
         if self.mcp.ist_mcp_werkzeug(name):
             return self.mcp.braucht_freigabe(name)
@@ -494,7 +499,7 @@ class Werkzeuge:
                                               "unbekannt")
             return ergebnis
 
-        if self.braucht_freigabe(name):
+        if self.braucht_freigabe(name, argumente):
             entscheidung = self._freigabe(name, argumente)
             if not entscheidung.get("erlaubt"):
                 ergebnis = {"ok": False, "abgebrochen": True,
@@ -578,6 +583,8 @@ class Werkzeuge:
                 a.get("offen", ""), a.get("datum", ""))
         if name == "rueckblick":
             return {"ok": True, "text": self.recall.rueckblick(int(a.get("tage") or 7))}
+        if name == "webseite_lesen":
+            return webseite_lesen(a.get("adresse", ""), a.get("frage", ""))
         if name == "autopilot_starten":
             return self.autopilot.laufen(self.agent)
         if name == "heute_zu_tun":

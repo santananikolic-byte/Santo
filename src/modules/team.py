@@ -283,7 +283,7 @@ class Team:
         if self.agent is None or not getattr(self.agent, "einsatzbereit",
                                              lambda: False)():
             return {"ok": False,
-                    "fehler": "Ohne Anthropic-Schlüssel kann %s nicht arbeiten."
+                    "fehler": "Ohne eingerichtetes Gehirn kann %s nicht arbeiten."
                               % ROLLEN[schluessel]["name"]}
 
         gedaechtnis = ""
