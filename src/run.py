@@ -247,6 +247,67 @@ def dashboard_bauen():
         agent.tools.mcp.stoppen()
 
 
+# Was Jarvis kann - nach Bereichen, für die Übersicht im Terminal.
+FAEHIGKEITEN = [
+    ("Gedächtnis", ("notiz", "kontakt_", "punkt", "kennzahl", "gedaechtnis", "tagesbericht",
+                    "rueckblick", "protokoll", "erinnerung")),
+    ("Verkauf", ("lead", "angebot", "nachfass", "pipeline", "verkauf", "gespraech",
+                 "autopilot", "heute_zu_tun", "anrufliste", "offene_leads")),
+    ("Geld", ("buchung", "beleg", "auswertung", "csv", "cashflow", "fixkosten", "bedarf",
+              "fehlende_belege")),
+    ("Kommunikation", ("mail", "nachricht", "anrufen", "sms", "termin")),
+    ("Web und Wissen", ("webseite", "recherche", "wetter", "flug", "browser")),
+    ("Sehen und Mac", ("umschauen", "bildschirm", "systeminfo", "ordner", "programm",
+                       "skript", "werkstatt")),
+    ("Team und Abläufe", ("mitarbeiter", "team", "lagebericht", "routine", "dashboard")),
+]
+CYAN, HELL, AUS = "\033[36m", "\033[96m", "\033[0m"
+
+
+def faehigkeiten_text(namen: list, bereit: bool = True) -> str:
+    """Die Übersicht aller Fähigkeiten, nach Bereichen."""
+    farbe = sys.stdout.isatty() if sys.stdout is not None else False
+    c, h, a = (CYAN, HELL, AUS) if farbe else ("", "", "")
+    zeilen = ["", "  %s%d FÄHIGKEITEN BEREIT%s%s" % (h, len(namen), a,
+                                                    "" if bereit else
+                                                    "  (noch ohne Gehirn - im Browser einrichten)")]
+    vergeben = set()
+    for bereich, anfaenge in FAEHIGKEITEN:
+        treffer = [n for n in namen if n not in vergeben and n.startswith(anfaenge)]
+        vergeben.update(treffer)
+        if treffer:
+            zeilen.append("  %s%-17s%s %s" % (c, bereich, a, ", ".join(treffer)))
+    rest = [n for n in namen if n not in vergeben]
+    if rest:
+        zeilen.append("  %s%-17s%s %s" % (c, "Weitere", a, ", ".join(rest)))
+    zeilen.append("")
+    zeilen.append("  Sprich im Browser mit mir - oder schreib mir hier im Terminal.")
+    zeilen.append("  'hilfe' zeigt diese Liste, 'beenden' oder Strg+C hört auf.")
+    return "\n".join(zeilen)
+
+
+def terminal_gespraech(agent, web):
+    """Jarvis im Terminal: Aufträge tippen, während der Browser weiterläuft."""
+    farbe = sys.stdout.isatty()
+    c, h, a = (CYAN, HELL, AUS) if farbe else ("", "", "")
+    while True:
+        try:
+            eingabe = input("\n  %sDu ›%s " % (h, a)).strip()
+        except EOFError:
+            return
+        if not eingabe:
+            continue
+        if eingabe.lower() in ("beenden", "exit", "quit", "tschüss", "ende"):
+            return
+        if eingabe.lower() in ("hilfe", "?", "help"):
+            print(faehigkeiten_text(agent.tools.namen(), agent.einsatzbereit()))
+            continue
+        beginn = time.time()
+        with web._denkt:  # nie gleichzeitig mit dem Browser im selben Verlauf
+            antwort = agent.denken(eingabe)
+        print("  %sJarvis ›%s %s  %s(%.1f s)%s" % (c, a, antwort, c, time.time() - beginn, a))
+
+
 def webbetrieb(argumente=None):
     """Startet Jarvis als Web-App im Browser."""
     argumente = argumente or []
@@ -278,19 +339,24 @@ def webbetrieb(argumente=None):
         print("  weiter, wenn du willst, dass jemand alles darf, was du darfst.")
     else:
         print("     (nur auf diesem Rechner erreichbar)")
-    print("\n  Beenden mit Strg und C.\n")
-
     import shutil as _shutil
     import subprocess as _subprocess
-    if _shutil.which("open"):
+    import threading as _threading
+    if _shutil.which("open") and os.environ.get("JARVIS_KEIN_BROWSER") != "1":
         try:
             _subprocess.run(["open", adresse], shell=False, timeout=15,
                             stdout=_subprocess.DEVNULL, stderr=_subprocess.DEVNULL)
         except (OSError, _subprocess.SubprocessError):
             pass
 
+    print(faehigkeiten_text(agent.tools.namen(), agent.einsatzbereit()))
+    web.starten(blockierend=False)
     try:
-        web.starten(blockierend=True)
+        if sys.stdin is not None and sys.stdin.isatty():
+            terminal_gespraech(agent, web)
+        else:
+            # Ohne Tastatur (etwa als Hintergrunddienst): einfach weiterlaufen.
+            _threading.Event().wait()
     except KeyboardInterrupt:
         pass
     finally:

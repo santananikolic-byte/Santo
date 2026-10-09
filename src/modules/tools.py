@@ -74,7 +74,9 @@ PARAMETER_AKTIONEN = {
 }
 
 # Alles hier drin fragt vor der Ausführung nach einer Freigabe.
-FREIGABE_PFLICHTIG = {"mail_senden", "termin_anlegen", "bildschirm_bedienen",
+# Termine im eigenen Kalender fragen nicht mehr nach: Sie lassen sich jederzeit
+# löschen, und ständiges Nachfragen machte Jarvis zäh.
+FREIGABE_PFLICHTIG = {"mail_senden", "bildschirm_bedienen",
                       "nachricht_senden", "skript_ausfuehren", "anrufen",
                       "sms_senden", "browser_auftrag"}
 

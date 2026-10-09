@@ -38,7 +38,7 @@ from modules.setup_wizard import schluessel_online_testen
 from modules.webseite import AUTOPILOT_HTML, PROTOKOLL_HTML, SEITE_HTML
 
 STANDARD_PORT = 8765
-MAX_KOERPER = 512 * 1024
+MAX_KOERPER = 6 * 1024 * 1024  # ein Kamerabild passt hinein
 
 # Ohne eigenes Symbol fragt jeder Browser nach /favicon.ico und bekommt einen
 # Fehler in die Konsole. Ein kleines SVG kostet nichts und räumt das weg.
@@ -361,8 +361,13 @@ class JarvisWeb:
                                "Gratis-Schlüssel ein, dann denke ich mit."})
             # Nur ein Gedanke gleichzeitig: sonst mischen sich zwei Gespräche
             # im selben Verlauf.
+            bild = str(daten.get("bild") or "")
+            if bild.startswith("data:"):
+                bild = bild.split(",", 1)[-1]
+            quelle = "Bildschirm" if daten.get("quelle") == "bildschirm" else "Kamera"
             with self._denkt:
-                antwort = self.agent.denken(text)
+                antwort = self.agent.denken(text, bild_base64=bild[:5_000_000],
+                                            bild_quelle=quelle)
             return self._antworten(behandler, 200,
                                    {"ok": True, "antwort": antwort,
                                     "zeit": zeitstempel()})

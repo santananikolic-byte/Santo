@@ -1381,6 +1381,12 @@ BEHAUPTUNG = re.compile(
     r"\b(notiert|gespeichert|vermerkt|angelegt|eingetragen|hinterlegt|gesendet|"
     r"verschickt|abgeschickt|erledigt|abgehakt|gebucht|erstellt|aufgenommen|gestartet)\b",
     re.IGNORECASE)
+# Nur wenn der Nutzer etwas tun lassen will, ist "erledigt" ohne Werkzeug eine
+# Lüge. Beschreibt das Modell ein Bild oder erzählt, darf es diese Wörter benutzen.
+AUFTRAG = re.compile(
+    r"\b(merk|notier|speicher|leg\w* .{0,40}an\b|anlegen|trag\w* .{0,40}ein|eintragen|"
+    r"schick|send|buch|erinner|start|erledig|hak|lösch|streich|ruf\w* .{0,30}an\b|"
+    r"anrufen|vermerk|nimm .{0,30}auf|aufnehmen)", re.IGNORECASE)
 WERKZEUG_PFLICHT = (
     "Regel ohne Ausnahme: Sollst du etwas speichern, anlegen, eintragen, senden, buchen, "
     "starten oder nachschlagen, rufst du dafür das passende Werkzeug auf. Behaupte nie, "
@@ -1573,6 +1579,12 @@ def _behauptung_pruefen(bloecke: list, nutzlast: dict, timeout: int) -> list:
         return bloecke  # in dieser Runde hat schon ein Werkzeug gearbeitet
     text = " ".join(b.get("text", "") for b in bloecke if b.get("type") == "text")
     if not BEHAUPTUNG.search(text):
+        return bloecke
+    frage = nutzlast["messages"][letzte_frage] if letzte_frage >= 0 else {}
+    inhalt = frage.get("content")
+    if isinstance(inhalt, list):  # mit Bild: Es wird beschrieben, nicht gehandelt
+        return bloecke
+    if not AUFTRAG.search(str(inhalt or "")):
         return bloecke
     nachfrage = dict(nutzlast)
     nachfrage["messages"] = nutzlast["messages"] + [
@@ -5268,8 +5280,8 @@ class Kamera:
         programm = self.werkzeug_vorhanden()
         if not programm:
             self.letzter_fehler = (
-                "Ich habe kein Programm zum Fotografieren. Bitte im Terminal "
-                "'brew install imagesnap' ausführen, dann kann ich mich umsehen.")
+                "Ich sehe über die Kamera im Browser: Sag einfach 'schau mal' oder "
+                "'was siehst du' im Jarvis-Fenster, dann mache ich ein Bild.")
             return {"ok": False, "fehler": self.letzter_fehler}
 
         try:
@@ -8000,6 +8012,10 @@ button{font-family:inherit;cursor:pointer;border:none;background:none;color:inhe
 .ticker a,.ticker .mini{color:var(--grau);text-decoration:none;font-size:10px;
                         letter-spacing:.12em}
 .ticker a:hover,.ticker .mini:hover{color:var(--kupfer)}
+.ticker .mini.aktiv{color:var(--akzent);text-shadow:0 0 8px rgba(58,209,255,.6)}
+.blitz{position:fixed;inset:0;background:rgba(166,236,255,.18);pointer-events:none;
+       opacity:0;transition:opacity .25s;z-index:50}
+.blitz.an{opacity:1}
 
 /* ---- Bühne ---- */
 main{flex:1;display:flex;flex-direction:column;align-items:center;
@@ -8144,11 +8160,14 @@ body[data-zustand="wach"] .zustandstext{color:var(--akzent)}
 </style>
 </head>
 <body data-zustand="aus">
+<div class="blitz" id="blitz"></div>
 
 <div class="ticker">
   <span class="pkt" id="pkt"></span>
   <span id="lage">Stand wird geholt …</span>
   <span class="rechts">
+    <button class="mini" id="kameraKnopf" title="Bei 'schau mal' macht Jarvis ein Foto mit der Kamera">Kamera an</button>
+    <button class="mini" id="schirmKnopf" title="Jarvis sieht deinen Bildschirm, solange du teilst">Bildschirm teilen</button>
     <button class="mini" id="tippenAn" title="Notweg, falls das Mikrofon streikt">Tippen</button>
     <a href="/autopilot" data-seite target="_blank" rel="noopener" id="zuTunLink">Heute zu tun</a>
     <a href="/protokoll" data-seite target="_blank" rel="noopener">Protokoll</a>
@@ -8360,6 +8379,85 @@ body[data-zustand="wach"] .zustandstext{color:var(--akzent)}
     }, Math.min(45000, 2500 + text.length * 90));
   }
 
+  /* ---------- Sehen: Kamera und Bildschirm über den Browser ---------- */
+  // Kein Homebrew, kein Zusatzprogramm: Der Browser darf an Kamera und
+  // Bildschirm, und das Gehirn bekommt das Bild direkt mit der Frage.
+  var SEHEN = /(schau|sieh |siehst|guck|kamera|vor mir|in der hand|erkennst|was ist das|lies das|lies vor|foto|diesen beleg|den beleg hier|die rechnung hier)/i;
+  var ADRESSE = /(https?:|www\.|\.(at|de|com|ch|eu|net|org)\b)/i;
+  var SCHIRM = /(bildschirm|monitor|display|fenster|auf dem schirm|was ist offen|was hab ich offen)/i;
+  var kameraAn = true, schirmStrom = null;
+  try { kameraAn = localStorage.getItem("jarvis-kamera") !== "aus"; } catch (e) {}
+
+  function knoepfeZeigen() {
+    el("kameraKnopf").textContent = kameraAn ? "Kamera an" : "Kamera aus";
+    el("kameraKnopf").classList.toggle("aktiv", kameraAn);
+    el("schirmKnopf").textContent = schirmStrom ? "Bildschirm geteilt" : "Bildschirm teilen";
+    el("schirmKnopf").classList.toggle("aktiv", !!schirmStrom);
+  }
+  function bildAus(strom) {
+    return new Promise(function (fertig, fehler) {
+      var v = document.createElement("video");
+      v.muted = true; v.playsInline = true; v.srcObject = strom;
+      v.onloadeddata = function () {
+        setTimeout(function () {
+          var breite = Math.min(1280, v.videoWidth || 1280);
+          var hoehe = Math.round(breite * (v.videoHeight || 720) / (v.videoWidth || 1280));
+          var c = document.createElement("canvas"); c.width = breite; c.height = hoehe;
+          c.getContext("2d").drawImage(v, 0, 0, breite, hoehe);
+          fertig(c.toDataURL("image/jpeg", 0.72).split(",")[1]);
+        }, 350);  // kurz warten: die Kamera regelt erst die Helligkeit nach
+      };
+      v.onerror = fehler;
+      v.play().catch(function () {});
+    });
+  }
+  function blitzen() {
+    el("blitz").classList.add("an");
+    setTimeout(function () { el("blitz").classList.remove("an"); }, 260);
+  }
+  function kameraBild() {
+    return navigator.mediaDevices.getUserMedia({ video: { width: 1280 } }).then(function (strom) {
+      return bildAus(strom).then(function (b) {
+        strom.getTracks().forEach(function (t) { t.stop(); });  // Kamera sofort wieder aus
+        blitzen(); return { daten: b, quelle: "kamera" };
+      });
+    });
+  }
+  function bildFuer(text) {
+    if (schirmStrom && SCHIRM.test(text)) {
+      return bildAus(schirmStrom).then(function (b) { return { daten: b, quelle: "bildschirm" }; });
+    }
+    if (kameraAn && SEHEN.test(text) && !ADRESSE.test(text) && navigator.mediaDevices) {
+      return kameraBild().catch(function () {
+        el("hinweis").style.display = "block";
+        el("hinweis").textContent = "Die Kamera ist im Browser nicht erlaubt - erlaube sie " +
+          "über das Symbol in der Adressleiste.";
+        return null;
+      });
+    }
+    return Promise.resolve(null);
+  }
+  el("kameraKnopf").addEventListener("click", function () {
+    kameraAn = !kameraAn;
+    try { localStorage.setItem("jarvis-kamera", kameraAn ? "an" : "aus"); } catch (e) {}
+    knoepfeZeigen();
+  });
+  el("schirmKnopf").addEventListener("click", function () {
+    if (schirmStrom) {
+      schirmStrom.getTracks().forEach(function (t) { t.stop(); });
+      schirmStrom = null; knoepfeZeigen(); return;
+    }
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) { return; }
+    navigator.mediaDevices.getDisplayMedia({ video: true }).then(function (strom) {
+      schirmStrom = strom;
+      strom.getVideoTracks()[0].addEventListener("ended", function () {
+        schirmStrom = null; knoepfeZeigen();
+      });
+      knoepfeZeigen();
+    }).catch(function () {});
+  });
+  knoepfeZeigen();
+
   /* ---------- Reden ---------- */
   function fragen(text) {
     text = (text || "").trim();
@@ -8370,7 +8468,11 @@ body[data-zustand="wach"] .zustandstext{color:var(--akzent)}
     el("gesagt").className = "gesagt";
     el("hinweis").style.display = "none";
     setzeZustand("denkt");
-    holen("/api/reden", { text: text }).then(function (a) {
+    bildFuer(text).then(function (bild) {
+      var k = { text: text };
+      if (bild && bild.daten) { k.bild = bild.daten; k.quelle = bild.quelle; }
+      return holen("/api/reden", k);
+    }).then(function (a) {
       var antwort = a.antwort || a.fehler || "Ich habe keine Antwort bekommen.";
       el("antwort").textContent = antwort;
       el("antwort").className = "antwort" + (a.ok ? "" : " fehler");
@@ -10580,7 +10682,7 @@ class Scheduler:
 
 
 STANDARD_PORT = 8765
-MAX_KOERPER = 512 * 1024
+MAX_KOERPER = 6 * 1024 * 1024  # ein Kamerabild passt hinein
 
 # Ohne eigenes Symbol fragt jeder Browser nach /favicon.ico und bekommt einen
 # Fehler in die Konsole. Ein kleines SVG kostet nichts und räumt das weg.
@@ -10903,8 +11005,13 @@ class JarvisWeb:
                                "Gratis-Schlüssel ein, dann denke ich mit."})
             # Nur ein Gedanke gleichzeitig: sonst mischen sich zwei Gespräche
             # im selben Verlauf.
+            bild = str(daten.get("bild") or "")
+            if bild.startswith("data:"):
+                bild = bild.split(",", 1)[-1]
+            quelle = "Bildschirm" if daten.get("quelle") == "bildschirm" else "Kamera"
             with self._denkt:
-                antwort = self.agent.denken(text)
+                antwort = self.agent.denken(text, bild_base64=bild[:5_000_000],
+                                            bild_quelle=quelle)
             return self._antworten(behandler, 200,
                                    {"ok": True, "antwort": antwort,
                                     "zeit": zeitstempel()})
@@ -12304,7 +12411,9 @@ PARAMETER_AKTIONEN = {
 }
 
 # Alles hier drin fragt vor der Ausführung nach einer Freigabe.
-FREIGABE_PFLICHTIG = {"mail_senden", "termin_anlegen", "bildschirm_bedienen",
+# Termine im eigenen Kalender fragen nicht mehr nach: Sie lassen sich jederzeit
+# löschen, und ständiges Nachfragen machte Jarvis zäh.
+FREIGABE_PFLICHTIG = {"mail_senden", "bildschirm_bedienen",
                       "nachricht_senden", "skript_ausfuehren", "anrufen",
                       "sms_senden", "browser_auftrag"}
 
@@ -13396,8 +13505,31 @@ class JarvisAgent:
 
     # -- Denkschleife -------------------------------------------------------
 
-    def denken(self, eingabe: str, protokollieren: bool = True) -> str:
-        """Die Hauptschleife: fragen, Werkzeuge ausführen, antworten."""
+    def denken(self, eingabe: str, protokollieren: bool = True, bild_base64: str = "",
+               bild_typ: str = "image/jpeg", bild_quelle: str = "Kamera") -> str:
+        """Die Hauptschleife: fragen, Werkzeuge ausführen, antworten.
+
+        Mit ``bild_base64`` liegt der Frage ein Bild bei - von der Kamera oder
+        dem geteilten Bildschirm im Browser. Es geht nur in dieser einen Runde
+        mit; danach steht im Verlauf nur noch ein Vermerk, sonst würde jede
+        weitere Frage das Bild erneut mitschleppen.
+        """
+        if not bild_base64:
+            return self._denken(eingabe, protokollieren)
+        try:
+            return self._denken(eingabe, protokollieren,
+                                bild=(bild_base64, bild_typ, bild_quelle))
+        finally:
+            for nachricht in self.verlauf:
+                inhalt = nachricht.get("content")
+                if isinstance(inhalt, list):
+                    nachricht["content"] = [
+                        {"type": "text", "text": "[Bild: %s]" % bild_quelle}
+                        if isinstance(b, dict) and b.get("type") == "image" else b
+                        for b in inhalt]
+
+    def _denken(self, eingabe: str, protokollieren: bool = True, bild=None) -> str:
+        """Die eigentliche Schleife - siehe ``denken``."""
         eingabe = (eingabe or "").strip()
         if not eingabe:
             return ""
@@ -13407,7 +13539,14 @@ class JarvisAgent:
 
         if protokollieren:
             self.memory.verlauf_anhaengen("user", eingabe)
-        self.verlauf.append({"role": "user", "content": eingabe})
+        if bild:
+            daten, typ, quelle = bild
+            inhalt = self._inhalt_bauen(
+                "[Dazu ein Bild von meiner %s - schau es dir direkt an, dafür brauchst du "
+                "kein Werkzeug.]\n%s" % (quelle, eingabe), daten, typ)
+        else:
+            inhalt = eingabe
+        self.verlauf.append({"role": "user", "content": inhalt})
         self._verlauf_kuerzen()
 
         systemtext = self.systemprompt(eingabe)
@@ -13852,6 +13991,67 @@ def dashboard_bauen():
         agent.tools.mcp.stoppen()
 
 
+# Was Jarvis kann - nach Bereichen, für die Übersicht im Terminal.
+FAEHIGKEITEN = [
+    ("Gedächtnis", ("notiz", "kontakt_", "punkt", "kennzahl", "gedaechtnis", "tagesbericht",
+                    "rueckblick", "protokoll", "erinnerung")),
+    ("Verkauf", ("lead", "angebot", "nachfass", "pipeline", "verkauf", "gespraech",
+                 "autopilot", "heute_zu_tun", "anrufliste", "offene_leads")),
+    ("Geld", ("buchung", "beleg", "auswertung", "csv", "cashflow", "fixkosten", "bedarf",
+              "fehlende_belege")),
+    ("Kommunikation", ("mail", "nachricht", "anrufen", "sms", "termin")),
+    ("Web und Wissen", ("webseite", "recherche", "wetter", "flug", "browser")),
+    ("Sehen und Mac", ("umschauen", "bildschirm", "systeminfo", "ordner", "programm",
+                       "skript", "werkstatt")),
+    ("Team und Abläufe", ("mitarbeiter", "team", "lagebericht", "routine", "dashboard")),
+]
+CYAN, HELL, AUS = "\033[36m", "\033[96m", "\033[0m"
+
+
+def faehigkeiten_text(namen: list, bereit: bool = True) -> str:
+    """Die Übersicht aller Fähigkeiten, nach Bereichen."""
+    farbe = sys.stdout.isatty() if sys.stdout is not None else False
+    c, h, a = (CYAN, HELL, AUS) if farbe else ("", "", "")
+    zeilen = ["", "  %s%d FÄHIGKEITEN BEREIT%s%s" % (h, len(namen), a,
+                                                    "" if bereit else
+                                                    "  (noch ohne Gehirn - im Browser einrichten)")]
+    vergeben = set()
+    for bereich, anfaenge in FAEHIGKEITEN:
+        treffer = [n for n in namen if n not in vergeben and n.startswith(anfaenge)]
+        vergeben.update(treffer)
+        if treffer:
+            zeilen.append("  %s%-17s%s %s" % (c, bereich, a, ", ".join(treffer)))
+    rest = [n for n in namen if n not in vergeben]
+    if rest:
+        zeilen.append("  %s%-17s%s %s" % (c, "Weitere", a, ", ".join(rest)))
+    zeilen.append("")
+    zeilen.append("  Sprich im Browser mit mir - oder schreib mir hier im Terminal.")
+    zeilen.append("  'hilfe' zeigt diese Liste, 'beenden' oder Strg+C hört auf.")
+    return "\n".join(zeilen)
+
+
+def terminal_gespraech(agent, web):
+    """Jarvis im Terminal: Aufträge tippen, während der Browser weiterläuft."""
+    farbe = sys.stdout.isatty()
+    c, h, a = (CYAN, HELL, AUS) if farbe else ("", "", "")
+    while True:
+        try:
+            eingabe = input("\n  %sDu ›%s " % (h, a)).strip()
+        except EOFError:
+            return
+        if not eingabe:
+            continue
+        if eingabe.lower() in ("beenden", "exit", "quit", "tschüss", "ende"):
+            return
+        if eingabe.lower() in ("hilfe", "?", "help"):
+            print(faehigkeiten_text(agent.tools.namen(), agent.einsatzbereit()))
+            continue
+        beginn = time.time()
+        with web._denkt:  # nie gleichzeitig mit dem Browser im selben Verlauf
+            antwort = agent.denken(eingabe)
+        print("  %sJarvis ›%s %s  %s(%.1f s)%s" % (c, a, antwort, c, time.time() - beginn, a))
+
+
 def webbetrieb(argumente=None):
     """Startet Jarvis als Web-App im Browser."""
     argumente = argumente or []
@@ -13883,19 +14083,24 @@ def webbetrieb(argumente=None):
         print("  weiter, wenn du willst, dass jemand alles darf, was du darfst.")
     else:
         print("     (nur auf diesem Rechner erreichbar)")
-    print("\n  Beenden mit Strg und C.\n")
-
     import shutil as _shutil
     import subprocess as _subprocess
-    if _shutil.which("open"):
+    import threading as _threading
+    if _shutil.which("open") and os.environ.get("JARVIS_KEIN_BROWSER") != "1":
         try:
             _subprocess.run(["open", adresse], shell=False, timeout=15,
                             stdout=_subprocess.DEVNULL, stderr=_subprocess.DEVNULL)
         except (OSError, _subprocess.SubprocessError):
             pass
 
+    print(faehigkeiten_text(agent.tools.namen(), agent.einsatzbereit()))
+    web.starten(blockierend=False)
     try:
-        web.starten(blockierend=True)
+        if sys.stdin is not None and sys.stdin.isatty():
+            terminal_gespraech(agent, web)
+        else:
+            # Ohne Tastatur (etwa als Hintergrunddienst): einfach weiterlaufen.
+            _threading.Event().wait()
     except KeyboardInterrupt:
         pass
     finally:

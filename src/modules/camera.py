@@ -54,8 +54,8 @@ class Kamera:
         programm = self.werkzeug_vorhanden()
         if not programm:
             self.letzter_fehler = (
-                "Ich habe kein Programm zum Fotografieren. Bitte im Terminal "
-                "'brew install imagesnap' ausführen, dann kann ich mich umsehen.")
+                "Ich sehe über die Kamera im Browser: Sag einfach 'schau mal' oder "
+                "'was siehst du' im Jarvis-Fenster, dann mache ich ein Bild.")
             return {"ok": False, "fehler": self.letzter_fehler}
 
         try:

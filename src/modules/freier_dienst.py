@@ -54,6 +54,12 @@ BEHAUPTUNG = re.compile(
     r"\b(notiert|gespeichert|vermerkt|angelegt|eingetragen|hinterlegt|gesendet|"
     r"verschickt|abgeschickt|erledigt|abgehakt|gebucht|erstellt|aufgenommen|gestartet)\b",
     re.IGNORECASE)
+# Nur wenn der Nutzer etwas tun lassen will, ist "erledigt" ohne Werkzeug eine
+# Lüge. Beschreibt das Modell ein Bild oder erzählt, darf es diese Wörter benutzen.
+AUFTRAG = re.compile(
+    r"\b(merk|notier|speicher|leg\w* .{0,40}an\b|anlegen|trag\w* .{0,40}ein|eintragen|"
+    r"schick|send|buch|erinner|start|erledig|hak|lösch|streich|ruf\w* .{0,30}an\b|"
+    r"anrufen|vermerk|nimm .{0,30}auf|aufnehmen)", re.IGNORECASE)
 WERKZEUG_PFLICHT = (
     "Regel ohne Ausnahme: Sollst du etwas speichern, anlegen, eintragen, senden, buchen, "
     "starten oder nachschlagen, rufst du dafür das passende Werkzeug auf. Behaupte nie, "
@@ -246,6 +252,12 @@ def _behauptung_pruefen(bloecke: list, nutzlast: dict, timeout: int) -> list:
         return bloecke  # in dieser Runde hat schon ein Werkzeug gearbeitet
     text = " ".join(b.get("text", "") for b in bloecke if b.get("type") == "text")
     if not BEHAUPTUNG.search(text):
+        return bloecke
+    frage = nutzlast["messages"][letzte_frage] if letzte_frage >= 0 else {}
+    inhalt = frage.get("content")
+    if isinstance(inhalt, list):  # mit Bild: Es wird beschrieben, nicht gehandelt
+        return bloecke
+    if not AUFTRAG.search(str(inhalt or "")):
         return bloecke
     nachfrage = dict(nutzlast)
     nachfrage["messages"] = nutzlast["messages"] + [

@@ -1909,6 +1909,114 @@ def pruefung_netz_und_tempo(agent):
     del agent_modul
 
 
+def pruefung_sehen_und_terminal(agent):
+    """Sehen über den Browser, Terminal mit Fähigkeitenliste, weniger Rückfragen."""
+    abschnitt("Sehen, Terminal, Rückfragen")
+    import http.server
+    import io
+    import contextlib
+    import run as run_modul
+    from modules.webseite import SEITE_HTML
+    from modules.freier_dienst import AUFTRAG
+
+    gesehen = []
+
+    class Dienst(http.server.BaseHTTPRequestHandler):
+        def log_message(self, *a):
+            pass
+
+        def do_POST(self):
+            anfrage = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+            gesehen.append(anfrage)
+            roh = json.dumps({"choices": [{"message": {
+                "role": "assistant", "content": "Ich sehe eine Rechnung, sie wurde erstellt am 3. Mai."}}]}).encode()
+            self.send_response(200)
+            self.send_header("Content-Length", str(len(roh)))
+            self.end_headers()
+            self.wfile.write(roh)
+
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 11994), Dienst)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    alt = (config.ANTHROPIC_API_KEY, config.FREIER_DIENST_URL, config.FREIER_DIENST_SCHLUESSEL,
+           config.FREIER_DIENST_MODELL)
+    config.ANTHROPIC_API_KEY = ""
+    config.FREIER_DIENST_URL = "http://127.0.0.1:11994/v1"
+    config.FREIER_DIENST_SCHLUESSEL = "x" * 20
+    config.FREIER_DIENST_MODELL = "sehen"
+    web = None
+    try:
+        agent.verlauf_leeren()
+        text = agent.denken("Was siehst du?", bild_base64="QUJD", bild_quelle="Kamera")
+        nachrichten = gesehen[-1]["messages"]
+        mit_bild = [m for m in nachrichten if isinstance(m.get("content"), list)]
+        pruefen("Das Bild geht an das Gehirn (als image_url)",
+                mit_bild and any(t.get("type") == "image_url" and "QUJD" in t["image_url"]["url"]
+                                 for t in mit_bild[-1]["content"]))
+        pruefen("Eine Bildbeschreibung gilt nicht als falsche Behauptung",
+                text.startswith("Ich sehe eine Rechnung") and len(gesehen) == 1, text[:60])
+        pruefen("Danach bleibt das Bild nicht im Verlauf hängen",
+                "QUJD" not in json.dumps(agent.verlauf))
+
+        web = JarvisWeb(agent, port=8803)
+        web.starten(blockierend=False)
+        time.sleep(0.4)
+        import urllib.request as _netz
+        roh = json.dumps({"text": "Schau mal", "bild": "data:image/jpeg;base64," + "A" * 300000,
+                          "quelle": "kamera"}).encode()
+        anfrage = _netz.Request("http://127.0.0.1:8803/api/reden", data=roh,
+                                headers={"Content-Type": "application/json"})
+        with _netz.urlopen(anfrage, timeout=20) as r:
+            antwort = json.loads(r.read().decode("utf-8"))
+        pruefen("Ein Kamerabild von 300 KB kommt über /api/reden an",
+                antwort.get("ok") is True and "A" * 1000 in json.dumps(gesehen[-1]))
+    finally:
+        if web is not None:
+            web.stoppen()
+        server.shutdown()
+        (config.ANTHROPIC_API_KEY, config.FREIER_DIENST_URL, config.FREIER_DIENST_SCHLUESSEL,
+         config.FREIER_DIENST_MODELL) = alt
+
+    pruefen("Die Oberfläche hat Kamera- und Bildschirm-Knopf",
+            'id="kameraKnopf"' in SEITE_HTML and 'id="schirmKnopf"' in SEITE_HTML
+            and "getDisplayMedia" in SEITE_HTML and "getUserMedia" in SEITE_HTML)
+    pruefen("Die Kamera geht nach dem Foto sofort wieder aus",
+            "t.stop()" in SEITE_HTML)
+    pruefen("Auftrag oder Erzählung wird unterschieden",
+            AUFTRAG.search("Merk dir: Berger") and AUFTRAG.search("Ruf den Berger an")
+            and not AUFTRAG.search("Was siehst du auf meinem Bildschirm?"))
+    pruefen("Termine im eigenen Kalender fragen nicht mehr nach",
+            not agent.tools.braucht_freigabe("termin_anlegen")
+            and agent.tools.braucht_freigabe("mail_senden"))
+
+    namen = agent.tools.namen()
+    liste = run_modul.faehigkeiten_text(namen, True)
+    pruefen("Terminal: Fähigkeitenliste nennt jedes Werkzeug",
+            all(n in liste for n in namen) and "Weitere" not in liste,
+            "%d Fähigkeiten" % len(namen))
+
+    class FalscheWeb:
+        _denkt = threading.Lock()
+
+    eingaben = iter(["hilfe", "Merk dir: Terminaltest", "beenden"])
+    alte_eingabe = run_modul.input if hasattr(run_modul, "input") else None
+    run_modul.input = lambda _: next(eingaben)
+    alt_denken = agent.denken
+    agent.denken = lambda t: "Notiert: %s" % t
+    puffer = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(puffer):
+            run_modul.terminal_gespraech(agent, FalscheWeb())
+    finally:
+        agent.denken = alt_denken
+        if alte_eingabe is None:
+            del run_modul.input
+        else:
+            run_modul.input = alte_eingabe
+    ausgabe = puffer.getvalue()
+    pruefen("Terminal: Aufträge tippen, Antwort mit Zeit, 'beenden' hört auf",
+            "Notiert: Merk dir: Terminaltest" in ausgabe and "FÄHIGKEITEN" in ausgabe)
+
+
 def pruefung_sicherheit(agent):
     abschnitt("Sicherheit")
     ergebnis = agent.tools.run("systeminfo", {"was": "rm -rf /"})
@@ -2058,6 +2166,7 @@ def main() -> int:
     pruefung_freier_dienst(agent)
     pruefung_autopilot(agent)
     pruefung_netz_und_tempo(agent)
+    pruefung_sehen_und_terminal(agent)
     pruefung_routinen(agent)
     pruefung_zeitplan()
     pruefung_kalender()

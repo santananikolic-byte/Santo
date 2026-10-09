@@ -58,6 +58,10 @@ button{font-family:inherit;cursor:pointer;border:none;background:none;color:inhe
 .ticker a,.ticker .mini{color:var(--grau);text-decoration:none;font-size:10px;
                         letter-spacing:.12em}
 .ticker a:hover,.ticker .mini:hover{color:var(--kupfer)}
+.ticker .mini.aktiv{color:var(--akzent);text-shadow:0 0 8px rgba(58,209,255,.6)}
+.blitz{position:fixed;inset:0;background:rgba(166,236,255,.18);pointer-events:none;
+       opacity:0;transition:opacity .25s;z-index:50}
+.blitz.an{opacity:1}
 
 /* ---- Bühne ---- */
 main{flex:1;display:flex;flex-direction:column;align-items:center;
@@ -202,11 +206,14 @@ body[data-zustand="wach"] .zustandstext{color:var(--akzent)}
 </style>
 </head>
 <body data-zustand="aus">
+<div class="blitz" id="blitz"></div>
 
 <div class="ticker">
   <span class="pkt" id="pkt"></span>
   <span id="lage">Stand wird geholt …</span>
   <span class="rechts">
+    <button class="mini" id="kameraKnopf" title="Bei 'schau mal' macht Jarvis ein Foto mit der Kamera">Kamera an</button>
+    <button class="mini" id="schirmKnopf" title="Jarvis sieht deinen Bildschirm, solange du teilst">Bildschirm teilen</button>
     <button class="mini" id="tippenAn" title="Notweg, falls das Mikrofon streikt">Tippen</button>
     <a href="/autopilot" data-seite target="_blank" rel="noopener" id="zuTunLink">Heute zu tun</a>
     <a href="/protokoll" data-seite target="_blank" rel="noopener">Protokoll</a>
@@ -418,6 +425,85 @@ body[data-zustand="wach"] .zustandstext{color:var(--akzent)}
     }, Math.min(45000, 2500 + text.length * 90));
   }
 
+  /* ---------- Sehen: Kamera und Bildschirm über den Browser ---------- */
+  // Kein Homebrew, kein Zusatzprogramm: Der Browser darf an Kamera und
+  // Bildschirm, und das Gehirn bekommt das Bild direkt mit der Frage.
+  var SEHEN = /(schau|sieh |siehst|guck|kamera|vor mir|in der hand|erkennst|was ist das|lies das|lies vor|foto|diesen beleg|den beleg hier|die rechnung hier)/i;
+  var ADRESSE = /(https?:|www\.|\.(at|de|com|ch|eu|net|org)\b)/i;
+  var SCHIRM = /(bildschirm|monitor|display|fenster|auf dem schirm|was ist offen|was hab ich offen)/i;
+  var kameraAn = true, schirmStrom = null;
+  try { kameraAn = localStorage.getItem("jarvis-kamera") !== "aus"; } catch (e) {}
+
+  function knoepfeZeigen() {
+    el("kameraKnopf").textContent = kameraAn ? "Kamera an" : "Kamera aus";
+    el("kameraKnopf").classList.toggle("aktiv", kameraAn);
+    el("schirmKnopf").textContent = schirmStrom ? "Bildschirm geteilt" : "Bildschirm teilen";
+    el("schirmKnopf").classList.toggle("aktiv", !!schirmStrom);
+  }
+  function bildAus(strom) {
+    return new Promise(function (fertig, fehler) {
+      var v = document.createElement("video");
+      v.muted = true; v.playsInline = true; v.srcObject = strom;
+      v.onloadeddata = function () {
+        setTimeout(function () {
+          var breite = Math.min(1280, v.videoWidth || 1280);
+          var hoehe = Math.round(breite * (v.videoHeight || 720) / (v.videoWidth || 1280));
+          var c = document.createElement("canvas"); c.width = breite; c.height = hoehe;
+          c.getContext("2d").drawImage(v, 0, 0, breite, hoehe);
+          fertig(c.toDataURL("image/jpeg", 0.72).split(",")[1]);
+        }, 350);  // kurz warten: die Kamera regelt erst die Helligkeit nach
+      };
+      v.onerror = fehler;
+      v.play().catch(function () {});
+    });
+  }
+  function blitzen() {
+    el("blitz").classList.add("an");
+    setTimeout(function () { el("blitz").classList.remove("an"); }, 260);
+  }
+  function kameraBild() {
+    return navigator.mediaDevices.getUserMedia({ video: { width: 1280 } }).then(function (strom) {
+      return bildAus(strom).then(function (b) {
+        strom.getTracks().forEach(function (t) { t.stop(); });  // Kamera sofort wieder aus
+        blitzen(); return { daten: b, quelle: "kamera" };
+      });
+    });
+  }
+  function bildFuer(text) {
+    if (schirmStrom && SCHIRM.test(text)) {
+      return bildAus(schirmStrom).then(function (b) { return { daten: b, quelle: "bildschirm" }; });
+    }
+    if (kameraAn && SEHEN.test(text) && !ADRESSE.test(text) && navigator.mediaDevices) {
+      return kameraBild().catch(function () {
+        el("hinweis").style.display = "block";
+        el("hinweis").textContent = "Die Kamera ist im Browser nicht erlaubt - erlaube sie " +
+          "über das Symbol in der Adressleiste.";
+        return null;
+      });
+    }
+    return Promise.resolve(null);
+  }
+  el("kameraKnopf").addEventListener("click", function () {
+    kameraAn = !kameraAn;
+    try { localStorage.setItem("jarvis-kamera", kameraAn ? "an" : "aus"); } catch (e) {}
+    knoepfeZeigen();
+  });
+  el("schirmKnopf").addEventListener("click", function () {
+    if (schirmStrom) {
+      schirmStrom.getTracks().forEach(function (t) { t.stop(); });
+      schirmStrom = null; knoepfeZeigen(); return;
+    }
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) { return; }
+    navigator.mediaDevices.getDisplayMedia({ video: true }).then(function (strom) {
+      schirmStrom = strom;
+      strom.getVideoTracks()[0].addEventListener("ended", function () {
+        schirmStrom = null; knoepfeZeigen();
+      });
+      knoepfeZeigen();
+    }).catch(function () {});
+  });
+  knoepfeZeigen();
+
   /* ---------- Reden ---------- */
   function fragen(text) {
     text = (text || "").trim();
@@ -428,7 +514,11 @@ body[data-zustand="wach"] .zustandstext{color:var(--akzent)}
     el("gesagt").className = "gesagt";
     el("hinweis").style.display = "none";
     setzeZustand("denkt");
-    holen("/api/reden", { text: text }).then(function (a) {
+    bildFuer(text).then(function (bild) {
+      var k = { text: text };
+      if (bild && bild.daten) { k.bild = bild.daten; k.quelle = bild.quelle; }
+      return holen("/api/reden", k);
+    }).then(function (a) {
       var antwort = a.antwort || a.fehler || "Ich habe keine Antwort bekommen.";
       el("antwort").textContent = antwort;
       el("antwort").className = "antwort" + (a.ok ? "" : " fehler");

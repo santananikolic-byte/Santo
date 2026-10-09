@@ -312,8 +312,31 @@ class JarvisAgent:
 
     # -- Denkschleife -------------------------------------------------------
 
-    def denken(self, eingabe: str, protokollieren: bool = True) -> str:
-        """Die Hauptschleife: fragen, Werkzeuge ausführen, antworten."""
+    def denken(self, eingabe: str, protokollieren: bool = True, bild_base64: str = "",
+               bild_typ: str = "image/jpeg", bild_quelle: str = "Kamera") -> str:
+        """Die Hauptschleife: fragen, Werkzeuge ausführen, antworten.
+
+        Mit ``bild_base64`` liegt der Frage ein Bild bei - von der Kamera oder
+        dem geteilten Bildschirm im Browser. Es geht nur in dieser einen Runde
+        mit; danach steht im Verlauf nur noch ein Vermerk, sonst würde jede
+        weitere Frage das Bild erneut mitschleppen.
+        """
+        if not bild_base64:
+            return self._denken(eingabe, protokollieren)
+        try:
+            return self._denken(eingabe, protokollieren,
+                                bild=(bild_base64, bild_typ, bild_quelle))
+        finally:
+            for nachricht in self.verlauf:
+                inhalt = nachricht.get("content")
+                if isinstance(inhalt, list):
+                    nachricht["content"] = [
+                        {"type": "text", "text": "[Bild: %s]" % bild_quelle}
+                        if isinstance(b, dict) and b.get("type") == "image" else b
+                        for b in inhalt]
+
+    def _denken(self, eingabe: str, protokollieren: bool = True, bild=None) -> str:
+        """Die eigentliche Schleife - siehe ``denken``."""
         eingabe = (eingabe or "").strip()
         if not eingabe:
             return ""
@@ -323,7 +346,14 @@ class JarvisAgent:
 
         if protokollieren:
             self.memory.verlauf_anhaengen("user", eingabe)
-        self.verlauf.append({"role": "user", "content": eingabe})
+        if bild:
+            daten, typ, quelle = bild
+            inhalt = self._inhalt_bauen(
+                "[Dazu ein Bild von meiner %s - schau es dir direkt an, dafür brauchst du "
+                "kein Werkzeug.]\n%s" % (quelle, eingabe), daten, typ)
+        else:
+            inhalt = eingabe
+        self.verlauf.append({"role": "user", "content": inhalt})
         self._verlauf_kuerzen()
 
         systemtext = self.systemprompt(eingabe)

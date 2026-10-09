@@ -61,6 +61,27 @@ Kalender kann man einrichten, muss man aber nicht.
 
 ---
 
+## Sehen – über die Kamera und den Bildschirm im Browser
+
+Ohne Homebrew und ohne Zusatzprogramm: Sag im Jarvis-Fenster **„schau mal“**,
+**„was siehst du“** oder **„lies das vor“** – die Seite macht ein Foto mit der
+Kamera des Macs und schickt es mit der Frage an das Gehirn. Die Kamera geht
+sofort danach wieder aus. Beim ersten Mal fragt der Browser, ob er die Kamera
+benutzen darf.
+
+Mit **„Bildschirm teilen“** (oben rechts) sieht Jarvis deinen Bildschirm,
+solange du teilst: „Was ist auf meinem Bildschirm offen?“ Mit „Kamera aus“
+schaltest du das Foto ab.
+
+## Terminal
+
+Nach dem Start zeigt das Terminal alle Fähigkeiten nach Bereichen. Du kannst
+Jarvis dort auch **schreiben** – gleichzeitig zur Sprache im Browser:
+`Du › Leg einen Punkt an: Freitag Berger anrufen`. `hilfe` zeigt die Liste,
+`beenden` oder Strg+C hört auf.
+
+---
+
 ## Seiten lesen und suchen – ohne Zusatzprogramme
 
 „Jarvis, lies www.beispiel.at und sag mir die Öffnungszeiten“: Er holt die
