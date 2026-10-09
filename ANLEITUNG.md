@@ -150,6 +150,19 @@ Per Sprache: „Jarvis, Autopilot starten“ oder „Was ist heute zu tun?“
 
 ---
 
+## Stimme
+
+Oben auf der Jarvis-Seite: **Stimme**. Ohne Auswahl nimmt Jarvis die beste
+deutsche Stimme, die dein Browser hat (Premium- und Natural-Stimmen zuerst,
+eine männliche bevorzugt). Du kannst Stimme, Tempo und Tonlage selbst wählen –
+„Probe hören“, dann „Übernehmen“. Lange Antworten liest er in Stücken, damit
+Chrome nicht mittendrin abbricht.
+**Bessere Stimme am Mac (kostenlos):** Systemeinstellungen → Bedienungshilfen →
+Gesprochene Inhalte → Systemstimme → Stimmen verwalten → Deutsch → eine
+Premium-Stimme laden (z. B. Markus oder Anna). Danach steht sie in der Auswahl.
+
+---
+
 ## Rechnungen, Angebote, Mahnungen – als PDF
 
 Einmal unter **„Heute zu tun“ → Einstellungen → Firmendaten** deine Adresse,

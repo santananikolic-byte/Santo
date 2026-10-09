@@ -9603,6 +9603,7 @@ body[data-zustand="wach"] .zustandstext{color:var(--akzent)}
     <button class="mini" id="kameraKnopf" title="Bei 'schau mal' macht Jarvis ein Foto mit der Kamera">Kamera an</button>
     <button class="mini" id="schirmKnopf" title="Jarvis sieht deinen Bildschirm, solange du teilst">Bildschirm teilen</button>
     <button class="mini" id="tippenAn" title="Notweg, falls das Mikrofon streikt">Tippen</button>
+    <button class="mini" id="stimmeKnopf" title="Welche Stimme Jarvis hat, wie schnell und wie tief">Stimme</button>
     <a href="/autopilot" data-seite target="_blank" rel="noopener" id="zuTunLink">Heute zu tun</a>
     <a href="/protokoll" data-seite target="_blank" rel="noopener">Protokoll</a>
     <a href="/dashboard" data-seite target="_blank" rel="noopener">Cockpit</a>
@@ -9674,6 +9675,34 @@ body[data-zustand="wach"] .zustandstext{color:var(--akzent)}
     <div class="knoepfe">
       <button class="nein" id="fNein">Nein</button>
       <button class="ja" id="fJa">Ja, mach</button>
+    </div>
+  </div>
+</div>
+
+<div class="schleier" id="stimmeDialog">
+  <div class="frage">
+    <div class="kopf"><h2>Jarvis' Stimme</h2></div>
+    <div class="inhalt">
+      <p class="sagen" style="padding:0 0 10px;text-align:left">
+        Ohne Auswahl nimmt Jarvis die beste deutsche Stimme, die dein Browser hat
+        (Premium- und Natural-Stimmen zuerst). Bessere Stimmen bekommst du am Mac
+        unter Systemeinstellungen, Bedienungshilfen, Gesprochene Inhalte,
+        Systemstimme, Stimmen verwalten: dort eine deutsche Premium-Stimme laden.</p>
+      <select id="stimmeWahl" style="width:100%;padding:11px;margin-bottom:10px;
+        border-radius:9px;background:var(--tief);border:1px solid var(--rand-hell);
+        color:var(--text);font-size:14px"></select>
+      <label class="sagen" style="display:block;text-align:left;padding:0">Tempo
+        <span id="tempoWert"></span>
+        <input id="stimmeTempo" type="range" min="0.8" max="1.35" step="0.01"
+               style="width:100%"></label>
+      <label class="sagen" style="display:block;text-align:left;padding:6px 0 0">Tonlage
+        <span id="tonWert"></span>
+        <input id="stimmeTon" type="range" min="0.7" max="1.2" step="0.01"
+               style="width:100%"></label>
+    </div>
+    <div class="knoepfe">
+      <button class="nein" id="stimmeProbe">Probe hören</button>
+      <button class="ja" id="stimmeSpeichern">Übernehmen</button>
     </div>
   </div>
 </div>
@@ -9788,6 +9817,58 @@ body[data-zustand="wach"] .zustandstext{color:var(--akzent)}
     stimmenLaden();
     window.speechSynthesis.onvoiceschanged = stimmenLaden;
   }
+  /* Eigene Wahl aus dem Stimme-Dialog; ohne Wahl die beste deutsche Stimme. */
+  var stimmWahl = {name: "", tempo: 1.06, ton: 0.95};
+  try {
+    var gemerkt = JSON.parse(localStorage.getItem("jarvis-stimme") || "null");
+    if (gemerkt && typeof gemerkt === "object") {
+      stimmWahl.name = String(gemerkt.name || "");
+      stimmWahl.tempo = Math.min(1.35, Math.max(0.8, Number(gemerkt.tempo) || 1.06));
+      stimmWahl.ton = Math.min(1.2, Math.max(0.7, Number(gemerkt.ton) || 0.95));
+    }
+  } catch (e) { /* ohne Speicher gilt die Vorgabe */ }
+
+  function stimmGuete(s) {
+    var n = s.name || "", p = 0;
+    if (/^de[-_]AT/i.test(s.lang)) { p += 3; } else if (/^de[-_]DE/i.test(s.lang)) { p += 2; }
+    if (/premium/i.test(n)) { p += 8; }
+    if (/enhanced|erweitert|verbessert/i.test(n)) { p += 6; }
+    if (/natural|neural|online/i.test(n)) { p += 6; }
+    if (/google/i.test(n)) { p += 4; }
+    if (/markus|yannick|conrad|viktor|jonas|killian|florian|hans/i.test(n)) { p += 2; }
+    if (s.localService) { p += 1; }
+    return p;
+  }
+  function deutscheStimmen() {
+    return stimmen.filter(function (s) { return /^de([-_]|$)/i.test(s.lang); })
+      .sort(function (a, b) { return stimmGuete(b) - stimmGuete(a); });
+  }
+  function gewaehlteStimme() {
+    var de = deutscheStimmen();
+    if (stimmWahl.name) {
+      var treffer = de.filter(function (s) { return s.name === stimmWahl.name; });
+      if (treffer.length) { return treffer[0]; }
+    }
+    return de[0] || null;
+  }
+  /* Lange Antworten in Stücke: Chrome bricht eine einzelne lange Äußerung sonst ab. */
+  function sprechStuecke(text) {
+    var saetze = String(text).replace(/\s+/g, " ").match(/[^.!?;:]+[.!?;:]*\s*/g) || [String(text)];
+    var stuecke = [], aktuell = "";
+    saetze.forEach(function (satz) {
+      if ((aktuell + satz).length > 220 && aktuell) { stuecke.push(aktuell.trim()); aktuell = ""; }
+      while (satz.length > 220) {
+        // An einem Komma oder Leerzeichen teilen, nie mitten im Wort.
+        var schnitt = satz.lastIndexOf(",", 220);
+        if (schnitt < 80) { schnitt = satz.lastIndexOf(" ", 220); }
+        if (schnitt < 80) { schnitt = 220; }
+        stuecke.push(satz.slice(0, schnitt + 1).trim()); satz = satz.slice(schnitt + 1);
+      }
+      aktuell += satz;
+    });
+    if (aktuell.trim()) { stuecke.push(aktuell.trim()); }
+    return stuecke;
+  }
   function sprich(text, danach) {
     if (!window.speechSynthesis || !text) { if (danach) { danach(); } return; }
     // Erkennung anhalten, sonst hört Jarvis sich selbst zu.
@@ -9795,22 +9876,29 @@ body[data-zustand="wach"] .zustandstext{color:var(--akzent)}
     sprichtGerade = true;
     setzeZustand("spricht");
     window.speechSynthesis.cancel();
-    var satz = new SpeechSynthesisUtterance(text);
-    satz.lang = "de-DE"; satz.rate = 1.06;
-    var de = stimmen.filter(function (s) { return /^de/i.test(s.lang); });
-    var gut = de.filter(function (s) {
-      return /markus|yannick|petra|anna|viktor|google/i.test(s.name); });
-    if (gut.length) { satz.voice = gut[0]; } else if (de.length) { satz.voice = de[0]; }
-    satz.onend = satz.onerror = function () {
+    var stimme = gewaehlteStimme();
+    var stuecke = sprechStuecke(text);
+    var fertig = false;
+    function ende() {
+      if (fertig) { return; }
+      fertig = true;
       sprichtGerade = false;
       hoerenWeiter();
       if (danach) { danach(); }
-    };
-    window.speechSynthesis.speak(satz);
+    }
+    stuecke.forEach(function (stueck, nr) {
+      var satz = new SpeechSynthesisUtterance(stueck);
+      satz.lang = stimme ? stimme.lang : "de-DE";
+      if (stimme) { satz.voice = stimme; }
+      satz.rate = stimmWahl.tempo; satz.pitch = stimmWahl.ton;
+      if (nr === stuecke.length - 1) { satz.onend = ende; }
+      satz.onerror = function (e) { if (!e || e.error !== "interrupted") { ende(); } };
+      window.speechSynthesis.speak(satz);
+    });
     // Sicherheitsnetz: manche Browser feuern onend nicht.
     setTimeout(function () {
-      if (sprichtGerade) { sprichtGerade = false; hoerenWeiter(); }
-    }, Math.min(45000, 2500 + text.length * 90));
+      if (sprichtGerade) { ende(); }
+    }, Math.min(120000, 2500 + text.length * 95 / stimmWahl.tempo));
   }
 
   /* ---------- Sehen: Kamera und Bildschirm über den Browser ---------- */
@@ -10108,6 +10196,53 @@ body[data-zustand="wach"] .zustandstext{color:var(--akzent)}
   });
   el("feld").addEventListener("keydown", function (e) {
     if (e.key === "Enter") { fragen(this.value); this.value = ""; }
+  });
+
+  /* ---------- Stimme wählen ---------- */
+  function stimmeDialogFuellen() {
+    var wahl = el("stimmeWahl");
+    wahl.textContent = "";
+    var auto = document.createElement("option");
+    auto.value = ""; auto.textContent = "Automatisch – die beste deutsche Stimme";
+    wahl.appendChild(auto);
+    deutscheStimmen().forEach(function (s) {
+      var o = document.createElement("option");
+      o.value = s.name;
+      o.textContent = s.name + " (" + s.lang + ")" + (stimmGuete(s) >= 8 ? " ★" : "");
+      wahl.appendChild(o);
+    });
+    wahl.value = stimmWahl.name;
+    if (wahl.value !== stimmWahl.name) { wahl.value = ""; }
+    el("stimmeTempo").value = stimmWahl.tempo;
+    el("stimmeTon").value = stimmWahl.ton;
+    stimmeWerteZeigen();
+  }
+  function stimmeWerteZeigen() {
+    el("tempoWert").textContent = Number(el("stimmeTempo").value).toFixed(2);
+    el("tonWert").textContent = Number(el("stimmeTon").value).toFixed(2);
+  }
+  function stimmeUebernehmen() {
+    stimmWahl.name = el("stimmeWahl").value;
+    stimmWahl.tempo = Number(el("stimmeTempo").value) || 1.06;
+    stimmWahl.ton = Number(el("stimmeTon").value) || 0.95;
+  }
+  el("stimmeKnopf").addEventListener("click", function () {
+    stimmenLaden(); stimmeDialogFuellen();
+    el("stimmeDialog").classList.add("zeigen");
+  });
+  el("stimmeTempo").addEventListener("input", stimmeWerteZeigen);
+  el("stimmeTon").addEventListener("input", stimmeWerteZeigen);
+  el("stimmeProbe").addEventListener("click", function () {
+    stimmeUebernehmen();
+    sprich("Guten Tag. Ich bin Jarvis. Die Zahlen stimmen, der Rest ist Arbeit.");
+  });
+  el("stimmeSpeichern").addEventListener("click", function () {
+    stimmeUebernehmen();
+    try { localStorage.setItem("jarvis-stimme", JSON.stringify(stimmWahl)); } catch (e) { /* nur diese Sitzung */ }
+    el("stimmeDialog").classList.remove("zeigen");
+  });
+  el("stimmeDialog").addEventListener("click", function (e) {
+    if (e.target === el("stimmeDialog")) { el("stimmeDialog").classList.remove("zeigen"); }
   });
 
   /* ---------- Freigaben ---------- */
