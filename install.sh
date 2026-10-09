@@ -207,15 +207,8 @@ if grep -q "^ANTHROPIC_API_KEY=sk-" "$ZIEL/config/.env" 2>/dev/null; then
 fi
 
 printf "  ============================================================\n"
-printf "   Jetzt richtet er sich ein. Er liest dir alles vor.\n"
+printf "   Jarvis startet jetzt. Im Browser erscheint ein Feld, in das\n"
+printf "   du deinen Anthropic-Schluessel einfuegst. Danach geht es los.\n"
+printf "   (Die gefuehrte Einrichtung mit Sprache: jarvis.py einrichten)\n"
 printf "  ============================================================\n\n"
-"$PYTHON" "$ZIEL/jarvis.py" einrichten
-
-printf "\n"
-printf "  ============================================================\n"
-printf "   FERTIG. Eine Sache noch:\n"
-printf "   Schliess dieses Fenster und starte Jarvis vom Schreibtisch.\n"
-printf "   Sonst greifen die erteilten Rechte nicht.\n"
-printf "   Er oeffnet sich dann im Browser. Dort druckst du auf das\n"
-printf "   Mikrofon und sprichst einfach los.\n"
-printf "  ============================================================\n\n"
+exec "$PYTHON" "$ZIEL/jarvis.py"

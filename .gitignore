@@ -14,6 +14,8 @@ dashboard/sales.html
 belege/
 profil/
 export/
+rechnungen/
+*.db
 sprachnachrichten/
 config/mcp_servers.json
 werkstatt/

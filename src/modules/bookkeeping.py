@@ -188,7 +188,7 @@ class Bookkeeping:
                     "fehler": "Ich finde die Bilddatei nicht: %s" % bildpfad}
         if agent is None or not getattr(agent, "einsatzbereit", lambda: False)():
             return {"ok": False,
-                    "fehler": "Ohne Anthropic-Schlüssel kann ich keinen Beleg lesen. "
+                    "fehler": "Ohne eingerichtetes Gehirn kann ich keinen Beleg lesen. "
                               "Bitte zuerst die Einrichtung durchlaufen."}
         try:
             with open(bildpfad, "rb") as datei:

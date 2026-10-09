@@ -85,6 +85,52 @@ STARTROUTINEN = [
 ]
 
 
+def schluessel_online_testen(schluessel: str) -> dict:
+    """Prüft einen Schlüssel mit einem echten, winzigen Aufruf."""
+    koerper = json.dumps({
+        "model": config.CLAUDE_MODEL, "max_tokens": 8,
+        "messages": [{"role": "user", "content": "Sag nur: ok"}],
+    }).encode("utf-8")
+    anfrage = urllib.request.Request(
+        "https://api.anthropic.com/v1/messages", data=koerper, method="POST",
+        headers={"x-api-key": schluessel, "anthropic-version": "2023-06-01",
+                 "content-type": "application/json"})
+    try:
+        with urllib.request.urlopen(anfrage, timeout=45) as antwort:
+            antwort.read()
+        return {"ok": True, "text": "Der Schlüssel funktioniert."}
+    except urllib.error.HTTPError as fehler:
+        try:
+            inhalt = fehler.read().decode("utf-8")
+            meldung = (json.loads(inhalt).get("error") or {}).get("message", inhalt)
+        except (ValueError, OSError):
+            meldung = str(fehler)
+        if fehler.code == 401:
+            return {"ok": False, "grund": "schluessel",
+                    "text": "Der Schlüssel wird abgelehnt. Vermutlich ist beim "
+                            "Kopieren etwas verloren gegangen. Bitte noch einmal "
+                            "vollständig kopieren."}
+        if fehler.code == 400 and "credit" in meldung.lower():
+            return {"ok": False, "grund": "guthaben",
+                    "text": "Der Schlüssel stimmt, aber auf dem Konto ist kein "
+                            "Guthaben. Bitte auf der Anthropic-Seite unter Billing "
+                            "etwas aufladen."}
+        if fehler.code == 429:
+            return {"ok": False, "grund": "zuviel",
+                    "text": "Zu viele Anfragen auf einmal. Ich warte kurz und "
+                            "versuche es noch einmal."}
+        if fehler.code == 404:
+            return {"ok": False, "grund": "modell",
+                    "text": "Das eingestellte Modell %s kennt die Schnittstelle "
+                            "nicht." % config.CLAUDE_MODEL}
+        return {"ok": False, "grund": "sonstiges",
+                "text": "Die Prüfung ist fehlgeschlagen: %s" % meldung[:200]}
+    except (urllib.error.URLError, OSError) as fehler:
+        return {"ok": False, "grund": "netz",
+                "text": "Keine Verbindung zu Anthropic. Ist das Internet da? (%s)"
+                        % fehler}
+
+
 class Einrichtung:
     """Führt den Nutzer Schritt für Schritt durch die Ersteinrichtung."""
 
@@ -167,48 +213,7 @@ class Einrichtung:
 
     def schluessel_testen(self, schluessel: str) -> dict:
         """Prüft einen Schlüssel mit einem echten, winzigen Aufruf."""
-        koerper = json.dumps({
-            "model": config.CLAUDE_MODEL, "max_tokens": 8,
-            "messages": [{"role": "user", "content": "Sag nur: ok"}],
-        }).encode("utf-8")
-        anfrage = urllib.request.Request(
-            "https://api.anthropic.com/v1/messages", data=koerper, method="POST",
-            headers={"x-api-key": schluessel, "anthropic-version": "2023-06-01",
-                     "content-type": "application/json"})
-        try:
-            with urllib.request.urlopen(anfrage, timeout=45) as antwort:
-                antwort.read()
-            return {"ok": True, "text": "Der Schlüssel funktioniert."}
-        except urllib.error.HTTPError as fehler:
-            try:
-                inhalt = fehler.read().decode("utf-8")
-                meldung = (json.loads(inhalt).get("error") or {}).get("message", inhalt)
-            except (ValueError, OSError):
-                meldung = str(fehler)
-            if fehler.code == 401:
-                return {"ok": False, "grund": "schluessel",
-                        "text": "Der Schlüssel wird abgelehnt. Vermutlich ist beim "
-                                "Kopieren etwas verloren gegangen. Bitte noch einmal "
-                                "vollständig kopieren."}
-            if fehler.code == 400 and "credit" in meldung.lower():
-                return {"ok": False, "grund": "guthaben",
-                        "text": "Der Schlüssel stimmt, aber auf dem Konto ist kein "
-                                "Guthaben. Bitte auf der Anthropic-Seite unter Billing "
-                                "etwas aufladen."}
-            if fehler.code == 429:
-                return {"ok": False, "grund": "zuviel",
-                        "text": "Zu viele Anfragen auf einmal. Ich warte kurz und "
-                                "versuche es noch einmal."}
-            if fehler.code == 404:
-                return {"ok": False, "grund": "modell",
-                        "text": "Das eingestellte Modell %s kennt die Schnittstelle "
-                                "nicht." % config.CLAUDE_MODEL}
-            return {"ok": False, "grund": "sonstiges",
-                    "text": "Die Prüfung ist fehlgeschlagen: %s" % meldung[:200]}
-        except (urllib.error.URLError, OSError) as fehler:
-            return {"ok": False, "grund": "netz",
-                    "text": "Keine Verbindung zu Anthropic. Ist das Internet da? (%s)"
-                            % fehler}
+        return schluessel_online_testen(schluessel)
 
     def schritt_schluessel(self) -> bool:
         """Holt den Schlüssel und prüft ihn - bis zu vier Versuche."""

@@ -87,8 +87,8 @@ def dauerbetrieb():
         return chatbetrieb(agent, stimme)
 
     if not agent.einsatzbereit():
-        stimme.sprich("Es ist kein Anthropic-Schlüssel hinterlegt. Starte bitte einmal "
-                      "die Einrichtung.")
+        stimme.sprich("Es ist noch kein Gehirn eingerichtet. Öffne Jarvis im Browser "
+                      "und trag einen Gratis-Schlüssel ein.")
         print("Starte die Einrichtung mit: python3 jarvis.py einrichten")
 
     stimme.sprich("Ich bin da. Sag Hey Jarvis, wenn du etwas brauchst.")
@@ -247,6 +247,90 @@ def dashboard_bauen():
         agent.tools.mcp.stoppen()
 
 
+# Was Jarvis kann - nach Bereichen, für die Übersicht im Terminal.
+FAEHIGKEITEN = [
+    ("Gedächtnis", ("notiz", "kontakt_", "punkt", "kennzahl", "gedaechtnis", "tagesbericht",
+                    "rueckblick", "protokoll", "erinnerung")),
+    ("Rechnungen", ("rechnung", "mahnung", "angebot_pdf", "angebot_entschieden")),
+    ("Verkauf", ("lead", "angebot", "nachfass", "pipeline", "verkauf", "gespraech",
+                 "autopilot", "heute_zu_tun", "anrufliste", "offene_leads")),
+    ("Geld", ("buchung", "beleg", "auswertung", "csv", "cashflow", "fixkosten", "bedarf",
+              "fehlende_belege")),
+    ("Kommunikation", ("mail", "nachricht", "anrufen", "sms", "termin")),
+    ("Web und Wissen", ("webseite", "recherche", "wetter", "flug", "browser")),
+    ("Sehen und Mac", ("umschauen", "bildschirm", "systeminfo", "ordner", "programm",
+                       "skript", "werkstatt")),
+    ("Team und Abläufe", ("mitarbeiter", "team", "lagebericht", "routine", "dashboard")),
+]
+CYAN, HELL, AUS = "\033[36m", "\033[96m", "\033[0m"
+
+
+def faehigkeiten_text(namen: list, bereit: bool = True) -> str:
+    """Die Übersicht aller Fähigkeiten, nach Bereichen."""
+    farbe = sys.stdout.isatty() if sys.stdout is not None else False
+    c, h, a = (CYAN, HELL, AUS) if farbe else ("", "", "")
+    zeilen = ["", "  %s%d FÄHIGKEITEN BEREIT%s%s" % (h, len(namen), a,
+                                                    "" if bereit else
+                                                    "  (noch ohne Gehirn - im Browser einrichten)")]
+    vergeben = set()
+    for bereich, anfaenge in FAEHIGKEITEN:
+        treffer = [n for n in namen if n not in vergeben and n.startswith(anfaenge)]
+        vergeben.update(treffer)
+        if treffer:
+            zeilen.append("  %s%-17s%s %s" % (c, bereich, a, ", ".join(treffer)))
+    rest = [n for n in namen if n not in vergeben]
+    if rest:
+        zeilen.append("  %s%-17s%s %s" % (c, "Weitere", a, ", ".join(rest)))
+    zeilen.append("")
+    zeilen.append("  Sprich im Browser mit mir - oder schreib mir hier im Terminal.")
+    zeilen.append("  'hilfe' zeigt diese Liste, 'beenden' oder Strg+C hört auf.")
+    return "\n".join(zeilen)
+
+
+class TerminalFreigabe:
+    """Fragt eine Freigabe im Terminal. Alles außer einem klaren Ja ist ein Nein."""
+
+    @staticmethod
+    def anfordern(aktion: str, details: str = "") -> dict:
+        print("\n  Freigabe: %s\n  %s" % (aktion, (details or "").replace("\n", "\n  ")[:800]))
+        try:
+            antwort = input("  Ausführen? (ja/nein) ").strip().lower()
+        except EOFError:
+            antwort = ""
+        if antwort in ("ja", "j", "yes", "y", "ok", "mach"):
+            return {"erlaubt": True, "kanal": "terminal", "grund": "Freigabe erteilt"}
+        return {"erlaubt": False, "kanal": "terminal", "grund": "abgelehnt"}
+
+
+def terminal_gespraech(agent, web):
+    """Jarvis im Terminal: Aufträge tippen, während der Browser weiterläuft."""
+    farbe = sys.stdout.isatty()
+    c, h, a = (CYAN, HELL, AUS) if farbe else ("", "", "")
+    while True:
+        try:
+            eingabe = input("\n  %sDu ›%s " % (h, a)).strip()
+        except EOFError:
+            return
+        if not eingabe:
+            continue
+        if eingabe.lower() in ("beenden", "exit", "quit", "tschüss", "ende"):
+            return
+        if eingabe.lower() in ("hilfe", "?", "help"):
+            print(faehigkeiten_text(agent.tools.namen(), agent.einsatzbereit()))
+            continue
+        beginn = time.time()
+        with web._denkt:  # nie gleichzeitig mit dem Browser im selben Verlauf
+            # Freigaben für Terminal-Aufträge werden im Terminal gefragt, nicht
+            # stumm zwei Minuten lang im Browser.
+            vorher = agent.tools.freigabe_kanal
+            agent.tools.freigabe_kanal_setzen(TerminalFreigabe())
+            try:
+                antwort = agent.denken(eingabe)
+            finally:
+                agent.tools.freigabe_kanal_setzen(vorher)
+        print("  %sJarvis ›%s %s  %s(%.1f s)%s" % (c, a, antwort, c, time.time() - beginn, a))
+
+
 def webbetrieb(argumente=None):
     """Startet Jarvis als Web-App im Browser."""
     argumente = argumente or []
@@ -278,19 +362,24 @@ def webbetrieb(argumente=None):
         print("  weiter, wenn du willst, dass jemand alles darf, was du darfst.")
     else:
         print("     (nur auf diesem Rechner erreichbar)")
-    print("\n  Beenden mit Strg und C.\n")
-
     import shutil as _shutil
     import subprocess as _subprocess
-    if _shutil.which("open"):
+    import threading as _threading
+    if _shutil.which("open") and os.environ.get("JARVIS_KEIN_BROWSER") != "1":
         try:
             _subprocess.run(["open", adresse], shell=False, timeout=15,
                             stdout=_subprocess.DEVNULL, stderr=_subprocess.DEVNULL)
         except (OSError, _subprocess.SubprocessError):
             pass
 
+    print(faehigkeiten_text(agent.tools.namen(), agent.einsatzbereit()))
+    web.starten(blockierend=False)
     try:
-        web.starten(blockierend=True)
+        if sys.stdin is not None and sys.stdin.isatty():
+            terminal_gespraech(agent, web)
+        else:
+            # Ohne Tastatur (etwa als Hintergrunddienst): einfach weiterlaufen.
+            _threading.Event().wait()
     except KeyboardInterrupt:
         pass
     finally:
@@ -661,10 +750,12 @@ def hauptprogramm(argumente=None) -> int:
     vorlage_schreiben()
 
     if modus in ("", "start", "web", "browser", "app"):
-        if not config.EINRICHTUNG_FERTIG and not config.ANTHROPIC_API_KEY:
-            print("Jarvis ist noch nicht eingerichtet. Ich starte die Einrichtung.")
-            einrichtung_starten()
-            return 0
+        # Auch ohne Schlüssel startet der Webserver: den Schlüssel trägt man im
+        # Browser ein. Eine Einrichtung im Terminal, die den Server gar nicht
+        # erst startet, lässt den Nutzer vor einer toten Adresse stehen.
+        if not config.ANTHROPIC_API_KEY:
+            print("Noch kein Gehirn eingerichtet - das machst du gleich im "
+                  "Browser.")
         return webbetrieb(argumente[1:] if argumente else [])
     elif modus in ("hoeren", "hören", "dauerbetrieb", "sprechen"):
         if not config.EINRICHTUNG_FERTIG and not config.ANTHROPIC_API_KEY:

@@ -87,6 +87,10 @@ class Scheduler:
         if config.BRIEFING_ABENDS:
             self.job_anlegen("abendrueckblick", config.BRIEFING_ABENDS,
                              self._abendrueckblick, "Abendrückblick")
+        if config.AUTOPILOT_AN:
+            for uhrzeit in [u.strip() for u in config.AUTOPILOT_UHRZEITEN.split(",") if u.strip()]:
+                self.job_anlegen("autopilot:%s" % uhrzeit, uhrzeit, self._autopilot,
+                                 "Autopilot")
 
     def routinen_einhaengen(self):
         """Hängt alle Routinen mit Uhrzeit in den Zeitplan."""
@@ -208,6 +212,12 @@ class Scheduler:
         if self.agent is None:
             return "Guten Morgen. Ich bin da, aber noch nicht eingerichtet."
         return self.agent.briefing_morgens()
+
+    def _autopilot(self) -> str:
+        """Der Autopilot arbeitet von selbst und meldet, was er vorbereitet hat."""
+        if self.agent is None or not config.AUTOPILOT_AN:
+            return ""
+        return self.agent.tools.autopilot.laufen(self.agent).get("text", "")
 
     def _abendrueckblick(self) -> str:
         """Der Text, den Jarvis abends von sich aus sagt."""

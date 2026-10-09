@@ -228,7 +228,7 @@ class Bildschirm:
                               "und pillow. Ohne sie läuft alles andere weiter."}
         if self.agent is None or not getattr(self.agent, "einsatzbereit", lambda: False)():
             return {"ok": False,
-                    "fehler": "Ohne Anthropic-Schlüssel kann ich den Bildschirm nicht sehen."}
+                    "fehler": "Ohne eingerichtetes Gehirn kann ich den Bildschirm nicht sehen."}
 
         verlauf = []
         for nummer in range(1, max(1, int(schritte_max)) + 1):

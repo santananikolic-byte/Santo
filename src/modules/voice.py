@@ -36,10 +36,30 @@ try:
 except (ImportError, OSError):
     sd = None
 
-try:
-    from faster_whisper import WhisperModel
-except ImportError:
-    WhisperModel = None
+
+
+def _whisper_klasse():
+    """Lädt faster-whisper erst, wenn die lokale Spracherkennung gebraucht wird.
+
+    Das Paket zieht beim ersten Import einen großen Rattenschwanz nach (av,
+    ffmpeg-Bibliotheken); auf dem Mac prüft das System jede dieser Dateien
+    einmal, das dauert Minuten. Die Web-App erkennt Sprache im Browser und
+    braucht das alles nicht - sie soll deshalb nicht daran hängen.
+    """
+    try:
+        from faster_whisper import WhisperModel
+        return WhisperModel
+    except Exception:
+        return None
+
+
+def whisper_vorhanden() -> bool:
+    """Ist faster-whisper installiert? Prüft nur, lädt aber nichts."""
+    import importlib.util
+    try:
+        return importlib.util.find_spec("faster_whisper") is not None
+    except (ImportError, ValueError):
+        return False
 
 # Die Spracherkennung schreibt den Namen selten korrekt. Alle diese Formen
 # werden als Weckwort akzeptiert.
@@ -175,7 +195,7 @@ class Stimme:
             "elevenlabs": bool(config.ELEVENLABS_API_KEY),
             "mikrofon": sd is not None and np is not None,
             "mikrofon_grund": mikrofon_fehlermeldung(),
-            "whisper_lokal": WhisperModel is not None,
+            "whisper_lokal": whisper_vorhanden(),
             "whisper_api": bool(config.OPENAI_API_KEY),
         }
 
@@ -408,12 +428,13 @@ class Stimme:
 
     def _whisper_lokal(self, wav_pfad: str) -> str:
         """Spracherkennung mit faster-whisper direkt auf dem Rechner (kostenlos)."""
-        if WhisperModel is None:
+        modell_klasse = _whisper_klasse() if self._whisper_modell is None else True
+        if modell_klasse is None:
             return ""
         try:
             if self._whisper_modell is None:
                 print("[stimme] Lade das Spracherkennungsmodell, das dauert einmalig ...")
-                self._whisper_modell = WhisperModel(
+                self._whisper_modell = modell_klasse(
                     config.WHISPER_MODELL, device="cpu", compute_type="int8")
             teile, _ = self._whisper_modell.transcribe(wav_pfad, language="de",
                                                        beam_size=1, vad_filter=True)

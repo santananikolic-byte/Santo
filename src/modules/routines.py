@@ -204,7 +204,7 @@ class Routines:
 
         if agent is None or not getattr(agent, "einsatzbereit", lambda: False)():
             return {"ok": False, "name": treffer["name"], "anweisung": treffer["anweisung"],
-                    "fehler": "Ohne Anthropic-Schlüssel kann ich die Routine %s nicht "
+                    "fehler": "Ohne eingerichtetes Gehirn kann ich die Routine %s nicht "
                               "ausführen." % treffer["name"]}
 
         auftrag = ("Führe jetzt die gespeicherte Routine '%s' aus. Das ist die Anweisung:\n\n%s\n\n"

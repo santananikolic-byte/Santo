@@ -283,7 +283,7 @@ class Team:
         if self.agent is None or not getattr(self.agent, "einsatzbereit",
                                              lambda: False)():
             return {"ok": False,
-                    "fehler": "Ohne Anthropic-Schlüssel kann %s nicht arbeiten."
+                    "fehler": "Ohne eingerichtetes Gehirn kann %s nicht arbeiten."
                               % ROLLEN[schluessel]["name"]}
 
         gedaechtnis = ""
@@ -383,7 +383,8 @@ class Team:
             teile.append("%d Ausgaben ohne Beleg." % belege["anzahl"])
         punkte = (stand["bereiche"].get("offene_punkte") or {}).get("punkte") or []
         if punkte:
-            teile.append("%d Punkte offen, zuerst: %s" % (len(punkte), punkte[0]))
+            teile.append(("Ein Punkt offen: %s" % punkte[0]) if len(punkte) == 1 else
+                         "%d Punkte offen, zuerst: %s" % (len(punkte), punkte[0]))
         termine = stand["bereiche"].get("termine") or {}
         if termine.get("ok") and termine.get("anzahl"):
             teile.append("%d Termine in den nächsten zwei Tagen."

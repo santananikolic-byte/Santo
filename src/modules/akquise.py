@@ -465,7 +465,7 @@ class Akquise:
             return {"ok": False, "fehler": "Die Suche ist nicht verfügbar."}
         if agent is None or not getattr(agent, "einsatzbereit", lambda: False)():
             return {"ok": False,
-                    "fehler": "Ohne Anthropic-Schlüssel kann ich die Treffer nicht "
+                    "fehler": "Ohne eingerichtetes Gehirn kann ich die Treffer nicht "
                               "auswerten."}
 
         branchen = branche.strip() if branche else \

@@ -22,6 +22,7 @@ fahrlässig. Zusätzlich wird der Host-Kopf geprüft, damit keine fremde Webseit
 import json
 import mimetypes
 import os
+import re
 import secrets
 import threading
 import time
@@ -31,19 +32,33 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
 import config
-from modules.memory import zeitstempel
-from modules.webseite import SEITE_HTML
+from modules.memory import datum_sprechen, zeitstempel
+from modules.freier_dienst import DIENST_VORGABEN, freier_dienst_pruefen
+from modules.lokal import STANDARD_MODELL, ollama_pruefen
+from modules.setup_wizard import schluessel_online_testen
+from modules.webseite import AUTOPILOT_HTML, PROTOKOLL_HTML, SEITE_HTML
 
 STANDARD_PORT = 8765
-MAX_KOERPER = 512 * 1024
+MAX_KOERPER = 6 * 1024 * 1024  # ein Kamerabild passt hinein
+# Kennung der Jarvis-Erweiterung - folgt aus dem Schlüssel in erweiterung/manifest.json.
+ERWEITERUNG_ID = "ingjjagdojoofphabghgjepoloiiagjm"
+RECHNUNG_DATEI = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,120}\.pdf$")
 
 # Ohne eigenes Symbol fragt jeder Browser nach /favicon.ico und bekommt einen
 # Fehler in die Konsole. Ein kleines SVG kostet nichts und räumt das weg.
 SYMBOL_SVG = (
     '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">'
-    '<rect width="64" height="64" rx="14" fill="#0F1113"/>'
-    '<circle cx="32" cy="32" r="17" fill="none" stroke="#E8622C" stroke-width="5"/>'
-    '<circle cx="32" cy="32" r="6" fill="#E8622C"/></svg>')
+    '<rect width="64" height="64" rx="14" fill="#03080F"/>'
+    '<circle cx="32" cy="32" r="21" fill="none" stroke="#3AD1FF" stroke-width="2" '
+    'stroke-dasharray="10 4"/>'
+    '<circle cx="32" cy="32" r="14" fill="none" stroke="#3AD1FF" stroke-width="4"/>'
+    '<circle cx="32" cy="32" r="6" fill="#A6ECFF"/></svg>')
+
+
+def _fuer_skript(wert: str) -> str:
+    """Macht einen Text sicher für die Einbettung in ein <script> der Seite."""
+    return (json.dumps(wert).replace("<", "\\u003c").replace(">", "\\u003e")
+            .replace("&", "\\u0026"))
 
 
 class WebFreigabe:
@@ -237,6 +252,42 @@ class JarvisWeb:
         kopfschluessel = behandler.headers.get("X-Jarvis-Schluessel", "")
         return secrets.compare_digest(gefragt or kopfschluessel, self.token)
 
+    @staticmethod
+    def _von_fremder_seite(behandler) -> bool:
+        """Schickt eine fremde Webseite im Browser des Nutzers diesen Auftrag?
+
+        Ohne Schlüssel (nur auf diesem Rechner) prüft der Host-Kopf nicht, wer
+        anklopft: Jede offene Webseite könnte per fetch() an localhost:8765
+        posten - etwa /api/werkzeug mit "buchung_eintragen". Deshalb müssen
+        Aufträge (POST) von der eigenen Seite kommen: Herkunft gleich Host,
+        und als JSON - das kann eine fremde Seite nicht ohne Vorab-Anfrage
+        senden, und die beantwortet dieser Server nie.
+        """
+        seite = (behandler.headers.get("Sec-Fetch-Site") or "").lower()
+        if seite in ("cross-site", "same-site"):
+            return True
+        herkunft = behandler.headers.get("Origin")
+        if herkunft is not None:
+            host = (behandler.headers.get("Host") or "").lower()
+            if herkunft == "null" or urlparse(herkunft).netloc.lower() != host:
+                return True
+        typ = (behandler.headers.get("Content-Type") or "").split(";")[0].strip().lower()
+        return typ != "application/json"
+
+    @staticmethod
+    def _von_erweiterung(behandler, pfad: str) -> bool:
+        """Die Jarvis-Erweiterung im Browser darf genau eine Tür benutzen: /api/seite.
+
+        Sie schickt als Herkunft chrome-extension://<ihre Kennung>. Die Kennung steht
+        über den Schlüssel im Manifest fest - keine Webseite und keine andere
+        Erweiterung kann sie vortäuschen. Alles andere bleibt für fremde Herkunft
+        gesperrt.
+        """
+        herkunft = (behandler.headers.get("Origin") or "").lower()
+        typ = (behandler.headers.get("Content-Type") or "").split(";")[0].strip().lower()
+        return (pfad == "/api/seite" and herkunft == "chrome-extension://" + ERWEITERUNG_ID
+                and typ == "application/json")
+
     def _behandeln(self, behandler, methode: str):
         """Verteilt eine Anfrage auf die passende Antwort."""
         pfad = urlparse(behandler.path).path.rstrip("/") or "/"
@@ -244,6 +295,11 @@ class JarvisWeb:
             return self._antworten(behandler, 403,
                                    {"fehler": "Kein Zugang. Der Schlüssel fehlt "
                                               "oder stimmt nicht."})
+        if methode == "POST" and self._von_fremder_seite(behandler) \
+                and not self._von_erweiterung(behandler, pfad):
+            return self._antworten(behandler, 403,
+                                   {"fehler": "Abgelehnt: Der Auftrag kam nicht von der "
+                                              "Jarvis-Seite."})
         try:
             if methode == "GET":
                 return self._get(behandler, pfad)
@@ -268,6 +324,7 @@ class JarvisWeb:
                 "nutzer": config.NUTZER_NAME, "firma": config.FIRMA,
                 "modell": config.CLAUDE_MODEL,
                 "werkzeuge": len(werkzeuge.namen()),
+                "aufgaben": werkzeuge.tagesueberblick()["anzahl"],
                 "rollen": [r["rolle"] for r in werkzeuge.team.rollen_liste()],
                 "dienste": config.konfig_uebersicht()})
         if pfad == "/api/meldungen":
@@ -281,6 +338,46 @@ class JarvisWeb:
             return self._antworten(behandler, 200, {"ok": True, "verlauf": [
                 {"rolle": z["rolle"], "text": z["text"], "zeit": z["zeit"]}
                 for z in zeilen]})
+        if pfad == "/api/protokoll":
+            frage = parse_qs(urlparse(behandler.path).query)
+            try:
+                tage = int((frage.get("tage") or ["1"])[0])
+            except ValueError:
+                tage = 1
+            return self._antworten(behandler, 200, werkzeuge.recall.protokoll(
+                (frage.get("tag") or ["heute"])[0],
+                (frage.get("thema") or [""])[0], tage))
+        if pfad == "/api/autopilot":
+            autopilot = werkzeuge.autopilot
+            return self._antworten(behandler, 200, {
+                "ok": True, "aufgaben": autopilot.aufgaben(),
+                "punkte": [{"id": p["id"], "text": p["text"], "faellig": p["faellig"],
+                            "faellig_text": datum_sprechen(p["faellig"])}
+                           for p in werkzeuge.memory.punkte_offen(tage=3650)],
+                "einstellungen": autopilot.einstellungen(),
+                "letzter_lauf": autopilot.letzter_lauf(),
+                "laeuft": autopilot._laeuft.locked()})
+        if pfad == "/autopilot":
+            return self._html(behandler, (
+                AUTOPILOT_HTML
+                .replace("{{SCHLUESSEL_JSON}}", _fuer_skript(self.token or ""))
+                .replace("{{NUTZER_JSON}}", _fuer_skript(config.NUTZER_NAME))
+                .replace("{{FIRMA_JSON}}", _fuer_skript(config.FIRMA))))
+        if pfad == "/protokoll":
+            return self._html(behandler, (
+                PROTOKOLL_HTML
+                .replace("{{SCHLUESSEL_JSON}}", _fuer_skript(self.token or ""))
+                .replace("{{NUTZER_JSON}}", _fuer_skript(config.NUTZER_NAME))
+                .replace("{{FIRMA_JSON}}", _fuer_skript(config.FIRMA))))
+        if pfad == "/api/rechnungen":
+            rechnungen = werkzeuge.rechnungen
+            offen = rechnungen.offene()
+            return self._antworten(behandler, 200, {
+                "ok": True, "offen": offen["rechnungen"], "summe_offen": offen["summe"],
+                "text": offen["text"], "letzte": rechnungen.liste(limit=25),
+                "ordner": rechnungen.ordner})
+        if pfad.startswith("/rechnung/"):
+            return self._rechnung_pdf(behandler, pfad[len("/rechnung/"):])
         if pfad == "/api/pipeline":
             return self._antworten(behandler, 200, werkzeuge.akquise.pipeline())
         if pfad == "/api/nachfassen":
@@ -317,12 +414,17 @@ class JarvisWeb:
             if not self.agent.einsatzbereit():
                 return self._antworten(behandler, 200, {
                     "ok": False,
-                    "antwort": "Es ist kein Anthropic-Schlüssel hinterlegt. "
-                               "Ohne ihn kann ich nicht denken."})
+                    "antwort": "Ich habe noch kein Gehirn. Trag im Startfenster einen "
+                               "Gratis-Schlüssel ein, dann denke ich mit."})
             # Nur ein Gedanke gleichzeitig: sonst mischen sich zwei Gespräche
             # im selben Verlauf.
+            bild = str(daten.get("bild") or "")
+            if bild.startswith("data:"):
+                bild = bild.split(",", 1)[-1]
+            quelle = "Bildschirm" if daten.get("quelle") == "bildschirm" else "Kamera"
             with self._denkt:
-                antwort = self.agent.denken(text)
+                antwort = self.agent.denken(text, bild_base64=bild[:5_000_000],
+                                            bild_quelle=quelle)
             return self._antworten(behandler, 200,
                                    {"ok": True, "antwort": antwort,
                                     "zeit": zeitstempel()})
@@ -343,6 +445,147 @@ class JarvisWeb:
                                        {"fehler": "Das Werkzeug gibt es nicht."})
             return self._antworten(behandler, 200,
                                    werkzeuge.run(name, daten.get("argumente") or {}))
+
+        if pfad == "/api/schluessel":
+            # Den Schlüssel nie zurückgeben oder protokollieren - er geht nur in
+            # die .env auf diesem Rechner.
+            schluessel = "".join(str(daten.get("schluessel") or "").split())
+            if not schluessel.startswith("sk-") or len(schluessel) < 20:
+                return self._antworten(behandler, 200, {
+                    "ok": False,
+                    "text": "Das sieht nicht nach einem Schlüssel aus. Er beginnt "
+                            "mit sk- und ist lang. Bitte vollständig kopieren."})
+            probe = schluessel_online_testen(schluessel)
+            if probe.get("ok") or probe.get("grund") == "guthaben":
+                config.env_setzen("ANTHROPIC_API_KEY", schluessel)
+                return self._antworten(behandler, 200, {
+                    "ok": True, "einsatzbereit": self.agent.einsatzbereit(),
+                    "text": probe["text"] if probe.get("ok") else probe["text"]
+                            + " Der Schlüssel ist gespeichert."})
+            return self._antworten(behandler, 200,
+                                   {"ok": False, "text": probe.get("text", "Fehlgeschlagen.")})
+
+        if pfad == "/api/dienst":
+            # Nur bekannte Anbieter: die Adresse kommt aus der Liste, nie aus der Anfrage.
+            vorgabe = DIENST_VORGABEN.get(str(daten.get("dienst") or ""))
+            schluessel = "".join(str(daten.get("schluessel") or "").split())
+            modell = str(daten.get("modell") or "").strip() or (vorgabe or {}).get("modell", "")
+            if vorgabe is None:
+                return self._antworten(behandler, 200, {
+                    "ok": False, "text": "Diesen Dienst kenne ich nicht."})
+            if len(schluessel) < 10 or len(modell) > 300 or any(c.isspace() for c in modell):
+                return self._antworten(behandler, 200, {
+                    "ok": False, "text": "Schlüssel oder Modellname sehen nicht richtig "
+                                         "aus. Bitte vollständig kopieren."})
+            probe = freier_dienst_pruefen(vorgabe["url"], schluessel, modell)
+            if not probe.get("ok"):
+                return self._antworten(behandler, 200, {"ok": False, "text": probe["text"]})
+            config.env_setzen("FREIER_DIENST_URL", vorgabe["url"])
+            config.env_setzen("FREIER_DIENST_MODELL", modell)
+            config.env_setzen("FREIER_DIENST_SCHLUESSEL", schluessel)
+            return self._antworten(behandler, 200, {
+                "ok": True, "einsatzbereit": self.agent.einsatzbereit(),
+                "text": probe["text"] + " Gespräche gehen dabei an %s; das Gratis-Kontingent "
+                                        "hat Grenzen." % vorgabe["name"]})
+
+        if pfad == "/api/lokal":
+            modell = str(daten.get("modell") or STANDARD_MODELL).strip()
+            if not modell or len(modell) > 80 or any(c.isspace() for c in modell):
+                return self._antworten(behandler, 200, {
+                    "ok": False, "text": "Der Modellname sieht nicht richtig aus."})
+            probe = ollama_pruefen(modell)
+            if not probe.get("ok"):
+                return self._antworten(behandler, 200, {"ok": False,
+                                                        "text": probe["text"]})
+            config.env_setzen("LOKALES_MODELL", probe["modell"])
+            return self._antworten(behandler, 200, {
+                "ok": True, "einsatzbereit": self.agent.einsatzbereit(),
+                "text": probe["text"] + " Es kostet nichts. Antworten dauern "
+                        "auf diesem Rechner länger als bei Claude."})
+
+        if pfad == "/api/autopilot/laufen":
+            autopilot = werkzeuge.autopilot
+            if autopilot._laeuft.locked():
+                return self._antworten(behandler, 200, {
+                    "ok": False, "text": "Jarvis arbeitet gerade schon."})
+
+            def arbeiten():
+                # Im Hintergrund: Die Seite bleibt bedienbar, auch wenn der
+                # Gratis-Dienst langsam ist.
+                ergebnis = autopilot.laufen(self.agent)
+                self.melden(ergebnis.get("text", ""))
+            threading.Thread(target=arbeiten, daemon=True).start()
+            return self._antworten(behandler, 200, {
+                "ok": True, "text": "Jarvis arbeitet. Das dauert ein bis drei Minuten."})
+        if pfad == "/api/autopilot/aktion":
+            text = daten.get("text")
+            betreff = daten.get("betreff")
+            return self._antworten(behandler, 200, werkzeuge.autopilot.aufgabe_erledigen(
+                daten.get("id"), str(daten.get("aktion") or ""),
+                None if text is None else str(text),
+                None if betreff is None else str(betreff)))
+        if pfad == "/api/autopilot/punkt":
+            erledigt = werkzeuge.memory.punkt_erledigen(daten.get("id"))
+            return self._antworten(behandler, 200, {
+                "ok": erledigt, "text": "Erledigt." if erledigt else "Diesen Punkt gibt es nicht."})
+        if pfad == "/api/autopilot/einstellungen":
+            branchen = daten.get("branchen")
+            return self._antworten(behandler, 200, werkzeuge.autopilot.einstellungen_setzen(
+                daten.get("ort"),
+                [str(b) for b in branchen] if isinstance(branchen, list) else None,
+                None if daten.get("an") is None else bool(daten.get("an")),
+                daten.get("name"), daten.get("firma"),
+                daten.get("firmendaten") if isinstance(daten.get("firmendaten"), dict) else None))
+
+        if pfad == "/api/rechnung/aktion":
+            # Der Klick auf der eigenen Seite ist die Freigabe - wie beim Autopilot.
+            rechnungen = werkzeuge.rechnungen
+            nummer = str(daten.get("nummer") or "")
+            aktion = str(daten.get("aktion") or "")
+            if aktion == "bezahlt":
+                ergebnis = rechnungen.bezahlt(nummer)
+            elif aktion == "mahnen":
+                ergebnis = rechnungen.mahnung_erstellen(nummer)
+            elif aktion == "neu":
+                ergebnis = rechnungen.neu_schreiben(nummer)
+            elif aktion in ("angenommen", "abgelehnt"):
+                ergebnis = rechnungen.angebot_status(nummer, aktion)
+            elif aktion in ("senden", "mahnung_senden"):
+                ergebnis = rechnungen.senden(nummer, "", "mahnung"
+                                             if aktion == "mahnung_senden" else "")
+            else:
+                ergebnis = {"ok": False, "fehler": "Unbekannte Aktion."}
+            if aktion in ("bezahlt", "mahnen", "angenommen", "abgelehnt", "senden",
+                          "mahnung_senden"):
+                werkzeuge.memory.aktion_protokollieren(
+                    "rechnung_%s" % aktion, {"nummer": nummer},
+                    str(ergebnis.get("text") or ergebnis.get("fehler") or "")[:300],
+                    "ok" if ergebnis.get("ok") else "fehler")
+            return self._antworten(behandler, 200, ergebnis)
+
+        if pfad == "/api/seite":
+            auftraege = {
+                "zusammenfassen": "Fasse diese Seite in drei bis fünf gesprochenen Sätzen "
+                                  "zusammen: worum geht es, und was ist für mich wichtig?",
+                "kontakte": "Lege den Betrieb von dieser Seite als Interessenten an "
+                            "(lead_anlegen): Firma, Telefon, E-Mail und Adresse genau so, "
+                            "wie sie auf der Seite stehen. Erfinde nichts; fehlt etwas, "
+                            "lass es leer. Sag danach kurz, was du angelegt hast.",
+            }
+            auftrag = str(daten.get("auftrag") or "frage")
+            frage = auftraege.get(auftrag) or str(daten.get("frage") or "").strip()
+            if not frage:
+                return self._antworten(behandler, 400, {"ok": False,
+                                                        "fehler": "Es fehlt die Frage."})
+            if not self.agent.einsatzbereit():
+                return self._antworten(behandler, 200, {
+                    "ok": False, "fehler": "Jarvis hat noch kein Gehirn eingerichtet."})
+            with self._denkt:
+                antwort = self.agent.seite_denken(frage[:2000], {
+                    "titel": daten.get("titel"), "adresse": daten.get("adresse"),
+                    "text": daten.get("text"), "auswahl": daten.get("auswahl"),
+                    "kontaktlinks": daten.get("kontaktlinks")})
+            return self._antworten(behandler, 200, {"ok": True, "antwort": antwort})
 
         if pfad == "/api/verlauf/neu":
             self.agent.verlauf_leeren()
@@ -389,6 +632,29 @@ class JarvisWeb:
     def _html(self, behandler, text: str):
         roh = text.encode("utf-8")
         self._kopf_setzen(behandler, 200, "text/html; charset=utf-8", len(roh))
+        behandler.wfile.write(roh)
+
+    def _rechnung_pdf(self, behandler, name: str):
+        """Liefert ein Rechnungs-PDF aus - nur aus dem Rechnungsordner, nur .pdf."""
+        name = os.path.basename(name)
+        if not RECHNUNG_DATEI.match(name):
+            return self._antworten(behandler, 404, {"fehler": "Diese Datei gibt es nicht."})
+        wurzel = os.path.realpath(self.agent.tools.rechnungen.ordner)
+        ziel = os.path.realpath(os.path.join(wurzel, name))
+        if os.path.dirname(ziel) != wurzel:
+            return self._antworten(behandler, 403, {"fehler": "Nicht erlaubt."})
+        try:
+            with open(ziel, "rb") as datei:
+                roh = datei.read()
+        except OSError:
+            return self._antworten(behandler, 404, {"fehler": "Diese Datei gibt es nicht."})
+        behandler.send_response(200)
+        behandler.send_header("Content-Type", "application/pdf")
+        behandler.send_header("Content-Length", str(len(roh)))
+        behandler.send_header("Content-Disposition", 'inline; filename="%s"' % name)
+        behandler.send_header("Cache-Control", "no-store")
+        behandler.send_header("X-Content-Type-Options", "nosniff")
+        behandler.end_headers()
         behandler.wfile.write(roh)
 
     def _datei(self, behandler, pfad: str):

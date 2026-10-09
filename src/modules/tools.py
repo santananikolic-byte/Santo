@@ -32,10 +32,13 @@ from modules.computer_use import Bildschirm
 from modules.dashboard import Dashboard
 from modules.mail import Mail
 from modules.mcp_client import MCPClient
-from modules.memory import Memory, heute_datum
+from modules.memory import Memory, datum_sprechen, heute_datum
 from modules.privat import BEREICHE, Privat, WIEDERHOLUNGEN, RHYTHMEN
 from modules.messenger import Messenger
+from modules.autopilot import Autopilot
+from modules.netz import webseite_lesen
 from modules.recall import Recall
+from modules.rechnungen import Rechnungen, rechnung_euro
 from modules.routines import Routines
 from modules.team import ROLLEN, Team
 from modules.telefon import Telefon
@@ -72,9 +75,11 @@ PARAMETER_AKTIONEN = {
 }
 
 # Alles hier drin fragt vor der Ausführung nach einer Freigabe.
-FREIGABE_PFLICHTIG = {"mail_senden", "termin_anlegen", "bildschirm_bedienen",
+# Termine im eigenen Kalender fragen nicht mehr nach: Sie lassen sich jederzeit
+# löschen, und ständiges Nachfragen machte Jarvis zäh.
+FREIGABE_PFLICHTIG = {"mail_senden", "bildschirm_bedienen",
                       "nachricht_senden", "skript_ausfuehren", "anrufen",
-                      "sms_senden", "browser_auftrag"}
+                      "sms_senden", "browser_auftrag", "rechnung_senden"}
 
 
 def parameter_pruefen(wert: str):
@@ -90,6 +95,19 @@ def parameter_pruefen(wert: str):
         return False, ("Der Wert enthält die Zeichen %s. Solche Werte führe ich "
                        "grundsätzlich nicht aus." % sichtbar)
     return True, ""
+
+
+def punkte_satz(punkte: list) -> str:
+    """Offene Punkte als gesprochener Satz - mit Inhalt, nicht nur als Zahl."""
+    if not punkte:
+        return "Es ist nichts offen."
+    def eintrag(p):
+        return p["text"] + ((" (%s)" % datum_sprechen(p["faellig"])) if p["faellig"] else "")
+    if len(punkte) == 1:
+        return "Ein Punkt ist offen: %s." % eintrag(punkte[0])
+    namen = [eintrag(p) for p in punkte[:5]]
+    rest = (" und %d weitere" % (len(punkte) - 5)) if len(punkte) > 5 else ""
+    return "%d Punkte sind offen: %s%s." % (len(punkte), "; ".join(namen), rest)
 
 
 class Werkzeuge:
@@ -112,6 +130,9 @@ class Werkzeuge:
         self.telefon = Telefon(self.memory)
         self.mcp = MCPClient()
         self.welt = Welt(self.mcp)
+        self.rechnungen = Rechnungen(self.memory, self.bookkeeping, self.mail, self.akquise)
+        self.autopilot = Autopilot(self.memory, self.akquise, self.mail, self.bookkeeping,
+                                   self.welt, self.rechnungen)
         self.bildschirm = Bildschirm(agent)
         self.browser = Browser(agent)
         self.messenger = Messenger(self.telegram, self.mail, self.mcp, None)
@@ -193,6 +214,21 @@ class Werkzeuge:
                       "datum": text}, ["zusammenfassung"]),
             werkzeug("rueckblick", "Gibt die Tagesberichte der letzten Tage zurück.",
                      {"tage": ganz}),
+            werkzeug("webseite_lesen",
+                     "Liest eine Webseite und gibt ihren Text, Mailadressen, Telefonnummern "
+                     "und Links zurück. Für jede Frage zu einer Adresse oder Seite.",
+                     {"adresse": text, "frage": text}, ["adresse"]),
+            werkzeug("autopilot_starten",
+                     "Startet den Autopilot jetzt: neue Betriebe finden und Anruf-Skripte "
+                     "schreiben, Nachfassen, Antworten auf wichtige Mails entwerfen, "
+                     "Cashflow prüfen. Alles landet unter 'Heute zu tun'.", {}),
+            werkzeug("heute_zu_tun",
+                     "Liest vor, was auf der Liste 'Heute zu tun' offen ist.", {}),
+            werkzeug("protokoll",
+                     "Zeigt das Protokoll eines Tages aus dem Gesprächsverlauf: was "
+                     "gesagt und getan wurde, was offen ist. Tag: heute, gestern oder "
+                     "ein Datum. Mit 'thema' nur Gespräche dazu, mit 'tage' mehrere Tage.",
+                     {"tag": text, "thema": text, "tage": ganz}),
 
             # -- Buchhaltung --
             werkzeug("buchung_eintragen",
@@ -216,6 +252,74 @@ class Werkzeuge:
                      "beim Steuerberater.", {"von": text, "bis": text}),
             werkzeug("csv_export", "Exportiert die Buchungen als CSV für den Steuerberater.",
                      {"von": text, "bis": text}),
+
+            # -- Rechnungen, Angebote, Mahnungen (PDF) --
+            werkzeug("rechnung_erstellen",
+                     "Schreibt eine Rechnung als PDF mit fortlaufender Nummer, Steuer und "
+                     "Zahlungsziel. Preise netto je Einheit, außer preise_brutto ist wahr. "
+                     "Adresse und Mail des Kunden holt Jarvis aus den Kontakten, wenn sie "
+                     "fehlen. Fehlt ein Preis, nachfragen - nie schätzen.",
+                     {"kunde": text,
+                      "positionen": {"type": "array", "items": {
+                          "type": "object", "properties": {
+                              "bezeichnung": text, "menge": zahl, "einheit": text,
+                              "einzelpreis": zahl}, "required": ["bezeichnung"]}},
+                      "adresse": text, "email": text,
+                      "leistungszeitraum": {"type": "string",
+                                            "description": "z.B. Oktober 2026 oder 01.10.-31.10.2026"},
+                      "zahlungsziel_tage": ganz, "kunde_uid": text,
+                      "steuerschuld_umkehr": {"type": "boolean", "description":
+                          "nur wenn der Kunde selbst Bauunternehmer ist (§ 19 Abs. 1a UStG)"},
+                      "preise_brutto": wahr, "notiz": text},
+                     ["kunde", "positionen"]),
+            werkzeug("angebot_pdf",
+                     "Schreibt ein Angebot als PDF. Mit qm und intervall_pro_woche rechnet "
+                     "Jarvis den Monatspreis selbst (wie angebot_kalkulieren); sonst "
+                     "eigene Positionen mit Preisen netto.",
+                     {"kunde": text, "adresse": text, "email": text, "qm": zahl,
+                      "bodenbelag": text, "intervall_pro_woche": zahl, "stundensatz": zahl,
+                      "sonderleistungen": {"type": "object", "description":
+                                           "Mengen je Leistung: %s" % ", ".join(SONDERLEISTUNGEN)},
+                      "positionen": {"type": "array", "items": {"type": "object"}},
+                      "gueltig_tage": ganz},
+                     ["kunde"]),
+            werkzeug("rechnungen_offen",
+                     "Welche Rechnungen noch nicht bezahlt sind, welche überfällig sind und "
+                     "wie viel Geld offen ist.", {}),
+            werkzeug("rechnungen_liste",
+                     "Die letzten Rechnungen, Angebote und Stornos mit Nummer, Kunde, Betrag "
+                     "und Stand.", {"art": {"type": "string",
+                                            "enum": ["rechnung", "angebot", "storno"]}}),
+            werkzeug("rechnung_bezahlt",
+                     "Hakt eine Rechnung als bezahlt ab und bucht die Einnahme. Nummer wie "
+                     "2026-007 oder nur 7.",
+                     {"nummer": text, "datum": text, "betrag": zahl}, ["nummer"]),
+            werkzeug("mahnung_erstellen",
+                     "Schreibt zu einer offenen Rechnung die nächste Mahnstufe als PDF: "
+                     "Zahlungserinnerung, dann 1. und 2. Mahnung. Spesen nur, wenn er sie "
+                     "ausdrücklich will.",
+                     {"nummer": text, "spesen": zahl}, ["nummer"]),
+            werkzeug("rechnung_stornieren",
+                     "Storniert eine Rechnung mit einer Stornorechnung. Gelöscht wird nie "
+                     "etwas. Ist schon Geld gekommen, nur mit rueckzahlung (er zahlt zurück).",
+                     {"nummer": text, "grund": text, "rueckzahlung": wahr}, ["nummer"]),
+            werkzeug("rechnung_neu_schreiben",
+                     "Schreibt das PDF einer Rechnung oder eines Angebots neu - etwa nachdem "
+                     "Firmendaten ergänzt wurden. Fehlende Adresse, Mail oder UID des "
+                     "Kunden kann man dabei nachtragen.",
+                     {"nummer": text, "adresse": text, "email": text, "kunde_uid": text},
+                     ["nummer"]),
+            werkzeug("angebot_entschieden",
+                     "Trägt ein, ob ein Angebot angenommen oder abgelehnt wurde.",
+                     {"nummer": text,
+                      "status": {"type": "string", "enum": ["angenommen", "abgelehnt"]}},
+                     ["nummer", "status"]),
+            werkzeug("rechnung_senden",
+                     "Schickt eine Rechnung, ein Angebot oder mit was=mahnung die letzte "
+                     "Mahnung als PDF per Mail. Braucht eine Freigabe.",
+                     {"nummer": text, "an": text,
+                      "was": {"type": "string", "enum": ["dokument", "mahnung"]},
+                      "text": text}, ["nummer"]),
 
             # -- Kundengespräche --
             werkzeug("gespraech_festhalten",
@@ -364,7 +468,7 @@ class Werkzeuge:
             werkzeug("termine_lesen",
                      "Termine der nächsten Tage samt Überschneidungen.", {"tage": ganz}),
             werkzeug("termin_anlegen",
-                     "Trägt einen Termin ein. Braucht eine Freigabe.",
+                     "Trägt einen Termin in den eigenen Kalender ein.",
                      {"titel": text, "beginn": text, "dauer_minuten": ganz,
                       "ort": text, "beschreibung": text}, ["titel", "beginn"]),
 
@@ -427,13 +531,61 @@ class Werkzeuge:
         ]
         return eigene + self.mcp.alle_werkzeuge()
 
+    def tagesueberblick(self) -> dict:
+        """Was heute ansteht - alles an einer Stelle statt in vier Listen."""
+        heute = heute_datum()
+        punkte = self.memory.punkte_offen(tage=3650)
+        dran = [p for p in punkte if p["faellig"] and p["faellig"][:10] <= heute]
+        aufgaben = self.autopilot.aufgaben()
+        try:
+            erinnerungen = self.privat.erinnerungen_faellig(1).get("eintraege") or []
+        except Exception:
+            erinnerungen = []
+        nachfassen = self.akquise.nachfassliste().get("eintraege") or []
+        try:
+            ueberfaellig = [r for r in self.rechnungen.offene()["rechnungen"]
+                            if r["ueberfaellig_tage"] > 0]
+        except Exception:
+            ueberfaellig = []
+        teile = []
+        if ueberfaellig:
+            teile.append("Überfällige Rechnungen: %s" % ", ".join(
+                "%s von %s über %s" % (r["nummer"], r["kunde"], rechnung_euro(r["brutto"]))
+                for r in ueberfaellig[:3]))
+        if dran:
+            teile.append("Fällig: %s" % ", ".join(
+                "%s (%s)" % (p["text"], datum_sprechen(p["faellig"])) for p in dran[:5]))
+        if erinnerungen:
+            teile.append("Erinnerung: %s" % ", ".join(
+                str(e.get("was") or e.get("text") or "") for e in erinnerungen[:3]))
+        if nachfassen:
+            teile.append("Nachfassen: %s" % ", ".join(e["firma"] for e in nachfassen[:3]))
+        if aufgaben:
+            teile.append("Vom Autopilot: %s" % ", ".join(z["titel"] for z in aufgaben[:3]))
+        spaeter = [p for p in punkte if p not in dran]
+        if spaeter:
+            namen = ", ".join(p["text"] + ((" (%s)" % datum_sprechen(p["faellig"]))
+                                           if p["faellig"] else "") for p in spaeter[:3])
+            mehr = (" und %d weitere" % (len(spaeter) - 3)) if len(spaeter) > 3 else ""
+            teile.append(("Ohne Eile: %s%s" if teile else
+                          "Heute ist nichts fällig. Offen ohne Eile: %s%s") % (namen, mehr))
+        text = (". ".join(t.rstrip(".") for t in teile) + ".") if teile \
+            else "Heute steht nichts an."
+        return {"ok": True,
+                "anzahl": len(dran) + len(aufgaben) + len(nachfassen) + len(ueberfaellig),
+                "faellig": [{"id": p["id"], "text": p["text"], "faellig": p["faellig"]}
+                            for p in dran],
+                "aufgaben": [{"id": z["id"], "titel": z["titel"], "art": z["art"]}
+                             for z in aufgaben[:15]],
+                "text": text}
+
     def namen(self) -> list:
         """Alle Werkzeugnamen."""
         return [w["name"] for w in self.katalog()]
 
     # -- Freigabe -----------------------------------------------------------
 
-    def braucht_freigabe(self, name: str) -> bool:
+    def braucht_freigabe(self, name: str, argumente: dict = None) -> bool:
         """Muss vor diesem Werkzeug gefragt werden?"""
         if self.mcp.ist_mcp_werkzeug(name):
             return self.mcp.braucht_freigabe(name)
@@ -445,6 +597,18 @@ class Werkzeuge:
             # Beim Ausführen von Code muss der Code selbst in der Frage stehen.
             # Über einen blossen Dateinamen kann niemand entscheiden.
             details = self.werkstatt.freigabetext(argumente.get("name", ""))
+        elif name == "rechnung_senden":
+            # Wer zustimmt, muss sehen, welches Dokument an wen geht - nicht nur "Nr. 7".
+            bereit = self.rechnungen.versandfertig(argumente.get("nummer"),
+                                                   argumente.get("an", ""),
+                                                   argumente.get("was", ""))
+            if bereit.get("ok"):
+                eintrag = bereit["eintrag"]
+                details = "An: %s\nBetreff: %s\nKunde: %s, %s\nAnhang: %s" % (
+                    bereit["an"], bereit["betreff"], eintrag["kunde"],
+                    rechnung_euro(eintrag["brutto"]), os.path.basename(bereit["pdf"]))
+            else:
+                details = bereit.get("fehler", "")
         else:
             try:
                 details = json.dumps(argumente or {}, ensure_ascii=False)[:600]
@@ -481,7 +645,7 @@ class Werkzeuge:
                                               "unbekannt")
             return ergebnis
 
-        if self.braucht_freigabe(name):
+        if self.braucht_freigabe(name, argumente):
             entscheidung = self._freigabe(name, argumente)
             if not entscheidung.get("erlaubt"):
                 ergebnis = {"ok": False, "abgebrochen": True,
@@ -533,12 +697,11 @@ class Werkzeuge:
         if name == "punkt_anlegen":
             return self.memory.punkt_anlegen(a.get("text"), a.get("faellig", ""))
         if name == "punkte_offen":
-            punkte = self.memory.punkte_offen()
+            punkte = self.memory.punkte_offen(tage=3650)
             return {"ok": True, "anzahl": len(punkte),
                     "punkte": [{"id": p["id"], "text": p["text"],
                                 "faellig": p["faellig"]} for p in punkte],
-                    "text": ("%d Punkte offen." % len(punkte)) if punkte
-                            else "Es ist nichts offen."}
+                    "text": punkte_satz(punkte)}
         if name == "punkt_erledigen":
             erledigt = self.memory.punkt_erledigen(a.get("id"))
             return {"ok": erledigt,
@@ -565,6 +728,15 @@ class Werkzeuge:
                 a.get("offen", ""), a.get("datum", ""))
         if name == "rueckblick":
             return {"ok": True, "text": self.recall.rueckblick(int(a.get("tage") or 7))}
+        if name == "webseite_lesen":
+            return webseite_lesen(a.get("adresse", ""), a.get("frage", ""))
+        if name == "autopilot_starten":
+            return self.autopilot.laufen(self.agent)
+        if name == "heute_zu_tun":
+            return self.tagesueberblick()
+        if name == "protokoll":
+            return self.recall.protokoll(a.get("tag") or "heute", a.get("thema", ""),
+                                         int(a.get("tage") or 1))
 
         # -- Buchhaltung --
         if name == "buchung_eintragen":
@@ -579,6 +751,53 @@ class Werkzeuge:
             return self.bookkeeping.auswertung(a.get("von", ""), a.get("bis", ""))
         if name == "fehlende_belege":
             return self.bookkeeping.fehlende_belege(a.get("von", ""), a.get("bis", ""))
+        # -- Rechnungen --
+        if name == "rechnung_erstellen":
+            return self.rechnungen.rechnung_erstellen(
+                a.get("kunde"), a.get("positionen"), a.get("adresse", ""),
+                a.get("email", ""), a.get("leistungszeitraum", ""),
+                a.get("zahlungsziel_tage"), a.get("kunde_uid", ""),
+                bool(a.get("steuerschuld_umkehr")), bool(a.get("preise_brutto")),
+                a.get("notiz", ""))
+        if name == "angebot_pdf":
+            kalkulation = None
+            if a.get("qm"):
+                kalkulation = self.akquise.angebot_kalkulieren(
+                    a.get("qm"), a.get("bodenbelag", ""), a.get("intervall_pro_woche") or 1,
+                    a.get("stundensatz"), a.get("sonderleistungen"))
+            elif not a.get("positionen"):
+                return {"ok": False, "fehler": "Für das Angebot brauche ich entweder "
+                                               "Quadratmeter und Intervall oder die "
+                                               "Leistungen mit Preisen."}
+            return self.rechnungen.angebot_erstellen(
+                a.get("kunde"), a.get("positionen"), a.get("adresse", ""),
+                a.get("email", ""), kalkulation, a.get("gueltig_tage"))
+        if name == "rechnungen_offen":
+            return self.rechnungen.offene()
+        if name == "rechnungen_liste":
+            liste = self.rechnungen.liste(a.get("art", ""), "", 20)
+            return {"ok": True, "anzahl": len(liste), "dokumente": [
+                {"nummer": r["nummer"], "art": r["art"], "kunde": r["kunde"],
+                 "brutto": r["brutto"], "datum": r["datum"], "status": r["status"],
+                 "mahnstufe": r["mahnstufe"]} for r in liste],
+                "text": ("%d Dokumente." % len(liste)) if liste
+                        else "Es gibt noch keine Rechnungen oder Angebote."}
+        if name == "rechnung_bezahlt":
+            return self.rechnungen.bezahlt(a.get("nummer"), a.get("datum", ""),
+                                           a.get("betrag"))
+        if name == "mahnung_erstellen":
+            return self.rechnungen.mahnung_erstellen(a.get("nummer"), a.get("spesen"))
+        if name == "rechnung_stornieren":
+            return self.rechnungen.stornieren(a.get("nummer"), a.get("grund", ""),
+                                              bool(a.get("rueckzahlung")))
+        if name == "rechnung_neu_schreiben":
+            return self.rechnungen.neu_schreiben(a.get("nummer"), a.get("adresse", ""),
+                                                 a.get("email", ""), a.get("kunde_uid", ""))
+        if name == "angebot_entschieden":
+            return self.rechnungen.angebot_status(a.get("nummer"), a.get("status", ""))
+        if name == "rechnung_senden":
+            return self.rechnungen.senden(a.get("nummer"), a.get("an", ""), a.get("was", ""),
+                                          a.get("text", ""))
         if name == "csv_export":
             return self.bookkeeping.csv_export(a.get("von", ""), a.get("bis", ""))
 
