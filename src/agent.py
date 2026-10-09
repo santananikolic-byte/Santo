@@ -19,6 +19,7 @@ from datetime import datetime
 
 import config
 from modules.memory import heute_datum
+from modules.claude_code import claude_code_aktiv, claude_code_anfragen
 from modules.lokal import lokal_anfragen, lokales_modell_aktiv
 from modules.recall import Recall
 from modules.tools import Werkzeuge
@@ -114,8 +115,9 @@ class JarvisAgent:
     # -- Grundlagen ---------------------------------------------------------
 
     def einsatzbereit(self) -> bool:
-        """Ist ein Anthropic-Schlüssel oder ein lokales Modell eingestellt?"""
-        return bool(config.ANTHROPIC_API_KEY) or lokales_modell_aktiv()
+        """Gibt es ein Gehirn: Schlüssel, Claude Code (Abo) oder ein lokales Modell?"""
+        return (bool(config.ANTHROPIC_API_KEY) or claude_code_aktiv()
+                or lokales_modell_aktiv())
 
     def stimme_setzen(self, stimme):
         """Hängt die Sprachausgabe ein."""
@@ -149,6 +151,8 @@ class JarvisAgent:
                     "fehler": "Es ist kein Anthropic-Schlüssel hinterlegt. Starte die "
                               "Einrichtung mit: python3 jarvis.py einrichten"}
         if not config.ANTHROPIC_API_KEY:
+            if claude_code_aktiv():
+                return claude_code_anfragen(koerper)
             return lokal_anfragen(koerper)
         daten = json.dumps(koerper).encode("utf-8")
         anfrage = urllib.request.Request(API_URL, data=daten, method="POST", headers={

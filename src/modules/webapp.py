@@ -32,6 +32,7 @@ from urllib.parse import parse_qs, urlparse
 
 import config
 from modules.memory import zeitstempel
+from modules.claude_code import claude_code_pruefen
 from modules.lokal import STANDARD_MODELL, ollama_pruefen
 from modules.setup_wizard import schluessel_online_testen
 from modules.webseite import PROTOKOLL_HTML, SEITE_HTML
@@ -385,6 +386,16 @@ class JarvisWeb:
                             + " Der Schlüssel ist gespeichert."})
             return self._antworten(behandler, 200,
                                    {"ok": False, "text": probe.get("text", "Fehlgeschlagen.")})
+
+        if pfad == "/api/claudecode":
+            probe = claude_code_pruefen()
+            if not probe.get("ok"):
+                return self._antworten(behandler, 200, {"ok": False,
+                                                        "text": probe["text"]})
+            config.env_setzen("CLAUDE_CODE_NUTZEN", "ja")
+            return self._antworten(behandler, 200, {
+                "ok": True, "einsatzbereit": self.agent.einsatzbereit(),
+                "text": probe["text"] + " Das zählt zu den Grenzen deines Abos."})
 
         if pfad == "/api/lokal":
             modell = str(daten.get("modell") or STANDARD_MODELL).strip()

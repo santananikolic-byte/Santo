@@ -234,6 +234,15 @@ body[data-zustand="wach"] .zustandstext{color:var(--akzent)}
 <div class="schleier" id="schluesselDialog">
   <div class="frage">
     <div class="kopf"><h2>Anthropic-Schlüssel</h2></div>
+    <div class="inhalt" style="border-bottom:1px solid var(--rand)">
+      <p class="sagen" style="padding:0 0 10px;text-align:left">
+        <b>Mit deinem Claude-Abo, ohne Extra-Kosten:</b> Ist Claude Code auf
+        diesem Rechner installiert und angemeldet, denkt Jarvis darüber. Es gilt
+        das Limit deines Abos, und Antworten brauchen ein paar Sekunden.</p>
+      <div class="meldung" id="ccMeldung" style="padding:0 0 8px"></div>
+      <div class="knoepfe" style="padding:0"><button class="ja" id="ccSpeichern">
+        Claude Code nutzen</button></div>
+    </div>
     <div class="inhalt">
       <div class="aktion">Ein Schritt fehlt</div>
       <p class="sagen" style="padding:0 0 12px;text-align:left">
@@ -611,6 +620,25 @@ body[data-zustand="wach"] .zustandstext{color:var(--akzent)}
       meldung.textContent = "Der Server antwortet nicht.";
     });
   }
+  function ccSpeichern() {
+    var meldung = el("ccMeldung");
+    meldung.className = "meldung"; meldung.textContent = "Ich frage Claude Code, das dauert kurz …";
+    el("ccSpeichern").disabled = true;
+    holen("/api/claudecode", {}).then(function (a) {
+      el("ccSpeichern").disabled = false;
+      meldung.textContent = a.text || "";
+      if (a.ok) {
+        el("schluesselDialog").classList.remove("zeigen");
+        el("antwort").textContent = ""; el("antwort").className = "antwort";
+        zustandHolen();
+      } else { meldung.className = "meldung fehler"; }
+    }).catch(function () {
+      el("ccSpeichern").disabled = false;
+      meldung.className = "meldung fehler";
+      meldung.textContent = "Der Server antwortet nicht.";
+    });
+  }
+  el("ccSpeichern").addEventListener("click", ccSpeichern);
   el("lokalSpeichern").addEventListener("click", lokalSpeichern);
   el("schluesselSpeichern").addEventListener("click", schluesselSpeichern);
   el("schluesselFeld").addEventListener("keydown", function (e) {
