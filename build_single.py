@@ -42,6 +42,7 @@ BAULISTE = [
     "config",
     "modules/memory",
     "modules/recall",
+    "modules/lokal",
     "modules/voice",
     "modules/speaker",
     "modules/mail",

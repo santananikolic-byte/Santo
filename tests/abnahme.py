@@ -1308,6 +1308,129 @@ def pruefung_schluessel(agent):
             .split('"$PYTHON" "$PROJEKT/jarvis.py" "$@"')[0].replace("python3 jarvis.py einrichten", ""))
 
 
+def pruefung_lokales_modell(agent):
+    """Jarvis denkt ohne Schlüssel und ohne Kosten mit einem Modell auf dem Rechner."""
+    abschnitt("Lokales Modell (Ollama)")
+    import http.server
+    import urllib.request as _netz
+    import modules.webapp as webapp_modul
+    from modules.lokal import ollama_pruefen, werkzeuge_auswaehlen
+
+    gesehen = []
+    modelle = {"liste": [{"name": "qwen2.5:3b"}]}
+
+    class FalschesOllama(http.server.BaseHTTPRequestHandler):
+        def log_message(self, *a):
+            pass
+
+        def _senden(self, nutzlast):
+            roh = json.dumps(nutzlast).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(roh)))
+            self.end_headers()
+            self.wfile.write(roh)
+
+        def do_GET(self):
+            self._senden({"models": modelle["liste"]})
+
+        def do_POST(self):
+            laenge = int(self.headers.get("Content-Length") or 0)
+            anfrage = json.loads(self.rfile.read(laenge).decode("utf-8"))
+            gesehen.append(anfrage)
+            hat_ergebnis = any(m.get("role") == "tool" for m in anfrage["messages"])
+            if hat_ergebnis:
+                self._senden({"message": {"role": "assistant", "content": "Gespeichert."}})
+            else:
+                self._senden({"message": {"role": "assistant", "content": "", "tool_calls": [
+                    {"function": {"name": "notiz_speichern",
+                                  "arguments": {"text": "Lokaltest Nikolic"}}}]}})
+
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 11998), FalschesOllama)
+    faden = threading.Thread(target=server.serve_forever, daemon=True)
+    faden.start()
+
+    alt = (config.ANTHROPIC_API_KEY, config.LOKALES_MODELL, config.OLLAMA_URL,
+           config.ENV_DATEI, dict(config._ROHWERTE))
+    config.ANTHROPIC_API_KEY = ""
+    config.LOKALES_MODELL = ""
+    config.OLLAMA_URL = "http://127.0.0.1:11998"
+    config.ENV_DATEI = pathlib.Path(ARBEITSVERZEICHNIS) / "lokal.env"
+    web = None
+    try:
+        pruefen("Ohne Schlüssel und ohne Modell ist Jarvis nicht einsatzbereit",
+                agent.einsatzbereit() is False)
+        pruefen("Ollama mit dem Modell wird erkannt", ollama_pruefen("qwen2.5:3b")["ok"])
+        modelle["liste"] = []
+        probe = ollama_pruefen("qwen2.5:3b")
+        pruefen("Fehlendes Modell: Hinweis mit dem Befehl zum Laden",
+                probe["ok"] is False and "ollama pull qwen2.5:3b" in probe["text"])
+        modelle["liste"] = [{"name": "qwen2.5:3b"}]
+
+        # Einrichtung über die Web-App
+        web = JarvisWeb(agent, port=8799)
+        web.starten(blockierend=False)
+        time.sleep(0.5)
+
+        def lokal_senden(modell):
+            anfrage = _netz.Request("http://127.0.0.1:8799/api/lokal",
+                                    data=json.dumps({"modell": modell}).encode("utf-8"),
+                                    headers={"Content-Type": "application/json"})
+            with _netz.urlopen(anfrage, timeout=8) as r:
+                return json.loads(r.read().decode("utf-8"))
+
+        antwort = lokal_senden("qwen2.5:3b")
+        pruefen("Lokales Modell lässt sich im Browser einrichten",
+                antwort.get("ok") is True and agent.einsatzbereit()
+                and config.LOKALES_MODELL == "qwen2.5:3b"
+                and "LOKALES_MODELL=qwen2.5:3b" in config.ENV_DATEI.read_text("utf-8"))
+        pruefen("Unsinniger Modellname wird abgewiesen",
+                lokal_senden("zwei Wörter")["ok"] is False)
+
+        # Denkschleife: Werkzeugaufruf und Antwort laufen durch die Übersetzung
+        agent.verlauf_leeren()
+        text = agent.denken("Bitte merk dir die Notiz Lokaltest Nikolic")
+        pruefen("Das lokale Modell antwortet durch die normale Denkschleife",
+                text == "Gespeichert.", text)
+        pruefen("Sein Werkzeugaufruf wurde wirklich ausgeführt",
+                any("Lokaltest Nikolic" in n["text"]
+                    for n in agent.memory.notizen_suchen("Lokaltest")))
+        erste, zweite = gesehen[-2], gesehen[-1]
+        pruefen("Es gehen nur wenige, passende Werkzeuge mit",
+                0 < len(erste["tools"]) <= 14
+                and "notiz_speichern" in [t["function"]["name"] for t in erste["tools"]],
+                "%d von %d" % (len(erste["tools"]), len(agent.tools.katalog())))
+        pruefen("Systemanweisung und Frage kommen im Ollama-Format an",
+                erste["messages"][0]["role"] == "system"
+                and erste["messages"][-1]["role"] == "user"
+                and erste["model"] == "qwen2.5:3b" and erste["stream"] is False)
+        pruefen("Das Werkzeugergebnis geht mit Namen zurück ans Modell",
+                any(m.get("role") == "tool" and m.get("tool_name") == "notiz_speichern"
+                    for m in zweite["messages"]))
+        auswahl = werkzeuge_auswaehlen(agent.tools.katalog(), "wie war das Wetter morgen")
+        pruefen("Die Werkzeugauswahl richtet sich nach der Frage",
+                len(auswahl) <= 14 and any("wetter" in w["name"] for w in auswahl),
+                ", ".join(w["name"] for w in auswahl[:6]))
+
+        # Ollama ausgeschaltet: verständliche Meldung statt Absturz
+        server.shutdown()
+        server.server_close()
+        fehler = agent.denken("Hallo")
+        pruefen("Ohne laufendes Ollama kommt ein Hinweis statt eines Absturzes",
+                "Ollama" in fehler, fehler[:80])
+    finally:
+        if web is not None:
+            web.stoppen()
+        (config.ANTHROPIC_API_KEY, config.LOKALES_MODELL, config.OLLAMA_URL,
+         config.ENV_DATEI, rohwerte) = alt
+        config._ROHWERTE.clear()
+        config._ROHWERTE.update(rohwerte)
+        try:
+            server.shutdown()
+        except Exception:
+            pass
+
+
 def pruefung_sicherheit(agent):
     abschnitt("Sicherheit")
     ergebnis = agent.tools.run("systeminfo", {"was": "rm -rf /"})
@@ -1453,6 +1576,7 @@ def main() -> int:
     pruefung_webapp(agent)
     pruefung_protokoll(agent)
     pruefung_schluessel(agent)
+    pruefung_lokales_modell(agent)
     pruefung_routinen(agent)
     pruefung_zeitplan()
     pruefung_kalender()

@@ -158,6 +158,7 @@ body[data-zustand="wach"] .zustandstext{color:var(--akzent)}
 .frage .knoepfe button{flex:1;padding:15px;border-radius:10px;font-weight:700;font-size:16px}
 .frage .ja{background:var(--akzent);color:#1A0E08}
 .frage .nein{background:var(--tief);border:1px solid var(--rand-hell);color:var(--text)}
+.frage{max-height:92vh;overflow-y:auto}
 .frage input{width:100%;padding:13px 14px;border-radius:9px;font:14px var(--mono);
   background:var(--tief);border:1px solid var(--rand-hell);color:var(--text);
   user-select:text;-webkit-user-select:text}
@@ -245,6 +246,18 @@ body[data-zustand="wach"] .zustandstext{color:var(--akzent)}
     <p class="meldung" id="schluesselMeldung"></p>
     <div class="knoepfe">
       <button class="ja" id="schluesselSpeichern">Speichern</button>
+    </div>
+    <div class="inhalt" style="border-top:1px solid var(--rand)">
+      <p class="sagen" style="padding:0 0 10px;text-align:left">
+        <b>Kein Schlüssel, keine Kosten?</b> Dann denkt Jarvis mit einem
+        Modell auf diesem Rechner (Ollama, ollama.com). Das ist kostenlos und
+        ohne Limit, aber langsamer und schwächer als Claude.</p>
+      <input id="lokalFeld" type="text" value="qwen2.5:3b" autocomplete="off"
+             spellcheck="false">
+    </div>
+    <p class="meldung" id="lokalMeldung"></p>
+    <div class="knoepfe">
+      <button class="nein" id="lokalSpeichern">Lokales Modell nutzen</button>
     </div>
   </div>
 </div>
@@ -580,6 +593,25 @@ body[data-zustand="wach"] .zustandstext{color:var(--akzent)}
       meldung.textContent = "Der Server antwortet nicht.";
     });
   }
+  function lokalSpeichern() {
+    var meldung = el("lokalMeldung");
+    meldung.className = "meldung"; meldung.textContent = "Ich schaue nach Ollama …";
+    el("lokalSpeichern").disabled = true;
+    holen("/api/lokal", { modell: el("lokalFeld").value }).then(function (a) {
+      el("lokalSpeichern").disabled = false;
+      meldung.textContent = a.text || "";
+      if (a.ok) {
+        el("schluesselDialog").classList.remove("zeigen");
+        el("antwort").textContent = ""; el("antwort").className = "antwort";
+        zustandHolen();
+      } else { meldung.className = "meldung fehler"; }
+    }).catch(function () {
+      el("lokalSpeichern").disabled = false;
+      meldung.className = "meldung fehler";
+      meldung.textContent = "Der Server antwortet nicht.";
+    });
+  }
+  el("lokalSpeichern").addEventListener("click", lokalSpeichern);
   el("schluesselSpeichern").addEventListener("click", schluesselSpeichern);
   el("schluesselFeld").addEventListener("keydown", function (e) {
     if (e.key === "Enter") { schluesselSpeichern(); }

@@ -32,6 +32,7 @@ from urllib.parse import parse_qs, urlparse
 
 import config
 from modules.memory import zeitstempel
+from modules.lokal import STANDARD_MODELL, ollama_pruefen
 from modules.setup_wizard import schluessel_online_testen
 from modules.webseite import PROTOKOLL_HTML, SEITE_HTML
 
@@ -384,6 +385,21 @@ class JarvisWeb:
                             + " Der Schlüssel ist gespeichert."})
             return self._antworten(behandler, 200,
                                    {"ok": False, "text": probe.get("text", "Fehlgeschlagen.")})
+
+        if pfad == "/api/lokal":
+            modell = str(daten.get("modell") or STANDARD_MODELL).strip()
+            if not modell or len(modell) > 80 or any(c.isspace() for c in modell):
+                return self._antworten(behandler, 200, {
+                    "ok": False, "text": "Der Modellname sieht nicht richtig aus."})
+            probe = ollama_pruefen(modell)
+            if not probe.get("ok"):
+                return self._antworten(behandler, 200, {"ok": False,
+                                                        "text": probe["text"]})
+            config.env_setzen("LOKALES_MODELL", probe["modell"])
+            return self._antworten(behandler, 200, {
+                "ok": True, "einsatzbereit": self.agent.einsatzbereit(),
+                "text": probe["text"] + " Es kostet nichts. Antworten dauern "
+                        "auf diesem Rechner länger als bei Claude."})
 
         if pfad == "/api/verlauf/neu":
             self.agent.verlauf_leeren()

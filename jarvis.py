@@ -215,6 +215,11 @@ ANTHROPIC_API_KEY = _text("ANTHROPIC_API_KEY")
 CLAUDE_MODEL = _text("CLAUDE_MODEL", "claude-sonnet-4-6")
 CLAUDE_MAX_TOKENS = _ganzzahl("CLAUDE_MAX_TOKENS", 2000)
 
+# Lokales Modell (Ollama): kostenlos, ohne Schlüssel, läuft auf diesem Rechner.
+# Wird nur benutzt, wenn kein Anthropic-Schlüssel hinterlegt ist.
+LOKALES_MODELL = _text("LOKALES_MODELL")
+OLLAMA_URL = _text("OLLAMA_URL", "http://127.0.0.1:11434")
+
 # Nutzer
 NUTZER_NAME = _text("NUTZER_NAME", "Chef")
 FIRMA = _text("FIRMA", "Gebäudereinigung")
@@ -352,6 +357,7 @@ def konfig_uebersicht() -> dict:
     """Zeigt an, welche Dienste eingerichtet sind - ohne Geheimnisse preiszugeben."""
     return {
         "Claude": bool(ANTHROPIC_API_KEY),
+        "Lokales Modell": bool(LOKALES_MODELL),
         "ElevenLabs": bool(ELEVENLABS_API_KEY),
         "Whisper-API": bool(OPENAI_API_KEY),
         "Telegram": bool(TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID),
@@ -1077,6 +1083,221 @@ class Recall:
                 "thema": thema, "gespraeche": gespraeche, "aktionen": aktionen,
                 "berichte": berichte, "offene_punkte": punkte,
                 "text": " ".join(saetze)}
+
+
+# =========================================================================
+# lokal  -  Lokales Modell - Jarvis denkt auf diesem Rechner statt bei Anthropic.
+# 
+# Kostet nichts, hat kein Limit und schickt nichts ins Netz. Dafür ist ein
+# kleines lokales Modell deutlich schwächer als Claude und auf einem älteren Mac
+# langsam. Gedacht als Weg ohne Schlüssel und ohne laufende Kosten.
+# 
+# Gesprochen wird mit Ollama (https://ollama.com), das auf dem Rechner läuft. Der
+# Rest von Jarvis spricht weiter das Format der Claude-Schnittstelle; dieses
+# Modul übersetzt hin und zurück, damit Schleifen und Werkzeuge unverändert
+# bleiben.
+# 
+# **Werkzeugauswahl.** Alle gut sechzig Werkzeuge mitzuschicken würde eine
+# Anfrage auf einem Intel-Mac um Minuten verlängern und kleine Modelle
+# verwirren. Deshalb gehen nur die Werkzeuge mit, die zur Frage passen, plus ein
+# kleiner Grundstock.
+# =========================================================================
+
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+
+
+STANDARD_MODELL = "qwen2.5:3b"
+GRUNDSTOCK = ("notiz_speichern", "gedaechtnis_durchsuchen", "protokoll", "punkte_offen")
+MAX_WERKZEUGE = 10
+
+
+def lokales_modell_aktiv() -> bool:
+    """Ist ein lokales Modell eingestellt?"""
+    return bool((LOKALES_MODELL or "").strip())
+
+
+def _adresse(pfad: str) -> str:
+    return OLLAMA_URL.rstrip("/") + pfad
+
+
+def ollama_pruefen(modell: str = "") -> dict:
+    """Läuft Ollama, und ist das Modell geladen? Sagt auf Deutsch, was fehlt."""
+    modell = (modell or LOKALES_MODELL or STANDARD_MODELL).strip()
+    try:
+        with urllib.request.urlopen(_adresse("/api/tags"), timeout=5) as antwort:
+            daten = json.loads(antwort.read().decode("utf-8"))
+    except (urllib.error.URLError, OSError, ValueError):
+        return {"ok": False, "grund": "ollama",
+                "text": "Ollama läuft nicht. Lade es auf ollama.com/download, "
+                        "installiere es und öffne es einmal. Dann sag Bescheid."}
+    vorhanden = [m.get("name", "") for m in daten.get("models", [])]
+    gleich = [n for n in vorhanden if n == modell or n == modell + ":latest"
+              or (":" not in modell and n.split(":")[0] == modell)]
+    if not gleich:
+        return {"ok": False, "grund": "modell", "vorhanden": vorhanden,
+                "text": "Das Modell %s ist noch nicht geladen. Gib im Terminal ein: "
+                        "ollama pull %s" % (modell, modell)}
+    return {"ok": True, "modell": gleich[0],
+            "text": "Das lokale Modell %s ist bereit." % gleich[0]}
+
+
+def werkzeuge_auswaehlen(katalog: list, frage: str, anzahl: int = MAX_WERKZEUGE,
+                         benutzt: tuple = ()) -> list:
+    """Wählt die zur Frage passenden Werkzeuge aus dem Katalog."""
+    woerter = [w[:5] for w in schluesselwoerter(frage or "")]
+    bewertet = []
+    for nr, werkzeug in enumerate(katalog):
+        name = werkzeug.get("name", "")
+        text = (name + " " + werkzeug.get("description", "")).lower()
+        punkte = sum(2 if w in name.lower() else 1 for w in woerter if w in text)
+        if name in benutzt:
+            punkte += 3
+        if name in GRUNDSTOCK:
+            punkte += 1
+        bewertet.append((punkte, -nr, werkzeug))
+    bewertet.sort(key=lambda t: (t[0], t[1]), reverse=True)
+    gewaehlt = [w for p, _, w in bewertet if p > 0][:anzahl]
+    for werkzeug in katalog:  # der Grundstock fehlt nie ganz
+        if werkzeug.get("name") in GRUNDSTOCK and werkzeug not in gewaehlt:
+            gewaehlt.append(werkzeug)
+    return gewaehlt[:anzahl + len(GRUNDSTOCK)]
+
+
+def _text_aus(inhalt) -> str:
+    if isinstance(inhalt, str):
+        return inhalt
+    return "\n".join(b.get("text", "") for b in inhalt or []
+                     if isinstance(b, dict) and b.get("type") == "text")
+
+
+def nachrichten_umwandeln(system: str, nachrichten: list) -> list:
+    """Claude-Nachrichten in das Format von Ollama übersetzen."""
+    ergebnis = []
+    if system:
+        ergebnis.append({"role": "system", "content": system})
+    namen = {}  # tool_use_id -> Werkzeugname
+    for nachricht in nachrichten:
+        rolle, inhalt = nachricht.get("role"), nachricht.get("content")
+        if rolle == "assistant":
+            aufrufe = []
+            for block in inhalt if isinstance(inhalt, list) else []:
+                if isinstance(block, dict) and block.get("type") == "tool_use":
+                    namen[block.get("id")] = block.get("name", "")
+                    aufrufe.append({"function": {"name": block.get("name", ""),
+                                                 "arguments": block.get("input") or {}}})
+            eintrag = {"role": "assistant", "content": _text_aus(inhalt)}
+            if aufrufe:
+                eintrag["tool_calls"] = aufrufe
+            ergebnis.append(eintrag)
+        elif isinstance(inhalt, list):
+            bilder = []
+            for block in inhalt:
+                if not isinstance(block, dict):
+                    continue
+                if block.get("type") == "tool_result":
+                    ergebnis.append({"role": "tool",
+                                     "tool_name": namen.get(block.get("tool_use_id"), ""),
+                                     "content": _text_aus(block.get("content"))})
+                elif block.get("type") == "image":
+                    bilder.append((block.get("source") or {}).get("data", ""))
+            text = _text_aus(inhalt)
+            if text or bilder:
+                eintrag = {"role": "user", "content": text}
+                if bilder:
+                    eintrag["images"] = [b for b in bilder if b]
+                ergebnis.append(eintrag)
+        else:
+            ergebnis.append({"role": "user", "content": inhalt or ""})
+    return ergebnis
+
+
+def antwort_umwandeln(daten: dict) -> list:
+    """Die Antwort von Ollama als Inhaltsblöcke im Claude-Format."""
+    nachricht = daten.get("message") or {}
+    bloecke = []
+    text = (nachricht.get("content") or "").strip()
+    if text:
+        bloecke.append({"type": "text", "text": text})
+    for nr, aufruf in enumerate(nachricht.get("tool_calls") or []):
+        funktion = aufruf.get("function") or {}
+        argumente = funktion.get("arguments") or {}
+        if isinstance(argumente, str):
+            try:
+                argumente = json.loads(argumente)
+            except ValueError:
+                argumente = {}
+        if not isinstance(argumente, dict):
+            argumente = {}
+        bloecke.append({"type": "tool_use", "id": "lokal_%d_%d" % (id(aufruf) % 100000, nr),
+                        "name": funktion.get("name", ""), "input": argumente})
+    return bloecke
+
+
+def _letzte_frage(nachrichten: list) -> str:
+    for nachricht in reversed(nachrichten):
+        if nachricht.get("role") == "user":
+            text = _text_aus(nachricht.get("content"))
+            if text:
+                return text
+    return ""
+
+
+def lokal_anfragen(koerper: dict, timeout: int = 900) -> dict:
+    """Beantwortet eine Anfrage im Claude-Format mit dem lokalen Modell."""
+    nachrichten = koerper.get("messages") or []
+    benutzt = tuple(b.get("name", "") for n in nachrichten
+                    if isinstance(n.get("content"), list) for b in n["content"]
+                    if isinstance(b, dict) and b.get("type") == "tool_use")
+    katalog = koerper.get("tools") or []
+    gewaehlt = werkzeuge_auswaehlen(katalog, _letzte_frage(nachrichten), benutzt=benutzt) \
+        if katalog else []
+    nutzlast = {
+        "model": LOKALES_MODELL,
+        "messages": nachrichten_umwandeln(koerper.get("system", ""), nachrichten),
+        "stream": False,
+        "keep_alive": "30m",
+        "options": {"num_predict": int(koerper.get("max_tokens") or 1000),
+                    "temperature": 0.3},
+    }
+    if gewaehlt:
+        nutzlast["tools"] = [{"type": "function", "function": {
+            "name": w["name"], "description": w.get("description", ""),
+            "parameters": w.get("input_schema") or {"type": "object", "properties": {}}}}
+            for w in gewaehlt]
+
+    for versuch in range(2):
+        anfrage = urllib.request.Request(
+            _adresse("/api/chat"), data=json.dumps(nutzlast).encode("utf-8"),
+            method="POST", headers={"content-type": "application/json"})
+        try:
+            with urllib.request.urlopen(anfrage, timeout=timeout) as antwort:
+                daten = json.loads(antwort.read().decode("utf-8"))
+            bloecke = antwort_umwandeln(daten)
+            if not bloecke:
+                bloecke = [{"type": "text", "text": ""}]
+            return {"ok": True, "daten": {"content": bloecke}}
+        except urllib.error.HTTPError as fehler:
+            try:
+                meldung = json.loads(fehler.read().decode("utf-8")).get("error", "")
+            except (ValueError, OSError):
+                meldung = str(fehler)
+            if "tools" in meldung.lower() and "tools" in nutzlast and versuch == 0:
+                nutzlast.pop("tools")  # Modell kann keine Werkzeuge: dann ohne
+                continue
+            if fehler.code == 404:
+                return {"ok": False, "fehler": "Das lokale Modell %s ist nicht geladen. "
+                        "Gib im Terminal ein: ollama pull %s"
+                        % (LOKALES_MODELL, LOKALES_MODELL)}
+            return {"ok": False, "fehler": "Das lokale Modell meldet einen Fehler (%d): %s"
+                    % (fehler.code, meldung[:300])}
+        except (urllib.error.URLError, OSError):
+            return {"ok": False, "fehler": "Ollama antwortet nicht. Ist die Ollama-App "
+                    "geöffnet?"}
+        except ValueError as fehler:
+            return {"ok": False, "fehler": "Die Antwort war unlesbar: %s" % fehler}
+    return {"ok": False, "fehler": "Das lokale Modell hat nicht geantwortet."}
 
 
 # =========================================================================
@@ -7139,6 +7360,7 @@ body[data-zustand="wach"] .zustandstext{color:var(--akzent)}
 .frage .knoepfe button{flex:1;padding:15px;border-radius:10px;font-weight:700;font-size:16px}
 .frage .ja{background:var(--akzent);color:#1A0E08}
 .frage .nein{background:var(--tief);border:1px solid var(--rand-hell);color:var(--text)}
+.frage{max-height:92vh;overflow-y:auto}
 .frage input{width:100%;padding:13px 14px;border-radius:9px;font:14px var(--mono);
   background:var(--tief);border:1px solid var(--rand-hell);color:var(--text);
   user-select:text;-webkit-user-select:text}
@@ -7226,6 +7448,18 @@ body[data-zustand="wach"] .zustandstext{color:var(--akzent)}
     <p class="meldung" id="schluesselMeldung"></p>
     <div class="knoepfe">
       <button class="ja" id="schluesselSpeichern">Speichern</button>
+    </div>
+    <div class="inhalt" style="border-top:1px solid var(--rand)">
+      <p class="sagen" style="padding:0 0 10px;text-align:left">
+        <b>Kein Schlüssel, keine Kosten?</b> Dann denkt Jarvis mit einem
+        Modell auf diesem Rechner (Ollama, ollama.com). Das ist kostenlos und
+        ohne Limit, aber langsamer und schwächer als Claude.</p>
+      <input id="lokalFeld" type="text" value="qwen2.5:3b" autocomplete="off"
+             spellcheck="false">
+    </div>
+    <p class="meldung" id="lokalMeldung"></p>
+    <div class="knoepfe">
+      <button class="nein" id="lokalSpeichern">Lokales Modell nutzen</button>
     </div>
   </div>
 </div>
@@ -7561,6 +7795,25 @@ body[data-zustand="wach"] .zustandstext{color:var(--akzent)}
       meldung.textContent = "Der Server antwortet nicht.";
     });
   }
+  function lokalSpeichern() {
+    var meldung = el("lokalMeldung");
+    meldung.className = "meldung"; meldung.textContent = "Ich schaue nach Ollama …";
+    el("lokalSpeichern").disabled = true;
+    holen("/api/lokal", { modell: el("lokalFeld").value }).then(function (a) {
+      el("lokalSpeichern").disabled = false;
+      meldung.textContent = a.text || "";
+      if (a.ok) {
+        el("schluesselDialog").classList.remove("zeigen");
+        el("antwort").textContent = ""; el("antwort").className = "antwort";
+        zustandHolen();
+      } else { meldung.className = "meldung fehler"; }
+    }).catch(function () {
+      el("lokalSpeichern").disabled = false;
+      meldung.className = "meldung fehler";
+      meldung.textContent = "Der Server antwortet nicht.";
+    });
+  }
+  el("lokalSpeichern").addEventListener("click", lokalSpeichern);
   el("schluesselSpeichern").addEventListener("click", schluesselSpeichern);
   el("schluesselFeld").addEventListener("keydown", function (e) {
     if (e.key === "Enter") { schluesselSpeichern(); }
@@ -9591,6 +9844,21 @@ class JarvisWeb:
             return self._antworten(behandler, 200,
                                    {"ok": False, "text": probe.get("text", "Fehlgeschlagen.")})
 
+        if pfad == "/api/lokal":
+            modell = str(daten.get("modell") or STANDARD_MODELL).strip()
+            if not modell or len(modell) > 80 or any(c.isspace() for c in modell):
+                return self._antworten(behandler, 200, {
+                    "ok": False, "text": "Der Modellname sieht nicht richtig aus."})
+            probe = ollama_pruefen(modell)
+            if not probe.get("ok"):
+                return self._antworten(behandler, 200, {"ok": False,
+                                                        "text": probe["text"]})
+            env_setzen("LOKALES_MODELL", probe["modell"])
+            return self._antworten(behandler, 200, {
+                "ok": True, "einsatzbereit": self.agent.einsatzbereit(),
+                "text": probe["text"] + " Es kostet nichts. Antworten dauern "
+                        "auf diesem Rechner länger als bei Claude."})
+
         if pfad == "/api/verlauf/neu":
             self.agent.verlauf_leeren()
             return self._antworten(behandler, 200,
@@ -11267,8 +11535,8 @@ class JarvisAgent:
     # -- Grundlagen ---------------------------------------------------------
 
     def einsatzbereit(self) -> bool:
-        """Ist ein Anthropic-Schlüssel hinterlegt?"""
-        return bool(ANTHROPIC_API_KEY)
+        """Ist ein Anthropic-Schlüssel oder ein lokales Modell eingestellt?"""
+        return bool(ANTHROPIC_API_KEY) or lokales_modell_aktiv()
 
     def stimme_setzen(self, stimme):
         """Hängt die Sprachausgabe ein."""
@@ -11301,6 +11569,8 @@ class JarvisAgent:
             return {"ok": False,
                     "fehler": "Es ist kein Anthropic-Schlüssel hinterlegt. Starte die "
                               "Einrichtung mit: python3 jarvis.py einrichten"}
+        if not ANTHROPIC_API_KEY:
+            return lokal_anfragen(koerper)
         daten = json.dumps(koerper).encode("utf-8")
         anfrage = urllib.request.Request(API_URL, data=daten, method="POST", headers={
             "x-api-key": ANTHROPIC_API_KEY,
