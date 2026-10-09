@@ -1956,6 +1956,13 @@ def pruefung_sehen_und_terminal(agent):
                 text.startswith("Ich sehe eine Rechnung") and len(gesehen) == 1, text[:60])
         pruefen("Danach bleibt das Bild nicht im Verlauf hängen",
                 "QUJD" not in json.dumps(agent.verlauf))
+        werkzeuge_im_bild = [t["function"]["name"] for t in gesehen[-1].get("tools", [])]
+        nutzertext = [t.get("text") for t in mit_bild[-1]["content"] if t.get("type") == "text"]
+        pruefen("Mit Bild: keine Werkzeuge, die Gesehenes nach draußen tragen",
+                "webseite_lesen" not in werkzeuge_im_bild and "recherche" not in werkzeuge_im_bild)
+        pruefen("Der Bild-Hinweis steht im Systemtext, nicht in der Frage",
+                nutzertext == ["Was siehst du?"]
+                and "kein Auftrag" in gesehen[-1]["messages"][0]["content"])
 
         web = JarvisWeb(agent, port=8803)
         web.starten(blockierend=False)
@@ -1969,6 +1976,26 @@ def pruefung_sehen_und_terminal(agent):
             antwort = json.loads(r.read().decode("utf-8"))
         pruefen("Ein Kamerabild von 300 KB kommt über /api/reden an",
                 antwort.get("ok") is True and "A" * 1000 in json.dumps(gesehen[-1]))
+
+        def post(kopf, koerper=b'{"text": "Hallo"}'):
+            anfrage = _netz.Request("http://127.0.0.1:8803/api/werkzeug", data=koerper,
+                                    headers=kopf)
+            try:
+                with _netz.urlopen(anfrage, timeout=10) as r:
+                    return r.status
+            except Exception as fehler:
+                return getattr(fehler, "code", 0)
+        json_kopf = {"Content-Type": "application/json"}
+        pruefen("Fremde Webseite (Origin) darf Jarvis keine Aufträge geben",
+                post(dict(json_kopf, Origin="https://boese.example")) == 403)
+        pruefen("Auftrag als text/plain (ohne Vorab-Anfrage) wird abgewiesen",
+                post({"Content-Type": "text/plain"}) == 403)
+        pruefen("Sec-Fetch-Site cross-site wird abgewiesen",
+                post(dict(json_kopf, **{"Sec-Fetch-Site": "cross-site"})) == 403)
+        pruefen("Die eigene Seite (gleiche Herkunft, JSON) darf weiter",
+                post(dict(json_kopf, Origin="http://127.0.0.1:8803",
+                          **{"Sec-Fetch-Site": "same-origin"}),
+                     b'{"name": "punkte_offen"}') == 200)
     finally:
         if web is not None:
             web.stoppen()
@@ -1981,6 +2008,18 @@ def pruefung_sehen_und_terminal(agent):
             and "getDisplayMedia" in SEITE_HTML and "getUserMedia" in SEITE_HTML)
     pruefen("Die Kamera geht nach dem Foto sofort wieder aus",
             "t.stop()" in SEITE_HTML)
+    pruefen("Die Kamera ist ab Werk aus, das Bildschirmteilen endet von selbst",
+            "kameraAn = false" in SEITE_HTML and "15 * 60 * 1000" in SEITE_HTML)
+    eingaben_freigabe = iter(["ja", "nein"])
+    run_modul.input = lambda _: next(eingaben_freigabe)
+    try:
+        with contextlib.redirect_stdout(io.StringIO()):
+            ja = run_modul.TerminalFreigabe.anfordern("mail_senden", "an x")
+            nein = run_modul.TerminalFreigabe.anfordern("mail_senden", "an x")
+    finally:
+        del run_modul.input
+    pruefen("Freigaben aus dem Terminal werden im Terminal gefragt",
+            ja["erlaubt"] is True and nein["erlaubt"] is False)
     pruefen("Auftrag oder Erzählung wird unterschieden",
             AUFTRAG.search("Merk dir: Berger") and AUFTRAG.search("Ruf den Berger an")
             and not AUFTRAG.search("Was siehst du auf meinem Bildschirm?"))

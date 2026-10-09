@@ -286,6 +286,21 @@ def faehigkeiten_text(namen: list, bereit: bool = True) -> str:
     return "\n".join(zeilen)
 
 
+class TerminalFreigabe:
+    """Fragt eine Freigabe im Terminal. Alles außer einem klaren Ja ist ein Nein."""
+
+    @staticmethod
+    def anfordern(aktion: str, details: str = "") -> dict:
+        print("\n  Freigabe: %s\n  %s" % (aktion, (details or "").replace("\n", "\n  ")[:800]))
+        try:
+            antwort = input("  Ausführen? (ja/nein) ").strip().lower()
+        except EOFError:
+            antwort = ""
+        if antwort in ("ja", "j", "yes", "y", "ok", "mach"):
+            return {"erlaubt": True, "kanal": "terminal", "grund": "Freigabe erteilt"}
+        return {"erlaubt": False, "kanal": "terminal", "grund": "abgelehnt"}
+
+
 def terminal_gespraech(agent, web):
     """Jarvis im Terminal: Aufträge tippen, während der Browser weiterläuft."""
     farbe = sys.stdout.isatty()
@@ -304,7 +319,14 @@ def terminal_gespraech(agent, web):
             continue
         beginn = time.time()
         with web._denkt:  # nie gleichzeitig mit dem Browser im selben Verlauf
-            antwort = agent.denken(eingabe)
+            # Freigaben für Terminal-Aufträge werden im Terminal gefragt, nicht
+            # stumm zwei Minuten lang im Browser.
+            vorher = agent.tools.freigabe_kanal
+            agent.tools.freigabe_kanal_setzen(TerminalFreigabe())
+            try:
+                antwort = agent.denken(eingabe)
+            finally:
+                agent.tools.freigabe_kanal_setzen(vorher)
         print("  %sJarvis ›%s %s  %s(%.1f s)%s" % (c, a, antwort, c, time.time() - beginn, a))
 
 

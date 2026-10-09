@@ -428,60 +428,106 @@ body[data-zustand="wach"] .zustandstext{color:var(--akzent)}
   /* ---------- Sehen: Kamera und Bildschirm über den Browser ---------- */
   // Kein Homebrew, kein Zusatzprogramm: Der Browser darf an Kamera und
   // Bildschirm, und das Gehirn bekommt das Bild direkt mit der Frage.
-  var SEHEN = /(schau|sieh |siehst|guck|kamera|vor mir|in der hand|erkennst|was ist das|lies das|lies vor|foto|diesen beleg|den beleg hier|die rechnung hier)/i;
+  // Nur eindeutige Seh-Aufforderungen - "schau mal in meinen Kalender" oder
+  // "Fotovoltaik" machen kein Foto.
+  var SEHEN = /((schau|guck)\w* (mal |doch |dir )*(her\b|hier\b|das an|was ich)|was siehst du|was halte ich|in der hand|mach (mal )?ein foto|was ist das hier|lies (mir )?(das|den zettel|den beleg|die rechnung) (hier )?vor|diesen beleg|den beleg hier|die rechnung hier)/i;
+  var SCHIRM = /(auf (meinem|dem) (bildschirm|schirm|monitor)|was ist (hier|gerade|da) offen|was hab ich (hier |gerade |da )?offen|was siehst du auf)/i;
   var ADRESSE = /(https?:|www\.|\.(at|de|com|ch|eu|net|org)\b)/i;
-  var SCHIRM = /(bildschirm|monitor|display|fenster|auf dem schirm|was ist offen|was hab ich offen)/i;
-  var kameraAn = true, schirmStrom = null;
-  try { kameraAn = localStorage.getItem("jarvis-kamera") !== "aus"; } catch (e) {}
+  var kannKamera = !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
+  var kannSchirm = !!(navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia);
+  var kameraAn = false, schirmStrom = null, schirmUhr = null;
+  try { kameraAn = kannKamera && localStorage.getItem("jarvis-kamera") === "an"; } catch (e) {}
 
   function knoepfeZeigen() {
-    el("kameraKnopf").textContent = kameraAn ? "Kamera an" : "Kamera aus";
+    el("kameraKnopf").textContent = !kannKamera ? "Kamera nicht verfügbar"
+                                  : (kameraAn ? "Kamera an" : "Kamera aus");
     el("kameraKnopf").classList.toggle("aktiv", kameraAn);
-    el("schirmKnopf").textContent = schirmStrom ? "Bildschirm geteilt" : "Bildschirm teilen";
+    el("kameraKnopf").disabled = !kannKamera;
+    el("schirmKnopf").textContent = !kannSchirm ? "Bildschirm nicht verfügbar"
+                                  : (schirmStrom ? "Bildschirm geteilt" : "Bildschirm teilen");
     el("schirmKnopf").classList.toggle("aktiv", !!schirmStrom);
+    el("schirmKnopf").disabled = !kannSchirm;
   }
   function bildAus(strom) {
-    return new Promise(function (fertig, fehler) {
-      var v = document.createElement("video");
+    // Mit Zeitlimit: Liefert die Quelle kein Bild (Tab im Hintergrund, Fenster
+    // minimiert), hängt Jarvis sonst für immer bei "Ich arbeite".
+    var v = document.createElement("video");
+    function aufraeumen() { try { v.pause(); } catch (e) {} v.srcObject = null; }
+    var aufnahme = new Promise(function (fertig, fehler) {
       v.muted = true; v.playsInline = true; v.srcObject = strom;
       v.onloadeddata = function () {
         setTimeout(function () {
-          var breite = Math.min(1280, v.videoWidth || 1280);
-          var hoehe = Math.round(breite * (v.videoHeight || 720) / (v.videoWidth || 1280));
-          var c = document.createElement("canvas"); c.width = breite; c.height = hoehe;
-          c.getContext("2d").drawImage(v, 0, 0, breite, hoehe);
-          fertig(c.toDataURL("image/jpeg", 0.72).split(",")[1]);
+          try {
+            var breite = Math.min(1280, v.videoWidth || 1280);
+            var hoehe = Math.round(breite * (v.videoHeight || 720) / (v.videoWidth || 1280));
+            var c = document.createElement("canvas"); c.width = breite; c.height = hoehe;
+            c.getContext("2d").drawImage(v, 0, 0, breite, hoehe);
+            fertig(c.toDataURL("image/jpeg", 0.72).split(",")[1]);
+          } catch (e) { fehler(e); }
         }, 350);  // kurz warten: die Kamera regelt erst die Helligkeit nach
       };
-      v.onerror = fehler;
-      v.play().catch(function () {});
+      v.onerror = function () { fehler(new Error("Kein Bild von der Quelle")); };
+      v.play().catch(fehler);
     });
+    var zeitlimit = new Promise(function (_, fehler) {
+      setTimeout(function () { fehler(new Error("Zeitlimit")); }, 5000);
+    });
+    return Promise.race([aufnahme, zeitlimit]).then(
+      function (b) { aufraeumen(); return b; },
+      function (e) { aufraeumen(); throw e; });
   }
   function blitzen() {
     el("blitz").classList.add("an");
     setTimeout(function () { el("blitz").classList.remove("an"); }, 260);
   }
   function kameraBild() {
-    return navigator.mediaDevices.getUserMedia({ video: { width: 1280 } }).then(function (strom) {
-      return bildAus(strom).then(function (b) {
-        strom.getTracks().forEach(function (t) { t.stop(); });  // Kamera sofort wieder aus
-        blitzen(); return { daten: b, quelle: "kamera" };
-      });
+    var anfrage = navigator.mediaDevices.getUserMedia({ video: { width: 1280 } });
+    var zeitlimit = new Promise(function (_, fehler) {
+      setTimeout(function () { fehler(new Error("Zeitlimit")); }, 8000);
     });
+    return Promise.race([anfrage, zeitlimit]).then(function (strom) {
+      function aus() { strom.getTracks().forEach(function (t) { t.stop(); }); }
+      return bildAus(strom).then(
+        function (b) { aus(); blitzen(); return { daten: b, quelle: "kamera" }; },
+        function (e) { aus(); throw e; });  // Kamera in jedem Fall wieder aus
+    });
+  }
+  function hinweisZeigen(text) {
+    el("hinweis").style.display = "block";
+    el("hinweis").textContent = text;
   }
   function bildFuer(text) {
     if (schirmStrom && SCHIRM.test(text)) {
-      return bildAus(schirmStrom).then(function (b) { return { daten: b, quelle: "bildschirm" }; });
+      return bildAus(schirmStrom).then(function (b) {
+        return { daten: b, quelle: "bildschirm" };
+      }).catch(function () {
+        hinweisZeigen("Vom geteilten Bildschirm kam kein Bild - ich antworte ohne.");
+        return null;
+      });
     }
-    if (kameraAn && SEHEN.test(text) && !ADRESSE.test(text) && navigator.mediaDevices) {
-      return kameraBild().catch(function () {
-        el("hinweis").style.display = "block";
-        el("hinweis").textContent = "Die Kamera ist im Browser nicht erlaubt - erlaube sie " +
-          "über das Symbol in der Adressleiste.";
+    if (SEHEN.test(text) && !ADRESSE.test(text)) {
+      if (!kannKamera) {
+        hinweisZeigen("Hier gibt es keine Kamera (nur am Mac über localhost).");
+        return Promise.resolve(null);
+      }
+      if (!kameraAn) {
+        hinweisZeigen("Damit ich sehen kann, schalte oben die Kamera an.");
+        return Promise.resolve(null);
+      }
+      return kameraBild().catch(function (e) {
+        hinweisZeigen(e && e.name === "NotAllowedError"
+          ? "Die Kamera ist im Browser nicht erlaubt - erlaube sie über das Symbol in der Adressleiste."
+          : (e && e.name === "NotReadableError"
+             ? "Die Kamera wird gerade von einem anderen Programm benutzt."
+             : "Von der Kamera kam kein Bild - ich antworte ohne."));
         return null;
       });
     }
     return Promise.resolve(null);
+  }
+  function schirmBeenden() {
+    if (schirmStrom) { schirmStrom.getTracks().forEach(function (t) { t.stop(); }); }
+    schirmStrom = null; clearTimeout(schirmUhr); knoepfeZeigen();
   }
   el("kameraKnopf").addEventListener("click", function () {
     kameraAn = !kameraAn;
@@ -489,16 +535,14 @@ body[data-zustand="wach"] .zustandstext{color:var(--akzent)}
     knoepfeZeigen();
   });
   el("schirmKnopf").addEventListener("click", function () {
-    if (schirmStrom) {
-      schirmStrom.getTracks().forEach(function (t) { t.stop(); });
-      schirmStrom = null; knoepfeZeigen(); return;
-    }
-    if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) { return; }
+    if (schirmStrom) { schirmBeenden(); return; }
+    if (!kannSchirm) { return; }
     navigator.mediaDevices.getDisplayMedia({ video: true }).then(function (strom) {
       schirmStrom = strom;
-      strom.getVideoTracks()[0].addEventListener("ended", function () {
-        schirmStrom = null; knoepfeZeigen();
-      });
+      strom.getVideoTracks()[0].addEventListener("ended", schirmBeenden);
+      // Vergessenes Teilen endet von selbst - sonst sieht Jarvis Stunden später
+      // noch das Online-Banking.
+      schirmUhr = setTimeout(schirmBeenden, 15 * 60 * 1000);
       knoepfeZeigen();
     }).catch(function () {});
   });
@@ -516,7 +560,11 @@ body[data-zustand="wach"] .zustandstext{color:var(--akzent)}
     setzeZustand("denkt");
     bildFuer(text).then(function (bild) {
       var k = { text: text };
-      if (bild && bild.daten) { k.bild = bild.daten; k.quelle = bild.quelle; }
+      if (bild && bild.daten) {
+        k.bild = bild.daten; k.quelle = bild.quelle;
+        el("gesagt").textContent = "„" + text + "“ · mit " +
+          (bild.quelle === "bildschirm" ? "Bildschirmbild" : "Foto");
+      }
       return holen("/api/reden", k);
     }).then(function (a) {
       var antwort = a.antwort || a.fehler || "Ich habe keine Antwort bekommen.";
@@ -526,7 +574,8 @@ body[data-zustand="wach"] .zustandstext{color:var(--akzent)}
       sprich(antwort, function () { setzeZustand("schlaeft"); });
       lageHolen(); zahlenHolen();
     }).catch(function (f) {
-      el("antwort").textContent = "Ich erreiche den Server nicht: " + f.message;
+      el("antwort").textContent = "Ich erreiche den Server nicht: " +
+        ((f && f.message) || String(f));
       el("antwort").className = "antwort fehler";
       laeuft = false;
       setzeZustand("schlaeft");

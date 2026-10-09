@@ -57,9 +57,14 @@ BEHAUPTUNG = re.compile(
 # Nur wenn der Nutzer etwas tun lassen will, ist "erledigt" ohne Werkzeug eine
 # Lüge. Beschreibt das Modell ein Bild oder erzählt, darf es diese Wörter benutzen.
 AUFTRAG = re.compile(
-    r"\b(merk|notier|speicher|leg\w* .{0,40}an\b|anlegen|trag\w* .{0,40}ein|eintragen|"
-    r"schick|send|buch|erinner|start|erledig|hak|lösch|streich|ruf\w* .{0,30}an\b|"
-    r"anrufen|vermerk|nimm .{0,30}auf|aufnehmen)", re.IGNORECASE)
+    r"\b(merk|notier|notiz|speicher|leg\w* .{0,40}an\b|anlegen|trag\w* .{0,40}ein|eintragen|"
+    r"schick|send|schreib|mail an|buch|erinner|start|erledig|hak|lösch|streich|"
+    r"ruf\w* .{0,30}an\b|anrufen|vermerk|nimm .{0,30}auf|aufnehmen|erstell|halt\w* .{0,30}fest|"
+    r"festhalten|füg|hinzu|öffne|plan|neue[rnm]? (lead|termin|punkt|kontakt|kunde|notiz)|"
+    r"setz|stell .{0,30}ein|abschick)", re.IGNORECASE)
+# "Ja", "mach", "ok" nach einer Rückfrage ("Soll ich den Termin eintragen?")
+BESTAETIGUNG = re.compile(r"^\W*(ja|jo|jep|ok|okay|mach|bitte|gern|gerne|passt|los|klar)\b",
+                          re.IGNORECASE)
 WERKZEUG_PFLICHT = (
     "Regel ohne Ausnahme: Sollst du etwas speichern, anlegen, eintragen, senden, buchen, "
     "starten oder nachschlagen, rufst du dafür das passende Werkzeug auf. Behaupte nie, "
@@ -255,9 +260,12 @@ def _behauptung_pruefen(bloecke: list, nutzlast: dict, timeout: int) -> list:
         return bloecke
     frage = nutzlast["messages"][letzte_frage] if letzte_frage >= 0 else {}
     inhalt = frage.get("content")
-    if isinstance(inhalt, list):  # mit Bild: Es wird beschrieben, nicht gehandelt
-        return bloecke
-    if not AUFTRAG.search(str(inhalt or "")):
+    if isinstance(inhalt, list):  # mit Bild: nur der Text zählt, nicht das Bild
+        inhalt = " ".join(t.get("text", "") for t in inhalt
+                          if isinstance(t, dict) and t.get("type") == "text")
+    inhalt = str(inhalt or "")
+    if not (AUFTRAG.search(inhalt) or (len(inhalt.split()) <= 4
+                                       and BESTAETIGUNG.search(inhalt))):
         return bloecke
     nachfrage = dict(nutzlast)
     nachfrage["messages"] = nutzlast["messages"] + [

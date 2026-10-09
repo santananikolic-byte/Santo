@@ -384,7 +384,7 @@ class Werkzeuge:
             werkzeug("termine_lesen",
                      "Termine der nächsten Tage samt Überschneidungen.", {"tage": ganz}),
             werkzeug("termin_anlegen",
-                     "Trägt einen Termin ein. Braucht eine Freigabe.",
+                     "Trägt einen Termin in den eigenen Kalender ein.",
                      {"titel": text, "beginn": text, "dauer_minuten": ganz,
                       "ort": text, "beschreibung": text}, ["titel", "beginn"]),
 

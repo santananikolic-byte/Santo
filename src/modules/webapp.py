@@ -248,6 +248,28 @@ class JarvisWeb:
         kopfschluessel = behandler.headers.get("X-Jarvis-Schluessel", "")
         return secrets.compare_digest(gefragt or kopfschluessel, self.token)
 
+    @staticmethod
+    def _von_fremder_seite(behandler) -> bool:
+        """Schickt eine fremde Webseite im Browser des Nutzers diesen Auftrag?
+
+        Ohne Schlüssel (nur auf diesem Rechner) prüft der Host-Kopf nicht, wer
+        anklopft: Jede offene Webseite könnte per fetch() an localhost:8765
+        posten - etwa /api/werkzeug mit "buchung_eintragen". Deshalb müssen
+        Aufträge (POST) von der eigenen Seite kommen: Herkunft gleich Host,
+        und als JSON - das kann eine fremde Seite nicht ohne Vorab-Anfrage
+        senden, und die beantwortet dieser Server nie.
+        """
+        seite = (behandler.headers.get("Sec-Fetch-Site") or "").lower()
+        if seite in ("cross-site", "same-site"):
+            return True
+        herkunft = behandler.headers.get("Origin")
+        if herkunft is not None:
+            host = (behandler.headers.get("Host") or "").lower()
+            if herkunft == "null" or urlparse(herkunft).netloc.lower() != host:
+                return True
+        typ = (behandler.headers.get("Content-Type") or "").split(";")[0].strip().lower()
+        return typ != "application/json"
+
     def _behandeln(self, behandler, methode: str):
         """Verteilt eine Anfrage auf die passende Antwort."""
         pfad = urlparse(behandler.path).path.rstrip("/") or "/"
@@ -255,6 +277,10 @@ class JarvisWeb:
             return self._antworten(behandler, 403,
                                    {"fehler": "Kein Zugang. Der Schlüssel fehlt "
                                               "oder stimmt nicht."})
+        if methode == "POST" and self._von_fremder_seite(behandler):
+            return self._antworten(behandler, 403,
+                                   {"fehler": "Abgelehnt: Der Auftrag kam nicht von der "
+                                              "Jarvis-Seite."})
         try:
             if methode == "GET":
                 return self._get(behandler, pfad)
