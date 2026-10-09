@@ -11,6 +11,8 @@ import email
 import email.header
 import email.utils
 import imaplib
+import mimetypes
+import os
 import smtplib
 import ssl
 from email.message import EmailMessage
@@ -182,11 +184,15 @@ class Mail:
 
     # -- Senden -------------------------------------------------------------
 
-    def senden(self, an: str, betreff: str, text: str) -> dict:
+    def senden(self, an: str, betreff: str, text: str, anhaenge=None) -> dict:
         """Verschickt eine Mail über SMTP mit STARTTLS.
 
         Achtung: Die Freigabe wird **nicht** hier eingeholt, sondern im
         Werkzeugkatalog, bevor diese Methode überhaupt aufgerufen wird.
+
+        ``anhaenge`` ist eine Liste von Dateipfaden. Fehlt eine Datei, geht
+        die Mail gar nicht erst raus - eine Rechnungsmail ohne Rechnung wäre
+        schlimmer als keine.
         """
         if not self.senden_moeglich():
             return {"ok": False,
@@ -203,6 +209,20 @@ class Mail:
         nachricht["Date"] = email.utils.formatdate(localtime=True)
         nachricht["Message-ID"] = email.utils.make_msgid()
         nachricht.set_content(text or "")
+
+        for anhang in ([anhaenge] if isinstance(anhaenge, str) else (anhaenge or [])):
+            anhang = str(anhang)
+            try:
+                with open(anhang, "rb") as datei:
+                    inhalt = datei.read()
+            except OSError:
+                return {"ok": False,
+                        "fehler": "Den Anhang %s finde ich nicht - die Mail ist "
+                                  "nicht raus." % os.path.basename(anhang)}
+            art = mimetypes.guess_type(anhang)[0] or "application/octet-stream"
+            haupttyp, _, untertyp = art.partition("/")
+            nachricht.add_attachment(inhalt, maintype=haupttyp, subtype=untertyp,
+                                     filename=os.path.basename(anhang))
 
         try:
             kontext = ssl.create_default_context()

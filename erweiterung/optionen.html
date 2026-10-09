@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>Jarvis - Einstellungen</title>
+<link rel="stylesheet" href="stil.css">
+</head>
+<body class="optionen">
+<h1>JARVIS · EINSTELLUNGEN</h1>
+<p class="einleitung">Die Erweiterung schickt Seiten nur an Jarvis auf diesem Rechner. Normalerweise musst du hier nichts ändern.</p>
+
+<form id="formular" autocomplete="off">
+  <div class="feld">
+    <label for="adresse">Jarvis-Adresse</label>
+    <input type="text" id="adresse" placeholder="http://localhost:8765" spellcheck="false">
+    <p class="hinweis">Erlaubt: http://localhost:8765 oder http://127.0.0.1:8765. Leer lassen für den Standard.</p>
+  </div>
+
+  <div class="feld">
+    <label for="schluessel">Zugangsschlüssel (freiwillig)</label>
+    <input type="password" id="schluessel" placeholder="nur nötig, wenn Jarvis mit Schlüssel läuft" spellcheck="false">
+    <label class="schalterzeile" for="zeigen"><input type="checkbox" id="zeigen"> Schlüssel anzeigen</label>
+    <p class="hinweis">Läuft Jarvis mit Schlüssel (er steht dann in der Adresse hinter „?schluessel=“), trag ihn hier ein. Er geht als Kopf X-Jarvis-Schluessel mit.</p>
+  </div>
+
+  <div class="knopfzeile">
+    <button type="submit" id="speichern" class="knopf haupt">Speichern</button>
+    <button type="button" id="testen" class="knopf">Verbindung testen</button>
+  </div>
+</form>
+
+<div id="meldung" class="meldung" role="status" aria-live="polite"></div>
+<p id="kennung" class="kennung"></p>
+
+<script src="gemeinsam.js"></script>
+<script src="optionen.js"></script>
+</body>
+</html>

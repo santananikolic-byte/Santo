@@ -1,0 +1,266 @@
+/*
+ * Jarvis-Erweiterung - Aussehen von Popup und Einstellungen.
+ * Gleiche Farben wie die Jarvis-Seite im Browser: dunkler Grund, kaltes Blau.
+ */
+:root {
+  --grund: #03080F;
+  --panel: #071420;
+  --rand: #0E2A3C;
+  --rand-hell: #16425C;
+  --akzent: #3AD1FF;
+  --kern: #A6ECFF;
+  --text: #E4F7FF;
+  --gedaempft: #8DB4C6;
+  --gruen: #4CC38A;
+  --rot: #E5484D;
+  --rot-hell: #FFB4B0;
+  --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  background: var(--grund);
+  color: var(--text);
+  font-family: var(--sans);
+  font-size: 14px;
+  line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
+}
+
+body.popup {
+  width: 380px;
+  min-height: 200px;
+}
+
+body.popup.fenster { width: auto; }
+
+[hidden] { display: none !important; }
+
+button, textarea, input { font: inherit; color: inherit; }
+
+:focus-visible { outline: 2px solid var(--akzent); outline-offset: 2px; }
+
+/* Kopf */
+.kopfleiste {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--rand);
+  background: radial-gradient(ellipse 80% 140% at 10% 0%, rgba(58, 209, 255, .10), transparent 70%);
+}
+
+.kugel {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  flex: none;
+  background: radial-gradient(circle, #F4FDFF 0%, var(--kern) 22%, var(--akzent) 45%, #0B6E99 70%, transparent 72%);
+  box-shadow: 0 0 12px rgba(58, 209, 255, .55);
+}
+
+body.beschaeftigt .kugel { animation: puls 1.2s ease-in-out infinite; }
+
+@keyframes puls { 50% { opacity: .35; } }
+
+.kopftext { flex: 1; min-width: 0; }
+
+h1 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: .22em;
+  color: var(--akzent);
+}
+
+.unterzeile { margin: 0; font-size: 12px; color: var(--gedaempft); }
+
+.symbolknopf {
+  border: 1px solid transparent;
+  background: none;
+  border-radius: 8px;
+  padding: 2px 8px;
+  font-size: 18px;
+  color: var(--gedaempft);
+  cursor: pointer;
+}
+
+.symbolknopf:hover { color: var(--akzent); border-color: var(--rand-hell); }
+
+main { padding: 12px 14px 4px; }
+
+/* Seite */
+.seite {
+  padding: 8px 10px;
+  border: 1px solid var(--rand);
+  border-radius: 10px;
+  background: var(--panel);
+}
+
+.seitentitel {
+  margin: 0;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.seitenhinweis { margin: 2px 0 0; font-size: 12px; color: var(--gedaempft); overflow-wrap: anywhere; }
+.seitenhinweis:empty { display: none; }
+.seitenhinweis.warnung { color: var(--rot-hell); }
+
+/* Knöpfe */
+.knoepfe { display: grid; gap: 8px; margin-top: 12px; }
+
+.knopf {
+  border: 1px solid var(--rand-hell);
+  background: var(--panel);
+  border-radius: 10px;
+  padding: 9px 12px;
+  cursor: pointer;
+  text-align: center;
+  transition: border-color .15s, background .15s, box-shadow .15s;
+}
+
+.knopf:hover:not(:disabled) { border-color: var(--akzent); box-shadow: 0 0 0 1px rgba(58, 209, 255, .25); }
+
+.knopf.haupt {
+  background: linear-gradient(180deg, rgba(58, 209, 255, .22), rgba(58, 209, 255, .10));
+  border-color: rgba(58, 209, 255, .55);
+  color: var(--text);
+  font-weight: 600;
+}
+
+.knopf.klein { padding: 3px 10px; font-size: 12px; border-radius: 8px; }
+
+.knopf:disabled { opacity: .45; cursor: default; }
+
+/* Frage */
+.frageformular { margin-top: 14px; }
+
+.frageformular label, .feld label {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 12px;
+  color: var(--gedaempft);
+}
+
+.fragezeile { display: flex; gap: 8px; align-items: stretch; }
+
+textarea, input[type="text"], input[type="password"], input[type="url"] {
+  width: 100%;
+  border: 1px solid var(--rand-hell);
+  border-radius: 10px;
+  background: var(--grund);
+  padding: 8px 10px;
+}
+
+textarea { resize: vertical; min-height: 42px; max-height: 160px; }
+
+textarea::placeholder, input::placeholder { color: #5D8799; }
+
+textarea:focus, input:focus { outline: none; border-color: var(--akzent); }
+
+.fragezeile .knopf { flex: none; }
+
+/* Antwort */
+.antwortbereich {
+  margin-top: 14px;
+  border: 1px solid var(--rand);
+  border-radius: 10px;
+  background: var(--panel);
+  overflow: hidden;
+}
+
+.antwortkopf {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--rand);
+}
+
+.antwortmarke {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--akzent);
+}
+
+.antwortfrage {
+  margin: 0;
+  padding: 6px 10px 0;
+  font-size: 12px;
+  color: var(--gedaempft);
+  overflow-wrap: anywhere;
+}
+
+.antwort {
+  padding: 10px;
+  max-height: 300px;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+
+body.fenster .antwort { max-height: none; }
+
+.antwortbereich.denkt .antwort { color: var(--gedaempft); }
+.antwortbereich.denkt .antwortmarke::after {
+  content: "";
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-left: 8px;
+  border-radius: 50%;
+  background: var(--akzent);
+  box-shadow: 0 0 8px var(--akzent);
+  animation: puls 1.1s ease-in-out infinite;
+  vertical-align: middle;
+}
+.antwortbereich.fehler { border-color: rgba(229, 72, 77, .5); }
+.antwortbereich.fehler .antwortmarke { color: var(--rot-hell); }
+.antwortbereich.fehler .antwort { color: var(--rot-hell); }
+
+/* Fußzeile */
+.fusszeile {
+  padding: 8px 14px 12px;
+  font-size: 11px;
+  color: #5D8799;
+}
+
+/* Einstellungen */
+body.optionen { min-width: 360px; max-width: 560px; padding: 4px 16px 16px; }
+
+.optionen h1 { margin-top: 12px; }
+
+.optionen .einleitung { color: var(--gedaempft); font-size: 13px; }
+
+.feld { margin-top: 14px; }
+
+.feld .hinweis { margin: 4px 0 0; font-size: 12px; color: #5D8799; }
+
+.schalterzeile { display: flex; align-items: center; gap: 6px; margin-top: 6px; font-size: 12px; color: var(--gedaempft); }
+
+.knopfzeile { display: flex; gap: 8px; margin-top: 16px; flex-wrap: wrap; }
+
+.meldung {
+  margin-top: 12px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid var(--rand);
+  background: var(--panel);
+  white-space: pre-wrap;
+}
+
+.meldung:empty { display: none; }
+.meldung.gut { border-color: rgba(76, 195, 138, .55); color: #BFF0D6; }
+.meldung.schlecht { border-color: rgba(229, 72, 77, .55); color: var(--rot-hell); }
+
+.kennung { margin-top: 16px; font-size: 11px; color: #5D8799; overflow-wrap: anywhere; }

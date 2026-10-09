@@ -124,6 +124,51 @@ Per Sprache: „Jarvis, Autopilot starten“ oder „Was ist heute zu tun?“
 
 ---
 
+## Rechnungen, Angebote, Mahnungen – als PDF
+
+Einmal unter **„Heute zu tun“ → Einstellungen → Firmendaten** deine Adresse,
+UID, IBAN, BIC, Telefon und Mail eintragen (Kleinunternehmer ankreuzen, falls
+du keine Umsatzsteuer verrechnest). Hast du schon Rechnungen aus einem anderen
+Programm, trag die **nächste Rechnungsnummer** ein (z. B. `2026-046`) – Jarvis
+macht dort weiter.
+
+Dann einfach sagen:
+
+- „Rechnung an Praxis Huber: Unterhaltsreinigung Oktober, 13 Einsätze zu 65 Euro.“
+- „Angebot für Kanzlei Berger, 220 Quadratmeter Fliesen, dreimal die Woche.“
+- „Welche Rechnungen sind offen?“ · „Rechnung 7 ist bezahlt.“
+- „Mahnung für 2026-007.“ · „Schick die Rechnung an Huber.“ (fragt vorher)
+
+Jarvis vergibt die Nummer fortlaufend, rechnet 20 % USt (oder keine, mit dem
+Kleinunternehmer-Vermerk), setzt 14 Tage Zahlungsziel und legt das PDF im Ordner
+`rechnungen` ab. Adresse und Mail des Kunden holt er aus deinen Kontakten.
+**Bezahlt** bucht die Einnahme gleich in die Buchhaltung. Ist eine Rechnung
+überfällig, steht sie unter „Heute zu tun“ – mit Knopf für Zahlungserinnerung,
+1. und 2. Mahnung. Falsche Rechnung? „Storniere Rechnung 7“ schreibt eine
+Stornorechnung; gelöscht wird nie etwas. Für Bauunternehmer als Kunden gibt es
+den Übergang der Steuerschuld (§ 19 Abs. 1a UStG, braucht deren UID).
+Die fachliche Prüfung bleibt beim Steuerberater.
+
+---
+
+## Browser-Erweiterung: Jede Webseite mit Jarvis besprechen
+
+Im Ordner `erweiterung` liegt eine Erweiterung für **Chrome** (auch Edge, Brave):
+
+1. In Chrome `chrome://extensions` öffnen, oben rechts **Entwicklermodus** an.
+2. **„Entpackte Erweiterung laden“** → den Ordner `Santo/erweiterung` wählen.
+3. Auf das Puzzle-Symbol klicken und Jarvis anpinnen.
+
+Auf jeder Seite: Jarvis-Symbol (oder **Alt+Shift+J**) → **Seite
+zusammenfassen**, **Kontakte als Interessent übernehmen** oder eine eigene
+Frage. Markierter Text: Rechtsklick → **„Mit Jarvis besprechen“**. Die
+Erweiterung redet nur mit Jarvis auf deinem iMac (`localhost:8765`), sonst mit
+niemandem. Text auf einer Webseite ist für Jarvis Inhalt, nie ein Auftrag: In
+diesen Runden kann er nur lesen und Neues anlegen (Notiz, Kontakt,
+Interessent, Punkt) – nichts löschen, nichts senden, nichts bezahlen.
+
+---
+
 ## Die Web-App
 
 Der Normalfall: `python3 jarvis.py` startet einen kleinen Server und öffnet
@@ -248,13 +293,20 @@ nicht darauf steht, läuft nicht. Eingesetzte Werte werden auf `; | & $ \` < >`
 und Zeilenumbrüche geprüft und sonst abgelehnt. Eine Shell wird nirgends
 eingeschaltet.
 
-**Kein Vollzug ohne klares Ja.** Mail verschicken, Termin anlegen, Nachricht
+**Kein Vollzug ohne klares Ja.** Mail und Rechnungen verschicken, Nachricht
 senden, Bildschirm bedienen und jedes nicht ausdrücklich freigegebene
 MCP-Werkzeug fragen vorher nach — per Telegram, sonst im Terminal.
 **Timeout, Netzwerkfehler oder ausbleibende Antwort gelten als Ablehnung.**
 Nie als Zustimmung. Wer sich nicht meldet, hat nicht zugestimmt.
 
 Jede Aktion landet im Protokoll und erscheint im Dashboard.
+
+**Die Browser-Erweiterung hat genau eine Tür.** Sie darf nur `POST /api/seite`
+benutzen, und nur mit ihrer festen Kennung (`chrome-extension://ingjjag…`, aus dem
+Schlüssel im Manifest). Andere Erweiterungen und Webseiten werden abgewiesen.
+Seiteninhalt geht als eigener Block mit, gilt nie als Auftrag, und in diesen
+Runden stehen nur lesende und anlegende Werkzeuge bereit. Danach bleibt im
+Verlauf nur ein Vermerk „[Seite: Titel]“.
 
 **Protokoll aus dem Gesprächsverlauf.** Sag „Jarvis, Protokoll“ (oder „Protokoll
 von gestern“, „Protokoll zum Thema Berger“, „Wochenprotokoll“) - Jarvis liest dir

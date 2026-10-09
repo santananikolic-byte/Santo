@@ -251,6 +251,7 @@ def dashboard_bauen():
 FAEHIGKEITEN = [
     ("Gedächtnis", ("notiz", "kontakt_", "punkt", "kennzahl", "gedaechtnis", "tagesbericht",
                     "rueckblick", "protokoll", "erinnerung")),
+    ("Rechnungen", ("rechnung", "mahnung", "angebot_pdf", "angebot_entschieden")),
     ("Verkauf", ("lead", "angebot", "nachfass", "pipeline", "verkauf", "gespraech",
                  "autopilot", "heute_zu_tun", "anrufliste", "offene_leads")),
     ("Geld", ("buchung", "beleg", "auswertung", "csv", "cashflow", "fixkosten", "bedarf",

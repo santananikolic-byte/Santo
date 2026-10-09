@@ -22,6 +22,7 @@ fahrlässig. Zusätzlich wird der Host-Kopf geprüft, damit keine fremde Webseit
 import json
 import mimetypes
 import os
+import re
 import secrets
 import threading
 import time
@@ -39,6 +40,9 @@ from modules.webseite import AUTOPILOT_HTML, PROTOKOLL_HTML, SEITE_HTML
 
 STANDARD_PORT = 8765
 MAX_KOERPER = 6 * 1024 * 1024  # ein Kamerabild passt hinein
+# Kennung der Jarvis-Erweiterung - folgt aus dem Schlüssel in erweiterung/manifest.json.
+ERWEITERUNG_ID = "ingjjagdojoofphabghgjepoloiiagjm"
+RECHNUNG_DATEI = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,120}\.pdf$")
 
 # Ohne eigenes Symbol fragt jeder Browser nach /favicon.ico und bekommt einen
 # Fehler in die Konsole. Ein kleines SVG kostet nichts und räumt das weg.
@@ -270,6 +274,20 @@ class JarvisWeb:
         typ = (behandler.headers.get("Content-Type") or "").split(";")[0].strip().lower()
         return typ != "application/json"
 
+    @staticmethod
+    def _von_erweiterung(behandler, pfad: str) -> bool:
+        """Die Jarvis-Erweiterung im Browser darf genau eine Tür benutzen: /api/seite.
+
+        Sie schickt als Herkunft chrome-extension://<ihre Kennung>. Die Kennung steht
+        über den Schlüssel im Manifest fest - keine Webseite und keine andere
+        Erweiterung kann sie vortäuschen. Alles andere bleibt für fremde Herkunft
+        gesperrt.
+        """
+        herkunft = (behandler.headers.get("Origin") or "").lower()
+        typ = (behandler.headers.get("Content-Type") or "").split(";")[0].strip().lower()
+        return (pfad == "/api/seite" and herkunft == "chrome-extension://" + ERWEITERUNG_ID
+                and typ == "application/json")
+
     def _behandeln(self, behandler, methode: str):
         """Verteilt eine Anfrage auf die passende Antwort."""
         pfad = urlparse(behandler.path).path.rstrip("/") or "/"
@@ -277,7 +295,8 @@ class JarvisWeb:
             return self._antworten(behandler, 403,
                                    {"fehler": "Kein Zugang. Der Schlüssel fehlt "
                                               "oder stimmt nicht."})
-        if methode == "POST" and self._von_fremder_seite(behandler):
+        if methode == "POST" and self._von_fremder_seite(behandler) \
+                and not self._von_erweiterung(behandler, pfad):
             return self._antworten(behandler, 403,
                                    {"fehler": "Abgelehnt: Der Auftrag kam nicht von der "
                                               "Jarvis-Seite."})
@@ -350,6 +369,15 @@ class JarvisWeb:
                 .replace("{{SCHLUESSEL_JSON}}", _fuer_skript(self.token or ""))
                 .replace("{{NUTZER_JSON}}", _fuer_skript(config.NUTZER_NAME))
                 .replace("{{FIRMA_JSON}}", _fuer_skript(config.FIRMA))))
+        if pfad == "/api/rechnungen":
+            rechnungen = werkzeuge.rechnungen
+            offen = rechnungen.offene()
+            return self._antworten(behandler, 200, {
+                "ok": True, "offen": offen["rechnungen"], "summe_offen": offen["summe"],
+                "text": offen["text"], "letzte": rechnungen.liste(limit=25),
+                "ordner": rechnungen.ordner})
+        if pfad.startswith("/rechnung/"):
+            return self._rechnung_pdf(behandler, pfad[len("/rechnung/"):])
         if pfad == "/api/pipeline":
             return self._antworten(behandler, 200, werkzeuge.akquise.pipeline())
         if pfad == "/api/nachfassen":
@@ -506,7 +534,58 @@ class JarvisWeb:
                 daten.get("ort"),
                 [str(b) for b in branchen] if isinstance(branchen, list) else None,
                 None if daten.get("an") is None else bool(daten.get("an")),
-                daten.get("name"), daten.get("firma")))
+                daten.get("name"), daten.get("firma"),
+                daten.get("firmendaten") if isinstance(daten.get("firmendaten"), dict) else None))
+
+        if pfad == "/api/rechnung/aktion":
+            # Der Klick auf der eigenen Seite ist die Freigabe - wie beim Autopilot.
+            rechnungen = werkzeuge.rechnungen
+            nummer = str(daten.get("nummer") or "")
+            aktion = str(daten.get("aktion") or "")
+            if aktion == "bezahlt":
+                ergebnis = rechnungen.bezahlt(nummer)
+            elif aktion == "mahnen":
+                ergebnis = rechnungen.mahnung_erstellen(nummer)
+            elif aktion == "neu":
+                ergebnis = rechnungen.neu_schreiben(nummer)
+            elif aktion in ("angenommen", "abgelehnt"):
+                ergebnis = rechnungen.angebot_status(nummer, aktion)
+            elif aktion in ("senden", "mahnung_senden"):
+                ergebnis = rechnungen.senden(nummer, "", "mahnung"
+                                             if aktion == "mahnung_senden" else "")
+            else:
+                ergebnis = {"ok": False, "fehler": "Unbekannte Aktion."}
+            if aktion in ("bezahlt", "mahnen", "angenommen", "abgelehnt", "senden",
+                          "mahnung_senden"):
+                werkzeuge.memory.aktion_protokollieren(
+                    "rechnung_%s" % aktion, {"nummer": nummer},
+                    str(ergebnis.get("text") or ergebnis.get("fehler") or "")[:300],
+                    "ok" if ergebnis.get("ok") else "fehler")
+            return self._antworten(behandler, 200, ergebnis)
+
+        if pfad == "/api/seite":
+            auftraege = {
+                "zusammenfassen": "Fasse diese Seite in drei bis fünf gesprochenen Sätzen "
+                                  "zusammen: worum geht es, und was ist für mich wichtig?",
+                "kontakte": "Lege den Betrieb von dieser Seite als Interessenten an "
+                            "(lead_anlegen): Firma, Telefon, E-Mail und Adresse genau so, "
+                            "wie sie auf der Seite stehen. Erfinde nichts; fehlt etwas, "
+                            "lass es leer. Sag danach kurz, was du angelegt hast.",
+            }
+            auftrag = str(daten.get("auftrag") or "frage")
+            frage = auftraege.get(auftrag) or str(daten.get("frage") or "").strip()
+            if not frage:
+                return self._antworten(behandler, 400, {"ok": False,
+                                                        "fehler": "Es fehlt die Frage."})
+            if not self.agent.einsatzbereit():
+                return self._antworten(behandler, 200, {
+                    "ok": False, "fehler": "Jarvis hat noch kein Gehirn eingerichtet."})
+            with self._denkt:
+                antwort = self.agent.seite_denken(frage[:2000], {
+                    "titel": daten.get("titel"), "adresse": daten.get("adresse"),
+                    "text": daten.get("text"), "auswahl": daten.get("auswahl"),
+                    "kontaktlinks": daten.get("kontaktlinks")})
+            return self._antworten(behandler, 200, {"ok": True, "antwort": antwort})
 
         if pfad == "/api/verlauf/neu":
             self.agent.verlauf_leeren()
@@ -553,6 +632,29 @@ class JarvisWeb:
     def _html(self, behandler, text: str):
         roh = text.encode("utf-8")
         self._kopf_setzen(behandler, 200, "text/html; charset=utf-8", len(roh))
+        behandler.wfile.write(roh)
+
+    def _rechnung_pdf(self, behandler, name: str):
+        """Liefert ein Rechnungs-PDF aus - nur aus dem Rechnungsordner, nur .pdf."""
+        name = os.path.basename(name)
+        if not RECHNUNG_DATEI.match(name):
+            return self._antworten(behandler, 404, {"fehler": "Diese Datei gibt es nicht."})
+        wurzel = os.path.realpath(self.agent.tools.rechnungen.ordner)
+        ziel = os.path.realpath(os.path.join(wurzel, name))
+        if os.path.dirname(ziel) != wurzel:
+            return self._antworten(behandler, 403, {"fehler": "Nicht erlaubt."})
+        try:
+            with open(ziel, "rb") as datei:
+                roh = datei.read()
+        except OSError:
+            return self._antworten(behandler, 404, {"fehler": "Diese Datei gibt es nicht."})
+        behandler.send_response(200)
+        behandler.send_header("Content-Type", "application/pdf")
+        behandler.send_header("Content-Length", str(len(roh)))
+        behandler.send_header("Content-Disposition", 'inline; filename="%s"' % name)
+        behandler.send_header("Cache-Control", "no-store")
+        behandler.send_header("X-Content-Type-Options", "nosniff")
+        behandler.end_headers()
         behandler.wfile.write(roh)
 
     def _datei(self, behandler, pfad: str):

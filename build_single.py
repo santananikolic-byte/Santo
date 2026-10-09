@@ -53,6 +53,8 @@ BAULISTE = [
     "modules/bookkeeping",
     "modules/call_analysis",
     "modules/akquise",
+    "modules/pdf_dokument",
+    "modules/rechnungen",
     "modules/privat",
     "modules/routines",
     "modules/camera",

@@ -29,9 +29,11 @@ import threading
 import urllib.error
 import urllib.parse
 import urllib.request
+from datetime import datetime, timedelta
 
 import config
 from modules.memory import db_schema_anlegen, heute_datum, zeitstempel
+from modules.rechnungen import MAHNSTUFEN, MAHNUNG_FRIST_TAGE
 
 SCHEMA_AUTOPILOT = """
 CREATE TABLE IF NOT EXISTS autopilot_aufgaben (
@@ -97,6 +99,9 @@ BRANCHEN_PUNKT = {
     "Kindergärten": "gründliche Reinigung mit kindgerechten Mitteln",
     "Restaurants": "Gastraum und Sanitär, gereinigt vor Öffnung",
 }
+
+FIRMENDATEN = ("FIRMA_ADRESSE", "FIRMA_UID", "FIRMA_IBAN", "FIRMA_BIC", "FIRMA_TELEFON",
+               "FIRMA_EMAIL", "KLEINUNTERNEHMER", "RECHNUNG_START")
 
 ARTEN = {"anruf": "Anrufen", "nachfassen": "Nachfassen", "antwort": "Mail beantworten",
          "hinweis": "Hinweis"}
@@ -191,8 +196,10 @@ def anruf_vorlage(betrieb: dict, ort: str = "") -> str:
 class Autopilot:
     """Arbeitet die Vorarbeit von selbst ab und legt sie zur Freigabe vor."""
 
-    def __init__(self, memory, akquise=None, mail=None, bookkeeping=None, welt=None):
+    def __init__(self, memory, akquise=None, mail=None, bookkeeping=None, welt=None,
+                 rechnungen=None):
         self.memory = memory
+        self.rechnungen = rechnungen  # für überfällige Rechnungen
         self.welt = welt  # für die Websuche, wenn OpenStreetMap ausfällt
         self.akquise = akquise
         self.mail = mail
@@ -209,13 +216,27 @@ class Autopilot:
                     .split(",") if b.strip() in BRANCHEN_OSM]
         return {"an": bool(config.AUTOPILOT_AN), "ort": config.AUTOPILOT_ORT,
                 "name": config.NUTZER_NAME, "firma": config.FIRMA,
+                # Einzeln ausgeschrieben: In der Einzeldatei gibt es kein Modul config.
+                "firmendaten": {"FIRMA_ADRESSE": config.FIRMA_ADRESSE,
+                                "FIRMA_UID": config.FIRMA_UID, "FIRMA_IBAN": config.FIRMA_IBAN,
+                                "FIRMA_BIC": config.FIRMA_BIC,
+                                "FIRMA_TELEFON": config.FIRMA_TELEFON,
+                                "FIRMA_EMAIL": config.FIRMA_EMAIL,
+                                "KLEINUNTERNEHMER": bool(config.KLEINUNTERNEHMER),
+                                "RECHNUNG_START": config.RECHNUNG_START},
                 "branchen": branchen, "alle_branchen": list(BRANCHEN_OSM),
                 "uhrzeiten": config.AUTOPILOT_UHRZEITEN,
                 "neue_pro_lauf": int(config.AUTOPILOT_NEUE_LEADS)}
 
     @staticmethod
     def einstellungen_setzen(ort=None, branchen=None, an=None, name=None,
-                             firma=None) -> dict:
+                             firma=None, firmendaten=None) -> dict:
+        for feld, wert in (firmendaten or {}).items():
+            if feld == "KLEINUNTERNEHMER":
+                config.env_setzen(feld, "ja" if wert else "nein")
+            elif feld in FIRMENDATEN:
+                # Zeilenumbrüche würden die .env zerlegen - Adresse mit Komma trennen.
+                config.env_setzen(feld, " ".join(str(wert or "").split())[:160])
         if name is not None and _sauber(str(name)):
             config.env_setzen("NUTZER_NAME", _sauber(str(name))[:60])
         if firma is not None and _sauber(str(firma)):
@@ -511,10 +532,10 @@ class Autopilot:
         return anzahl, ""
 
     def _cashflow(self, agent):
+        anzahl = self._ueberfaellige()
         if self.akquise is None:
-            return 0, ""
+            return anzahl, ""
         prognose = self.akquise.cashflow_prognose(3, self.bookkeeping)
-        anzahl = 0
         for monat in prognose.get("monate") or []:
             if monat["ergebnis"] < 0:
                 if self.aufgabe_anlegen(
@@ -526,3 +547,28 @@ class Autopilot:
                         grund="Cashflow-Prognose"):
                     anzahl += 1
         return anzahl, ""
+
+    def _ueberfaellige(self) -> int:
+        """Überfällige Rechnungen: Geld, das schon verdient ist. Je Mahnstufe ein Hinweis."""
+        if self.rechnungen is None:
+            return 0
+        anzahl = 0
+        for rechnung in self.rechnungen.offene()["rechnungen"]:
+            if rechnung["ueberfaellig_tage"] < 3:
+                continue  # ein paar Tage Kulanz, Überweisungen dauern
+            stufe = int(rechnung["mahnstufe"] or 0)
+            if stufe and rechnung["gemahnt_am"] and rechnung["gemahnt_am"] > (
+                    datetime.now() - timedelta(days=MAHNUNG_FRIST_TAGE + 3)).strftime("%Y-%m-%d"):
+                continue  # die letzte Mahnung läuft noch
+            naechste = MAHNSTUFEN[min(stufe, len(MAHNSTUFEN) - 1)]
+            if self.aufgabe_anlegen(
+                    "mahnung:%s:%d" % (rechnung["nummer"], stufe), "hinweis",
+                    "Rechnung %s von %s ist seit %d Tagen offen (%.2f Euro)" % (
+                        rechnung["nummer"], rechnung["kunde"], rechnung["ueberfaellig_tage"],
+                        rechnung["brutto"]),
+                    "Als Nächstes käme die %s. Sag 'Mahnung für %s', dann schreibe ich sie - "
+                    "oder 'Rechnung %s ist bezahlt', falls das Geld schon da ist."
+                    % (naechste, rechnung["nummer"], rechnung["nummer"]),
+                    firma=rechnung["kunde"], grund="Offene Rechnung"):
+                anzahl += 1
+        return anzahl

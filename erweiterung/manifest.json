@@ -1,0 +1,50 @@
+{
+  "manifest_version": 3,
+  "name": "Jarvis",
+  "version": "1.0.0",
+  "description": "Schickt die offene Webseite an Jarvis: zusammenfassen, Kontakte als Interessent übernehmen, Fragen stellen.",
+  "minimum_chrome_version": "102",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA1X1FLFrcMGUl4vKI+eIfLDcn3uSKqS8QCs2jDFJdNphH3DexTEYYFhJYpmE0nXxy87+Z3wTXHXYLFBQzgiwWWQ2Mr08U/+dNQlGm6CZz/LBoBLZxxQc4jbcdgR5BYGyHxSpBikh9SVQZ0u4DjC6cL6lLuthfJFQeyDVZDHVRyJBk1FxWwxQpM7MK2X7G3OBsSx4i9QWuo/LuR8OsMHfmgsRU/7/P9qPPnr7LGboY4nz6zhjROK15foL1GHj792EGg6Uio8dEgvDKS5AzkljeUUaR30egoNOlL2nf3p0tv1ZesPgK0m6/ZYjR7Jkhp5L/Xh7MQ7ajs0PWAyDxAzo6oQIDAQAB",
+  "permissions": [
+    "activeTab",
+    "scripting",
+    "contextMenus",
+    "storage"
+  ],
+  "host_permissions": [
+    "http://localhost:8765/*",
+    "http://127.0.0.1:8765/*"
+  ],
+  "background": {
+    "service_worker": "hintergrund.js"
+  },
+  "action": {
+    "default_title": "Jarvis",
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "symbole/jarvis16.png",
+      "32": "symbole/jarvis32.png"
+    }
+  },
+  "icons": {
+    "16": "symbole/jarvis16.png",
+    "32": "symbole/jarvis32.png",
+    "48": "symbole/jarvis48.png",
+    "128": "symbole/jarvis128.png"
+  },
+  "options_ui": {
+    "page": "optionen.html",
+    "open_in_tab": false
+  },
+  "commands": {
+    "_execute_action": {
+      "suggested_key": {
+        "default": "Alt+Shift+J"
+      },
+      "description": "Jarvis öffnen"
+    }
+  },
+  "content_security_policy": {
+    "extension_pages": "default-src 'self'; script-src 'self'; object-src 'none'; connect-src http://localhost:8765 http://127.0.0.1:8765; img-src 'self'; style-src 'self'; base-uri 'none'; form-action 'none'"
+  }
+}

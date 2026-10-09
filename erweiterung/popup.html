@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>Jarvis</title>
+<link rel="stylesheet" href="stil.css">
+</head>
+<body class="popup">
+<header class="kopfleiste">
+  <span class="kugel" aria-hidden="true"></span>
+  <div class="kopftext">
+    <h1>JARVIS</h1>
+    <p class="unterzeile">Diese Seite besprechen</p>
+  </div>
+  <button type="button" id="einstellungen" class="symbolknopf" title="Einstellungen" aria-label="Einstellungen">&#9881;</button>
+</header>
+
+<main>
+  <section class="seite" aria-label="Offene Seite">
+    <p id="seitentitel" class="seitentitel">Seite wird geprüft …</p>
+    <p id="seitenhinweis" class="seitenhinweis"></p>
+  </section>
+
+  <div class="knoepfe">
+    <button type="button" id="zusammenfassen" class="knopf haupt">Seite zusammenfassen</button>
+    <button type="button" id="kontakte" class="knopf">Kontakte als Interessent übernehmen</button>
+  </div>
+
+  <form id="frageformular" class="frageformular" autocomplete="off">
+    <label for="frage">Frage zu dieser Seite</label>
+    <div class="fragezeile">
+      <textarea id="frage" rows="2" maxlength="2000" placeholder="z. B. Suchen die eine Reinigungsfirma?"></textarea>
+      <button type="submit" id="senden" class="knopf haupt">Senden</button>
+    </div>
+  </form>
+
+  <section id="antwortbereich" class="antwortbereich" hidden>
+    <div class="antwortkopf">
+      <span id="antwortmarke" class="antwortmarke">Antwort</span>
+      <button type="button" id="vorlesen" class="knopf klein" hidden>Vorlesen</button>
+    </div>
+    <p id="antwortfrage" class="antwortfrage" hidden></p>
+    <div id="antwort" class="antwort" role="status" aria-live="polite"></div>
+  </section>
+</main>
+
+<footer class="fusszeile">
+  <span id="verbindung">Jarvis: localhost:8765</span>
+</footer>
+
+<script src="gemeinsam.js"></script>
+<script src="popup.js"></script>
+</body>
+</html>

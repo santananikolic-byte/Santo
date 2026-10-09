@@ -28,7 +28,7 @@ import urllib.error
 import urllib.request
 
 import config
-from modules.lokal import werkzeuge_auswaehlen
+from modules.lokal import erster_text, werkzeuge_auswaehlen
 
 DIENST_VORGABEN = {
     "groq": {"name": "Groq", "url": "https://api.groq.com/openai/v1",
@@ -141,10 +141,16 @@ def nachrichten_umwandeln(system: str, nachrichten: list) -> list:
                     bilder.append("data:%s;base64,%s" % (quelle.get("media_type", "image/jpeg"),
                                                          quelle.get("data", "")))
             text = _text_aus(inhalt)
+            texte = [b["text"] for b in inhalt if isinstance(b, dict)
+                     and b.get("type") == "text" and b.get("text")]
             if bilder:
                 teile = [{"type": "text", "text": text or "Was siehst du?"}]
                 teile += [{"type": "image_url", "image_url": {"url": b}} for b in bilder]
                 ergebnis.append({"role": "user", "content": teile})
+            elif len(texte) > 1:
+                # Frage und Seiteninhalt getrennt lassen: die Frage bleibt der erste Teil.
+                ergebnis.append({"role": "user", "content": [{"type": "text", "text": t}
+                                                             for t in texte]})
             elif text:
                 ergebnis.append({"role": "user", "content": text})
         else:
@@ -260,9 +266,8 @@ def _behauptung_pruefen(bloecke: list, nutzlast: dict, timeout: int) -> list:
         return bloecke
     frage = nutzlast["messages"][letzte_frage] if letzte_frage >= 0 else {}
     inhalt = frage.get("content")
-    if isinstance(inhalt, list):  # mit Bild: nur der Text zählt, nicht das Bild
-        inhalt = " ".join(t.get("text", "") for t in inhalt
-                          if isinstance(t, dict) and t.get("type") == "text")
+    if isinstance(inhalt, list):  # mit Bild oder Seite: nur die Frage selbst zählt
+        inhalt = erster_text(inhalt)
     inhalt = str(inhalt or "")
     if not (AUFTRAG.search(inhalt) or (len(inhalt.split()) <= 4
                                        and BESTAETIGUNG.search(inhalt))):
@@ -289,8 +294,8 @@ def freier_dienst_anfragen(koerper: dict, timeout: int = 45) -> dict:
     katalog = koerper.get("tools") or []
     letzte = ""
     for nachricht in reversed(nachrichten):
-        if nachricht.get("role") == "user" and _text_aus(nachricht.get("content")):
-            letzte = _text_aus(nachricht.get("content"))
+        if nachricht.get("role") == "user" and erster_text(nachricht.get("content")):
+            letzte = erster_text(nachricht.get("content"))
             break
     benutzt = tuple(b.get("name", "") for n in nachrichten
                     if isinstance(n.get("content"), list) for b in n["content"]

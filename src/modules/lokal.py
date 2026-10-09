@@ -166,10 +166,21 @@ def antwort_umwandeln(daten: dict) -> list:
     return bloecke
 
 
+def erster_text(inhalt) -> str:
+    """Die eigentliche Frage: der erste Textblock. Dahinter kann Seiteninhalt stehen,
+    der die Werkzeugwahl sonst mit lauter Zufallswörtern verfälschen würde."""
+    if isinstance(inhalt, str):
+        return inhalt
+    for block in inhalt or []:
+        if isinstance(block, dict) and block.get("type") == "text" and block.get("text"):
+            return block["text"]
+    return ""
+
+
 def _letzte_frage(nachrichten: list) -> str:
     for nachricht in reversed(nachrichten):
         if nachricht.get("role") == "user":
-            text = _text_aus(nachricht.get("content"))
+            text = erster_text(nachricht.get("content"))
             if text:
                 return text
     return ""

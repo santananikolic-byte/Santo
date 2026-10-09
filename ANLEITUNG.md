@@ -150,6 +150,51 @@ Per Sprache: „Jarvis, Autopilot starten“ oder „Was ist heute zu tun?“
 
 ---
 
+## Rechnungen, Angebote, Mahnungen – als PDF
+
+Einmal unter **„Heute zu tun“ → Einstellungen → Firmendaten** deine Adresse,
+UID, IBAN, BIC, Telefon und Mail eintragen (Kleinunternehmer ankreuzen, falls
+du keine Umsatzsteuer verrechnest). Hast du schon Rechnungen aus einem anderen
+Programm, trag die **nächste Rechnungsnummer** ein (z. B. `2026-046`) – Jarvis
+macht dort weiter.
+
+Dann einfach sagen:
+
+- „Rechnung an Praxis Huber: Unterhaltsreinigung Oktober, 13 Einsätze zu 65 Euro.“
+- „Angebot für Kanzlei Berger, 220 Quadratmeter Fliesen, dreimal die Woche.“
+- „Welche Rechnungen sind offen?“ · „Rechnung 7 ist bezahlt.“
+- „Mahnung für 2026-007.“ · „Schick die Rechnung an Huber.“ (fragt vorher)
+
+Jarvis vergibt die Nummer fortlaufend, rechnet 20 % USt (oder keine, mit dem
+Kleinunternehmer-Vermerk), setzt 14 Tage Zahlungsziel und legt das PDF im Ordner
+`rechnungen` ab. Adresse und Mail des Kunden holt er aus deinen Kontakten.
+**Bezahlt** bucht die Einnahme gleich in die Buchhaltung. Ist eine Rechnung
+überfällig, steht sie unter „Heute zu tun“ – mit Knopf für Zahlungserinnerung,
+1. und 2. Mahnung. Falsche Rechnung? „Storniere Rechnung 7“ schreibt eine
+Stornorechnung; gelöscht wird nie etwas. Für Bauunternehmer als Kunden gibt es
+den Übergang der Steuerschuld (§ 19 Abs. 1a UStG, braucht deren UID).
+Die fachliche Prüfung bleibt beim Steuerberater.
+
+---
+
+## Browser-Erweiterung: Jede Webseite mit Jarvis besprechen
+
+Im Ordner `erweiterung` liegt eine Erweiterung für **Chrome** (auch Edge, Brave):
+
+1. In Chrome `chrome://extensions` öffnen, oben rechts **Entwicklermodus** an.
+2. **„Entpackte Erweiterung laden“** → den Ordner `Santo/erweiterung` wählen.
+3. Auf das Puzzle-Symbol klicken und Jarvis anpinnen.
+
+Auf jeder Seite: Jarvis-Symbol (oder **Alt+Shift+J**) → **Seite
+zusammenfassen**, **Kontakte als Interessent übernehmen** oder eine eigene
+Frage. Markierter Text: Rechtsklick → **„Mit Jarvis besprechen“**. Die
+Erweiterung redet nur mit Jarvis auf deinem iMac (`localhost:8765`), sonst mit
+niemandem. Text auf einer Webseite ist für Jarvis Inhalt, nie ein Auftrag: In
+diesen Runden kann er nur lesen und Neues anlegen (Notiz, Kontakt,
+Interessent, Punkt) – nichts löschen, nichts senden, nichts bezahlen.
+
+---
+
 ## Was er dann kann
 
 - **Sehen** — „Hey Jarvis, schau mal" nimmt ein Kamerabild auf und beschreibt es

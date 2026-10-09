@@ -1097,7 +1097,15 @@ button:disabled{opacity:.5;cursor:default}
 .grund{font-size:12px;color:var(--grau)}
 .meldung{font-size:13px;color:var(--gedaempft);min-height:18px;margin-top:8px}
 .meldung.fehler{color:var(--rot)}
+.karte .meldung:empty{display:none}
 .leer{color:var(--grau);font-size:14px;padding:8px 0}
+.betrag{font-family:var(--mono);font-size:14px;color:var(--kupfer)}
+.rot{color:var(--rot)}
+.zeile{display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:8px 0;
+  border-top:1px solid var(--rand);font-size:13px}
+.zeile:first-child{border-top:0}
+.zeile .wer{flex:1;min-width:160px}
+.zeile a{color:var(--akzent)}
 :focus-visible{outline:2px solid var(--akzent);outline-offset:2px}
 </style>
 </head>
@@ -1121,12 +1129,40 @@ button:disabled{opacity:.5;cursor:default}
   <h2>Vom Autopilot</h2>
   <div id="liste"></div>
 
+  <h2>Rechnungen</h2>
+  <div class="karte">
+    <div id="rechnungText">Wird geholt …</div>
+    <p class="grund" style="margin-top:6px">Neue Rechnung? Sag Jarvis zum Beispiel:
+      „Rechnung an Praxis Huber: Unterhaltsreinigung Oktober, 13 Einsätze zu 65 Euro“.
+      Angebote genauso: „Angebot für Kanzlei Berger, 220 Quadratmeter, 3-mal die Woche“.</p>
+  </div>
+  <div id="rechnungen"></div>
+  <div class="karte" id="letzteKarte" hidden>
+    <div class="art" style="margin-bottom:4px">Zuletzt geschrieben</div>
+    <div id="letzte"></div>
+  </div>
+
   <h2>Einstellungen</h2>
   <div class="karte">
     <label for="name">Dein Name (so stellt Jarvis dich in Skripten vor)</label>
     <input id="name" type="text" autocomplete="off" style="margin-bottom:10px">
     <label for="firma">Name deiner Firma</label>
     <input id="firma" type="text" autocomplete="off" style="margin-bottom:10px">
+    <details style="margin:4px 0 12px"><summary style="cursor:pointer;color:var(--kupfer);font-size:13px">
+      Firmendaten für Rechnungen und Angebote</summary>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px" id="firmendaten">
+        <input type="text" data-feld="FIRMA_ADRESSE" placeholder="Adresse (Straße Nr, PLZ Ort)" style="grid-column:1/3">
+        <input type="text" data-feld="FIRMA_UID" placeholder="UID (ATU12345678)">
+        <input type="text" data-feld="FIRMA_TELEFON" placeholder="Telefon">
+        <input type="text" data-feld="FIRMA_IBAN" placeholder="IBAN">
+        <input type="text" data-feld="FIRMA_BIC" placeholder="BIC">
+        <input type="text" data-feld="FIRMA_EMAIL" placeholder="E-Mail" style="grid-column:1/3">
+        <input type="text" data-feld="RECHNUNG_START" style="grid-column:1/3"
+          placeholder="Nächste Rechnungsnummer, falls du schon Rechnungen hast (z.B. 2026-046)">
+        <label style="grid-column:1/3"><input type="checkbox" data-feld="KLEINUNTERNEHMER">
+          Kleinunternehmer (keine Umsatzsteuer auf Rechnungen)</label>
+      </div>
+    </details>
     <label for="ort">In welchem Ort oder Bezirk suchst du Kunden?</label>
     <input id="ort" type="text" placeholder="zum Beispiel Linz oder Wien" autocomplete="off">
     <div class="branchen" id="branchen"></div>
@@ -1214,7 +1250,107 @@ button:disabled{opacity:.5;cursor:default}
     return k;
   }
 
+  function euro(x) {
+    return Number(x || 0).toLocaleString("de-AT", {style: "currency", currency: "EUR"});
+  }
+  function datum(iso) {
+    var t = String(iso || "").slice(0, 10).split("-");
+    return t.length === 3 ? t[2] + "." + t[1] + "." + t[0] : String(iso || "");
+  }
+  function pdfLink(datei, text) {
+    var a = document.createElement("a"); a.className = "knopf";
+    a.href = url("/rechnung/" + encodeURIComponent(datei)); a.target = "_blank";
+    a.rel = "noopener"; a.textContent = text; return a;
+  }
+  var STUFEN = ["", "Zahlungserinnerung", "1. Mahnung", "2. Mahnung"];
+  var ARTNAMEN = {rechnung: "Rechnung", angebot: "Angebot", storno: "Storno"};
+
+  function rechnungAktion(r, aktion, frage, meldung, karte) {
+    return function () {
+      if (frage && !window.confirm(frage)) { return; }
+      meldung.className = "meldung"; meldung.textContent = "…";
+      holen("/api/rechnung/aktion", {nummer: r.nummer, aktion: aktion}).then(function (x) {
+        meldung.textContent = x.text || x.fehler || "";
+        if (x.ok) { if (karte) { karte.style.opacity = ".45"; } setTimeout(rechnungenLaden, 900); }
+        else { meldung.className = "meldung fehler"; }
+      }).catch(function () { meldung.className = "meldung fehler";
+                             meldung.textContent = "Der iMac antwortet nicht."; });
+    };
+  }
+
+  function rechnungKarte(r) {
+    var k = document.createElement("div"); k.className = "karte";
+    var art = document.createElement("div"); art.className = "art";
+    art.textContent = "Rechnung " + r.nummer + (r.mahnstufe ? " · " + STUFEN[r.mahnstufe] +
+      " am " + datum(r.gemahnt_am) : "");
+    var reihe0 = document.createElement("div"); reihe0.className = "reihe"; reihe0.style.marginTop = "2px";
+    var titel = document.createElement("div"); titel.className = "titel"; titel.style.flex = "1";
+    titel.textContent = r.kunde;
+    var betrag = document.createElement("span"); betrag.className = "betrag"; betrag.textContent = euro(r.brutto);
+    reihe0.appendChild(titel); reihe0.appendChild(betrag);
+    var grund = document.createElement("div"); grund.className = "grund";
+    grund.textContent = "vom " + datum(r.datum) + " · zahlbar bis " + datum(r.faellig);
+    if (r.ueberfaellig_tage > 0) {
+      var rot = document.createElement("span"); rot.className = "rot";
+      rot.textContent = " · seit " + r.ueberfaellig_tage + (r.ueberfaellig_tage === 1 ? " Tag" : " Tagen") + " überfällig";
+      grund.appendChild(rot);
+    }
+    var meldung = document.createElement("div"); meldung.className = "meldung";
+    var reihe = document.createElement("div"); reihe.className = "reihe";
+    if (r.datei) { reihe.appendChild(pdfLink(r.datei, "PDF ansehen")); }
+    reihe.appendChild(knopf("Bezahlt", "haupt", rechnungAktion(r, "bezahlt",
+      "Ist Rechnung " + r.nummer + " über " + euro(r.brutto) + " bezahlt? Jarvis bucht dann die Einnahme.",
+      meldung, k)));
+    if (r.ueberfaellig_tage > 0 && r.mahnstufe < 3) {
+      reihe.appendChild(knopf(STUFEN[r.mahnstufe + 1] + " schreiben", "",
+        rechnungAktion(r, "mahnen", "", meldung, null)));
+    }
+    if (r.mahn_datei) { reihe.appendChild(pdfLink(r.mahn_datei, STUFEN[r.mahnstufe] + " ansehen")); }
+    if (r.email) {
+      reihe.appendChild(knopf(r.mahn_datei ? "Mahnung senden" : "Senden", "",
+        rechnungAktion(r, r.mahn_datei ? "mahnung_senden" : "senden",
+          (r.mahn_datei ? STUFEN[r.mahnstufe] : "Rechnung " + r.nummer) + " jetzt an " + r.email + " schicken?",
+          meldung, null)));
+    }
+    k.appendChild(art); k.appendChild(reihe0); k.appendChild(grund);
+    k.appendChild(reihe); k.appendChild(meldung);
+    return k;
+  }
+
+  function letzteZeile(r) {
+    var z = document.createElement("div"); z.className = "zeile";
+    var wer = document.createElement("span"); wer.className = "wer";
+    wer.textContent = (ARTNAMEN[r.art] || r.art) + " " + r.nummer + " · " + r.kunde;
+    var b = document.createElement("span"); b.className = "betrag"; b.textContent = euro(r.brutto);
+    var st = document.createElement("span"); st.className = "grund"; st.textContent = r.status;
+    z.appendChild(wer); z.appendChild(b); z.appendChild(st);
+    if (r.datei) {
+      var a = document.createElement("a"); a.href = url("/rechnung/" + encodeURIComponent(r.datei));
+      a.target = "_blank"; a.rel = "noopener"; a.textContent = "PDF"; z.appendChild(a);
+    }
+    if (r.art === "angebot" && r.status === "offen") {
+      var m = document.createElement("span"); m.className = "meldung"; m.style.marginTop = "0";
+      z.appendChild(knopf("Angenommen", "", rechnungAktion(r, "angenommen", "", m, null)));
+      z.appendChild(knopf("Abgelehnt", "", rechnungAktion(r, "abgelehnt", "", m, null)));
+      z.appendChild(m);
+    }
+    return z;
+  }
+
+  function rechnungenLaden() {
+    holen("/api/rechnungen").then(function (d) {
+      el("rechnungText").textContent = d.text || "";
+      var kasten = el("rechnungen"); kasten.textContent = "";
+      d.offen.forEach(function (r) { kasten.appendChild(rechnungKarte(r)); });
+      var letzte = el("letzte"); letzte.textContent = "";
+      var andere = d.letzte.filter(function (r) { return !(r.art === "rechnung" && r.status === "offen"); });
+      andere.slice(0, 12).forEach(function (r) { letzte.appendChild(letzteZeile(r)); });
+      el("letzteKarte").hidden = !andere.length;
+    }).catch(function () { el("rechnungText").textContent = "Rechnungen sind gerade nicht abrufbar."; });
+  }
+
   function laden() {
+    rechnungenLaden();
     holen("/api/autopilot").then(function (d) {
       var liste = el("liste"); liste.textContent = "";
       if (!d.aufgaben.length) {
@@ -1248,6 +1384,11 @@ button:disabled{opacity:.5;cursor:default}
       ["ort", "name", "firma"].forEach(function (f) {
         if (document.activeElement !== el(f)) { el(f).value = e[f] || ""; }
       });
+      Array.prototype.forEach.call(document.querySelectorAll("#firmendaten [data-feld]"), function (f) {
+        var wert = (e.firmendaten || {})[f.getAttribute("data-feld")];
+        if (f.type === "checkbox") { f.checked = !!wert; }
+        else if (document.activeElement !== f) { f.value = wert || ""; }
+      });
       el("an").checked = !!e.an; el("uhrzeiten").textContent = e.uhrzeiten;
       var kasten = el("branchen");
       if (!kasten.childNodes.length) {
@@ -1273,13 +1414,21 @@ button:disabled{opacity:.5;cursor:default}
       el("laufMeldung").textContent = r.text || ""; setTimeout(laden, 1500);
     });
   });
+  function firmendatenLesen() {
+    var daten = {};
+    Array.prototype.forEach.call(document.querySelectorAll("#firmendaten [data-feld]"), function (f) {
+      daten[f.getAttribute("data-feld")] = f.type === "checkbox" ? f.checked : f.value;
+    });
+    return daten;
+  }
   el("speichern").addEventListener("click", function () {
     var gewaehlt = Array.prototype.filter.call(
       document.querySelectorAll("#branchen input"), function (c) { return c.checked; })
       .map(function (c) { return c.value; });
     holen("/api/autopilot/einstellungen", {ort: el("ort").value, branchen: gewaehlt,
                                            an: el("an").checked, name: el("name").value,
-                                           firma: el("firma").value}).then(function (r) {
+                                           firma: el("firma").value,
+                                           firmendaten: firmendatenLesen()}).then(function (r) {
       el("einstMeldung").textContent = r.text || ""; laden();
     });
   });

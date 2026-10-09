@@ -1,0 +1,82 @@
+JARVIS IM BROWSER - DIE ERWEITERUNG
+===================================
+
+Mit der Erweiterung schickst du die Webseite, die gerade offen ist, an Jarvis:
+
+  * "Seite zusammenfassen"  - Jarvis sagt dir in ein paar Sätzen, worum es geht.
+  * "Kontakte als Interessent übernehmen" - Firma, Telefon und Mail von der
+    Seite landen als neuer Interessent in deiner Akquise-Liste.
+  * "Frage zu dieser Seite" - z. B. "Suchen die eine Reinigungsfirma?"
+  * "Vorlesen" - Jarvis liest die Antwort mit deutscher Stimme vor.
+  * Rechtsklick auf markierten Text -> "Mit Jarvis besprechen".
+    Die Antwort erscheint unten rechts in der Seite.
+
+Funktioniert in Google Chrome, Microsoft Edge und Brave.
+
+
+EINMAL EINRICHTEN (2 Minuten)
+-----------------------------
+
+1. Jarvis starten: Doppelklick auf JARVIS.command.
+   (Die Erweiterung redet nur mit Jarvis auf diesem Rechner.)
+
+2. Im Browser in die Adresszeile eintippen und Enter drücken:
+       Chrome:  chrome://extensions
+       Edge:    edge://extensions
+       Brave:   brave://extensions
+
+3. Oben rechts (Edge: links unten) den Schalter "Entwicklermodus" einschalten.
+
+4. Auf "Entpackte Erweiterung laden" klicken
+   (Edge: "Entpackt laden").
+
+5. Den Ordner "erweiterung" aus dem Jarvis-Ordner auswählen und bestätigen.
+   Wichtig: den Ordner selbst auswählen, nicht eine Datei darin.
+
+6. Damit das Symbol immer sichtbar ist: oben rechts auf das Puzzle-Symbol
+   klicken und bei "Jarvis" die Stecknadel anklicken.
+
+Fertig. Das Jarvis-Symbol (blauer Ring) steht jetzt neben der Adresszeile.
+Tastenkürzel zum Öffnen: Alt+Umschalt+J.
+
+
+BENUTZEN
+--------
+
+* Webseite öffnen, auf das Jarvis-Symbol klicken, Knopf wählen.
+* Ist auf der Seite Text markiert, geht die Markierung mit.
+* Die Antwort bleibt 30 Minuten im Popup stehen - auch wenn du es
+  zwischendurch schließt.
+* Browser-eigene Seiten (Einstellungen, Web Store) und PDFs kann die
+  Erweiterung nicht lesen. Fragen kannst du dort trotzdem stellen.
+
+
+WENN ES NICHT GEHT
+------------------
+
+"Jarvis läuft nicht - starte JARVIS.command."
+    Jarvis ist nicht gestartet. Doppelklick auf JARVIS.command und
+    noch einmal versuchen.
+
+"Kein Zugang. Der Schlüssel fehlt oder stimmt nicht."
+    Jarvis läuft mit Zugangsschlüssel (WLAN-Betrieb). Im Popup auf das
+    Zahnrad klicken und den Schlüssel eintragen - er steht in der
+    Jarvis-Adresse hinter "?schluessel=".
+
+"Diese Jarvis-Version kennt die Erweiterung noch nicht"
+    Jarvis ist zu alt. Neueste Version holen und neu starten.
+
+Nach einer Änderung an den Dateien im Ordner "erweiterung":
+    chrome://extensions öffnen und bei Jarvis auf den runden Pfeil
+    (Neu laden) klicken.
+
+
+WAS DIE ERWEITERUNG DARF - UND WAS NICHT
+----------------------------------------
+
+* Sie liest eine Seite nur, wenn DU auf das Symbol oder ins Kontextmenü
+  klickst (Berechtigung "activeTab"). Im Hintergrund liest sie nichts mit.
+* Sie schickt nur an Jarvis auf diesem Rechner (localhost:8765 bzw.
+  127.0.0.1:8765), an keinen anderen Server. Sie lädt nichts aus dem Netz.
+* Berechtigungen: activeTab, scripting, contextMenus, storage - mehr nicht.
+* Die Erweiterungs-ID ist immer: ingjjagdojoofphabghgjepoloiiagjm

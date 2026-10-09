@@ -31,6 +31,7 @@ DASHBOARD_VERZEICHNIS = BASIS / "dashboard"
 BELEGE_VERZEICHNIS = BASIS / "belege"
 PROFIL_VERZEICHNIS = BASIS / "profil"
 EXPORT_VERZEICHNIS = BASIS / "export"
+RECHNUNGEN_VERZEICHNIS = BASIS / "rechnungen"
 DB_PFAD = str(BASIS / "jarvis_memory.db")
 
 # ---------------------------------------------------------------------------
@@ -122,6 +123,16 @@ OLLAMA_URL = _text("OLLAMA_URL", "http://127.0.0.1:11434")
 # Nutzer
 NUTZER_NAME = _text("NUTZER_NAME", "Chef")
 FIRMA = _text("FIRMA", "Gebäudereinigung")
+# Firmendaten für Rechnungen und Angebote (österreichische Pflichtangaben)
+FIRMA_ADRESSE = _text("FIRMA_ADRESSE")
+FIRMA_UID = _text("FIRMA_UID")
+FIRMA_IBAN = _text("FIRMA_IBAN")
+FIRMA_BIC = _text("FIRMA_BIC")
+FIRMA_TELEFON = _text("FIRMA_TELEFON")
+FIRMA_EMAIL = _text("FIRMA_EMAIL")
+KLEINUNTERNEHMER = _wahrheit("KLEINUNTERNEHMER", False)
+# Wer schon Rechnungen aus einem anderen Programm hat: nächste Nummer, z.B. 2026-046
+RECHNUNG_START = _text("RECHNUNG_START")
 
 # Sprachausgabe
 ELEVENLABS_API_KEY = _text("ELEVENLABS_API_KEY")
@@ -245,7 +256,7 @@ def env_schreiben() -> bool:
 def verzeichnisse_anlegen():
     """Legt alle Arbeitsverzeichnisse an, falls sie fehlen."""
     for pfad in (CONFIG_VERZEICHNIS, DASHBOARD_VERZEICHNIS, BELEGE_VERZEICHNIS,
-                 PROFIL_VERZEICHNIS, EXPORT_VERZEICHNIS):
+                 PROFIL_VERZEICHNIS, EXPORT_VERZEICHNIS, RECHNUNGEN_VERZEICHNIS):
         try:
             pfad.mkdir(parents=True, exist_ok=True)
         except OSError as fehler:
