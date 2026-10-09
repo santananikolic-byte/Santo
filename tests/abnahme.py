@@ -1461,6 +1461,7 @@ def pruefung_freier_dienst(agent):
                 else:
                     nachricht = {"role": "assistant", "content": None, "tool_calls": [{
                         "id": "call_1", "type": "function",
+                        "extra_content": {"google": {"thought_signature": "SIG123"}},
                         "function": {"name": "notiz_speichern",
                                      "arguments": json.dumps({"text": "Dienst-Test Nikolic"})}}]}
                 roh = json.dumps({"choices": [{"message": nachricht}]}).encode("utf-8")
@@ -1540,6 +1541,10 @@ def pruefung_freier_dienst(agent):
         pruefen("Werkzeugaufruf des Assistenten steht im OpenAI-Format im Verlauf",
                 any(m.get("tool_calls") and m["tool_calls"][0]["function"]["name"]
                     == "notiz_speichern" for m in zweite["body"]["messages"]))
+
+        pruefen("Die Gedanken-Signatur von Gemini geht unverändert zurück",
+                any(c.get("extra_content") == {"google": {"thought_signature": "SIG123"}}
+                    for m in zweite["body"]["messages"] for c in m.get("tool_calls") or []))
 
         modus["fehler"] = 429
         meldung = agent.denken("Hallo")

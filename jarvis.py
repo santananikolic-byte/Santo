@@ -1338,7 +1338,7 @@ DIENST_VORGABEN = {
              "seite": "console.groq.com/keys"},
     "gemini": {"name": "Google Gemini",
                "url": "https://generativelanguage.googleapis.com/v1beta/openai",
-               "modell": "gemini-2.5-flash",
+               "modell": "gemini-flash-latest",
                "seite": "aistudio.google.com/apikey"},
     "openrouter": {"name": "OpenRouter", "url": "https://openrouter.ai/api/v1",
                    "modell": "meta-llama/llama-3.3-70b-instruct:free",
@@ -1371,11 +1371,16 @@ def nachrichten_umwandeln_freier_dienst(system: str, nachrichten: list) -> list:
             aufrufe = []
             for block in inhalt if isinstance(inhalt, list) else []:
                 if isinstance(block, dict) and block.get("type") == "tool_use":
-                    aufrufe.append({"id": block.get("id"), "type": "function",
-                                    "function": {"name": block.get("name", ""),
-                                                 "arguments": json.dumps(
-                                                     block.get("input") or {},
-                                                     ensure_ascii=False)}})
+                    aufruf = {"id": block.get("id"), "type": "function",
+                              "function": {"name": block.get("name", ""),
+                                           "arguments": json.dumps(
+                                               block.get("input") or {},
+                                               ensure_ascii=False)}}
+                    # Gemini 3 verlangt seine "Gedanken-Signatur" unverändert zurück,
+                    # sonst lehnt es den nächsten Schritt mit 400 ab.
+                    if block.get("extra_content"):
+                        aufruf["extra_content"] = block["extra_content"]
+                    aufrufe.append(aufruf)
             eintrag = {"role": "assistant", "content": _text_aus_freier_dienst(inhalt) or None}
             if aufrufe:
                 eintrag["tool_calls"] = aufrufe
@@ -1424,8 +1429,11 @@ def antwort_umwandeln_freier_dienst(daten: dict) -> list:
                 argumente = {}
         if not isinstance(argumente, dict):
             argumente = {}
-        bloecke.append({"type": "tool_use", "id": aufruf.get("id") or "dienst_%d" % nr,
-                        "name": funktion.get("name", ""), "input": argumente})
+        block = {"type": "tool_use", "id": aufruf.get("id") or "dienst_%d" % nr,
+                 "name": funktion.get("name", ""), "input": argumente}
+        if aufruf.get("extra_content"):
+            block["extra_content"] = aufruf["extra_content"]
+        bloecke.append(block)
     return bloecke
 
 
@@ -1443,6 +1451,8 @@ def _senden(url: str, schluessel: str, nutzlast: dict, timeout: int) -> dict:
     except urllib.error.HTTPError as fehler:
         try:
             roh = json.loads(fehler.read().decode("utf-8"))
+            if isinstance(roh, list) and roh:  # Google schickt den Fehler als Liste
+                roh = roh[0]
             meldung = roh.get("error", roh)
             meldung = meldung.get("message", str(meldung)) if isinstance(meldung, dict) \
                 else str(meldung)
@@ -1498,7 +1508,9 @@ def freier_dienst_anfragen(koerper: dict, timeout: int = 120) -> dict:
     nutzlast = {
         "model": FREIER_DIENST_MODELL,
         "messages": nachrichten_umwandeln_freier_dienst(koerper.get("system", ""), nachrichten),
-        "max_tokens": int(koerper.get("max_tokens") or 1000),
+        # Denkende Modelle verbrauchen einen Teil davon für Gedanken - zu wenig
+        # Platz ergibt eine leere Antwort.
+        "max_tokens": max(int(koerper.get("max_tokens") or 1000), 4096),
         "temperature": 0.3,
     }
     if gewaehlt:
@@ -7666,7 +7678,7 @@ body[data-zustand="wach"] .zustandstext{color:var(--akzent)}
         border-radius:9px;background:var(--tief);border:1px solid var(--rand-hell);
         color:var(--text);font-size:14px">
         <option value="groq" data-modell="llama-3.3-70b-versatile">Groq</option>
-        <option value="gemini" data-modell="gemini-2.5-flash">Google Gemini</option>
+        <option value="gemini" data-modell="gemini-flash-latest">Google Gemini</option>
         <option value="openrouter" data-modell="meta-llama/llama-3.3-70b-instruct:free">OpenRouter</option>
       </select>
       <input id="dienstModell" type="text" value="llama-3.3-70b-versatile"
