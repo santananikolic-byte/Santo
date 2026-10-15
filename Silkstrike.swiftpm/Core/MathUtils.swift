@@ -276,10 +276,16 @@ struct SeededRandom: RandomNumberGenerator {
 
     init(seed: UInt64) {
         state = seed ^ 0x2545_F491_4F6C_DD1D
-        _ = next()
+        _ = silkNextRaw()
     }
 
     mutating func next() -> UInt64 {
+        return silkNextRaw()
+    }
+
+    /// SplitMix64-Schritt (eindeutiger Name, damit es keine Überladungs-Mehrdeutigkeit
+    /// mit den generischen next()-Varianten von RandomNumberGenerator gibt).
+    private mutating func silkNextRaw() -> UInt64 {
         state = state &+ 0x9E37_79B9_7F4A_7C15
         var z = state
         z = (z ^ (z >> 30)) &* 0xBF58_476D_1CE4_E5B9
@@ -289,7 +295,7 @@ struct SeededRandom: RandomNumberGenerator {
 
     /// Gleichverteilt in [lo, hi).
     mutating func float(_ lo: Float, _ hi: Float) -> Float {
-        let u = Float(next() >> 40) * (1.0 / 16_777_216.0)   // 24 Bit → [0, 1)
+        let u = Float(silkNextRaw() >> 40) * (1.0 / 16_777_216.0)   // 24 Bit → [0, 1)
         return lo + (hi - lo) * u
     }
 
@@ -299,7 +305,7 @@ struct SeededRandom: RandomNumberGenerator {
     mutating func int(_ lo: Int, _ hi: Int) -> Int {
         guard hi > lo else { return lo }
         let span = UInt64(bitPattern: Int64(hi &- lo))
-        return lo &+ Int(truncatingIfNeeded: next() % span)
+        return lo &+ Int(truncatingIfNeeded: silkNextRaw() % span)
     }
 
     /// true mit Wahrscheinlichkeit p (0...1).
@@ -309,7 +315,7 @@ struct SeededRandom: RandomNumberGenerator {
 
     /// -1 oder +1.
     mutating func signf() -> Float {
-        return (next() & 1) == 0 ? -1 : 1
+        return (silkNextRaw() & 1) == 0 ? -1 : 1
     }
 
     /// Zufälliges Element oder nil bei leerem Array.
