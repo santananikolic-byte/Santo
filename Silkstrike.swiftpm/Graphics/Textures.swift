@@ -419,3 +419,262 @@ extension UIColor {
                        blue: b1 + (b2 - b1) * t, alpha: a1 + (a2 - a1) * t)
     }
 }
+
+// MARK: - Oberflächen (Fassaden, Asphalt, Beton, Metall, Fliesen, Ziegel, Blut)
+
+extension ProceduralTextures {
+
+    /// Eine Fassaden-Textur deckt facadeTileMeters x facadeTileMeters Meter ab (4 x 4 Fenster, 3 m Geschosse).
+    /// MeshBuilder: uvScale = 1 / facadeTileMeters verwenden.
+    static let facadeTileMeters: Float = 12
+
+    /// style 0 = Glasbüro, 1 = Ziegel-Wohnhaus, 2 = Beton, 3 = Neon-Gewerbe. lit = true liefert die Leuchtkarte (Emission).
+    static func facade(style: Int, lit: Bool) -> UIImage {
+        let s = ((style % 4) + 4) % 4
+        return cached("facade\(s)\(lit ? "L" : "D")") {
+            let size = 512
+            let px = CGFloat(size)
+            var rng = Rand(seed: UInt64(0xFACADE + s * 977))
+            let wall: TexRGB
+            let frame: TexRGB
+            let glass: TexRGB
+            switch s {
+            case 0: wall = TexRGB(0.16, 0.18, 0.21); frame = TexRGB(0.30, 0.32, 0.35); glass = TexRGB(0.07, 0.10, 0.14)
+            case 1: wall = TexRGB(0.36, 0.18, 0.13); frame = TexRGB(0.55, 0.50, 0.44); glass = TexRGB(0.06, 0.07, 0.09)
+            case 2: wall = TexRGB(0.38, 0.37, 0.35); frame = TexRGB(0.24, 0.24, 0.24); glass = TexRGB(0.08, 0.09, 0.10)
+            default: wall = TexRGB(0.10, 0.09, 0.12); frame = TexRGB(0.20, 0.18, 0.24); glass = TexRGB(0.05, 0.05, 0.08)
+            }
+            let cols = 4
+            let rows = 4
+            let cellW = px / CGFloat(cols)
+            let cellH = px / CGFloat(rows)
+            let winW: CGFloat = s == 0 ? cellW * 0.92 : cellW * 0.58
+            let winH: CGFloat = s == 0 ? cellH * 0.78 : cellH * 0.56
+            return renderImage(width: size, height: size, opaque: true) { ctx in
+                if lit {
+                    ctx.setFillColor(UIColor.black.cgColor)
+                    ctx.fill(CGRect(x: 0, y: 0, width: px, height: px))
+                } else {
+                    ctx.setFillColor(wall.color().cgColor)
+                    ctx.fill(CGRect(x: 0, y: 0, width: px, height: px))
+                    drawFBM(ctx, size: px, rng: &rng, startCells: 4, octaves: 4, alpha: 0.18, blend: .overlay)
+                    if s == 1 {
+                        // Ziegelfugen
+                        ctx.setStrokeColor(UIColor(white: 0.12, alpha: 0.35).cgColor)
+                        ctx.setLineWidth(1)
+                        var y: CGFloat = 0
+                        var row = 0
+                        while y < px {
+                            ctx.move(to: CGPoint(x: 0, y: y)); ctx.addLine(to: CGPoint(x: px, y: y))
+                            var x: CGFloat = row % 2 == 0 ? 0 : 8
+                            while x < px { ctx.move(to: CGPoint(x: x, y: y)); ctx.addLine(to: CGPoint(x: x, y: y + 6)); x += 16 }
+                            y += 6; row += 1
+                        }
+                        ctx.strokePath()
+                    }
+                    // Geschossbänder
+                    ctx.setFillColor(frame.color(0.8).cgColor)
+                    for r in 0..<rows {
+                        ctx.fill(CGRect(x: 0, y: CGFloat(r) * cellH, width: px, height: s == 0 ? 6 : 10))
+                    }
+                }
+                for r in 0..<rows {
+                    for c in 0..<cols {
+                        let x = CGFloat(c) * cellW + (cellW - winW) / 2
+                        let y = CGFloat(r) * cellH + (cellH - winH) * 0.6
+                        let rect = CGRect(x: x, y: y, width: winW, height: winH)
+                        let isLit = rng.chance(s == 3 ? 0.55 : 0.38)
+                        let warm = rng.chance(0.7)
+                        let shade = rng.range(0.55, 1.0)
+                        if lit {
+                            guard isLit else { continue }
+                            let base: UIColor = warm
+                                ? UIColor(red: 1.0, green: 0.72, blue: 0.42, alpha: 1)
+                                : (s == 3 ? UIColor(red: 0.95, green: 0.25, blue: 0.6, alpha: 1) : UIColor(red: 0.6, green: 0.8, blue: 1.0, alpha: 1))
+                            ctx.saveGState()
+                            ctx.clip(to: rect)
+                            drawLinear(ctx, from: CGPoint(x: rect.midX, y: rect.minY), to: CGPoint(x: rect.midX, y: rect.maxY),
+                                       colors: [base.withAlphaComponent(shade * 0.55), base.withAlphaComponent(shade)],
+                                       locations: [0, 1])
+                            // Silhouette von Möbeln / Jalousien
+                            if rng.chance(0.4) {
+                                ctx.setFillColor(UIColor(white: 0, alpha: 0.55).cgColor)
+                                ctx.fill(CGRect(x: rect.minX + rect.width * rng.range(0.1, 0.6), y: rect.maxY - rect.height * 0.35,
+                                                width: rect.width * 0.25, height: rect.height * 0.35))
+                            }
+                            ctx.restoreGState()
+                        } else {
+                            ctx.setFillColor(frame.color().cgColor)
+                            ctx.fill(rect.insetBy(dx: -3, dy: -3))
+                            ctx.setFillColor((isLit ? glass.color(1.6) : glass.color()).cgColor)
+                            ctx.fill(rect)
+                            // Spiegelung
+                            ctx.setFillColor(UIColor(white: 1, alpha: 0.05).cgColor)
+                            ctx.fill(CGRect(x: rect.minX, y: rect.minY, width: rect.width * 0.35, height: rect.height))
+                            if s != 0 {
+                                ctx.setFillColor(frame.color(0.7).cgColor)
+                                ctx.fill(CGRect(x: rect.midX - 1.5, y: rect.minY, width: 3, height: rect.height))
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    static func asphalt() -> UIImage {
+        return cached("asphalt") {
+            let n = 512
+            let px = CGFloat(n)
+            var rng = Rand(seed: 0xA5FA17)
+            return renderImage(width: n, height: n, opaque: true) { ctx in
+                ctx.setFillColor(UIColor(white: 0.11, alpha: 1).cgColor)
+                ctx.fill(CGRect(x: 0, y: 0, width: px, height: px))
+                drawFBM(ctx, size: px, rng: &rng, startCells: 3, octaves: 5, alpha: 0.35, blend: .overlay)
+                drawSpeckles(ctx, size: px, count: 2600, rng: &rng, minRadius: 0.4, maxRadius: 1.4,
+                             gray: 0.05...0.35, alpha: 0.3...0.8)
+                // Risse
+                ctx.setStrokeColor(UIColor(white: 0.03, alpha: 0.8).cgColor)
+                ctx.setLineWidth(1.2)
+                for _ in 0..<7 {
+                    var p = CGPoint(x: rng.unit() * px, y: rng.unit() * px)
+                    ctx.move(to: p)
+                    for _ in 0..<12 {
+                        p = CGPoint(x: p.x + rng.range(-14, 14), y: p.y + rng.range(-14, 14))
+                        ctx.addLine(to: p)
+                    }
+                }
+                ctx.strokePath()
+            }
+        }
+    }
+
+    static func asphaltNormal() -> UIImage {
+        return cached("asphaltN") {
+            return normalMap(fromHeight: asphalt(), strength: 2.0)
+        }
+    }
+
+    static func concrete() -> UIImage {
+        return cached("concrete") {
+            let n = 512
+            let px = CGFloat(n)
+            var rng = Rand(seed: 0xC0C0)
+            return renderImage(width: n, height: n, opaque: true) { ctx in
+                ctx.setFillColor(UIColor(white: 0.42, alpha: 1).cgColor)
+                ctx.fill(CGRect(x: 0, y: 0, width: px, height: px))
+                drawFBM(ctx, size: px, rng: &rng, startCells: 2, octaves: 5, alpha: 0.3, blend: .overlay)
+                drawSpeckles(ctx, size: px, count: 1500, rng: &rng, minRadius: 0.5, maxRadius: 1.8,
+                             gray: 0.2...0.6, alpha: 0.2...0.5)
+                ctx.setStrokeColor(UIColor(white: 0.25, alpha: 0.6).cgColor)
+                ctx.setLineWidth(2)
+                ctx.stroke(CGRect(x: 1, y: 1, width: px - 2, height: px - 2))
+                // Wasserflecken
+                for _ in 0..<5 {
+                    let x = rng.unit() * px
+                    ctx.setFillColor(UIColor(white: 0.2, alpha: 0.12).cgColor)
+                    ctx.fill(CGRect(x: x, y: 0, width: rng.range(6, 30), height: px))
+                }
+            }
+        }
+    }
+
+    static func metalPanels() -> UIImage {
+        return cached("metal") {
+            let n = 512
+            let px = CGFloat(n)
+            var rng = Rand(seed: 0x3E7A1)
+            return renderImage(width: n, height: n, opaque: true) { ctx in
+                ctx.setFillColor(UIColor(white: 0.5, alpha: 1).cgColor)
+                ctx.fill(CGRect(x: 0, y: 0, width: px, height: px))
+                drawFBM(ctx, size: px, rng: &rng, startCells: 4, octaves: 4, alpha: 0.2, blend: .overlay)
+                let panel = px / 4
+                ctx.setStrokeColor(UIColor(white: 0.18, alpha: 1).cgColor)
+                ctx.setLineWidth(3)
+                for i in 0...4 {
+                    let v = CGFloat(i) * panel
+                    ctx.move(to: CGPoint(x: v, y: 0)); ctx.addLine(to: CGPoint(x: v, y: px))
+                    ctx.move(to: CGPoint(x: 0, y: v)); ctx.addLine(to: CGPoint(x: px, y: v))
+                }
+                ctx.strokePath()
+                ctx.setFillColor(UIColor(white: 0.25, alpha: 1).cgColor)
+                for i in 0..<4 {
+                    for j in 0..<4 {
+                        for k in 0..<4 {
+                            let cx = CGFloat(i) * panel + (k % 2 == 0 ? 10 : panel - 10)
+                            let cy = CGFloat(j) * panel + (k < 2 ? 10 : panel - 10)
+                            ctx.fillEllipse(in: CGRect(x: cx - 3, y: cy - 3, width: 6, height: 6))
+                        }
+                    }
+                }
+                // Rost
+                drawSpeckles(ctx, size: px, count: 400, rng: &rng, minRadius: 1, maxRadius: 5,
+                             gray: 0.25...0.4, alpha: 0.15...0.35)
+            }
+        }
+    }
+
+    static func tiles() -> UIImage {
+        return cached("tiles") {
+            let n = 512
+            let px = CGFloat(n)
+            var rng = Rand(seed: 0x711E5)
+            return renderImage(width: n, height: n, opaque: true) { ctx in
+                ctx.setFillColor(UIColor(white: 0.3, alpha: 1).cgColor)
+                ctx.fill(CGRect(x: 0, y: 0, width: px, height: px))
+                let t = px / 8
+                for i in 0..<8 {
+                    for j in 0..<8 {
+                        let g = rng.range(0.62, 0.8)
+                        ctx.setFillColor(UIColor(red: g * 0.92, green: g, blue: g * 0.95, alpha: 1).cgColor)
+                        ctx.fill(CGRect(x: CGFloat(i) * t + 2, y: CGFloat(j) * t + 2, width: t - 4, height: t - 4))
+                    }
+                }
+                drawFBM(ctx, size: px, rng: &rng, startCells: 3, octaves: 4, alpha: 0.3, blend: .multiply)
+            }
+        }
+    }
+
+    static func brick() -> UIImage {
+        return cached("brick") {
+            let n = 512
+            let px = CGFloat(n)
+            var rng = Rand(seed: 0xB21C)
+            return renderImage(width: n, height: n, opaque: true) { ctx in
+                ctx.setFillColor(UIColor(white: 0.22, alpha: 1).cgColor)
+                ctx.fill(CGRect(x: 0, y: 0, width: px, height: px))
+                let bh = px / 16
+                let bw = px / 8
+                for r in 0..<16 {
+                    let off: CGFloat = r % 2 == 0 ? 0 : bw / 2
+                    for c in -1..<9 {
+                        let k = rng.range(0.75, 1.1)
+                        ctx.setFillColor(UIColor(red: 0.42 * k, green: 0.19 * k, blue: 0.14 * k, alpha: 1).cgColor)
+                        ctx.fill(CGRect(x: CGFloat(c) * bw + off + 2, y: CGFloat(r) * bh + 2, width: bw - 4, height: bh - 4))
+                    }
+                }
+                drawFBM(ctx, size: px, rng: &rng, startCells: 3, octaves: 4, alpha: 0.25, blend: .overlay)
+            }
+        }
+    }
+
+    static func bloodSplat() -> UIImage {
+        return cached("bloodSplat") {
+            let n = 256
+            let px = CGFloat(n)
+            var rng = Rand(seed: 0xB100D)
+            return renderImage(width: n, height: n, opaque: false) { ctx in
+                let c = CGPoint(x: px / 2, y: px / 2)
+                let red = UIColor(red: 0.32, green: 0.0, blue: 0.01, alpha: 0.95)
+                ctx.setFillColor(red.cgColor)
+                ctx.fillEllipse(in: CGRect(x: c.x - px * 0.28, y: c.y - px * 0.25, width: px * 0.56, height: px * 0.5))
+                for _ in 0..<26 {
+                    let a = rng.range(0, .pi * 2)
+                    let d = rng.range(px * 0.15, px * 0.46)
+                    let r = rng.range(2, 14)
+                    ctx.fillEllipse(in: CGRect(x: c.x + cos(a) * d - r, y: c.y + sin(a) * d - r, width: r * 2, height: r * 2))
+                }
+            }
+        }
+    }
+}
