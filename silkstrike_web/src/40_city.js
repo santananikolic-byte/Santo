@@ -112,6 +112,42 @@ class City {
     const lanes = new MeshBuilder(), posts = new MeshBuilder(), heads = new MeshBuilder();
     const tops = [];
     const S = 1 / 12;
+    // Dach-Details + Bäume: eigener Zufallsstrom, damit das Stadtlayout gleich bleibt
+    const rnd2 = seeded(4242), rf2 = (a, b) => a + rnd2() * (b - a);
+    const wood = new MeshBuilder(), garden = new MeshBuilder(), treeAt = [];
+    const waterTower = (cx, y, cz) => {
+      const lh = 3.2, r = 2.1, th = 3.8;
+      for (const [ox, oz] of [[-1.4, -1.4], [1.4, -1.4], [-1.4, 1.4], [1.4, 1.4]]) metal.box(cx + ox - 0.14, y, cz + oz - 0.14, cx + ox + 0.14, y + lh, cz + oz + 0.14, 0.3);
+      metal.box(cx - 1.5, y + 1.4, cz - 1.45, cx + 1.5, y + 1.55, cz - 1.35, 0.3); metal.box(cx - 1.5, y + 1.4, cz + 1.35, cx + 1.5, y + 1.55, cz + 1.45, 0.3);
+      metal.box(cx - 1.45, y + 1.4, cz - 1.5, cx - 1.35, y + 1.55, cz + 1.5, 0.3); metal.box(cx + 1.35, y + 1.4, cz - 1.5, cx + 1.45, y + 1.55, cz + 1.5, 0.3);
+      metal.box(cx - 2.3, y + lh - 0.2, cz - 2.3, cx + 2.3, y + lh, cz + 2.3, 0.3);
+      wood.cyl(cx, y + lh, cz, r, th, 14, 0.25);
+      for (const b of [0.5, 1.8, 3.1]) metal.cyl(cx, y + lh + b, cz, r + 0.05, 0.12, 14, 0.3);
+      metal.cone(cx, y + lh + th, cz, r + 0.25, 1.4, 14);
+      metal.cyl(cx, y + lh + th + 1.25, cz, 0.1, 0.7, 5);
+      metal.box(cx + r - 0.1, y + lh, cz - 0.3, cx + r + 0.12, y + lh + th, cz - 0.22, 0.3); metal.box(cx + r - 0.1, y + lh, cz + 0.22, cx + r + 0.12, y + lh + th, cz + 0.3, 0.3);
+    };
+    const roofDeco = (x0, y1, z0, x1, z1) => {
+      const w = x1 - x0, d = z1 - z0;
+      if (rnd2() < 0.5) { // Geländer auf der Brüstung
+        const ry = y1 + 1.1, step = quality === 'performance' ? 7 : 3.2, e = 0.18;
+        const rail = (ax, az, bx, bz) => { const n = Math.max(1, Math.round(Math.hypot(bx - ax, bz - az) / step)); for (let k = 0; k <= n; k++) { const px = lerp(ax, bx, k / n), pz = lerp(az, bz, k / n); metal.box(px - 0.05, ry, pz - 0.05, px + 0.05, ry + 1, pz + 0.05, 0.3); } };
+        rail(x0 + e, z0 + e, x1 - e, z0 + e); rail(x0 + e, z1 - e, x1 - e, z1 - e); rail(x0 + e, z0 + e, x0 + e, z1 - e); rail(x1 - e, z0 + e, x1 - e, z1 - e);
+        for (const hy of [0.5, 0.96]) { metal.box(x0, ry + hy, z0 + 0.12, x1, ry + hy + 0.07, z0 + 0.24, 0.3); metal.box(x0, ry + hy, z1 - 0.24, x1, ry + hy + 0.07, z1 - 0.12, 0.3); metal.box(x0 + 0.12, ry + hy, z0, x0 + 0.24, ry + hy + 0.07, z1, 0.3); metal.box(x1 - 0.24, ry + hy, z0, x1 - 0.12, ry + hy + 0.07, z1, 0.3); }
+      }
+      if (rnd2() < 0.6 && w > 9 && d > 9) { // Treppenhaus-Aufbau mit Tür
+        const bx = x1 - 4.6 - rnd2() * Math.min(3, w * 0.2), bz = z1 - 4.4;
+        roofs.box(bx, y1, bz, bx + 3.2, y1 + 2.8, bz + 3, 0.25); roofs.box(bx - 0.15, y1 + 2.8, bz - 0.15, bx + 3.35, y1 + 3, bz + 3.15, 0.25);
+        metal.box(bx + 1, y1, bz - 0.06, bx + 2.1, y1 + 2.2, bz, 0.3);
+      }
+      if (rnd2() < 0.22 && w > 14 && d > 14 && y1 < 150) { // Dachgarten
+        const gx0 = x0 + w * 0.5, gz0 = z0 + 2, gx1 = x1 - 2, gz1 = z0 + d * 0.48;
+        roofs.box(gx0 - 0.3, y1, gz0 - 0.3, gx1 + 0.3, y1 + 0.5, gz1 + 0.3, 0.25);
+        garden.box(gx0, y1 + 0.5, gz0, gx1, y1 + 0.58, gz1, 0.2);
+        for (let k = 0; k < 5; k++) treeAt.push(rf2(gx0 + 1, gx1 - 1), y1 + 0.58, rf2(gz0 + 1, gz1 - 1), rf2(0.3, 0.55));
+      }
+      if (rnd2() < 0.3) for (let k = 0; k < 3; k++) metal.cyl(x0 + 1.5 + k * 0.9, y1, z1 - 1.5, 0.06, rf2(2.5, 7), 4); // Antennen
+    };
     const district = (i, j) => {
       if (i === 4 && j === 4) return 'plaza';
       if ((i === 6 || i === 7) && (j === 1 || j === 2)) return 'park';
@@ -133,8 +169,9 @@ class City {
       tops.push(new V3((x0 + x1) / 2, y1, (z0 + z1) / 2));
       if (!props) return;
       const w = x1 - x0, d = z1 - z0;
-      for (let k = 0; k < ri(1, 4); k++) { const px = rf(x0 + 2, Math.max(x0 + 2.1, x1 - 4)), pz = rf(z0 + 2, Math.max(z0 + 2.1, z1 - 4)); metal.box(px, y1, pz, px + 2.2, y1 + 1.4, pz + 1.6, 0.3); }
-      if (rnd() < 0.4 && w > 12 && d > 12) { const cx = x0 + w * 0.3, cz = z0 + d * 0.65; stone.cyl(cx, y1 + 3, cz, 2.1, 3.6, 12, 0.2); stone.cone(cx, y1 + 6.6, cz, 2.3, 1.2, 12); for (const [ox, oz] of [[-1.4, -1.4], [1.4, -1.4], [-1.4, 1.4], [1.4, 1.4]]) metal.box(cx + ox - 0.15, y1, cz + oz - 0.15, cx + ox + 0.15, y1 + 3, cz + oz + 0.15, 0.3); }
+      for (let k = 0; k < ri(1, 4); k++) { const px = rf(x0 + 2, Math.max(x0 + 2.1, x1 - 4)), pz = rf(z0 + 2, Math.max(z0 + 2.1, z1 - 4)); metal.box(px, y1, pz, px + 2.2, y1 + 1.4, pz + 1.6, 0.3); metal.cyl(px + 1.1, y1 + 1.4, pz + 0.8, 0.55, 0.1, 8, 0.3); metal.box(px - 0.5, y1, pz + 0.45, px, y1 + 0.55, pz + 1.15, 0.3); }
+      if (rnd() < 0.4 && w > 12 && d > 12) waterTower(x0 + w * 0.3, y1, z0 + d * 0.65);
+      roofDeco(x0, y1, z0, x1, z1);
       if (y1 > 60 && rnd() < 0.6) { const ax = x0 + w * 0.7, az = z0 + d * 0.3, h = rf(6, 18); metal.cyl(ax, y1, az, 0.15, h, 6); blink.box(ax - 0.35, y1 + h, az - 0.35, ax + 0.35, y1 + h + 0.7, az + 0.35, 1); }
       if (rnd() < 0.25) { const ny = y1 + 1.2, k = ri(0, 3); if (rnd() < 0.5) { metal.box(x0 + 2, y1, z0 + 0.4, x0 + 2.3, ny + 4, z0 + 0.7, 0.3); neon[k].box(x0 + 1, ny, z0 + 0.2, Math.min(x1 - 1, x0 + 14), ny + 3.5, z0 + 0.5, 1); } else neon[k].box(x1 + 0.05, y1 * 0.55, z0 + d * 0.4, x1 + 0.6, y1 * 0.55 + 9, z0 + d * 0.4 + 2.5, 1); }
     };
@@ -159,10 +196,25 @@ class City {
       const [x0, z0, x1, z1] = rect(i, j);
       const dist = district(i, j);
       if (dist !== 'park') side.box(x0 - 3, 0, z0 - 3, x1 + 3, 0.15, z1 + 3, 0.25);
+      if (dist !== 'park' && dist !== 'industry' && dist !== 'harbor') { // Straßenbäume entlang der Gehwege (Abstand zu Laternen)
+        const sp = quality === 'performance' ? 24 : quality === 'balanced' ? 15 : 11.5;
+        for (const [ax, az, bx, bz] of [[x0 - 1.7, z0, x0 - 1.7, z1], [x1 + 1.7, z0, x1 + 1.7, z1], [x0, z0 - 1.7, x1, z0 - 1.7], [x0, z1 + 1.7, x1, z1 + 1.7]]) {
+          const n = Math.floor(Math.hypot(bx - ax, bz - az) / sp);
+          for (let k = 0; k < n; k++) {
+            const t = (k + 0.5) / n, px = lerp(ax, bx, t), pz = lerp(az, bz, t), m = ((((ax === bx ? pz : px) + half - 20) % 50) + 50) % 50;
+            if (m > 3 && m < 47) treeAt.push(px, 0.15, pz, rf2(0.8, 1.15));
+          }
+        }
+        if (dist === 'plaza') for (let k = 0; k < 7; k++) for (const [px, pz] of [[x0 + 5, z0 + 5 + k * 11.5], [x1 - 5, z0 + 5 + k * 11.5], [x0 + 5 + k * 11.5, z0 + 5]]) treeAt.push(px, 0.15, pz, rf2(0.9, 1.2));
+      }
       if (dist === 'plaza') { stone.box(x0 + 10, 0.15, z0 + 10, x1 - 10, 0.6, z1 - 10, 0.2); this.landmarks.bloodTower = new V3((x0 + x1) / 2, 0.6, z1 - 6); continue; }
       if (dist === 'park') {
         grass.box(x0 - 3, 0, z0 - 3, x1 + 3, 0.2, z1 + 3, 0.1);
-        for (let k = 0; k < (quality === 'performance' ? 10 : 22); k++) { const px = rf(x0, x1), pz = rf(z0, z1), h = rf(5, 10); trunks.cyl(px, 0.2, pz, 0.3, h * 0.45, 6); trees.cone(px, 0.2 + h * 0.35, pz, h * 0.32, h * 0.75, 8); }
+        for (let k = 0; k < (quality === 'performance' ? 10 : 22); k++) { const px = rf(x0, x1), pz = rf(z0, z1), h = rf(5, 10); treeAt.push(px, 0.2, pz, h / 7); }
+        const cx = (x0 + x1) / 2, cz = (z0 + z1) / 2; // Parkwege + dichter Baumbestand
+        side.box(x0 - 3, 0.2, cz - 1.6, x1 + 3, 0.26, cz + 1.6, 0.25); side.box(cx - 1.6, 0.2, z0 - 3, cx + 1.6, 0.26, z1 + 3, 0.25);
+        for (let k = 0; k < (quality === 'performance' ? 12 : 34); k++) { const px = rf2(x0, x1), pz = rf2(z0, z1); if (Math.abs(px - cx) > 3 && Math.abs(pz - cz) > 3) treeAt.push(px, 0.2, pz, rf2(0.8, 1.5)); }
+        for (const [hx, hz] of [[x0 + 4, z0 + 4], [x1 - 14, z1 - 6]]) garden.box(hx, 0.2, hz, hx + 10, 1.3, hz + 1.4, 0.2); // Hecken
         continue;
       }
       if (i === 1 && j === 1) { // Dom
@@ -228,7 +280,8 @@ class City {
     add(lanes, new THREE.MeshStandardMaterial({ color: 0xcccccc, emissive: 0x333333, roughness: 0.5 }), false);
     add(posts, pbr(0x262626, 0.4, 0.8)); add(heads, glowMat(0xffc880, 4), false);
     for (let s = 0; s < 4; s++) {
-      const m = new THREE.MeshStandardMaterial({ map: Tex.facade(s, false), emissiveMap: Tex.facade(s, true), emissive: 0xffffff, emissiveIntensity: tod === 'dusk' ? 0.9 : 1.7, roughness: s === 0 ? 0.25 : 0.7, metalness: s === 0 ? 0.5 : 0.05 });
+      const m = new THREE.MeshStandardMaterial({ map: Tex.facade(s, false), emissiveMap: Tex.facade(s, true), emissive: 0xffffff, emissiveIntensity: tod === 'dusk' ? 0.4 : 1.7, roughness: s === 0 ? 0.25 : 0.7, metalness: s === 0 ? 0.5 : 0.05 });
+      if (tod === 'dusk') m.color.setRGB(2.5, 2.2, 1.95); // Fassaden im warmen Abendlicht aufhellen
       add(fac[s], m);
     }
     add(metal, new THREE.MeshStandardMaterial({ map: Tex.metal(), roughness: 0.45, metalness: 0.7 }));
@@ -237,7 +290,32 @@ class City {
     const neonCols = [0xff1a73, 0x1ad9ff, 0xff9a1a];
     this.neonMats = neonCols.map((c) => glowMat(c, 2.6));
     neon.forEach((b, k) => add(b, this.neonMats[k], false));
-    add(grass, pbr(0x122410, 0.95, 0), false); add(trees, pbr(0x0d2a12, 0.9, 0)); add(trunks, pbr(0x2a1a10, 0.9, 0)); add(crane, pbr(0xbf1f14, 0.5, 0.6));
+    const golden = tod === 'dusk';
+    add(grass, pbr(golden ? 0x3f5a26 : 0x122410, 0.95, 0), false); add(trees, pbr(0x0d2a12, 0.9, 0)); add(trunks, pbr(0x2a1a10, 0.9, 0)); add(crane, pbr(0xbf1f14, 0.5, 0.6));
+    add(wood, new THREE.MeshStandardMaterial({ map: Tex.metal(), color: 0x9a6a42, roughness: 0.8, metalness: 0.1 }));
+    add(garden, pbr(golden ? 0x4d6a2c : 0x16301a, 0.95, 0));
+    // Bäume als InstancedMesh (2 Draw-Calls für die ganze Stadt)
+    const nT = treeAt.length / 4;
+    if (nT) {
+      const fg = new THREE.SphereGeometry(1, 8, 6), fp = fg.attributes.position;
+      for (let k = 0; k < fp.count; k++) { const x = fp.getX(k), y = fp.getY(k), z = fp.getZ(k), n = 1 + 0.16 * Math.sin(x * 5.1 + z * 3.7) * Math.cos(y * 4.3 + x * 2.1); fp.setXYZ(k, x * n, y * n * 0.85, z * n); }
+      fg.computeVertexNormals();
+      const tg = new THREE.CylinderGeometry(0.14, 0.22, 1, 5); tg.translate(0, 0.5, 0);
+      const fol = new THREE.InstancedMesh(fg, new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.9 }), nT);
+      const trk = new THREE.InstancedMesh(tg, pbr(0x3a2618, 0.9, 0), nT);
+      const M = new THREE.Matrix4(), Q = new THREE.Quaternion(), P = new V3(), Sc = new V3(), C = new THREE.Color(), UPV = new V3(0, 1, 0);
+      const greens = golden ? [0x5a7a2c, 0x6c8a32, 0x48682a, 0x8a7a2c, 0x7a9a3a, 0x9a6a28] : [0x1d3a1a, 0x24401c, 0x18301a];
+      for (let k = 0; k < nT; k++) {
+        const x = treeAt[k * 4], y = treeAt[k * 4 + 1], z = treeAt[k * 4 + 2], s = treeAt[k * 4 + 3], th = 2.6 * s, r = (2 + rnd2() * 0.6) * s;
+        Q.setFromAxisAngle(UPV, rnd2() * TAU);
+        M.compose(P.set(x, y, z), Q, Sc.set(s * 1.2, th, s * 1.2)); trk.setMatrixAt(k, M);
+        M.compose(P.set(x, y + th + r * 0.5, z), Q, Sc.set(r, r * (0.95 + rnd2() * 0.25), r)); fol.setMatrixAt(k, M);
+        fol.setColorAt(k, C.setHex(greens[Math.floor(rnd2() * greens.length)]));
+      }
+      fol.castShadow = trk.castShadow = quality !== 'performance'; fol.receiveShadow = true;
+      fol.computeBoundingSphere(); trk.computeBoundingSphere();
+      this.root.add(fol, trk);
+    }
     this.anim.push(() => { const t = this.t || 0; this.blinkMat.emissiveIntensity = (t % 1.4) < 0.18 ? 6 : 0.2; this.neonMats.forEach((m, i) => { m.emissiveIntensity = Math.sin(t * (7 + i * 3.1)) + Math.sin(t * 13.7 + i) > 1.75 ? 0.4 : 2.6; }); });
     // Blutturm
     this.tower = new THREE.Group();

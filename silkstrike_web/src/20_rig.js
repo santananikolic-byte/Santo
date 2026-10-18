@@ -117,19 +117,19 @@ class Rig {
     this.suitMat = suit; this.trimMat = trim; this.glowMat = glow;
     const isHuman = L.eyes === 'human';
     const headMat = (L.mask || !isHuman) ? suit : skin;
-    const cap = (r, len, m) => { const g = new THREE.CapsuleGeometry(r, len, 4, seg); const me = new THREE.Mesh(g, m); me.position.y = -len / 2 - r * 0.2; me.castShadow = true; return me; };
+    const cap = (r, len, m) => { const g = new THREE.CapsuleGeometry(r, len, 4, seg); const me = new THREE.Mesh(g, m); me.position.y = -len / 2 - r * 0.2; me.castShadow = true; me.userData.body = true; return me; };
     const grp = (name, parent, x, y, z) => { const g = new THREE.Group(); g.position.set(x, y, z); parent.add(g); this.j[name] = g; g.userData.rest = g.position.clone(); g.userData.parent = parent; return g; };
     const R = this.root;
     const hips = grp('hips', R, 0, 0.98 * s, 0);
-    const pelvis = new THREE.Mesh(new THREE.SphereGeometry(0.15 * s * bw, seg, seg), trim); pelvis.scale.set(1.25, 0.75, 0.85); hips.add(pelvis); pelvis.castShadow = true;
+    const pelvis = new THREE.Mesh(new THREE.SphereGeometry(0.15 * s * bw, seg, seg), trim); pelvis.scale.set(1.25, 0.75, 0.85); hips.add(pelvis); pelvis.castShadow = true; pelvis.userData.body = true;
     const spine = grp('spine', hips, 0, 0.08 * s, 0);
-    const abd = new THREE.Mesh(new THREE.CapsuleGeometry(0.135 * s * bw, 0.12 * s, 4, seg), suit); abd.position.y = 0.1 * s; abd.scale.set(1.15, 1, 0.8); spine.add(abd); abd.castShadow = true;
+    const abd = new THREE.Mesh(new THREE.CapsuleGeometry(0.135 * s * bw, 0.12 * s, 4, seg), suit); abd.position.y = 0.1 * s; abd.scale.set(1.15, 1, 0.8); spine.add(abd); abd.castShadow = true; abd.userData.body = true;
     const chest = grp('chest', spine, 0, 0.22 * s, 0);
-    const torso = new THREE.Mesh(new THREE.SphereGeometry(0.215 * s * bw, seg, seg), suit); torso.scale.set(1.22, 1.08, 0.78); torso.position.y = 0.1 * s; chest.add(torso); torso.castShadow = true;
+    const torso = new THREE.Mesh(new THREE.SphereGeometry(0.215 * s * bw, seg, seg), suit); torso.scale.set(1.22, 1.08, 0.78); torso.position.y = 0.1 * s; chest.add(torso); torso.castShadow = true; torso.userData.body = true;
     const neck = grp('neck', chest, 0, 0.28 * s, 0);
-    const neckM = new THREE.Mesh(new THREE.CylinderGeometry(0.05 * s * bw, 0.06 * s * bw, 0.1 * s, seg), headMat); neckM.position.y = 0.03 * s; neck.add(neckM);
+    const neckM = new THREE.Mesh(new THREE.CylinderGeometry(0.05 * s * bw, 0.06 * s * bw, 0.1 * s, seg), headMat); neckM.position.y = 0.03 * s; neck.add(neckM); neckM.userData.body = true;
     const head = grp('head', neck, 0, 0.1 * s, 0);
-    const skull = new THREE.Mesh(new THREE.SphereGeometry(0.115 * s, seg + 4, seg + 4), headMat); skull.scale.set(0.9, 1.08, 0.98); skull.position.y = 0.09 * s; head.add(skull); skull.castShadow = true;
+    const skull = new THREE.Mesh(new THREE.SphereGeometry(0.115 * s, seg + 4, seg + 4), headMat); skull.scale.set(0.9, 1.08, 0.98); skull.position.y = 0.09 * s; head.add(skull); skull.castShadow = true; skull.userData.body = true;
     // Augen
     if (L.eyes === 'lenses') {
       const lensMat = this.mat('#ffffff', 0.2, 0, L.glow, 1.3);
@@ -149,16 +149,16 @@ class Rig {
     for (const side of ['l', 'r']) {
       const sx = side === 'l' ? 1 : -1;
       const up = grp(side + 'Upper', chest, sx * 0.21 * s * bw, 0.19 * s, 0);
-      const shoulder = new THREE.Mesh(new THREE.SphereGeometry(armR * 1.35, seg, seg), trim); up.add(shoulder);
+      const shoulder = new THREE.Mesh(new THREE.SphereGeometry(armR * 1.35, seg, seg), trim); up.add(shoulder); shoulder.userData.body = true;
       up.add(cap(armR, 0.22 * s, suit));
       const fore = grp(side + 'Fore', up, 0, -0.3 * s, 0);
       fore.add(cap(armR * 0.88, 0.2 * s, side === 'r' && L.acc.includes('cyberArm') ? this.mat('#9aa3ad', 0.25, 0.9) : trim));
       const hand = grp(side + 'Hand', fore, 0, -0.27 * s, 0);
-      const handM = new THREE.Mesh(new THREE.SphereGeometry(armR * 0.95, seg, seg), L.mask ? trim : skin); handM.scale.set(0.9, 1.2, 0.7); handM.position.y = -0.04 * s; hand.add(handM);
+      const handM = new THREE.Mesh(new THREE.SphereGeometry(armR * 0.95, seg, seg), L.mask ? trim : skin); handM.scale.set(0.9, 1.2, 0.7); handM.position.y = -0.04 * s; hand.add(handM); handM.userData.body = true;
       if (L.acc.includes('chainBlades')) { const bl = new THREE.Mesh(new THREE.BoxGeometry(0.02 * s, 0.32 * s, 0.07 * s), this.mat('#b8bec6', 0.15, 1)); bl.position.set(sx * 0.05 * s, -0.12 * s, -0.02); fore.add(bl); }
       if (L.acc.includes('shoulderPads')) { const pad = new THREE.Mesh(new THREE.SphereGeometry(armR * 2.1, seg, seg, 0, TAU, 0, Math.PI / 2), this.mat(L.secondary, 0.35, 0.8)); pad.position.y = 0.02; up.add(pad); }
       if (L.acc.includes('spikes')) { const sp = new THREE.Mesh(new THREE.ConeGeometry(0.03 * s, 0.14 * s, 5), this.mat('#1b1b1f', 0.3, 0.8)); sp.position.y = 0.07 * s; up.add(sp); }
-      if (L.acc.includes('webLines')) { for (const yy of [-0.08, -0.2]) { const ring = new THREE.Mesh(new THREE.TorusGeometry(armR * 1.02, 0.005 * s, 4, seg), lineMat); ring.rotation.x = Math.PI / 2; ring.position.y = yy * s; up.add(ring); } }
+      if (L.acc.includes('webLines')) { for (const yy of [-0.08, -0.2]) { const ring = new THREE.Mesh(new THREE.TorusGeometry(armR * 1.02, 0.005 * s, 4, seg), lineMat); ring.rotation.x = Math.PI / 2; ring.position.y = yy * s; up.add(ring); ring.userData.body = true; } }
     }
     // Beine
     const legR = 0.084 * s * bw;
@@ -169,7 +169,7 @@ class Rig {
       const sh = grp(side + 'Shin', th, 0, -0.45 * s * bh, 0);
       sh.add(cap(legR * 0.8, 0.33 * s * bh, trim));
       const ft = grp(side + 'Foot', sh, 0, -0.44 * s * bh, 0);
-      const foot = new THREE.Mesh(new THREE.BoxGeometry(0.09 * s, 0.06 * s, 0.22 * s), trim); foot.position.set(0, -0.03 * s, 0.05 * s); ft.add(foot); foot.castShadow = true;
+      const foot = new THREE.Mesh(new THREE.BoxGeometry(0.09 * s, 0.06 * s, 0.22 * s), trim); foot.position.set(0, -0.03 * s, 0.05 * s); ft.add(foot); foot.castShadow = true; foot.userData.body = true;
     }
     // Zubehör
     const A = L.acc;

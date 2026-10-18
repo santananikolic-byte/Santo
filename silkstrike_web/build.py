@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
 import os, glob
 here=os.path.dirname(os.path.abspath(__file__))
-order=['00_core.js','10_audio.js','64_roster.js','65_storydata.js','20_rig.js','30_fx.js','40_city.js','50_world.js','60_kombat.js','70_story.js','80_ui.js','90_main.js']
-js='\n'.join(open(os.path.join(here,'src',f),encoding='utf-8').read() for f in order)
+order=['00_core.js','10_audio.js','64_roster.js','65_storydata.js','20_rig.js','22_skin.js','30_fx.js','40_city.js','50_world.js','60_kombat.js','70_story.js','80_ui.js','90_main.js']
+import base64
+glb=os.path.join(here,'assets','hero.glb')
+skin='const SKIN_GLB = "'+(base64.b64encode(open(glb,'rb').read()).decode() if os.path.exists(glb) else '')+'";\n'
+js=skin+'\n'.join(open(os.path.join(here,'src',f),encoding='utf-8').read() for f in order)
 shell=open(os.path.join(here,'shell.html'),encoding='utf-8').read()
 page=shell.replace('/*__GAME__*/', js)
 open(os.path.join(here,'silkstrike.html'),'w',encoding='utf-8').write(page)

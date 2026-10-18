@@ -6,6 +6,9 @@ import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 
 const V3 = THREE.Vector3;
 const TAU = Math.PI * 2;
@@ -60,6 +63,30 @@ const bloomPass = new UnrealBloomPass(new THREE.Vector2(256, 256), 0.7, 0.4, 0.9
 composer.addPass(renderPass);
 composer.addPass(bloomPass);
 composer.addPass(new OutputPass());
+// Kino-Grading (Display-sRGB): Filmkurve, Teal/Orange-Split-Toning, Sättigung, Vignette, Korn, chromatische Aberration
+const gradePass = new ShaderPass({
+  uniforms: { tDiffuse: { value: null }, uTime: { value: 0 }, uRes: { value: new THREE.Vector2(1, 1) }, uGrain: { value: 0.04 }, uCA: { value: 1.0 }, uVig: { value: 0.34 } },
+  vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
+  fragmentShader: `
+    uniform sampler2D tDiffuse; uniform float uTime, uGrain, uCA, uVig; uniform vec2 uRes; varying vec2 vUv;
+    float hash(vec2 p) { p = fract(p * vec2(443.897, 441.423)); p += dot(p, p.yx + 19.19); return fract((p.x + p.y) * p.x); }
+    void main() {
+      vec2 c = vUv - 0.5; float r2 = dot(c, c);
+      vec3 col;
+      if (uCA > 0.0) { vec2 o = c * r2 * uCA * 0.012; col = vec3(texture2D(tDiffuse, vUv + o).r, texture2D(tDiffuse, vUv).g, texture2D(tDiffuse, vUv - o).b); }
+      else col = texture2D(tDiffuse, vUv).rgb;
+      col = clamp(col, 0.0, 1.0);
+      col = mix(col, col * col * (3.0 - 2.0 * col), 0.3);
+      float l = dot(col, vec3(0.2126, 0.7152, 0.0722));
+      col += vec3(-0.018, 0.012, 0.04) * (1.0 - smoothstep(0.0, 0.45, l)) + vec3(0.045, 0.016, -0.03) * smoothstep(0.4, 1.0, l);
+      l = dot(col, vec3(0.2126, 0.7152, 0.0722));
+      col = mix(vec3(l), col, 1.1);
+      col *= 1.0 - uVig * smoothstep(0.08, 0.5, r2);
+      if (uGrain > 0.0) col += (hash(floor(vUv * uRes) + fract(uTime * 7.13) * vec2(97.3, 61.7)) - 0.5) * uGrain * (1.0 - 0.6 * l);
+      gl_FragColor = vec4(clamp(col, 0.0, 1.0), 1.0);
+    }`,
+});
+composer.addPass(gradePass);
 
 function qualityScale() {
   const dpr = window.devicePixelRatio || 1;
@@ -74,6 +101,8 @@ function applyQuality() {
   renderer.shadowMap.enabled = q !== 'performance';
   bloomPass.enabled = true;
   bloomPass.strength = q === 'performance' ? 0.45 : 0.7;
+  gradePass.uniforms.uGrain.value = q === 'performance' ? 0 : 0.04;
+  gradePass.uniforms.uCA.value = q === 'performance' ? 0 : 1.0;
   onResize();
 }
 function onResize() {
@@ -82,6 +111,7 @@ function onResize() {
   composer.setPixelRatio(qualityScale());
   composer.setSize(w, h);
   bloomPass.resolution.set(w * 0.5, h * 0.5);
+  gradePass.uniforms.uRes.value.set(w * qualityScale(), h * qualityScale());
   if (Game.active && Game.active.camera) {
     Game.active.camera.aspect = w / Math.max(1, h);
     Game.active.camera.updateProjectionMatrix();
@@ -207,6 +237,7 @@ function frame(now) {
   if (c) {
     if (!Game.paused) { Game.time += dt; c.update(dt); }
     renderPass.scene = c.scene; renderPass.camera = c.camera;
+    gradePass.uniforms.uTime.value = now / 1000;
     composer.render(dt);
   }
 }

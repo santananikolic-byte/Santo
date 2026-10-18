@@ -1,24 +1,72 @@
 // =====================================================================
 //  Offene Welt: Schwingen, Wandlauf, Netz-Zip, Kultisten, Ziele, Blutsiegel
 // =====================================================================
+// Goldene Stunde: warmer Himmel mit tiefer Sonne (u/v passend zu sunDir), eigene Umgebungs-Map
+const GOLDEN_SUN = new V3(0.55, 0.24, -0.8).normalize();
+let goldenEnv = null;
+function goldenSky() {
+  return canvasTex('skyGolden', 1024, 512, (g, w, h) => {
+    const grd = g.createLinearGradient(0, 0, 0, h);
+    grd.addColorStop(0, '#2f4f7e'); grd.addColorStop(0.25, '#6b86a8'); grd.addColorStop(0.4, '#d6a682'); grd.addColorStop(0.47, '#ffc583');
+    grd.addColorStop(0.5, '#ffd9a0'); grd.addColorStop(0.53, '#a9775a'); grd.addColorStop(1, '#2e2420');
+    g.fillStyle = grd; g.fillRect(0, 0, w, h);
+    const su = (Math.atan2(GOLDEN_SUN.z, GOLDEN_SUN.x) / TAU + 0.5) * w, sv = (0.5 - Math.asin(GOLDEN_SUN.y) / Math.PI) * h;
+    for (const off of [-w, 0, w]) {
+      g.save(); g.translate(su + off, sv); g.scale(2.2, 1);
+      const sg = g.createRadialGradient(0, 0, 0, 0, 0, h * 0.42);
+      sg.addColorStop(0, 'rgba(255,240,200,1)'); sg.addColorStop(0.08, 'rgba(255,215,150,0.9)'); sg.addColorStop(0.35, 'rgba(255,170,100,0.45)'); sg.addColorStop(1, 'rgba(255,140,80,0)');
+      g.fillStyle = sg; g.fillRect(-h, -h, h * 2, h * 2); g.restore();
+    }
+    const r = seeded(31);
+    for (let i = 0; i < 46; i++) { // flache, sonnenbeschienene Wolkenbänder
+      const x = r() * w, y = h * (0.18 + r() * 0.26), s = 30 + r() * 110;
+      g.save(); g.translate(x, y); g.scale(3.5, 0.5);
+      const cg = g.createRadialGradient(0, 0, 0, 0, 0, s);
+      cg.addColorStop(0, `rgba(255,${190 + Math.floor(r() * 40)},${150 + Math.floor(r() * 40)},${0.18 + r() * 0.2})`); cg.addColorStop(1, 'rgba(255,200,160,0)');
+      g.fillStyle = cg; g.fillRect(-s, -s, s * 2, s * 2); g.restore();
+    }
+  }, false);
+}
 class WorldController {
   constructor(opts) {
     this.opts = opts; // { chapter, dark, onObjective }
     const ch = opts.chapter;
-    this.tod = ch ? ch.tod : 'night';
+    this.tod = ch ? ch.tod : 'dusk'; // freies Schwingen = goldene Stunde
+    this.golden = this.tod === 'dusk';
+    const G = this.golden, q = Settings.data.quality;
     this.scene = new THREE.Scene();
     this.camera = new THREE.PerspectiveCamera(62, innerWidth / innerHeight, 0.15, 2600);
-    applyEnvironment(this.scene, this.tod, 0.0016);
+    applyEnvironment(this.scene, this.tod, G ? 0.0019 : 0.0016);
+    if (G) {
+      const sky = goldenSky(); sky.mapping = THREE.EquirectangularReflectionMapping;
+      if (!goldenEnv) goldenEnv = pmrem.fromEquirectangular(sky).texture;
+      this.scene.background = sky; this.scene.environment = goldenEnv; this.scene.environmentIntensity = 0.75;
+      if (this.scene.fog) this.scene.fog.color.set(0xd2a07c); // warmer Dunst zum Horizont
+    }
     FX.attach(this.scene, 0);
-    this.city = new City(this.tod, Settings.data.quality);
+    this.city = new City(this.tod, q);
     this.scene.add(this.city.root);
     this.city.setTower(ch && ch.objective === 'bloodTower');
-    const key = new THREE.DirectionalLight(this.tod === 'dusk' ? 0xffa070 : 0x9fb0ff, this.tod === 'dusk' ? 1.6 : 0.9);
-    key.position.set(40, 80, 30); key.castShadow = Settings.data.quality !== 'performance';
-    key.shadow.mapSize.set(Settings.data.quality === 'ultra' ? 2048 : 1024, Settings.data.quality === 'ultra' ? 2048 : 1024);
-    const sc = key.shadow.camera; sc.left = -45; sc.right = 45; sc.top = 45; sc.bottom = -45; sc.near = 1; sc.far = 260; key.shadow.bias = -0.0008;
+    // Sonne: tief und warm (goldene Stunde), Schattenkamera folgt dem Helden
+    this.sunDir = G ? GOLDEN_SUN.clone() : new V3(40, 80, 30).normalize();
+    const key = new THREE.DirectionalLight(G ? 0xffb06a : 0x9fb0ff, G ? 3.4 : 0.9);
+    key.position.copy(this.sunDir).multiplyScalar(220); key.castShadow = q !== 'performance';
+    key.shadow.mapSize.set(q === 'ultra' ? 2048 : 1024, q === 'ultra' ? 2048 : 1024);
+    const ext = q === 'ultra' ? 70 : 55;
+    const sc = key.shadow.camera; sc.left = -ext; sc.right = ext; sc.top = ext; sc.bottom = -ext; sc.near = 1; sc.far = 520; key.shadow.bias = -0.0006; key.shadow.normalBias = 0.04;
     this.scene.add(key, key.target); this.key = key;
-    this.scene.add(new THREE.HemisphereLight(0x5a6688, 0x1a1012, 0.6));
+    this.scene.add(G ? new THREE.HemisphereLight(0x9db4d6, 0x5a3a26, 0.85) : new THREE.HemisphereLight(0x5a6688, 0x1a1012, 0.6));
+    this.sun = null;
+    if (G) { // bloom-taugliche Sonnenscheibe mit Halo
+      const tex = canvasTex('sunDisc', 128, 128, (g2, w, h) => {
+        const gr = g2.createRadialGradient(64, 64, 0, 64, 64, 64);
+        gr.addColorStop(0, 'rgba(255,255,255,1)'); gr.addColorStop(0.1, 'rgba(255,248,230,1)'); gr.addColorStop(0.16, 'rgba(255,210,150,0.5)');
+        gr.addColorStop(0.4, 'rgba(255,160,90,0.14)'); gr.addColorStop(1, 'rgba(255,120,60,0)');
+        g2.fillStyle = gr; g2.fillRect(0, 0, w, h);
+      }, false);
+      this.sun = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, color: new THREE.Color(1, 0.82, 0.58).multiplyScalar(5), blending: THREE.AdditiveBlending, depthWrite: false, fog: false, transparent: true }));
+      this.sun.scale.setScalar(560); this.scene.add(this.sun);
+    }
     this.hero = new Rig(opts.dark ? 'darksuit' : 'silkstrike');
     this.scene.add(this.hero.root);
     this.web = new WebLine(0xf4f6ff, 0.018); this.scene.add(this.web.mesh);
@@ -288,7 +336,8 @@ class WorldController {
     const wantFov = 60 + clamp(speed / 45, 0, 1) * 20;
     this.fov = damp(this.fov, wantFov, 4, dt);
     this.camera.fov = this.fov; this.camera.updateProjectionMatrix();
-    this.key.position.copy(this.pos).add(new V3(40, 80, 30)); this.key.target.position.copy(this.pos);
+    this.key.position.copy(this.pos).addScaledVector(this.sunDir, 220); this.key.target.position.copy(this.pos);
+    if (this.sun) this.sun.position.copy(this.camera.position).addScaledVector(this.sunDir, 1900);
     for (const c of this.crystals) c.m.rotation.y += dt * 2.4;
   }
   objectiveCheck() {

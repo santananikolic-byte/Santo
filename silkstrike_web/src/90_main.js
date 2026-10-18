@@ -3,8 +3,7 @@
 // =====================================================================
 UI.init();
 applyQuality();
-Game.setController(new TitleController());
-requestAnimationFrame(frame);
+SkinLib.load(() => { Game.setController(new TitleController()); requestAnimationFrame(frame); });
 const rot = $('rotate');
 const checkRotate = () => rot.classList.toggle('need', innerHeight > innerWidth);
 window.addEventListener('resize', checkRotate); checkRotate();
