@@ -1,0 +1,116 @@
+name: AutoVocal macOS Build
+
+on:
+  push:
+    branches: [autovocal-plugin]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-macos:
+    runs-on: macos-14
+    timeout-minutes: 60
+    env:
+      VERSION: 1.0.${{ github.run_number }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure (Universal Binary – Apple Silicon + Intel)
+        run: |
+          cmake -S . -B build -G "Unix Makefiles" \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64" \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET=10.15
+
+      - name: Build AU, VST3 and Standalone app
+        shell: bash
+        run: cmake --build build --config Release -j 4 2>&1 | tee build.log
+
+      - name: Sign (ad-hoc)
+        run: |
+          ART=build/AutoVocal_artefacts/Release
+          codesign --force --deep --sign - "$ART/AU/AutoVocal.component"
+          codesign --force --deep --sign - "$ART/VST3/AutoVocal.vst3"
+          codesign --force --deep --sign - "$ART/Standalone/AutoVocal.app"
+
+      - name: Validate Audio Unit (auval, like Logic/GarageBand do)
+        shell: bash
+        run: |
+          mkdir -p ~/Library/Audio/Plug-Ins/Components
+          cp -R build/AutoVocal_artefacts/Release/AU/AutoVocal.component ~/Library/Audio/Plug-Ins/Components/
+          killall -9 AudioComponentRegistrar 2>/dev/null || true
+          sleep 2
+          auval -strict -v aufx Avt1 Avoc 2>&1 | tee auval.log
+          grep -q "AU VALIDATION SUCCEEDED" auval.log
+          echo "::notice title=auval::AU VALIDATION SUCCEEDED"
+
+      - name: Build installer package
+        run: |
+          ART=build/AutoVocal_artefacts/Release
+          STAGE=pkgroot
+          mkdir -p "$STAGE/Library/Audio/Plug-Ins/Components" "$STAGE/Library/Audio/Plug-Ins/VST3" "$STAGE/Applications"
+          cp -R "$ART/AU/AutoVocal.component" "$STAGE/Library/Audio/Plug-Ins/Components/"
+          cp -R "$ART/VST3/AutoVocal.vst3" "$STAGE/Library/Audio/Plug-Ins/VST3/"
+          cp -R "$ART/Standalone/AutoVocal.app" "$STAGE/Applications/"
+
+          pkgbuild --analyze --root "$STAGE" components.plist
+          python3 - <<'EOF'
+          import plistlib
+          with open("components.plist", "rb") as f:
+              items = plistlib.load(f)
+          def fix(entries):
+              for e in entries:
+                  e["BundleIsRelocatable"] = False
+                  fix(e.get("ChildBundles", []))
+          fix(items)
+          with open("components.plist", "wb") as f:
+              plistlib.dump(items, f)
+          EOF
+
+          pkgbuild --root "$STAGE" --component-plist components.plist \
+            --scripts installer/scripts \
+            --identifier com.autovocal.autovocal.pkg --version "$VERSION" \
+            --install-location / AutoVocal-core.pkg
+          productbuild --distribution installer/distribution.xml --resources installer/resources \
+            --package-path . "AutoVocal-Installer.pkg"
+
+          mkdir -p dist
+          mv AutoVocal-Installer.pkg dist/
+          cp README.md dist/LIESMICH.md
+          (cd "$ART" && zip -qry "$GITHUB_WORKSPACE/dist/AutoVocal-Plugins-ohne-Installer.zip" AU/AutoVocal.component VST3/AutoVocal.vst3 Standalone/AutoVocal.app)
+
+      - name: Report errors as annotations
+        if: failure()
+        shell: bash
+        run: |
+          for f in build.log auval.log; do
+            [ -f "$f" ] || continue
+            grep -E "error:|error |FAIL|fatal|Undefined symbols" "$f" | head -40 | while IFS= read -r l; do echo "::error title=$f::$l"; done
+            tail -15 "$f" | while IFS= read -r l; do echo "::warning title=$f tail::$l"; done
+          done
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: AutoVocal-macOS-${{ env.VERSION }}
+          path: dist/*
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: autovocal-v${{ env.VERSION }}
+          name: AutoVocal ${{ env.VERSION }} für Mac
+          body: |
+            **AutoVocal – Autotune + automatisches Vocal-Mixing für Mac (Apple Silicon & Intel)**
+
+            1. `AutoVocal-Installer.pkg` herunterladen
+            2. Doppelklick → falls macOS blockiert: Systemeinstellungen → Datenschutz & Sicherheit → „Dennoch öffnen“
+            3. Installieren, dann GarageBand/Logic neu starten → Plugin unter *Audio Units → AutoVocal*
+
+            Enthalten: Audio Unit (GarageBand, Logic), VST3 (Ableton, FL Studio, Cubase, Reaper) und eine eigenständige App.
+          files: |
+            dist/AutoVocal-Installer.pkg
+            dist/AutoVocal-Plugins-ohne-Installer.zip
+          make_latest: true

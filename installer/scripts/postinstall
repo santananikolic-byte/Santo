@@ -1,0 +1,4 @@
+#!/bin/sh
+# Audio-Unit-Cache neu einlesen lassen, damit GarageBand/Logic das Plugin sofort finden
+killall -9 AudioComponentRegistrar 2>/dev/null
+exit 0
