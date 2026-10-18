@@ -1,0 +1,357 @@
+<title>Silkstrike Blutturnier</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Silkstrike">
+<meta name="theme-color" content="#07060a">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Teko:wght@500;600;700&family=Barlow+Condensed:wght@500;600;700&display=swap">
+<style>
+/* Layout: Vollbild-Spiel, 3D-Leinwand hinten, HUD/Menüs als Ebenen darüber. Bewusst nur dunkles Thema. */
+:root {
+  --ink: #07060a; --ink-2: #120d14; --blood: #b3081b; --ember: #ff3b2f; --gold: #ffcc5c; --steel: #d7d9e2; --violet: #9a5cff; --glass: rgba(14, 9, 16, 0.72);
+  --display: 'Teko', 'Impact', 'Arial Narrow', sans-serif; --body: 'Barlow Condensed', 'Arial Narrow', system-ui, sans-serif;
+  color-scheme: dark;
+}
+[hidden] { display: none !important; }
+html, body { height: 100%; margin: 0; background: var(--ink); color: var(--steel); overflow: hidden; touch-action: none; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+body { font-family: var(--body); padding-left: max(0px, env(safe-area-inset-left, 0px)); padding-right: max(0px, env(safe-area-inset-right, 0px)); }
+#game { position: fixed; inset: 0; width: 100vw; height: 100%; display: block; background: var(--ink); }
+.layer { position: fixed; inset: 0; pointer-events: none; }
+.layer > * { pointer-events: auto; }
+button { font-family: var(--body); cursor: pointer; }
+button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
+.gutter { padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+
+/* ---------- Bildschirme ---------- */
+.screen { position: fixed; inset: 0; display: flex; padding-block: max(14px, env(safe-area-inset-top, 0px)) max(14px, env(safe-area-inset-bottom, 0px)); overflow-y: auto; -webkit-overflow-scrolling: touch; touch-action: pan-y; }
+#title { align-items: center; justify-content: space-between; gap: 24px; background: linear-gradient(90deg, rgba(7,6,10,0.85) 0%, rgba(7,6,10,0.15) 55%, rgba(7,6,10,0.7) 100%); flex-wrap: wrap; }
+.logo h1 { font-family: var(--display); font-weight: 700; font-style: italic; font-size: clamp(54px, 11vw, 120px); line-height: 0.82; margin: 0; color: #fff; letter-spacing: 0.01em; text-shadow: 0 0 28px rgba(255,59,47,0.55), 0 4px 0 #3a0006; }
+.logo h2 { font-family: var(--display); font-size: clamp(18px, 3.4vw, 30px); letter-spacing: 0.55em; color: var(--ember); margin: 4px 0 0; font-weight: 600; }
+.logo p { margin: 14px 0 0; font-size: 16px; color: rgba(215,217,226,0.75); max-width: 34ch; }
+.menu { display: flex; flex-direction: column; gap: 9px; width: min(360px, 100%); }
+.menu-btn { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; text-align: left; border: 1px solid rgba(179,8,27,0.7); background: rgba(7,6,10,0.55); color: #fff; padding: 10px 16px; border-radius: 4px; font-family: var(--display); font-size: 25px; letter-spacing: 0.06em; line-height: 1; clip-path: polygon(0 0, 100% 0, 100% 72%, 94% 100%, 0 100%); }
+.menu-btn small { font-family: var(--body); font-size: 13px; letter-spacing: 0.02em; color: rgba(215,217,226,0.65); }
+.menu-btn.main { background: linear-gradient(90deg, var(--blood), #3a0006); border-color: var(--ember); }
+.menu-btn:active { transform: scale(0.98); }
+.panel-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; }
+.panel-head h2 { font-family: var(--display); font-size: 34px; letter-spacing: 0.08em; color: #fff; margin: 0; text-wrap: balance; }
+.back { border: 1px solid rgba(255,255,255,0.25); background: rgba(0,0,0,0.5); color: #fff; padding: 8px 14px; border-radius: 99px; font-size: 16px; }
+.col { flex-direction: column; gap: 14px; background: rgba(7,6,10,0.72); }
+#chapter-list { display: flex; gap: 12px; overflow-x: auto; padding-bottom: 8px; touch-action: pan-x; }
+.chapter { flex: 0 0 210px; min-height: 230px; position: relative; text-align: left; border: 1px solid var(--blood); border-radius: 6px; color: #fff; padding: 14px; display: flex; flex-direction: column; gap: 6px; background: linear-gradient(180deg, color-mix(in srgb, var(--sig) 38%, transparent), rgba(7,6,10,0.92) 70%); }
+.chapter small { font-family: var(--display); color: var(--ember); font-size: 17px; letter-spacing: 0.12em; }
+.chapter h3 { font-family: var(--display); font-size: 30px; line-height: 0.95; margin: 0; text-transform: uppercase; }
+.chapter p { margin: 0; font-size: 15px; color: rgba(215,217,226,0.8); }
+.chapter em { margin-top: auto; font-style: normal; font-size: 13px; color: rgba(215,217,226,0.6); }
+.chapter.locked { filter: grayscale(1) brightness(0.55); }
+.chapter .lock { position: absolute; inset: 0; display: grid; place-items: center; font-family: var(--display); font-size: 26px; letter-spacing: 0.2em; color: rgba(255,255,255,0.75); }
+.fs-grid { display: grid; grid-template-columns: 1fr minmax(180px, 260px) 1fr; gap: 12px; width: 100%; min-height: 0; }
+.fs-list { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.fs-list h4 { font-family: var(--display); margin: 0; color: var(--ember); letter-spacing: 0.15em; font-size: 18px; }
+.fighter { display: flex; align-items: center; gap: 10px; text-align: left; border: 1px solid rgba(255,255,255,0.12); background: rgba(0,0,0,0.45); color: #fff; padding: 7px 10px; border-radius: 4px; }
+.fighter i { width: 8px; align-self: stretch; background: var(--sig); border-radius: 2px; }
+.fighter b { font-family: var(--display); font-size: 21px; letter-spacing: 0.05em; display: block; line-height: 1; }
+.fighter small { font-size: 12px; color: rgba(215,217,226,0.6); }
+.fighter.sel { border-color: var(--gold); background: rgba(179,8,27,0.45); }
+#fs-vs { text-align: center; display: flex; flex-direction: column; gap: 6px; align-items: center; }
+#fs-vs h3 { font-family: var(--display); font-size: 30px; margin: 0; color: #fff; line-height: 1; }
+#fs-vs b { font-family: var(--display); font-size: 46px; color: var(--ember); line-height: 0.9; text-shadow: 0 0 18px rgba(255,59,47,0.7); }
+#fs-vs p { font-size: 13px; color: rgba(215,217,226,0.7); margin: 4px 0; }
+#fs-vs em { font-style: normal; font-size: 13px; color: var(--gold); }
+.row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+select, input[type=range] { accent-color: var(--ember); }
+select { background: var(--ink-2); color: #fff; border: 1px solid rgba(255,255,255,0.2); border-radius: 4px; padding: 8px; font-family: var(--body); font-size: 16px; }
+.settings-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; width: 100%; max-width: 820px; }
+.settings-grid section { border: 1px solid rgba(179,8,27,0.45); background: var(--glass); border-radius: 6px; padding: 12px 14px; display: flex; flex-direction: column; gap: 10px; }
+.settings-grid h4 { margin: 0; font-family: var(--display); letter-spacing: 0.15em; color: var(--ember); font-size: 19px; }
+.settings-grid label { display: flex; justify-content: space-between; align-items: center; gap: 10px; font-size: 16px; }
+.settings-grid input[type=range] { width: 50%; }
+.settings-grid .note { font-size: 13px; color: rgba(215,217,226,0.6); margin: 0; }
+#results { align-items: center; justify-content: center; flex-direction: column; gap: 14px; background: rgba(7,6,10,0.78); }
+#rs-title { font-family: var(--display); font-size: clamp(60px, 12vw, 110px); line-height: 0.85; margin: 0; letter-spacing: 0.04em; }
+#rs-title.won { color: var(--gold); text-shadow: 0 0 30px rgba(255,59,47,0.6); }
+#rs-title.lost { color: var(--ember); }
+#rs-stats { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; }
+#rs-stats div { border: 1px solid rgba(255,255,255,0.15); background: var(--glass); border-radius: 4px; padding: 8px 14px; text-align: center; font-variant-numeric: tabular-nums; }
+#rs-stats small { display: block; font-size: 11px; letter-spacing: 0.12em; color: rgba(215,217,226,0.6); }
+#rs-stats b { font-family: var(--display); font-size: 28px; color: #fff; }
+#rs-unlock { color: var(--gold); font-size: 16px; margin: 0; min-height: 1em; }
+#rs-buttons { display: flex; flex-direction: column; gap: 8px; width: min(360px, 100%); }
+#credits { flex-direction: column; background: rgba(7,6,10,0.85); overflow: hidden; }
+#credits-roll { text-align: center; animation: roll 40s linear forwards; }
+#credits-roll p { margin: 10px 0; font-size: 19px; }
+#credits-roll p.big { font-family: var(--display); font-size: 46px; color: var(--ember); }
+@keyframes roll { from { transform: translateY(100vh); } to { transform: translateY(-140%); } }
+
+/* ---------- HUD Welt ---------- */
+.hud { position: fixed; inset: 0; pointer-events: none; }
+.hud * { pointer-events: none; }
+.hud .tap, .hud .tap * { pointer-events: auto; }
+.w-top { position: absolute; top: max(10px, env(safe-area-inset-top, 0px)); left: max(16px, env(safe-area-inset-left, 0px)); display: flex; flex-direction: column; gap: 8px; max-width: min(360px, 46vw); }
+.objective { display: flex; gap: 10px; align-items: center; background: var(--glass); border: 1px solid rgba(179,8,27,0.6); border-radius: 6px; padding: 8px 10px; }
+#w-arrow { width: 26px; height: 26px; flex: none; color: var(--ember); filter: drop-shadow(0 0 6px rgba(255,59,47,0.8)); }
+#w-obj { font-size: 15px; color: #fff; line-height: 1.15; }
+#w-dist { font-family: var(--display); font-size: 18px; color: var(--gold); font-variant-numeric: tabular-nums; }
+.w-stats { display: flex; align-items: center; gap: 10px; font-variant-numeric: tabular-nums; }
+.bar { width: 150px; height: 8px; background: rgba(0,0,0,0.6); border-radius: 4px; overflow: hidden; }
+.bar > i { display: block; height: 100%; background: var(--ember); width: 100%; transition: width 0.15s; }
+#w-seals { font-family: var(--display); font-size: 18px; color: #fff; }
+#w-seals::before { content: '◆ '; color: var(--ember); }
+#w-map { position: absolute; top: max(10px, env(safe-area-inset-top, 0px)); right: max(16px, env(safe-area-inset-right, 0px)); width: 110px; height: 110px; border-radius: 50%; border: 1px solid rgba(179,8,27,0.7); }
+.w-speed { position: absolute; left: max(22px, env(safe-area-inset-left, 0px)); bottom: calc(max(12px, env(safe-area-inset-bottom, 0px)) + 150px); font-variant-numeric: tabular-nums; }
+#w-speed { font-family: var(--display); font-size: 40px; color: #fff; line-height: 0.8; display: block; }
+#w-speed.fast { color: var(--gold); text-shadow: 0 0 12px var(--ember); }
+.w-speed small { font-size: 12px; letter-spacing: 0.2em; color: rgba(215,217,226,0.6); }
+#w-combo { position: absolute; top: 34%; left: 50%; transform: translateX(-50%); font-family: var(--display); font-size: 38px; color: var(--gold); text-shadow: 0 0 14px var(--blood); }
+#btn-interact { position: absolute; left: 50%; bottom: calc(max(14px, env(safe-area-inset-bottom, 0px)) + 30px); transform: translateX(-50%); font-family: var(--display); font-size: 26px; letter-spacing: 0.1em; color: #fff; background: var(--blood); border: 2px solid rgba(255,255,255,0.8); border-radius: 99px; padding: 8px 26px; box-shadow: 0 0 22px rgba(255,59,47,0.8); }
+
+/* ---------- Touch-Steuerung ---------- */
+.stick-zone { position: absolute; left: 0; top: 30%; bottom: 0; width: 42%; touch-action: none; }
+.stick-base { position: absolute; left: 110px; top: calc(100% - 120px); width: 112px; height: 112px; margin: -56px 0 0 -56px; border-radius: 50%; border: 2px dashed rgba(255,255,255,0.18); }
+.stick-base.on { border: 2px solid rgba(255,255,255,0.4); background: rgba(255,255,255,0.06); }
+.stick-knob { position: absolute; left: 50%; top: 50%; width: 50px; height: 50px; border-radius: 50%; background: rgba(179,8,27,0.8); border: 2px solid rgba(255,255,255,0.7); transform: translate(-50%, -50%); }
+.pad { position: absolute; right: max(16px, env(safe-area-inset-right, 0px)); bottom: max(14px, env(safe-area-inset-bottom, 0px)); display: grid; gap: 10px; justify-items: end; }
+.pad .r { display: flex; gap: 10px; align-items: flex-end; }
+.btn { width: 66px; height: 66px; border-radius: 50%; border: 2px solid rgba(255,255,255,0.7); background: rgba(179,8,27,0.5); color: #fff; display: grid; place-items: center; font-family: var(--display); font-size: 17px; letter-spacing: 0.05em; line-height: 0.9; text-align: center; padding: 4px; touch-action: none; transition: transform 0.06s; }
+.btn span { font-family: var(--body); font-size: 10px; letter-spacing: 0; }
+.btn.on { transform: scale(0.9); background: rgba(255,59,47,0.9); }
+.btn.big { width: 86px; height: 86px; font-size: 22px; }
+.btn.gray { background: rgba(120,120,130,0.45); }
+.btn.vio { background: rgba(154,92,255,0.45); width: 58px; height: 58px; }
+.btn.dim { opacity: 0.35; }
+.btn.active { background: rgba(255,59,47,0.95); box-shadow: 0 0 18px rgba(255,59,47,0.9); }
+#btn-brutal { background: var(--violet); box-shadow: 0 0 20px var(--violet); animation: pulse 0.8s ease-in-out infinite alternate; }
+@keyframes pulse { to { transform: scale(1.08); } }
+#btn-exec { position: absolute; right: calc(max(16px, env(safe-area-inset-right, 0px)) + 30px); bottom: calc(max(14px, env(safe-area-inset-bottom, 0px)) + 20px); width: 140px; height: 140px; font-size: 26px; background: var(--blood); box-shadow: 0 0 30px rgba(255,0,20,0.9); }
+#exec-ring { position: absolute; inset: -10px; border-radius: 50%; background: conic-gradient(var(--ember) calc(var(--k, 1) * 360deg), transparent 0); -webkit-mask: radial-gradient(circle, transparent 64%, #000 65%); mask: radial-gradient(circle, transparent 64%, #000 65%); }
+.pause-btn { position: absolute; top: max(10px, env(safe-area-inset-top, 0px)); left: 50%; transform: translateX(-50%); width: 42px; height: 42px; border-radius: 50%; border: 1px solid rgba(255,255,255,0.35); background: rgba(0,0,0,0.45); color: #fff; font-size: 16px; }
+
+/* ---------- HUD Kombat ---------- */
+.k-top { position: absolute; top: max(8px, env(safe-area-inset-top, 0px)); left: max(16px, env(safe-area-inset-left, 0px)); right: max(16px, env(safe-area-inset-right, 0px)); display: grid; grid-template-columns: 1fr auto 1fr; gap: 10px; align-items: start; }
+.k-side { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.k-side.right { align-items: flex-end; }
+.hbar { position: relative; width: 100%; height: 22px; background: rgba(0,0,0,0.7); border: 1.5px solid rgba(255,255,255,0.6); transform: skewX(-14deg); overflow: hidden; }
+.k-side.right .hbar { transform: skewX(14deg); }
+.hbar i { position: absolute; top: 0; bottom: 0; left: 0; }
+.k-side.right .hbar i { left: auto; right: 0; }
+.hbar .lag { background: var(--ember); opacity: 0.85; }
+.hbar .hp { background: linear-gradient(180deg, var(--gold), #f06a14); transition: width 0.08s linear; }
+.k-name { display: flex; gap: 8px; align-items: center; font-family: var(--display); font-size: 21px; color: #fff; letter-spacing: 0.05em; text-shadow: 0 0 6px var(--blood); }
+.rounds { display: flex; gap: 4px; }
+.rounds i { width: 11px; height: 11px; border-radius: 50% 50% 50% 0; transform: rotate(-45deg); border: 1.5px solid rgba(255,255,255,0.55); }
+.rounds i.won { background: var(--ember); border-color: var(--ember); }
+.mbar { width: min(180px, 70%); height: 7px; border-radius: 4px; background: rgba(0,0,0,0.6); overflow: hidden; }
+.mbar i { display: block; height: 100%; background: #4fd8ff; }
+.mbar i.full { background: var(--violet); box-shadow: 0 0 10px var(--violet); }
+#k-timer { font-family: var(--display); font-size: 40px; color: #fff; width: 74px; text-align: center; line-height: 1.2; background: rgba(0,0,0,0.6); border: 1.5px solid rgba(255,204,92,0.7); border-radius: 6px; font-variant-numeric: tabular-nums; }
+#k-timer.low { color: var(--ember); }
+.k-mid { display: flex; flex-direction: column; align-items: center; gap: 6px; }
+.k-mid .pause-btn { position: static; transform: none; }
+#hud-kombat.cine .k-top, #hud-kombat.cine #k-controls { display: none; }
+.letterbox { position: absolute; left: 0; right: 0; height: 0; background: #000; transition: height 0.45s; }
+.letterbox.t { top: 0; } .letterbox.b { bottom: 0; }
+#hud-kombat.cine .letterbox, #hud-cut .letterbox { height: 11vh; }
+.banner { position: fixed; left: 0; right: 0; top: 36%; text-align: center; font-family: var(--display); font-size: clamp(52px, 12vw, 120px); line-height: 0.9; color: var(--gold); opacity: 0; transform: scale(2.2); pointer-events: none; padding: 0 16px; text-shadow: 0 0 24px rgba(255,59,47,0.8), 0 4px 0 #2a0004; }
+.banner.show { animation: slam 0.35s cubic-bezier(.2,1.6,.4,1) forwards; }
+.banner.finish, .banner.execution, .banner.defeat { color: var(--ember); }
+.banner.finish.show { animation: slam 0.35s cubic-bezier(.2,1.6,.4,1) forwards, quake 0.12s 0.35s 8; }
+.banner.brutal { color: var(--violet); font-size: clamp(40px, 8vw, 80px); }
+.banner.info { color: #fff; font-size: clamp(26px, 5vw, 46px); }
+@keyframes slam { to { opacity: 1; transform: scale(1); } }
+@keyframes quake { 50% { transform: translate(3px, -2px) scale(1); } }
+#combo { position: fixed; left: max(24px, env(safe-area-inset-left, 0px)); top: 42%; font-family: var(--display); font-size: 34px; color: #fff; text-shadow: 0 0 12px var(--ember); opacity: 0; transform: translateX(-30px) rotate(-6deg); pointer-events: none; }
+#combo.show { animation: comboIn 0.18s forwards; }
+@keyframes comboIn { to { opacity: 1; transform: translateX(0) rotate(-6deg); } }
+#toast { position: fixed; top: 22%; left: 50%; transform: translateX(-50%); font-family: var(--display); font-size: 28px; letter-spacing: 0.06em; color: #fff; background: var(--glass); border: 1px solid rgba(179,8,27,0.6); padding: 6px 18px; border-radius: 6px; opacity: 0; transition: opacity 0.3s; pointer-events: none; white-space: nowrap; max-width: 92vw; overflow: hidden; text-overflow: ellipsis; }
+#toast.show { opacity: 1; }
+
+/* ---------- Zwischensequenz ---------- */
+#cs-sub { position: absolute; left: 0; right: 0; bottom: calc(11vh + 10px); text-align: center; padding: 0 9vw; opacity: 0; transition: opacity 0.25s; }
+#cs-sub.show { opacity: 1; }
+#cs-sub b { display: block; font-family: var(--display); font-size: 19px; letter-spacing: 0.15em; color: var(--ember); }
+#cs-sub p { margin: 0; font-size: clamp(17px, 2.6vw, 24px); color: #fff; text-shadow: 0 2px 6px #000; max-width: 60ch; margin-inline: auto; }
+#cs-title { position: absolute; inset: 0; display: grid; place-items: center; font-family: var(--display); font-size: clamp(34px, 7vw, 70px); letter-spacing: 0.25em; color: #fff; text-align: center; padding: 0 16px; text-shadow: 0 0 22px rgba(255,59,47,0.8); opacity: 0; transition: opacity 0.8s; }
+#cs-title.show { opacity: 1; }
+#cs-skip { position: absolute; top: calc(11vh + 8px); right: max(16px, env(safe-area-inset-right, 0px)); border: none; background: rgba(0,0,0,0.45); color: rgba(255,255,255,0.85); padding: 7px 14px; border-radius: 99px; font-size: 14px; }
+
+/* ---------- Ebenen ---------- */
+#flash, #fade { position: fixed; inset: 0; pointer-events: none; opacity: 0; }
+#fade { background: #000; }
+#loading { position: fixed; inset: 0; background: var(--ink); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; text-align: center; opacity: 0; pointer-events: none; transition: opacity 0.25s; padding: 0 16px; }
+#loading.show { opacity: 1; pointer-events: auto; }
+.ld-title { font-family: var(--display); font-size: clamp(36px, 7vw, 64px); letter-spacing: 0.08em; color: #fff; display: flex; gap: 24px; align-items: center; justify-content: center; flex-wrap: wrap; text-shadow: 0 0 18px rgba(255,59,47,0.6); }
+.ld-title b { color: var(--ember); }
+.ld-sub { font-size: 18px; color: rgba(215,217,226,0.8); }
+.ld-tip { font-size: 14px; color: rgba(215,217,226,0.55); max-width: 52ch; }
+.ld-bar { width: 140px; height: 3px; background: rgba(255,255,255,0.1); overflow: hidden; border-radius: 2px; }
+.ld-bar i { display: block; width: 40%; height: 100%; background: var(--ember); animation: ld 0.9s ease-in-out infinite; }
+@keyframes ld { from { transform: translateX(-100%); } to { transform: translateX(260%); } }
+#pause { position: fixed; inset: 0; background: rgba(7,6,10,0.7); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; }
+#pause h2 { font-family: var(--display); font-size: 60px; margin: 0; color: #fff; letter-spacing: 0.1em; }
+#start { position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 18px; background: radial-gradient(circle at 50% 40%, #2a0610 0%, var(--ink) 70%); text-align: center; padding: 0 16px; }
+#start h1 { font-family: var(--display); font-style: italic; font-size: clamp(60px, 14vw, 140px); margin: 0; line-height: 0.8; color: #fff; text-shadow: 0 0 30px rgba(255,59,47,0.6); }
+#start h2 { font-family: var(--display); margin: 0; color: var(--ember); letter-spacing: 0.5em; font-size: clamp(18px, 4vw, 30px); }
+#start button { font-family: var(--display); font-size: 30px; letter-spacing: 0.15em; color: #fff; background: var(--blood); border: 2px solid var(--ember); padding: 10px 36px; border-radius: 4px; animation: pulse 1s ease-in-out infinite alternate; }
+#start p { font-size: 14px; color: rgba(215,217,226,0.6); max-width: 44ch; margin: 0; }
+#rotate { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; flex-direction: column; gap: 10px; background: var(--ink); text-align: center; padding: 0 16px; font-size: 18px; }
+#rotate b { font-family: var(--display); font-size: 40px; color: var(--ember); letter-spacing: 0.1em; }
+@media (orientation: portrait) and (max-width: 820px) { #rotate.need { display: flex; } }
+#fps { position: fixed; right: 8px; bottom: 6px; font: 600 12px var(--body); color: #6f6; pointer-events: none; }
+@media (max-height: 430px) { .btn { width: 56px; height: 56px; font-size: 15px; } .btn.big { width: 74px; height: 74px; } .btn.vio { width: 50px; height: 50px; } .menu-btn { font-size: 21px; padding: 7px 14px; } .chapter { min-height: 200px; } #w-map { width: 86px; height: 86px; } }
+@media (prefers-reduced-motion: reduce) { .banner.show, #btn-brutal, #start button { animation: none; opacity: 1; transform: none; } }
+</style>
+
+<canvas id="game"></canvas>
+
+<!-- Hauptmenü -->
+<div class="screen gutter" id="title" hidden>
+  <div class="logo">
+    <h1>SILKSTRIKE</h1>
+    <h2>BLUTTURNIER</h2>
+    <p>Neo-Haven braucht einen Champion. Schwing durch die Stadt, stell dich dem Turnier und vollende es.</p>
+  </div>
+  <div class="menu">
+    <button class="menu-btn main" id="btn-continue" data-go="continue" hidden>WEITERSPIELEN<small></small></button>
+    <button class="menu-btn main" data-go="chapters">STORY<small>Das Blutturnier · 7 Kapitel</small></button>
+    <button class="menu-btn" data-go="fighters">KAMPF<small>1 gegen 1 gegen die KI</small></button>
+    <button class="menu-btn" data-go="free">FREIES SCHWINGEN<small>Ganz Neo-Haven erkunden</small></button>
+    <button class="menu-btn" data-go="settings">EINSTELLUNGEN<small>Grafik, Blut, Ton, Steuerung</small></button>
+    <button class="menu-btn" data-go="credits">CREDITS</button>
+  </div>
+</div>
+
+<div class="screen gutter col" id="chapters" hidden>
+  <div class="panel-head"><button class="back" data-go="title">‹ Zurück</button><h2>STORY</h2><span></span></div>
+  <div id="chapter-list"></div>
+</div>
+
+<div class="screen gutter col" id="fighters" hidden>
+  <div class="panel-head"><button class="back" data-go="title">‹ Zurück</button><h2>KÄMPFERWAHL</h2><span></span></div>
+  <div class="fs-grid">
+    <div class="fs-list"><h4>DU</h4><div id="fs-p1" class="fs-list"></div></div>
+    <div id="fs-vs"></div>
+    <div class="fs-list"><h4>GEGNER</h4><div id="fs-p2" class="fs-list"></div></div>
+  </div>
+  <div class="row">
+    <label for="fs-arena">Arena</label><select id="fs-arena"></select>
+    <label for="fs-diff">Schwierigkeit</label>
+    <select id="fs-diff"><option value="easy">Leicht</option><option value="normal">Normal</option><option value="hard">Schwer</option><option value="brutal">Brutal</option></select>
+    <button class="menu-btn main" data-go="versus" style="min-width:200px">KÄMPFT!</button>
+  </div>
+</div>
+
+<div class="screen gutter col" id="settings" hidden>
+  <div class="panel-head"><button class="back" data-go="settingsBack">‹ Zurück</button><h2>EINSTELLUNGEN</h2><span></span></div>
+  <div class="settings-grid">
+    <section><h4>GRAFIK</h4>
+      <label for="st-quality">Grafikstufe <select id="st-quality"><option value="performance">Leistung</option><option value="balanced">Ausgewogen</option><option value="ultra">Ultra</option></select></label>
+      <p class="note">Ultra rendert mit bis zu 2,5-facher Pixeldichte, weichen Schatten und Bloom. Leistung ist am flüssigsten.</p>
+      <label for="st-fps">FPS anzeigen <input type="checkbox" id="st-fps"></label>
+    </section>
+    <section><h4>SPIEL</h4>
+      <label for="st-diff">Schwierigkeit <select id="st-diff"><option value="easy">Leicht</option><option value="normal">Normal</option><option value="hard">Schwer</option><option value="brutal">Brutal</option></select></label>
+      <label for="st-blood">Blut &amp; Exekutions-Effekte <input type="checkbox" id="st-blood"></label>
+      <label for="st-sens">Kamera-Empfindlichkeit <input type="range" id="st-sens" min="0.3" max="2.5" step="0.1"></label>
+    </section>
+    <section><h4>AUDIO</h4>
+      <label for="st-voices">Sprachausgabe <input type="checkbox" id="st-voices"></label>
+      <label for="st-music">Musik <input type="checkbox" id="st-music"></label>
+      <label for="st-sfx">Effekte <input type="range" id="st-sfx" min="0" max="1" step="0.05"></label>
+      <label for="st-mvol">Musik-Lautstärke <input type="range" id="st-mvol" min="0" max="1" step="0.05"></label>
+    </section>
+  </div>
+</div>
+
+<div class="screen gutter" id="results" hidden>
+  <h2 id="rs-title">SIEG</h2>
+  <div id="rs-stats"></div>
+  <p id="rs-unlock"></p>
+  <div id="rs-buttons"></div>
+</div>
+
+<div class="screen gutter" id="credits" hidden>
+  <div class="panel-head"><button class="back" data-go="title">‹ Zurück</button><span></span></div>
+  <div id="credits-roll"></div>
+</div>
+
+<!-- HUD offene Welt -->
+<div class="hud" id="hud-world" hidden>
+  <div class="w-top">
+    <div class="objective">
+      <svg id="w-arrow" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2 L20 20 L12 15 L4 20 Z" fill="currentColor"/></svg>
+      <div><div id="w-obj"></div><div id="w-dist"></div></div>
+    </div>
+    <div class="w-stats"><div class="bar"><i id="w-health"></i></div><span id="w-seals">0/40</span></div>
+  </div>
+  <canvas id="w-map" width="110" height="110"></canvas>
+  <div class="w-speed"><span id="w-speed">0</span><small>KM/H</small></div>
+  <div id="w-combo" hidden></div>
+  <div class="stick-zone tap"><div class="stick-base"><div class="stick-knob"></div></div></div>
+  <div class="pad tap">
+    <div class="r"><button class="btn vio" data-btn="zip">ZIP</button><button class="btn gray" data-btn="attack">ANGRIFF</button></div>
+    <div class="r"><button class="btn" data-btn="jump">SPRUNG</button><button class="btn big" id="btn-web" data-btn="web">NETZ</button></div>
+  </div>
+  <button class="tap" id="btn-interact" hidden>RISS BETRETEN</button>
+  <button class="pause-btn tap" id="btn-pause-w" aria-label="Pause">❚❚</button>
+</div>
+
+<!-- HUD Kombat -->
+<div class="hud" id="hud-kombat" hidden>
+  <div class="letterbox t"></div><div class="letterbox b"></div>
+  <div class="k-top">
+    <div class="k-side"><div class="hbar"><i class="lag" id="k-l1"></i><i class="hp" id="k-h1"></i></div><div class="k-name"><span id="k-n1"></span><span class="rounds" id="k-r1"></span></div><div class="mbar"><i id="k-m1"></i></div></div>
+    <div class="k-mid"><div id="k-timer">90</div><button class="pause-btn tap" id="btn-pause-k" aria-label="Pause">❚❚</button></div>
+    <div class="k-side right"><div class="hbar"><i class="lag" id="k-l2"></i><i class="hp" id="k-h2"></i></div><div class="k-name"><span class="rounds" id="k-r2"></span><span id="k-n2"></span></div><div class="mbar"><i id="k-m2"></i></div></div>
+  </div>
+  <div id="k-controls" class="tap" hidden>
+    <div class="stick-zone tap"><div class="stick-base"><div class="stick-knob"></div></div></div>
+    <div class="pad tap">
+      <div class="r"><button class="btn vio" id="btn-s1" data-btn="special1">S1<span></span></button><button class="btn vio" id="btn-s2" data-btn="special2">S2<span></span></button><button class="btn" id="btn-brutal" data-btn="brutal" hidden>BRUTAL</button></div>
+      <div class="r"><button class="btn gray" data-btn="block">BLOCK</button><button class="btn big" data-btn="punch">SCHLAG</button><button class="btn big" data-btn="kick">TRITT</button></div>
+    </div>
+  </div>
+  <button class="btn tap" id="btn-exec" data-btn="execute" hidden><div id="exec-ring"></div>EXEKUTION</button>
+</div>
+
+<!-- HUD Zwischensequenz -->
+<div class="hud" id="hud-cut" hidden>
+  <div class="letterbox t"></div><div class="letterbox b"></div>
+  <div id="cs-title"></div>
+  <div id="cs-sub"><b></b><p></p></div>
+  <button class="tap" id="cs-skip">Überspringen ⏭</button>
+</div>
+
+<div class="banner" id="banner"></div>
+<div id="combo"></div>
+<div id="toast"></div>
+<div id="flash"></div>
+<div id="fade"></div>
+<div id="fps" hidden></div>
+
+<div id="pause" hidden>
+  <h2>PAUSE</h2>
+  <div class="menu">
+    <button class="menu-btn main" data-go="resume">FORTSETZEN</button>
+    <button class="menu-btn" id="pause-restart" data-go="restart">KAMPF NEU STARTEN</button>
+    <button class="menu-btn" data-go="settings">EINSTELLUNGEN</button>
+    <button class="menu-btn" data-go="title">HAUPTMENÜ</button>
+  </div>
+</div>
+
+<div id="loading"><div class="ld-title"></div><div class="ld-sub"></div><div class="ld-bar"><i></i></div><div class="ld-tip"></div></div>
+
+<div id="start">
+  <h1>SILKSTRIKE</h1>
+  <h2>BLUTTURNIER</h2>
+  <button id="start-btn">TIPPEN ZUM STARTEN</button>
+  <p>Querformat halten. Für Vollbild: in Safari „Teilen“ → „Zum Home-Bildschirm“.</p>
+</div>
+<div id="rotate"><b>DREH DEIN HANDY</b>Silkstrike wird im Querformat gespielt.</div>
+
+<script type="importmap">{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/" } }</script>
+<script type="module">
+/*__GAME__*/
+</script>
