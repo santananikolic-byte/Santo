@@ -280,6 +280,8 @@ void VocalChain::blockUpdate() noexcept
         {
             learned.activeDb = rawHist.percentile (0.95, learned.activeDb);
             learned.floorDb = rawHist.percentile (0.10, learned.floorDb);
+            if (! learned.valid) // until enough has been heard: moderate starting point
+                learned.compThreshold = learned.activeDb - 8.0f;
         }
         if (preDb > learned.activeDb - 30.0f)
             preHist.add (preDb);
