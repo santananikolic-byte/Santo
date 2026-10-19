@@ -186,7 +186,7 @@ const TIPS = ['Halte NETZ gedrückt, um zu schwingen – lass im tiefsten Punkt 
   'Auf den Dächern von Neo-Haven liegen 40 Blutsiegel versteckt.', 'Ducken + Schlag ist ein Uppercut, Ducken + Tritt ein Feger.', 'Schlag, Schlag, Tritt ist die Dreierkette.'];
 const Flow = {
   mode: 'story', ci: 0, lastSetup: null, unlocked: null,
-  vs: { p1: 'silkstrike', p2: 'vex', arena: 'rainRooftop', diff: 'normal' },
+  vs: { p1: 'silkstrike', p2: 'vex', arena: 'templeGarden', diff: 'normal' },
   tip() { return TIPS[Math.floor(Math.random() * TIPS.length)]; },
   transition(info, build, delay = 350) {
     UI.loading(info || {});

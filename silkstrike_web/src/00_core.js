@@ -9,6 +9,7 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
+import { RGBELoader } from 'three/addons/loaders/RGBELoader.js';
 
 const V3 = THREE.Vector3;
 const TAU = Math.PI * 2;
@@ -371,15 +372,46 @@ function skyTexture(tod) {
     g.fillStyle = hg; g.fillRect(0, h * 0.44, w, h * 0.08);
   }, false);
 }
+// Taghimmel: Blauverlauf, Sonne (passend zum Sonnenlicht vorne rechts oben), weiche Kumuluswolken
+function daySkyTexture() {
+  return canvasTex('skyday', 2048, 1024, (g, w, h) => {
+    const grd = g.createLinearGradient(0, 0, 0, h);
+    grd.addColorStop(0, '#1d54ad'); grd.addColorStop(0.22, '#3372c6'); grd.addColorStop(0.36, '#4a8ad4'); grd.addColorStop(0.45, '#86b6e4'); grd.addColorStop(0.5, '#bcd5ea'); grd.addColorStop(0.53, '#b5c4c0'); grd.addColorStop(1, '#6c7858');
+    g.fillStyle = grd; g.fillRect(0, 0, w, h);
+    const sx = w * 0.643, sy = h * 0.217;
+    const sg = g.createRadialGradient(sx, sy, 0, sx, sy, h * 0.5);
+    sg.addColorStop(0, 'rgba(255,248,228,0.95)'); sg.addColorStop(0.05, 'rgba(255,242,210,0.6)'); sg.addColorStop(0.3, 'rgba(255,232,195,0.16)'); sg.addColorStop(1, 'rgba(255,232,195,0)');
+    g.fillStyle = sg; g.fillRect(0, 0, w, h * 0.6);
+    g.fillStyle = '#fffef6'; g.beginPath(); g.ellipse(sx, sy, 22, 14, 0, 0, TAU); g.fill();
+    const r = seeded(0xc10d);
+    // Schleierwolken
+    for (let i = 0; i < 26; i++) { const x = r() * w, y = h * (0.12 + r() * 0.25); g.fillStyle = `rgba(255,255,255,${0.05 + r() * 0.08})`; g.beginPath(); g.ellipse(x, y, 80 + r() * 200, 4 + r() * 8, (r() - 0.5) * 0.1, 0, TAU); g.fill(); }
+    // Kumulus: Haufen weicher Puffs mit leicht grauer Unterseite
+    for (let i = 0; i < 64; i++) {
+      const cx = r() * w, cy = h * (0.33 + r() * 0.15), cw = 50 + r() * 140, n = 8 + Math.floor(r() * 10);
+      for (let pass = 0; pass < 2; pass++) for (let k = 0; k < n; k++) {
+        const rr = seeded(i * 97 + k * 13 + 1), px = cx + (rr() - 0.5) * cw * 2, py = cy - rr() * cw * 0.35, s = cw * (0.25 + rr() * 0.35);
+        const pg = g.createRadialGradient(px, py + (pass ? 0 : s * 0.25), 0, px, py + (pass ? 0 : s * 0.25), s);
+        if (pass === 0) { pg.addColorStop(0, 'rgba(150,165,190,0.28)'); pg.addColorStop(1, 'rgba(150,165,190,0)'); }
+        else { pg.addColorStop(0, 'rgba(255,255,255,0.62)'); pg.addColorStop(0.5, 'rgba(250,252,255,0.3)'); pg.addColorStop(1, 'rgba(255,255,255,0)'); }
+        g.fillStyle = pg; g.fillRect(px - s, py - s + (pass ? 0 : s * 0.25), s * 2, s * 2);
+      }
+    }
+    const hz = g.createLinearGradient(0, h * 0.44, 0, h * 0.5);
+    hz.addColorStop(0, 'rgba(205,224,238,0)'); hz.addColorStop(1, 'rgba(205,224,238,0.7)');
+    g.fillStyle = hz; g.fillRect(0, h * 0.44, w, h * 0.06);
+  }, false);
+}
 function applyEnvironment(scene, tod, fogDensity) {
-  const sky = skyTexture(tod);
+  const day = tod === 'day';
+  const sky = day ? daySkyTexture() : skyTexture(tod);
   sky.mapping = THREE.EquirectangularReflectionMapping;
   scene.background = sky;
   if (!EnvCache[tod]) EnvCache[tod] = pmrem.fromEquirectangular(sky).texture;
   scene.environment = EnvCache[tod];
-  scene.environmentIntensity = tod === 'dusk' ? 0.9 : 0.6;
-  const fogColor = tod === 'dusk' ? 0x2a1b22 : (tod === 'stormNight' ? 0x121417 : 0x0d0f18);
-  scene.fog = new THREE.FogExp2(fogColor, fogDensity);
+  scene.environmentIntensity = day ? 0.7 : (tod === 'dusk' ? 0.9 : 0.6);
+  const fogColor = day ? 0xc0d6e8 : (tod === 'dusk' ? 0x2a1b22 : (tod === 'stormNight' ? 0x121417 : 0x0d0f18));
+  scene.fog = new THREE.FogExp2(fogColor, day ? Math.min(fogDensity, 0.0042) : fogDensity);
 }
 
 // ---------------------------------------------------------------- Material-Helfer

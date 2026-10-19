@@ -133,15 +133,15 @@ class Rig {
     // Augen
     if (L.eyes === 'lenses') {
       const lensMat = this.mat('#ffffff', 0.2, 0, L.glow, 1.3);
-      for (const sx of [-1, 1]) { const e = new THREE.Mesh(new THREE.SphereGeometry(0.038 * s, 12, 8), lensMat); e.scale.set(1.2, 0.75, 0.35); e.position.set(sx * 0.042 * s, 0.11 * s, 0.098 * s); e.rotation.z = sx * 0.5; head.add(e); }
+      for (const sx of [-1, 1]) { const e = new THREE.Mesh(new THREE.SphereGeometry(0.038 * s, 12, 8), lensMat); e.scale.set(1.2, 0.75, 0.35); e.position.set(sx * 0.042 * s, 0.11 * s, 0.098 * s); e.rotation.z = sx * 0.5; head.add(e); e.userData.face = true; }
     } else if (L.eyes === 'glow') {
-      for (const sx of [-1, 1]) { const e = new THREE.Mesh(new THREE.SphereGeometry(0.014 * s, 8, 6), glow); e.position.set(sx * 0.038 * s, 0.11 * s, 0.1 * s); head.add(e); }
+      for (const sx of [-1, 1]) { const e = new THREE.Mesh(new THREE.SphereGeometry(0.014 * s, 8, 6), glow); e.position.set(sx * 0.038 * s, 0.11 * s, 0.1 * s); head.add(e); e.userData.face = true; }
     } else if (L.eyes === 'visor') {
-      const v = new THREE.Mesh(new THREE.BoxGeometry(0.17 * s, 0.03 * s, 0.05 * s), glow); v.position.set(0, 0.11 * s, 0.09 * s); head.add(v);
+      const v = new THREE.Mesh(new THREE.BoxGeometry(0.17 * s, 0.03 * s, 0.05 * s), glow); v.position.set(0, 0.11 * s, 0.09 * s); head.add(v); v.userData.face = true;
     } else {
       const eyeM = this.mat('#1a1410', 0.3, 0);
-      for (const sx of [-1, 1]) { const e = new THREE.Mesh(new THREE.SphereGeometry(0.012 * s, 8, 6), eyeM); e.position.set(sx * 0.038 * s, 0.11 * s, 0.1 * s); head.add(e); }
-      if (L.hair) { const hairM = this.mat(L.hair, 0.8, 0); const hair = new THREE.Mesh(new THREE.SphereGeometry(0.122 * s, seg, seg, 0, TAU, 0, Math.PI * 0.55), hairM); hair.position.y = 0.1 * s; hair.rotation.x = -0.25; head.add(hair); }
+      for (const sx of [-1, 1]) { const e = new THREE.Mesh(new THREE.SphereGeometry(0.012 * s, 8, 6), eyeM); e.position.set(sx * 0.038 * s, 0.11 * s, 0.1 * s); head.add(e); e.userData.face = true; }
+      if (L.hair) { const hairM = this.mat(L.hair, 0.8, 0); const hair = new THREE.Mesh(new THREE.SphereGeometry(0.122 * s, seg, seg, 0, TAU, 0, Math.PI * 0.55), hairM); hair.position.y = 0.1 * s; hair.rotation.x = -0.25; head.add(hair); hair.userData.face = true; }
     }
     // Arme
     const armR = 0.062 * s * bw;

@@ -178,6 +178,74 @@ const FX = {
   },
 };
 
+// ---- Blitzbögen: zackige, verzweigte Doppelbänder (Glow + Kern), additiv & HDR, damit Bloom sie erfasst.
+// const b = FX.bolt(color, cap); b.begin(); b.strike(a, b, {segs, jitter, branches, width}); b.end(); … b.remove();
+FX.bolt = function (color = 0x7cc4ff, cap = 160) {
+  const mk = (c, mult, op) => {
+    const pos = new Float32Array(cap * 36), g = new THREE.BufferGeometry(), at = new THREE.BufferAttribute(pos, 3);
+    at.setUsage(THREE.DynamicDrawUsage); g.setAttribute('position', at); g.setDrawRange(0, 0);
+    const m = new THREE.MeshBasicMaterial({ color: new THREE.Color(c).multiplyScalar(mult), transparent: true, opacity: op, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, toneMapped: false, fog: false });
+    const me = new THREE.Mesh(g, m); me.frustumCulled = false; me.renderOrder = 4;
+    return { me, pos, at, g, m };
+  };
+  const glow = mk(color, 1.1, 0.35), core = mk(0xeaf6ff, 2.4, 1);
+  const group = new THREE.Group(); group.add(glow.me, core.me);
+  if (this.scene) this.scene.add(group);
+  const d = new V3(), u = new V3(), w = new V3(), up = new V3(0, 1, 0), alt = new V3(1, 0, 0), tA = new V3(), tB = new V3();
+  let n = 0;
+  const put = (L, a, b, ax, h) => {
+    const o = n * 36 + (ax === u ? 0 : 18), P = L.pos;
+    const v = [a.x - ax.x * h, a.y - ax.y * h, a.z - ax.z * h, a.x + ax.x * h, a.y + ax.y * h, a.z + ax.z * h, b.x + ax.x * h, b.y + ax.y * h, b.z + ax.z * h, b.x - ax.x * h, b.y - ax.y * h, b.z - ax.z * h];
+    const idx = [0, 1, 2, 0, 2, 3];
+    for (let i = 0; i < 6; i++) { const k = idx[i] * 3; P[o + i * 3] = v[k]; P[o + i * 3 + 1] = v[k + 1]; P[o + i * 3 + 2] = v[k + 2]; }
+  };
+  const seg = (a, b, wd) => {
+    if (n >= cap) return;
+    d.subVectors(b, a); const len = d.length(); if (len < 1e-4) return; d.divideScalar(len);
+    u.crossVectors(d, Math.abs(d.y) > 0.9 ? alt : up).normalize(); w.crossVectors(d, u);
+    put(glow, a, b, u, 0.035 * wd); put(glow, a, b, w, 0.035 * wd);
+    put(core, a, b, u, 0.008 * wd); put(core, a, b, w, 0.008 * wd);
+    n++;
+  };
+  const path = (a, b, segs, jit, wd, br) => {
+    const len = a.distanceTo(b), pts = [a.clone()];
+    for (let i = 1; i < segs; i++) {
+      const t = i / segs, e = Math.sin(Math.PI * t) * jit * len;
+      pts.push(tA.lerpVectors(a, b, t).add(tB.set(rand(-1, 1), rand(-1, 1), rand(-1, 1)).multiplyScalar(e)).clone());
+    }
+    pts.push(b.clone());
+    for (let i = 0; i < pts.length - 1; i++) seg(pts[i], pts[i + 1], wd * (1 - 0.45 * i / pts.length));
+    for (let k = 0; k < br; k++) {
+      const i = 1 + ((Math.random() * (pts.length - 3)) | 0), s = pts[i];
+      const dir = pts[i + 1].clone().sub(s).normalize().add(tB.set(rand(-1, 1), rand(-1, 1), rand(-1, 1)).multiplyScalar(0.9)).normalize();
+      path(s, s.clone().addScaledVector(dir, len * rand(0.12, 0.3)), 4, 0.35, wd * 0.5, 0);
+    }
+  };
+  return {
+    group,
+    begin() { n = 0; },
+    strike(a, b, o = {}) { path(a, b, o.segs || 10, o.jitter != null ? o.jitter : 0.16, o.width || 1, o.branches != null ? o.branches : 2); },
+    end() { for (const L of [glow, core]) { L.g.setDrawRange(0, n * 12); L.at.needsUpdate = true; } },
+    flicker(k) { glow.m.opacity = 0.35 * k; core.m.opacity = Math.min(1, k); },
+    remove() { group.parent && group.parent.remove(group); for (const L of [glow, core]) { L.g.dispose(); L.m.dispose(); } },
+  };
+};
+// ---- Verstreute Leichenreste am Boden (2 InstancedMeshes, geteilte Geometrie): FX.gore(center, spreadX, spreadZ)
+FX.gore = function (c, sx = 2.6, sz = 1.4) {
+  if (!Settings.data.blood || !this.scene) return null;
+  if (!this._goreGeo) this._goreGeo = [new THREE.IcosahedronGeometry(1, 0), new THREE.CylinderGeometry(1, 0.8, 1, 5)];
+  const q = Settings.data.quality, nf = q === 'performance' ? 8 : 16, nb = q === 'performance' ? 3 : 6;
+  const g = new THREE.Group();
+  const flesh = new THREE.InstancedMesh(this._goreGeo[0], pbr('#3a0205', 0.2, 0.05, '#140000', 0.5), nf);
+  const bone = new THREE.InstancedMesh(this._goreGeo[1], pbr('#cfc2a6', 0.65, 0), nb);
+  const m4 = new THREE.Matrix4(), qq = new THREE.Quaternion(), e = new THREE.Euler(), s = new V3(), p = new V3();
+  for (let i = 0; i < nf; i++) { p.set(c.x + rand(-sx, sx), 0.03, c.z + rand(-sz, sz)); e.set(rand(0, TAU), rand(0, TAU), rand(0, TAU)); s.set(rand(0.05, 0.14), rand(0.03, 0.07), rand(0.05, 0.12)); flesh.setMatrixAt(i, m4.compose(p, qq.setFromEuler(e), s)); }
+  for (let i = 0; i < nb; i++) { p.set(c.x + rand(-sx, sx), 0.025, c.z + rand(-sz, sz)); e.set(Math.PI / 2, rand(0, TAU), rand(-0.3, 0.3), 'YXZ'); s.set(0.02, rand(0.14, 0.3), 0.02); bone.setMatrixAt(i, m4.compose(p, qq.setFromEuler(e), s)); }
+  flesh.frustumCulled = bone.frustumCulled = false; flesh.receiveShadow = bone.receiveShadow = true;
+  g.add(flesh, bone); this.scene.add(g);
+  return g;
+};
+
 class WebLine {
   constructor(color = 0xf0f4ff, radius = 0.015) {
     this.mesh = new THREE.Mesh(new THREE.CylinderGeometry(radius, radius, 1, 5, 1, true), new THREE.MeshBasicMaterial({ color }));
