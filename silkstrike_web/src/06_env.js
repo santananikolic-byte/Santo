@@ -9,7 +9,7 @@ const ENV_HDRI = {
   // Alpenwiese mit Bergen, Sonne passend zum Tageslicht der Tempel-Arena
   day: { path: Assets.need('hdr', 'env/hdri/alps_field_2k.hdr'), shift: 0.0408, peak: 40, bg: 0.85, env: 0.5, blur: 0, fog: [0.52, 0.6, 0.7] },
   // goldene Stunde: Sonnenuntergang mit Wolken (reiner Himmel, die Stadt liefert die Skyline), Sonne auf GOLDEN_SUN gedreht
-  dusk: { path: Assets.need('hdr', 'env/hdri/belfast_sunset_puresky_2k.hdr'), shift: -0.2586, peak: 60, bg: 0.9, env: 0.45, blur: 0, fog: [0.72, 0.56, 0.48] },
+  dusk: { path: Assets.need('hdr', 'env/hdri/belfast_sunset_puresky_2k.hdr'), shift: -0.2586, peak: 18, bg: 0.5, env: 0.4, blur: 0, fog: [0.5, 0.38, 0.33] },
   // Stadt bei Nacht: Skyline hinter den Arenen (-z)
   night: { path: Assets.need('hdr', 'env/hdri/shanghai_bund_1k.hdr'), shift: -0.25, peak: 8, bg: 0.2, env: 0.16, blur: 0.02, fog: [0.03, 0.032, 0.055] },
   // dunkler, bedeckter Nachthimmel mit Stadtglühen

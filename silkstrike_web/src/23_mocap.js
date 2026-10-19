@@ -17,6 +17,9 @@ const mocapCanonDir = (b) => /^Left(Shoulder|Arm|ForeArm|Hand)$/.test(b) ? new V
   : /Foot|Toe/.test(b) ? new V3(0, 0, 1) : new V3(0, 1, 0);
 // Treffer-Zeitpunkt im Spiel (Anteil der Clip-Dauer), auf den der Mocap-Treffer gelegt wird
 const MOCAP_HIT_AT = 0.36;
+// Spiel-Clips ohne eigene Aufnahme nutzen die passendste vorhandene
+const MOCAP_ALIAS = { hitLow: 'hitHigh', sprint: 'run', celebrate: 'victory', dashStrike: 'punch2' };
+const MOCAP_SPEED = { sprint: 1.35 };
 
 const Mocap = {
   lib: null, fps: 30, hip: 0.95,
@@ -28,7 +31,7 @@ const Mocap = {
     const c = d.clips.idle || d.clips.walkForward;
     if (c && c.p && c.n) { let s = 0; for (let i = 0; i < c.n; i++) s += c.p[i * 3 + 1]; this.hip = clamp(s / c.n, 0.8, 1.1); }
   },
-  clip(name) { return this.lib ? this.lib.clips[name] || null : null; },
+  clip(name) { return this.lib ? this.lib.clips[name] || this.lib.clips[MOCAP_ALIAS[name]] || null : null; },
 };
 
 // Kanonische T-Pose des Modells (je Knochen) und Hüft-Umrechnung; Modell steht dabei noch in der Bind-Pose
@@ -58,10 +61,10 @@ const _mqa = new THREE.Quaternion(), _mqb = new THREE.Quaternion(), _mv = new V3
 function mocapApply(rig) {
   const S = rig.skin, L = Mocap.lib;
   if (!S || !S.canon || !L) return false;
-  const c = L.clips[rig.clip];
+  const c = Mocap.clip(rig.clip);
   if (!c || !c.n) return false;
   let f;
-  if (c.loop) f = (rig.clipT * Mocap.fps) % c.n;
+  if (c.loop) f = (rig.clipT * Mocap.fps * (MOCAP_SPEED[rig.clip] || 1)) % c.n;
   else {
     let p = clamp(rig.clipT / Math.max(0.01, rig.clipDur), 0, 1);
     if (c.hit != null) { const h = clamp(c.hit, 0.05, 0.95); p = p < MOCAP_HIT_AT ? p / MOCAP_HIT_AT * h : h + (p - MOCAP_HIT_AT) / (1 - MOCAP_HIT_AT) * (1 - h); }
