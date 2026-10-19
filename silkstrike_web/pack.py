@@ -33,7 +33,7 @@ def main():
         od = os.path.join(dst, rel)
         for f in fs:
             p = os.path.join(d, f); ext = f.rsplit('.', 1)[-1].lower()
-            if ext in ('jpg', 'jpeg', 'png'):
+            if ext in ('jpg', 'jpeg', 'png', 'json'):
                 os.makedirs(od, exist_ok=True); shutil.copy(p, os.path.join(od, f))
             elif ext == 'hdr':
                 write_txt(os.path.join(od, f + '.txt'), open(p, 'rb').read())

@@ -12,6 +12,7 @@ const Assets = {
   model(path) { const g = this.data.get(path); return g ? g.scene.clone(true) : null; },
   gltf(path) { return this.data.get(path) || null; },
   hdr(path) { return this.data.get(path) || null; },
+  json(path) { return this.data.get(path) || null; },
   // Textur (geteilt); repeat setzt man am besten über tex.clone() pro Material
   tex(path) { return this.data.get(path) || null; },
   // PBR-Material aus einem Texturset: {map, normal, rough, arm, repeat:[x,y], color, metal}
@@ -53,6 +54,8 @@ const Assets = {
             t.colorSpace = THREE.LinearSRGBColorSpace; t.minFilter = t.magFilter = THREE.LinearFilter; t.generateMipmaps = false; t.flipY = true;
             t.mapping = THREE.EquirectangularReflectionMapping; t.needsUpdate = true; ok(t);
           }).catch(fail);
+        } else if (it.kind === 'json') {
+          fetch(url).then((r) => { if (!r.ok) throw new Error(r.status + ' ' + url); return r.json(); }).then(ok).catch(fail);
         } else tl.load(url, (t) => { t.colorSpace = it.opts.srgb ? THREE.SRGBColorSpace : THREE.NoColorSpace; t.anisotropy = aniso; t.wrapS = t.wrapT = THREE.RepeatWrapping; ok(t); }, undefined, fail);
       } catch (e) { fail(e); }
     });

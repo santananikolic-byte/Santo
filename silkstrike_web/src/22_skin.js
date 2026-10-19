@@ -16,6 +16,7 @@ const SkinLib = {
   gltf: {}, geoCache: new Map(),
   load(done) {
     for (const k in SKIN_MODELS) { const g = Assets.gltf(SKIN_MODELS[k]); if (g) this.gltf[k] = g; }
+    Mocap.init();
     if (this.gltf.suit || typeof SKIN_GLB === 'undefined' || !SKIN_GLB) { done(); return; }
     // Ersatz: eingebettetes Anzug-Modell
     let called = false;
@@ -134,6 +135,7 @@ function attachSkin(rig) {
   align(['Spine', 'Spine1', 'Spine2', 'Neck', 'Head'], 'Hips', 'Neck', new V3(0, 1, 0));
   rig.root.add(model);
   rig.skin = { model, B, calib, kind, hipBindY: B.Hips.position.y, hipRestY: rig.j.hips.userData.rest.y, on: true };
+  mocapCalibrate(rig);
   // Prozedurale Körperteile ausblenden; bei echten Gesichtern/Helmen auch Augen und Haare
   rig.bodyMeshes = [];
   rig.root.traverse((o) => { if (o.isMesh && (o.userData.body || (kind !== 'suit' && o.userData.face))) rig.bodyMeshes.push(o); });
@@ -144,7 +146,7 @@ function setSkin(rig, on) {
   const S = rig.skin; if (!S) return;
   S.on = on; S.model.visible = on;
   for (const m of rig.bodyMeshes) m.visible = !on;
-  if (!on && rig.j.head) rig.j.head.position.copy(rig.j.head.userData.rest);
+  if (!on) for (const [j] of SKIN_SNAP) { const g = rig.j[j]; if (g && !g.userData.detached) g.position.copy(g.userData.rest); }
 }
 
 const _sq = new THREE.Quaternion();
@@ -164,10 +166,34 @@ function retarget(rig) {
     bq.set(bone, want);
   }
   B.Hips.position.y = S.hipBindY * (J.hips.position.y / S.hipRestY);
-  // Kopf-Zubehör (Augen, Kapuze, Hörner) folgt dem echten Kopf
-  if (B.Head && J.head && J.neck) {
-    rig.root.updateMatrixWorld(true);
-    J.head.position.copy(J.neck.worldToLocal(B.Head.getWorldPosition(new V3())));
+}
+
+// Pro Frame: Mocap-Clip oder Rig-Pose übertragen, Übergänge überblenden,
+// Kopf/Hände/Füße des Rigs an das sichtbare Modell heften (Effekte, Zubehör)
+const SKIN_SNAP = [['head', 'Head'], ['lHand', 'LeftHand'], ['rHand', 'RightHand'], ['lFoot', 'LeftFoot'], ['rFoot', 'RightFoot']];
+const SKIN_FADE = 0.14;
+function skinStep(rig, dt) {
+  const S = rig.skin;
+  if (!S || !S.on) return;
+  const B = S.B, J = rig.j;
+  if (!S.bones) { S.bones = SKIN_MAP.map(([b]) => B[b]).filter(Boolean); for (const b of ['LeftShoulder', 'RightShoulder', 'LeftToeBase', 'RightToeBase']) if (B[b]) S.bones.push(B[b]); S.last = S.bones.map((o) => o.quaternion.clone()); S.lastHip = B.Hips.position.clone(); S.from = S.bones.map((o) => o.quaternion.clone()); S.fromHip = new V3(); }
+  if (rig.clip !== S.clip || rig.clipT + 1e-6 < S.clipT) {
+    S.clip = rig.clip; S.fade = 0;
+    S.bones.forEach((o, i) => S.from[i].copy(S.last[i])); S.fromHip.copy(S.lastHip);
+  }
+  S.clipT = rig.clipT;
+  if (!mocapApply(rig)) retarget(rig);
+  if (S.fade < SKIN_FADE) {
+    S.fade += dt;
+    const k = smooth(Math.min(1, S.fade / SKIN_FADE));
+    S.bones.forEach((o, i) => o.quaternion.slerpQuaternions(S.from[i], o.quaternion.clone(), k));
+    B.Hips.position.lerpVectors(S.fromHip, B.Hips.position.clone(), k);
+  }
+  S.bones.forEach((o, i) => S.last[i].copy(o.quaternion)); S.lastHip.copy(B.Hips.position);
+  rig.root.updateMatrixWorld(true);
+  for (const [j, b] of SKIN_SNAP) {
+    const g = J[j];
+    if (g && B[b] && g.parent && !g.userData.detached) g.position.copy(g.parent.worldToLocal(B[b].getWorldPosition(new V3())));
   }
 }
 
@@ -176,7 +202,7 @@ function retarget(rig) {
   const P = Rig.prototype;
   const _build = P.build, _update = P.update, _detach = P.detach, _reset = P.resetBody;
   P.build = function () { _build.call(this); this.skin = null; this.bodyMeshes = []; if (SkinLib.gltf.suit || SkinLib.gltf.armor) { try { attachSkin(this); } catch (e) { console.warn('skin attach', e); this.skin = null; } } };
-  P.update = function (dt) { _update.call(this, dt); retarget(this); };
+  P.update = function (dt) { _update.call(this, dt); skinStep(this, dt); };
   P.detach = function (...a) { if (this.skin && this.skin.on) setSkin(this, false); return _detach.apply(this, a); };
   P.resetBody = function () { _reset.call(this); if (this.skin) setSkin(this, true); };
 }
