@@ -13,7 +13,7 @@ const [out, setup = '', wait = '12'] = process.argv.slice(2);
   page.on('pageerror', (e) => errs.push('PAGEERROR: ' + e.message + ' | ' + (e.stack || '').split('\n').slice(1, 3).join(' | ')));
   await page.route('https://silk.test/**', (r) => {
     const rel = decodeURIComponent(new URL(r.request().url()).pathname).replace(/^\//, '') || 'index.html';
-    const f = path.join(__dirname, rel);
+    const f = path.join(__dirname, 'dist', rel);
     if (fs.existsSync(f)) r.fulfill({ path: f }); else r.fulfill({ status: 404, body: 'missing' });
   });
   await page.goto('https://silk.test/index.html', { waitUntil: 'load', timeout: 60000 });

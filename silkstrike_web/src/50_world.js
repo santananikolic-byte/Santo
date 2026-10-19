@@ -37,7 +37,8 @@ class WorldController {
     this.scene = new THREE.Scene();
     this.camera = new THREE.PerspectiveCamera(62, innerWidth / innerHeight, 0.15, 2600);
     applyEnvironment(this.scene, this.tod, G ? 0.0019 : 0.0016);
-    if (G) {
+    // goldene Stunde: echtes Sonnenuntergangs-HDRI (schon durch applyEnvironment gesetzt), sonst gemalter Himmel
+    if (G && !EnvHDR.get('dusk')) {
       const sky = goldenSky(); sky.mapping = THREE.EquirectangularReflectionMapping;
       if (!goldenEnv) goldenEnv = pmrem.fromEquirectangular(sky).texture;
       this.scene.background = sky; this.scene.environment = goldenEnv; this.scene.environmentIntensity = 0.75;

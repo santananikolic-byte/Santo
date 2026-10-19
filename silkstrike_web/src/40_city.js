@@ -268,20 +268,24 @@ class City {
     // Boden + Wasser
     const ground = new MeshBuilder();
     ground.quad([-half - 150, 0, half + 10], [half + 150, 0, half + 10], [half + 150, 0, -half - 150], [-half - 150, 0, -half - 150], [0, 1, 0], [[0, 0], [130, 0], [130, 130], [0, 130]]);
-    const asph = Tex.asphalt();
-    const groundMat = new THREE.MeshStandardMaterial({ map: asph, roughness: tod === 'dusk' ? 0.55 : 0.28, metalness: 0.1 });
+    // Foto-Asphalt (3 m Kachel; Quad: 1200 x 1060 m auf 130 UV), nachts nass und dunkler; Ersatz: Canvas-Asphalt
+    const groundMat = photoMat('asphalt', [(this.size + 300) / 130, (this.size + 160) / 130], tod === 'dusk' ? { roughness: 1.35, color: 0xb8b4ae } : { roughness: 0.5, color: 0x6a6a6e, metal: 0.05 })
+      || new THREE.MeshStandardMaterial({ map: Tex.asphalt(), roughness: tod === 'dusk' ? 0.55 : 0.28, metalness: 0.1 });
     this.root.add(ground.mesh(groundMat, false));
     const water = new MeshBuilder();
     water.quad([-half - 400, -0.6, half + 700], [half + 400, -0.6, half + 700], [half + 400, -0.6, half + 10], [-half - 400, -0.6, half + 10], [0, 1, 0], [[0, 0], [1, 0], [1, 1], [0, 1]]);
     this.root.add(water.mesh(new THREE.MeshStandardMaterial({ color: 0x02070c, roughness: 0.05, metalness: 0.9 }), false));
     const add = (b, m, sh = true) => { if (!b.empty) this.root.add(b.mesh(m, sh)); };
     const conc = new THREE.MeshStandardMaterial({ map: Tex.concrete(), roughness: 0.85 });
-    add(side, conc, false); add(roofs, conc);
+    // Gehwege: Betonplatten (UV 4 m), Dächer: verwitterter Beton (Hauptdach-UV ~8 m)
+    add(side, photoMat('pavement', 4, { color: tod === 'dusk' ? 0xd8d2c8 : 0x8a8a8e }) || conc, false);
+    add(roofs, photoMat('concrete', 1 / 0.12, { color: tod === 'dusk' ? 0xc8c2b8 : 0x7a7a80, roughness: tod === 'dusk' ? 1.4 : 0.8 }) || conc);
     add(lanes, new THREE.MeshStandardMaterial({ color: 0xcccccc, emissive: 0x333333, roughness: 0.5 }), false);
     add(posts, pbr(0x262626, 0.4, 0.8)); add(heads, glowMat(0xffc880, 4), false);
     for (let s = 0; s < 4; s++) {
       const m = new THREE.MeshStandardMaterial({ map: Tex.facade(s, false), emissiveMap: Tex.facade(s, true), emissive: 0xffffff, emissiveIntensity: tod === 'dusk' ? 0.22 : 1.7, roughness: s === 0 ? 0.25 : 0.7, metalness: s === 0 ? 0.5 : 0.05 });
       if (tod === 'dusk') m.color.setRGB(2.5, 2.2, 1.95); // Fassaden im warmen Abendlicht aufhellen
+      if (quality !== 'performance') photoDetail(m, 'wallDetail', 12, s === 0 ? 0.25 : 0.55); // Foto-Betonrelief (UV 12 m)
       add(fac[s], m);
     }
     add(metal, new THREE.MeshStandardMaterial({ map: Tex.metal(), roughness: 0.45, metalness: 0.7 }));
@@ -317,6 +321,7 @@ class City {
       this.root.add(fol, trk);
     }
     this.anim.push(() => { const t = this.t || 0; this.blinkMat.emissiveIntensity = (t % 1.4) < 0.18 ? 6 : 0.2; this.neonMats.forEach((m, i) => { m.emissiveIntensity = Math.sin(t * (7 + i * 3.1)) + Math.sin(t * 13.7 + i) > 1.75 ? 0.4 : 2.6; }); });
+    propsForCity(this, tops, half, quality); // echte Requisiten (62_props.js)
     // Blutturm
     this.tower = new THREE.Group();
     const tb = this.landmarks.bloodTower, tc = new V3(0, 0, tb.z - 34);
@@ -369,6 +374,6 @@ function buildSkyline(seed, quality, tod, clear, groundY = -60) {
   if (!blink.empty) root.add(blink.mesh(glowMat(0xff1a1a, 5), false));
   const g = new MeshBuilder(); const R = clear + 600;
   g.quad([-R, groundY, R], [R, groundY, R], [R, groundY, -R], [-R, groundY, -R], [0, 1, 0], [[0, 0], [60, 0], [60, 60], [0, 60]]);
-  root.add(g.mesh(new THREE.MeshStandardMaterial({ map: Tex.asphalt(), roughness: 0.35 }), false));
+  root.add(g.mesh(photoMat('asphalt', 2 * R / 60, { roughness: 0.5, color: 0x6a6a6e }) || new THREE.MeshStandardMaterial({ map: Tex.asphalt(), roughness: 0.35 }), false));
   return root;
 }

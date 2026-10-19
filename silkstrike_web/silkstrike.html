@@ -759,6 +759,9 @@ function daySkyTexture() {
   }, false);
 }
 function applyEnvironment(scene, tod, fogDensity) {
+  // echtes HDR-Panorama (06_env.js), sonst prozeduraler Himmel als Ersatz
+  if (typeof EnvHDR !== 'undefined' && EnvHDR.apply(scene, tod, fogDensity)) return;
+  scene.backgroundIntensity = 1; scene.backgroundBlurriness = 0;
   const day = tod === 'day';
   const sky = day ? daySkyTexture() : skyTexture(tod);
   sky.mapping = THREE.EquirectangularReflectionMapping;
@@ -867,6 +870,13 @@ const Assets = {
     if (o.map && !m.map) return null;
     return m;
   },
+  async bin(url) {
+    const r = await fetch(url);
+    if (!r.ok) throw new Error(r.status + ' ' + url);
+    const s = atob((await r.text()).trim()), n = s.length, u = new Uint8Array(n);
+    for (let i = 0; i < n; i++) u[i] = s.charCodeAt(i);
+    return u.buffer;
+  },
   preload(onProgress) {
     const total = this.list.length;
     if (!total) return Promise.resolve();
@@ -877,9 +887,18 @@ const Assets = {
       const ok = (v) => { this.data.set(it.path, v); this.loaded++; onProgress && onProgress(this.loaded / total); res(); };
       const fail = (e) => { console.warn('asset fehlt', it.path, e && e.message); this.loaded++; onProgress && onProgress(this.loaded / total); res(); };
       try {
-        if (it.kind === 'model') gl.load(url, (g) => { g.scene.traverse((o) => { if (o.isMesh) { o.castShadow = it.opts.shadow !== false; o.receiveShadow = true; } }); ok(g); }, undefined, fail);
-        else if (it.kind === 'hdr') hl.load(url, (t) => { t.mapping = THREE.EquirectangularReflectionMapping; ok(t); }, undefined, fail);
-        else tl.load(url, (t) => { t.colorSpace = it.opts.srgb ? THREE.SRGBColorSpace : THREE.NoColorSpace; t.anisotropy = aniso; t.wrapS = t.wrapT = THREE.RepeatWrapping; ok(t); }, undefined, fail);
+        // Modelle und HDRs liegen gepackt als Base64-Text vor (pack.py), Bilder als .jpg/.png
+        if (it.kind === 'model') {
+          const dir = url.slice(0, url.lastIndexOf('/') + 1);
+          this.bin(url.replace(/\.(gltf|glb)$/, '.glb.txt')).then((buf) => gl.parse(buf, dir, (g) => { g.scene.traverse((o) => { if (o.isMesh) { o.castShadow = it.opts.shadow !== false; o.receiveShadow = true; } }); ok(g); }, fail)).catch(fail);
+        } else if (it.kind === 'hdr') {
+          this.bin(url + '.txt').then((buf) => {
+            const d = hl.parse(buf);
+            const t = new THREE.DataTexture(d.data, d.width, d.height, THREE.RGBAFormat, d.type);
+            t.colorSpace = THREE.LinearSRGBColorSpace; t.minFilter = t.magFilter = THREE.LinearFilter; t.generateMipmaps = false; t.flipY = true;
+            t.mapping = THREE.EquirectangularReflectionMapping; t.needsUpdate = true; ok(t);
+          }).catch(fail);
+        } else tl.load(url, (t) => { t.colorSpace = it.opts.srgb ? THREE.SRGBColorSpace : THREE.NoColorSpace; t.anisotropy = aniso; t.wrapS = t.wrapT = THREE.RepeatWrapping; ok(t); }, undefined, fail);
       } catch (e) { fail(e); }
     });
     // max. 6 gleichzeitig
@@ -888,6 +907,114 @@ const Assets = {
     return Promise.all(Array.from({ length: Math.min(6, total) }, worker));
   },
 };
+
+// =====================================================================
+//  Umgebung: echte HDR-Himmel + Foto-PBR-Oberflächen (Poly Haven, CC0)
+//  HDRIs werden einmalig auf die Sonnen-/Blickrichtung des Spiels gedreht
+//  und als PMREM-Umgebung gecacht. Fehlen Dateien -> prozeduraler Himmel.
+// =====================================================================
+// shift: Drehung in Bildbreiten (Sonne/Skyline -> Spielrichtung), bg/env: Intensitäten,
+// fog: Horizontfarbe linear (bereits mit bg multipliziert), blur: Hintergrundunschärfe
+const ENV_HDRI = {
+  // Alpenwiese mit Bergen, Sonne passend zum Tageslicht der Tempel-Arena
+  day: { path: Assets.need('hdr', 'env/hdri/alps_field_2k.hdr'), shift: 0.0408, peak: 40, bg: 0.85, env: 0.5, blur: 0, fog: [0.52, 0.6, 0.7] },
+  // goldene Stunde: Sonnenuntergang mit Wolken (reiner Himmel, die Stadt liefert die Skyline), Sonne auf GOLDEN_SUN gedreht
+  dusk: { path: Assets.need('hdr', 'env/hdri/belfast_sunset_puresky_2k.hdr'), shift: -0.2586, peak: 60, bg: 0.9, env: 0.45, blur: 0, fog: [0.72, 0.56, 0.48] },
+  // Stadt bei Nacht: Skyline hinter den Arenen (-z)
+  night: { path: Assets.need('hdr', 'env/hdri/shanghai_bund_1k.hdr'), shift: -0.25, peak: 8, bg: 0.2, env: 0.16, blur: 0.02, fog: [0.03, 0.032, 0.055] },
+  // dunkler, bedeckter Nachthimmel mit Stadtglühen
+  stormNight: { path: Assets.need('hdr', 'env/hdri/kloppenheim_07_puresky_1k.hdr'), shift: -0.317, bg: 0.16, env: 0.3, blur: 0.02, fog: [0.035, 0.036, 0.042] },
+};
+const EnvHDR = {
+  cache: {},
+  // Spalten jeder Zeile zyklisch verschieben (dreht das Panorama um die Hochachse)
+  rotate(t, shift) {
+    const img = t.image, w = img && img.width, h = img && img.height, d = img && img.data;
+    if (!d || !w || !h || !shift) return;
+    const C = d.length / (w * h), k = ((Math.round(shift * w) % w) + w) % w;
+    if (!k || C !== Math.floor(C)) return;
+    const row = w * C, tmp = new d.constructor(row);
+    for (let y = 0; y < h; y++) {
+      const o = y * row; tmp.set(d.subarray(o, o + row));
+      d.set(tmp.subarray((w - k) * C), o); d.set(tmp.subarray(0, (w - k) * C), o + k * C);
+    }
+    t.needsUpdate = true;
+  },
+  // Sonnen-/Lampen-Spitzen kappen: die Sonne liefert das Richtungslicht der Szene, sonst überstrahlt die IBL alles
+  clampPeak(t, max) {
+    const d = t.image && t.image.data;
+    if (!d || !max) return;
+    if (d instanceof Uint16Array) { const hm = THREE.DataUtils.toHalfFloat(max); for (let i = 0; i < d.length; i++) if (d[i] > hm && d[i] < 0x8000) d[i] = hm; }
+    else if (d instanceof Float32Array) { for (let i = 0; i < d.length; i++) if (d[i] > max) d[i] = max; }
+    t.needsUpdate = true;
+  },
+  get(tod) {
+    const def = ENV_HDRI[tod];
+    if (!def) return null;
+    if (this.cache[tod]) return this.cache[tod];
+    const t = Assets.hdr(def.path);
+    if (!t) return null;
+    try {
+      if (!t.userData.envRotated) { this.rotate(t, def.shift); this.clampPeak(t, def.peak); t.userData.envRotated = true; }
+      t.mapping = THREE.EquirectangularReflectionMapping;
+      const env = pmrem.fromEquirectangular(t).texture; // einmal pro HDRI
+      return (this.cache[tod] = { bg: t, env, def });
+    } catch (e) { console.warn('HDRI', tod, e && e.message); return null; }
+  },
+  // auf die Szene anwenden; false -> prozeduraler Ersatz
+  apply(scene, tod, fogDensity) {
+    const H = this.get(tod);
+    if (!H) return false;
+    const d = H.def;
+    scene.background = H.bg; scene.backgroundIntensity = d.bg; scene.backgroundBlurriness = d.blur;
+    scene.environment = H.env; scene.environmentIntensity = d.env;
+    scene.fog = new THREE.FogExp2(0xffffff, tod === 'day' ? Math.min(fogDensity, 0.0042) : fogDensity);
+    scene.fog.color.setRGB(d.fog[0], d.fog[1], d.fog[2]); // linear, passt zum HDR-Horizont
+    return true;
+  },
+};
+
+// ---------------------------------------------------------------- Foto-PBR-Sets (1k, Diffuse/Normal/Rough)
+// size = Kantenlänge eines Textur-Kachels in Metern (aus Poly-Haven-Metadaten)
+const PHOTO_SETS = {};
+for (const [key, id, size, maps] of [
+  ['asphalt', 'asphalt_02', 3.0, 'dnr'], ['concrete', 'concrete_floor_worn_001', 3.0, 'dnr'], ['pavement', 'concrete_pavement', 1.8, 'dnr'],
+  ['tiles', 'large_grey_tiles', 3.0, 'dnr'], ['plate', 'metal_plate', 0.5, 'dnr'], ['cobble', 'cobblestone_square', 1.0, 'dnr'],
+  ['rock', 'rock_boulder_dry', 1.8, 'dnr'], ['slab', 'slab_tiles', 2.37, 'dnr'], ['flagstone', 'stone_tiles_02', 2.0, 'dnr'],
+  ['grass', 'leafy_grass', 2.0, 'dn'], ['wallDetail', 'concrete_wall_008', 2.71, 'n'],
+]) {
+  const p = 'env/tex/' + id;
+  PHOTO_SETS[key] = {
+    size,
+    map: maps.includes('d') ? Assets.need('tex', p + '_diff.jpg', { srgb: true }) : null,
+    normal: maps.includes('n') ? Assets.need('tex', p + '_nor.jpg') : null,
+    rough: maps.includes('r') ? Assets.need('tex', p + '_rough.jpg') : null,
+  };
+}
+const PhotoMatCache = new Map();
+// Foto-Material; uvMeters = Meter pro UV-Einheit der Geometrie (Zahl oder [x, y]).
+// o: color, roughness (Faktor auf die Rough-Map), metal, normalScale, envIntensity. null -> prozeduraler Ersatz
+function photoMat(key, uvMeters, o = {}) {
+  const S = PHOTO_SETS[key];
+  if (!S || !S.map) return null;
+  const um = Array.isArray(uvMeters) ? uvMeters : [uvMeters, uvMeters];
+  const rx = um[0] / S.size, ry = um[1] / S.size;
+  const ck = key + '|' + rx.toFixed(3) + '|' + ry.toFixed(3) + '|' + JSON.stringify(o);
+  if (PhotoMatCache.has(ck)) return PhotoMatCache.get(ck);
+  const m = Assets.pbrSet({ map: S.map, normal: S.normal, rough: S.rough, repeat: [rx, ry], normalScale: o.normalScale ?? 1, color: o.color, roughness: o.roughness ?? (S.rough ? 1 : 0.9), metal: o.metal ?? 0 });
+  if (!m) return null;
+  if (o.envIntensity != null) m.envMapIntensity = o.envIntensity;
+  PhotoMatCache.set(ck, m);
+  return m;
+}
+// feines Foto-Relief (Normal-Map mit eigener Kachelung) auf ein bestehendes Material legen, z. B. Fassaden
+function photoDetail(mat, key, uvMeters, normalScale = 0.5) {
+  const S = PHOTO_SETS[key], t = S && S.normal && Assets.tex(S.normal);
+  if (!t || !mat) return mat;
+  const n = t.clone(); n.wrapS = n.wrapT = THREE.RepeatWrapping; n.repeat.set(uvMeters / S.size, uvMeters / S.size); n.needsUpdate = true;
+  mat.normalMap = n; mat.normalScale.set(normalScale, normalScale); mat.needsUpdate = true;
+  return mat;
+}
 
 // =====================================================================
 //  Audio: synthetisierte Effekte, generative Musik, deutsche Sprachausgabe
@@ -2187,20 +2314,24 @@ class City {
     // Boden + Wasser
     const ground = new MeshBuilder();
     ground.quad([-half - 150, 0, half + 10], [half + 150, 0, half + 10], [half + 150, 0, -half - 150], [-half - 150, 0, -half - 150], [0, 1, 0], [[0, 0], [130, 0], [130, 130], [0, 130]]);
-    const asph = Tex.asphalt();
-    const groundMat = new THREE.MeshStandardMaterial({ map: asph, roughness: tod === 'dusk' ? 0.55 : 0.28, metalness: 0.1 });
+    // Foto-Asphalt (3 m Kachel; Quad: 1200 x 1060 m auf 130 UV), nachts nass und dunkler; Ersatz: Canvas-Asphalt
+    const groundMat = photoMat('asphalt', [(this.size + 300) / 130, (this.size + 160) / 130], tod === 'dusk' ? { roughness: 1.35, color: 0xb8b4ae } : { roughness: 0.5, color: 0x6a6a6e, metal: 0.05 })
+      || new THREE.MeshStandardMaterial({ map: Tex.asphalt(), roughness: tod === 'dusk' ? 0.55 : 0.28, metalness: 0.1 });
     this.root.add(ground.mesh(groundMat, false));
     const water = new MeshBuilder();
     water.quad([-half - 400, -0.6, half + 700], [half + 400, -0.6, half + 700], [half + 400, -0.6, half + 10], [-half - 400, -0.6, half + 10], [0, 1, 0], [[0, 0], [1, 0], [1, 1], [0, 1]]);
     this.root.add(water.mesh(new THREE.MeshStandardMaterial({ color: 0x02070c, roughness: 0.05, metalness: 0.9 }), false));
     const add = (b, m, sh = true) => { if (!b.empty) this.root.add(b.mesh(m, sh)); };
     const conc = new THREE.MeshStandardMaterial({ map: Tex.concrete(), roughness: 0.85 });
-    add(side, conc, false); add(roofs, conc);
+    // Gehwege: Betonplatten (UV 4 m), Dächer: verwitterter Beton (Hauptdach-UV ~8 m)
+    add(side, photoMat('pavement', 4, { color: tod === 'dusk' ? 0xd8d2c8 : 0x8a8a8e }) || conc, false);
+    add(roofs, photoMat('concrete', 1 / 0.12, { color: tod === 'dusk' ? 0xc8c2b8 : 0x7a7a80, roughness: tod === 'dusk' ? 1.4 : 0.8 }) || conc);
     add(lanes, new THREE.MeshStandardMaterial({ color: 0xcccccc, emissive: 0x333333, roughness: 0.5 }), false);
     add(posts, pbr(0x262626, 0.4, 0.8)); add(heads, glowMat(0xffc880, 4), false);
     for (let s = 0; s < 4; s++) {
       const m = new THREE.MeshStandardMaterial({ map: Tex.facade(s, false), emissiveMap: Tex.facade(s, true), emissive: 0xffffff, emissiveIntensity: tod === 'dusk' ? 0.22 : 1.7, roughness: s === 0 ? 0.25 : 0.7, metalness: s === 0 ? 0.5 : 0.05 });
       if (tod === 'dusk') m.color.setRGB(2.5, 2.2, 1.95); // Fassaden im warmen Abendlicht aufhellen
+      if (quality !== 'performance') photoDetail(m, 'wallDetail', 12, s === 0 ? 0.25 : 0.55); // Foto-Betonrelief (UV 12 m)
       add(fac[s], m);
     }
     add(metal, new THREE.MeshStandardMaterial({ map: Tex.metal(), roughness: 0.45, metalness: 0.7 }));
@@ -2236,6 +2367,7 @@ class City {
       this.root.add(fol, trk);
     }
     this.anim.push(() => { const t = this.t || 0; this.blinkMat.emissiveIntensity = (t % 1.4) < 0.18 ? 6 : 0.2; this.neonMats.forEach((m, i) => { m.emissiveIntensity = Math.sin(t * (7 + i * 3.1)) + Math.sin(t * 13.7 + i) > 1.75 ? 0.4 : 2.6; }); });
+    propsForCity(this, tops, half, quality); // echte Requisiten (62_props.js)
     // Blutturm
     this.tower = new THREE.Group();
     const tb = this.landmarks.bloodTower, tc = new V3(0, 0, tb.z - 34);
@@ -2288,7 +2420,7 @@ function buildSkyline(seed, quality, tod, clear, groundY = -60) {
   if (!blink.empty) root.add(blink.mesh(glowMat(0xff1a1a, 5), false));
   const g = new MeshBuilder(); const R = clear + 600;
   g.quad([-R, groundY, R], [R, groundY, R], [R, groundY, -R], [-R, groundY, -R], [0, 1, 0], [[0, 0], [60, 0], [60, 60], [0, 60]]);
-  root.add(g.mesh(new THREE.MeshStandardMaterial({ map: Tex.asphalt(), roughness: 0.35 }), false));
+  root.add(g.mesh(photoMat('asphalt', 2 * R / 60, { roughness: 0.5, color: 0x6a6a6e }) || new THREE.MeshStandardMaterial({ map: Tex.asphalt(), roughness: 0.35 }), false));
   return root;
 }
 
@@ -2331,7 +2463,8 @@ class WorldController {
     this.scene = new THREE.Scene();
     this.camera = new THREE.PerspectiveCamera(62, innerWidth / innerHeight, 0.15, 2600);
     applyEnvironment(this.scene, this.tod, G ? 0.0019 : 0.0016);
-    if (G) {
+    // goldene Stunde: echtes Sonnenuntergangs-HDRI (schon durch applyEnvironment gesetzt), sonst gemalter Himmel
+    if (G && !EnvHDR.get('dusk')) {
       const sky = goldenSky(); sky.mapping = THREE.EquirectangularReflectionMapping;
       if (!goldenEnv) goldenEnv = pmrem.fromEquirectangular(sky).texture;
       this.scene.background = sky; this.scene.environment = goldenEnv; this.scene.environmentIntensity = 0.75;
@@ -2777,7 +2910,17 @@ function buildArena(id, scene, anim) {
   applyEnvironment(scene, A.tod, id === 'subway' ? 0.03 : 0.012);
   const root = new THREE.Group(); scene.add(root);
   const q = Settings.data.quality;
-  const floorMat = {
+  // Foto-Böden (Poly Haven CC0; Boden-UV = 4 m), prozeduraler Ersatz falls Texturen fehlen
+  const photoFloor = {
+    rainRooftop: ['concrete', { color: 0x8a8a90, roughness: 0.36, metal: 0.12 }], // nasser Dachbeton
+    subway: ['tiles', { color: 0xc8d0d2, roughness: 0.6 }],
+    foundry: ['plate', { color: 0x8e8a84, roughness: 0.85, metal: 0.85 }],
+    burningSquare: ['cobble', { color: 0xa89c92, roughness: 0.9 }],
+    riftRealm: ['rock', { color: 0x5e4468, roughness: 0.85 }],
+    bloodTower: ['slab', { color: 0x9a3434, roughness: 0.4, metal: 0.2 }],
+    templeGarden: ['flagstone', { color: 0xf0e8dc }],
+  }[id];
+  const floorMat = (photoFloor && photoMat(photoFloor[0], 4, photoFloor[1])) || {
     rainRooftop: new THREE.MeshStandardMaterial({ map: Tex.concrete(), roughness: 0.3, metalness: 0.15 }),
     subway: new THREE.MeshStandardMaterial({ map: Tex.tiles(), roughness: 0.3 }),
     foundry: new THREE.MeshStandardMaterial({ map: Tex.metal(), roughness: 0.5, metalness: 0.8 }),
@@ -2802,7 +2945,7 @@ function buildArena(id, scene, anim) {
     for (let k = 0; k < 7; k++) m.box(-18 + k * 6 - 0.4, 0, -6, -18 + k * 6 + 0.4, 7.5, -5.2, 0.25);
     m.box(-4, -0.9, -12.3, 16, 3.2, -7.4, 0.2);
     for (let k = 0; k < 5; k++) { g.box(-2.5 + k * 3.6, 1.2, -7.38, -0.3 + k * 3.6, 2.4, -7.3, 1); }
-    root.add(m.mesh(new THREE.MeshStandardMaterial({ map: Tex.tiles(), roughness: 0.35 })), g.mesh(glowMat(0xb0e6ff, 1.6), false));
+    root.add(m.mesh(photoMat('tiles', 4, { color: 0xd8dee0, roughness: 0.5 }) || new THREE.MeshStandardMaterial({ map: Tex.tiles(), roughness: 0.35 })), g.mesh(glowMat(0xb0e6ff, 1.6), false));
     const tubes = new MeshBuilder(); for (let k = 0; k < 5; k++) { tubes.box(-14 + k * 7 - 1.2, 7.3, -3.1, -14 + k * 7 + 1.2, 7.42, -2.9, 1); point(0xc0fff0, 22, 14, -14 + k * 7, 7, -3, k % 2 === 1); }
     root.add(tubes.mesh(glowMat(0xd0fff4, 5), false));
   } else if (id === 'foundry') {
@@ -2874,18 +3017,19 @@ function buildArena(id, scene, anim) {
     // Boden: Pflasterweg zum Tempel, Bordsteine, Grasfläche bis zum Horizont
     pv.box(-3, -0.4, -43, 3, 0.02, -16, 0.25);
     for (const sx of [-1, 1]) { st.box(sx > 0 ? 3 : -20.4, -0.4, -16.6, sx > 0 ? 20.4 : -3, 0.16, -16, S); st.box(sx * 20 - (sx > 0 ? 0 : 0.6), -0.4, -16.6, sx * 20 + (sx > 0 ? 0.6 : 0), 0.16, 8, S); }
-    const grassT = templeTex('grass'); grassT.repeat.set(90, 36);
-    const ground = new THREE.Mesh(new THREE.PlaneGeometry(520, 210), new THREE.MeshStandardMaterial({ map: grassT, roughness: 0.95 }));
+    const grassMat = photoMat('grass', [520, 210], { color: 0xdde6cc, roughness: 0.95, normalScale: 0.8 }) || (() => { const grassT = templeTex('grass'); grassT.repeat.set(90, 36); return new THREE.MeshStandardMaterial({ map: grassT, roughness: 0.95 }); })();
+    const ground = new THREE.Mesh(new THREE.PlaneGeometry(520, 210), grassMat);
     ground.rotation.x = -Math.PI / 2; ground.position.set(0, -0.03, -85); ground.receiveShadow = true; root.add(ground);
     // gemalte Bergkette mit Schneekappen weit hinten
     const mt = new THREE.Mesh(new THREE.PlaneGeometry(600, 75), new THREE.MeshBasicMaterial({ map: templeTex('mountains'), transparent: true, depthWrite: false, fog: false }));
-    mt.scale.y = 1.6; mt.position.set(0, 54, -190); root.add(mt);
+    mt.scale.y = 1.6; mt.position.set(0, 54, -190); if (!Assets.hdr(ENV_HDRI.day.path)) root.add(mt); // echte Alpen aus dem HDRI, sonst gemalt
     // rundes Steinpodest mit Bronze-Räucherbecken
     st.cyl(0, 0, -13.5, 4.8, 0.35, 32, S); st.cyl(0, 0.35, -13.5, 4.1, 0.35, 32, S); st.cyl(0, 0.7, -13.5, 3.4, 0.3, 32, S);
     br.cyl(0, 1.0, -13.5, 0.75, 0.25, 12); br.cyl(0, 1.25, -13.5, 1.0, 0.75, 14); br.cyl(0, 2.0, -13.5, 1.15, 0.12, 14); br.cone(0, 2.12, -13.5, 0.9, 0.6, 14); br.cyl(0, 2.7, -13.5, 0.12, 0.3, 8);
     // zwei steinerne Kriegerstatuen mit gesenktem Schwert
     const statue = (cx, cz) => {
       st.box(cx - 1.7, 0, cz - 1.7, cx + 1.7, 0.45, cz + 1.7, S); st.box(cx - 1.35, 0.45, cz - 1.35, cx + 1.35, 1.7, cz + 1.35, S); st.box(cx - 1.5, 1.7, cz - 1.5, cx + 1.5, 1.95, cz + 1.5, S, true);
+      if (propsHave('lion_head')) return; // echter Wächterlöwe statt prozeduraler Figur (62_props.js)
       const Y = 1.95;
       for (const sx of [-1, 1]) {
         st.box(cx + sx * 0.62 - 0.28, Y, cz - 0.35, cx + sx * 0.62 + 0.28, Y + 0.32, cz + 0.6, S);
@@ -3021,6 +3165,7 @@ function buildArena(id, scene, anim) {
     const stoneMat = new THREE.MeshStandardMaterial({ map: templeTex('stone'), color: 0xd6d0c4, roughness: 0.92 });
     root.add(roofs, st.mesh(stoneMat), red.mesh(pbr(0xa3221a, 0.55, 0)), pl.mesh(pbr(0xe9dfca, 0.85, 0)), gold.mesh(pbr(0xd4a640, 0.35, 0.85)), tk.mesh(pbr(0x3a2924, 0.9, 0)), br.mesh(pbr(0x6b5636, 0.45, 0.8)), pv.mesh(floorMat, false), g.mesh(glowMat(0xffb35a, 2.2), false));
   }
+  propsForArena(id, root, anim, q); // echte Requisiten (62_props.js)
   const key = new THREE.DirectionalLight(0xc8d0ff, 1.8);
   key.position.set(6, 12, 9); key.castShadow = q !== 'performance';
   key.shadow.mapSize.set(1024, 1024); const sc = key.shadow.camera; sc.left = -12; sc.right = 12; sc.top = 10; sc.bottom = -4; key.shadow.bias = -0.0006;
@@ -3761,6 +3906,213 @@ class KombatController {
     const [a, b] = this.f;
     UI.kombatUpdate({ h1: a.hp / a.max, h2: b.hp / b.max, l1: a.lag / a.max, l2: b.lag / b.max, m1: a.meter / 100, m2: b.meter / 100, r1: a.rounds, r2: b.rounds, toWin: this.setup.toWin || 2,
       timer: this.timer, s1: a.cd[0] <= 0, s2: a.cd[1] <= 0, brutal: this.phase === 'fight' && a.meter >= 100 });
+  }
+}
+
+// =====================================================================
+//  Echte Requisiten (Poly Haven, CC0): Felsen, Statuen, Klimageräte,
+//  Fässer, Kisten ... als InstancedMesh (1 Draw-Call pro Teilmesh).
+//  Fehlt ein Modell, bleibt die prozedurale Kulisse unverändert.
+// =====================================================================
+const PROP_IDS = ['rock_face_01', 'rock_moss_set_01', 'shrub_02', 'lion_head', 'gothic_statue', 'exterior_aircon_unit', 'Barrel_01', 'wooden_crate_02',
+  'modular_airduct_circular_01', 'modular_industrial_pipes_01', 'security_light', 'barrel_stove', 'old_tyre', 'stone_fire_pit', 'metal_trash_can', 'trashbag',
+  'large_castle_door', 'street_lamp_01'];
+const PROP = {};
+for (const id of PROP_IDS) PROP[id] = Assets.need('model', 'models/' + id + '/' + id + '.gltf');
+const propCache = new Map();
+
+function propsHave(id) { return !!(PROP[id] && Assets.gltf(PROP[id])); }
+
+// Quelle eines Modells (optional nur ein benannter Knoten): Teilmeshes mit Matrix,
+// so verschoben, dass die Unterseite auf y=0 liegt und x/z mittig sind.
+function propSrc(id, node) {
+  const key = id + '|' + (node || '');
+  if (propCache.has(key)) return propCache.get(key);
+  const g = PROP[id] && Assets.gltf(PROP[id]);
+  let src = null;
+  if (g) {
+    g.scene.updateMatrixWorld(true);
+    const base = node ? g.scene.getObjectByName(node) : g.scene;
+    if (base) {
+      const inv = new THREE.Matrix4().copy(base.matrixWorld).invert(), parts = [], box = new THREE.Box3();
+      base.traverse((o) => {
+        if (!o.isMesh) return;
+        const m = new THREE.Matrix4().multiplyMatrices(inv, o.matrixWorld);
+        if (!o.geometry.boundingBox) o.geometry.computeBoundingBox();
+        box.union(o.geometry.boundingBox.clone().applyMatrix4(m));
+        parts.push({ geo: o.geometry, mat: o.material, m });
+      });
+      if (parts.length) {
+        const c = box.getCenter(new V3()), off = new THREE.Matrix4().makeTranslation(-c.x, -box.min.y, -c.z);
+        parts.forEach((p) => p.m.premultiply(off));
+        src = { parts, size: box.getSize(new V3()) };
+      }
+    }
+  }
+  propCache.set(key, src);
+  return src;
+}
+
+// Platziert viele Kopien: list = [[x, y, z, ry, s, rx, rz], ...]; s = Zahl oder [sx, sy, sz]
+const _pM = new THREE.Matrix4(), _pQ = new THREE.Quaternion(), _pE = new THREE.Euler(), _pP = new V3(), _pS = new V3(), _pT = new THREE.Matrix4();
+function propPlace(parent, id, node, list, opt = {}) {
+  const S = propSrc(id, node);
+  if (!S || !list.length) return null;
+  const out = [];
+  for (const p of S.parts) {
+    const im = new THREE.InstancedMesh(p.geo, p.mat, list.length);
+    list.forEach(([x, y, z, ry = 0, s = 1, rx = 0, rz = 0], i) => {
+      _pE.set(rx, ry, rz); _pQ.setFromEuler(_pE);
+      if (Array.isArray(s)) _pS.set(s[0], s[1], s[2]); else _pS.set(s, s, s);
+      _pT.compose(_pP.set(x, y, z), _pQ, _pS); _pM.multiplyMatrices(_pT, p.m); im.setMatrixAt(i, _pM);
+    });
+    im.castShadow = opt.shadow !== false; im.receiveShadow = true;
+    im.computeBoundingSphere(); im.computeBoundingBox && im.computeBoundingBox();
+    parent.add(im); out.push(im);
+  }
+  return out;
+}
+// Skalierung auf Zielhöhe (Meter)
+function propH(id, node, h) { const S = propSrc(id, node); return S ? h / S.size.y : 1; }
+// Leuchtende Teile (Glühbirnen/Glas) eines Modells zum Glühen bringen
+function propGlow(id, test, color, inten) {
+  const S = propSrc(id); if (!S) return;
+  for (const p of S.parts) {
+    const ms = Array.isArray(p.mat) ? p.mat : [p.mat];
+    for (const m of ms) if (test.test(m.name || '') && m.emissive && !m.userData.glowSet) { m.emissive.set(color); m.emissiveIntensity = inten; m.userData.glowSet = true; }
+  }
+}
+
+function propsForArena(id, root, anim, q) {
+  const perf = q === 'performance';
+  const thin = (l) => (perf ? l.filter((_, i) => i % 2 === 0) : l);
+  const R = seeded(0x9e0b + id.length * 7);
+  const MOSS = ['rock_moss_set_01_rock01', 'rock_moss_set_01_rock02', 'rock_moss_set_01_rock03', 'rock_moss_set_01_rock04', 'rock_moss_set_01_rock05', 'rock_moss_set_01_rock06'];
+  const SHRUB = ['shrub_02_a', 'shrub_02_b', 'shrub_02_c', 'shrub_02_d'];
+  const spread = (nodes, pts) => nodes.forEach((n, k) => { const l = pts.filter((_, i) => i % nodes.length === k); if (l.length) propPlace(root, ...n, l); });
+  const embers = (x, y, z, r) => anim.push(() => { if (Math.random() < 0.45) FX.emberAt(new V3(x + rand(-r, r), y, z + rand(-r, r))); });
+  if (id === 'templeGarden') {
+    // Wächterlöwen auf den Statuensockeln (Sockeloberkante y=1.95)
+    const lh = propH('lion_head', null, 2.3);
+    propPlace(root, 'lion_head', null, [[-9.5, 1.95, -12, 0.18, lh], [9.5, 1.95, -12, -0.18, lh]]);
+    // bemooste Findlinge im Garten
+    const rocks = thin([[-13.2, 0, -8.2, 0.4, 0.9], [13.6, 0, -9.0, 2.1, 1.0], [-18.4, 0, -6.4, 1.3, 1.15], [18.8, 0, -5.2, 4.2, 1.1], [-7.6, 0, -20.5, 0.7, 0.8], [8.4, 0, -21.2, 2.6, 0.85],
+      [-14.5, 0, -28.5, 3.3, 1.4], [15.2, 0, -29.5, 5.1, 1.35], [-6.3, 0, -38.5, 1.9, 1.1], [6.9, 0, -39.2, 0.2, 1.0], [-24, 0, -22, 2.4, 1.8], [25, 0, -24, 1.1, 1.9]]);
+    spread(MOSS.map((n) => ['rock_moss_set_01', n]), rocks.map(([x, y, z, ry, s]) => [x, y - 0.12 * s, z, ry, s]));
+    // Felswände als Kulisse links/rechts hinter dem Garten
+    const cliffs = [[-44, -0.3, -36, 0.9, 3.4], [46, -0.3, -40, -0.8, 3.6], [-30, -0.4, -78, 0.2, 5.5], [33, -0.4, -84, -0.3, 5.8], [-70, -0.5, -60, 1.3, 6], [72, -0.5, -66, -1.4, 6.2]];
+    propPlace(root, 'rock_face_01', null, perf ? cliffs.slice(0, 4) : cliffs, { shadow: false });
+    // Sträucher um Felsen und Wege
+    const sh = [];
+    for (const [x, , z, , s] of rocks) for (let k = 0; k < 2; k++) sh.push([x + rand(-1.6, 1.6) * s, 0, z + rand(0.6, 1.6) * s, R() * TAU, 0.8 + R() * 0.4]);
+    for (const sx of [-1, 1]) for (let k = 0; k < 6; k++) sh.push([sx * (4.2 + k * 2.6), 0, -15.4 + (k % 2) * 0.3, R() * TAU, 0.7 + R() * 0.3]);
+    spread(SHRUB.map((n) => ['shrub_02', n]), thin(sh));
+  } else if (id === 'rainRooftop') {
+    const ac = propH('exterior_aircon_unit', null, 1.65);
+    propPlace(root, 'exterior_aircon_unit', null, [[-15.6, 0, -9.55, 0, ac], [-14.0, 0, -9.55, 0, ac], [-7.5, 1.6, -7.1, 0.12, ac * 0.85], [7.2, 2.2, -7.8, -0.1, ac * 0.85], [16.5, 0, -6.4, -1.4, ac], [3.2, 0, -9.55, 0, ac]]);
+    const barrel = propH('Barrel_01', null, 0.88);
+    propPlace(root, 'Barrel_01', null, thin([[8.7, 0, -4.6, 0.3, barrel], [9.4, 0, -5.2, 1.2, barrel], [8.3, 0, -5.6, 2.0, barrel], [-10.0, 0, -4.8, 0.4, barrel], [-10.7, 0, -4.2, 2.4, barrel], [10.6, 0.3, -3.9, 0.4, barrel, Math.PI / 2, 0]]));
+    propPlace(root, 'wooden_crate_02', null, thin([[-8.6, 0, -3.4, 1.62, 1.1], [-8.7, 0.48, -3.5, 1.5, 1.1], [-7.4, 0, -4.6, 0.2, 1.1], [11.6, 0, -3.0, 1.2, 1.1], [12.4, 0, -4.2, 0.3, 1.1]]));
+    propPlace(root, 'old_tyre', null, [[9.9, 0.08, -3.2, 0, 1, Math.PI / 2, 0], [9.9, 0.25, -3.2, 0.4, 1, Math.PI / 2, 0], [-11.4, 0.08, -3.0, 0, 1, Math.PI / 2, 0]]);
+    propPlace(root, 'trashbag', null, thin([[-9.6, 0, -2.6, 0.5, 1], [-7.0, 0, -3.3, 2.2, 0.9], [12.9, 0, -2.6, 1.4, 1]]));
+    // Lüftungskanal entlang der Brüstung + Lüfter
+    const d = 1.45, duct = [];
+    for (let k = 0; k < 4; k++) duct.push([-5.6 + k * 2.06, 0.1, -9.65, Math.PI / 2, d]);
+    propPlace(root, 'modular_airduct_circular_01', 'modular_airduct_circular_triple', duct);
+    propPlace(root, 'modular_airduct_circular_01', 'modular_airduct_circular_fan', [[1.72, 0, -9.65, Math.PI / 2, d]]);
+    // Rohre vom Wassertank in den Boden
+    propPlace(root, 'modular_industrial_pipes_01', 'modular_industrial_pipes_01_pipe02', [[11.0, 0, -9.6, 0, [1.6, 1.6, 1.6]], [11.5, 0, -9.6, 0, [1.6, 1.3, 1.6]], [15.2, 0, -9.6, 0, [1.6, 1.6, 1.6]]]);
+    // Strahler auf den Klimakästen
+    propGlow('security_light', /bulb|glass/i, 0xfff0d0, 1.6);
+    propPlace(root, 'security_light', null, [[-7.5, 0.7, -5.74, 0, 1.3], [7.0, 1.2, -6.24, 0, 1.3]], { shadow: false });
+  } else if (id === 'foundry') {
+    const barrel = propH('Barrel_01', null, 0.88);
+    propPlace(root, 'Barrel_01', null, thin([[-13.5, 0, -6.2, 0.3, barrel], [-12.8, 0, -6.9, 1.2, barrel], [-14.2, 0, -7.0, 2.5, barrel], [13.2, 0, -6.5, 0.6, barrel], [14.0, 0, -5.8, 2.2, barrel], [9.5, 0.3, -5.0, 1.1, barrel, Math.PI / 2, 0]]));
+    propPlace(root, 'barrel_stove', null, [[-16.5, 0, -4.2, 0.4, 1.1], [16.2, 0, -3.6, 2.0, 1.1]]);
+    embers(-16.5, 0.95, -4.2, 0.25); embers(16.2, 0.95, -3.6, 0.25);
+    propPlace(root, 'wooden_crate_02', null, thin([[-10.0, 0, -5.8, 0.1, 1.15], [-10.1, 0.5, -5.85, 0.25, 1.15], [11.5, 0, -4.6, 1.5, 1.15], [-18.5, 0, -6.8, 1.6, 1.2], [18.6, 0, -7.0, 0.1, 1.2]]));
+    propPlace(root, 'old_tyre', null, [[12.0, 0.08, -3.3, 0, 1, Math.PI / 2, 0], [12.0, 0.25, -3.3, 0.7, 1, Math.PI / 2, 0], [-8.8, 0.3, -4.2, 0.9, 1, 0, 0]]);
+    // senkrechte Rohre an den Hallenstützen
+    const pp = [];
+    for (let k = 0; k < 6; k++) { const x = -20 + k * 8; pp.push([x + 0.65, 0, -13.2, 0, [1.4, 3.4, 1.4]], [x + 0.65, 6.65, -13.2, 0, [1.4, 3.4, 1.4]]); }
+    propPlace(root, 'modular_industrial_pipes_01', 'modular_industrial_pipes_01_pipe02', thin(pp));
+    propGlow('security_light', /bulb|glass/i, 0xffd8a0, 1.6);
+    propPlace(root, 'security_light', null, [[-12, 5.5, -12.74, 0, 1.4], [4, 5.5, -12.74, 0, 1.4]], { shadow: false });
+  } else if (id === 'burningSquare') {
+    propPlace(root, 'gothic_statue', null, [[-5.2, 0, -18.7, 0.25, propH('gothic_statue', null, 3.1)], [5.2, 0, -18.7, -0.25, propH('gothic_statue', null, 3.1)]]);
+    propPlace(root, 'stone_fire_pit', null, [[-15.5, 0, -12.5, 0.3, 1.3], [6.0, 0, -15.0, 1.9, 1.2]]);
+    embers(-15.5, 0.35, -12.5, 0.7); embers(6.0, 0.35, -15.0, 0.6);
+    const barrel = propH('Barrel_01', null, 0.88);
+    propPlace(root, 'Barrel_01', null, thin([[-12.5, 0, -4.2, 0.3, barrel], [-13.2, 0, -4.8, 1.3, barrel], [12.4, 0.3, -6.0, 0.9, barrel, Math.PI / 2, 0], [16.5, 0, -8.5, 2.2, barrel]]));
+    propPlace(root, 'trashbag', null, thin([[-11.8, 0, -3.2, 0.4, 1], [13.6, 0, -3.0, 1.7, 1.1], [-8.0, 0, -9.0, 2.6, 1]]));
+    propGlow('street_lamp_01', /bulb|glass/i, 0xffc070, 5);
+    const sl = propH('street_lamp_01', null, 4.4);
+    propPlace(root, 'street_lamp_01', null, [[-17.5, 0, -5.5, 0.4, sl], [17.5, 0, -6.5, -0.5, sl], [-9.5, 0, -16.5, 0.2, sl], [9.5, 0, -16.5, -0.2, sl]]);
+  } else if (id === 'subway') {
+    const tc = [];
+    for (const x of [-12, 0, 12]) tc.push([x + 0.95, 0, -5.6, R() * TAU, 1.05]);
+    tc.push([-17.0, 0, -12.6, 0.3, 1.05]);
+    propPlace(root, 'metal_trash_can', null, tc);
+    propPlace(root, 'trashbag', null, thin([[-11.3, 0, -4.7, 0.8, 1], [1.7, 0, -5.0, 2.1, 0.9], [-16.2, 0, -12.2, 1.4, 1.1], [13.6, 0, -4.9, 0.2, 1]]));
+    propPlace(root, 'wooden_crate_02', null, [[-13.8, 0, -11.8, 0.1, 1.1], [-13.8, 0.48, -11.85, 0.2, 1.1]]);
+    propGlow('security_light', /bulb|glass/i, 0xe8fff8, 1.6);
+    propPlace(root, 'security_light', null, [[-15.0, 4.6, -13.24, 0, 1.4], [-8.0, 4.6, -13.24, 0, 1.4]], { shadow: false });
+  } else if (id === 'bloodTower' || id === 'riftRealm') {
+    const gs = propH('gothic_statue', null, id === 'bloodTower' ? 3.4 : 2.9);
+    if (id === 'bloodTower') {
+      propPlace(root, 'gothic_statue', null, thin([[-6, 0, -9.3, 0.1, gs], [6, 0, -9.3, -0.1, gs], [-12, 0, -9.3, 0.2, gs], [12, 0, -9.3, -0.2, gs]]));
+      const lh = propH('lion_head', null, 1.1);
+      propPlace(root, 'lion_head', null, [[-2.3, 1.5, -12.6, 0.15, lh], [2.3, 1.5, -12.6, -0.15, lh]]);
+    } else {
+      propPlace(root, 'gothic_statue', null, [[-9.5, 0, -6.8, 0.5, gs], [9.8, 0, -7.4, -0.4, gs]]);
+      propPlace(root, 'large_castle_door', null, [[0, 0, -13.5, 0, propH('large_castle_door', null, 5.6)]]);
+      // schwebende Felsbrocken im Riss
+      const fl = [];
+      for (let k = 0; k < (perf ? 5 : 10); k++) { const sx = k % 2 ? 1 : -1; fl.push([sx * (8 + R() * 22), 2 + R() * 14, -16 - R() * 34, R() * TAU, 0.8 + R() * 1.6, (R() - 0.5) * 0.9, (R() - 0.5) * 0.9]); }
+      const flo = propPlace(root, 'rock_face_01', null, fl, { shadow: false });
+      if (flo) { let t = 0; anim.push((dt) => { t += dt; for (const m of flo) m.position.y = Math.sin(t * 0.5) * 0.4; }); }
+    }
+  }
+}
+
+// Freie Stadt: Mülltonnen an Laternen, Klimageräte auf Dächern, Fässer/Kisten im Hafen.
+// In 300-m-Kacheln instanziert, damit Frustum-Culling greift.
+function propsForCity(city, tops, half, quality) {
+  if (quality === 'performance') return;
+  const R = seeded(0x51ee7), rich = quality === 'ultra';
+  const tiles = new Map();
+  const add = (k, p) => { const t = Math.floor((p[0] + half) / 300) + ',' + Math.floor((p[2] + half) / 300), key = k + '|' + t; if (!tiles.has(key)) tiles.set(key, []); tiles.get(key).push(p); };
+  // Mülltonnen + Müllsäcke an Laternenmasten (Gehweg c±8.5)
+  for (let k = 0; k <= CITY.blocks; k++) {
+    const c = -half + k * CITY.pitch;
+    for (let t = -half + 20; t < half; t += 50) for (const sd of [-1, 1]) {
+      if (R() > (rich ? 0.3 : 0.15)) continue;
+      const along = R() < 0.5, o = sd * 8.9, d = (R() < 0.5 ? 1 : -1) * 1.1;
+      const p = along ? [c + o, 0.15, t + d] : [t + d, 0.15, c + o];
+      add('can', [p[0], p[1], p[2], R() * TAU, 1]);
+      if (R() < 0.5) add('bag', [p[0] + rand(-0.6, 0.6), 0.15, p[2] + rand(-0.6, 0.6), R() * TAU, 0.9 + R() * 0.3]);
+    }
+  }
+  // Klimageräte auf niedrigen Dächern (dort schwingt/läuft man am häufigsten)
+  const ac = propH('exterior_aircon_unit', null, 1.7);
+  let nAc = 0;
+  for (const tp of tops) {
+    if (tp.y > 60 || R() > 0.35 || nAc > (rich ? 80 : 40)) continue;
+    const n = 1 + Math.floor(R() * 2), ry = Math.floor(R() * 4) * Math.PI / 2; nAc += n;
+    for (let i = 0; i < n; i++) add('ac', [tp.x + Math.cos(ry) * (i * 1.6 - 1.6) + rand(-2, 2), tp.y + 0.05, tp.z - Math.sin(ry) * (i * 1.6 - 1.6) + rand(-2, 2), ry, ac]);
+  }
+  const lm = city.landmarks;
+  const barrel = propH('Barrel_01', null, 0.88);
+  const L = lm.harborCrane;
+  if (L) {
+    for (let i = 0; i < 12; i++) { const a = Math.PI + R() * Math.PI, r = 7 + R() * 9; add('barrel', [L.x + Math.cos(a) * r, 0.02, L.z - 6 + Math.sin(a) * r, R() * TAU, barrel]); }
+    for (let i = 0; i < 8; i++) { const a = Math.PI + R() * Math.PI, r = 7 + R() * 9; add('crate', [L.x + Math.cos(a) * r, 0.02, L.z - 6 + Math.sin(a) * r, R() * TAU, 1.2]); }
+  }
+  const kinds = { can: ['metal_trash_can', null], bag: ['trashbag', null], ac: ['exterior_aircon_unit', null], barrel: ['Barrel_01', null], crate: ['wooden_crate_02', null] };
+  for (const [key, list] of tiles) {
+    const [k] = key.split('|');
+    const meshes = propPlace(city.root, kinds[k][0], kinds[k][1], list, { shadow: k === 'ac' });
+    if (meshes) for (const m of meshes) m.receiveShadow = k !== 'ac';
   }
 }
 

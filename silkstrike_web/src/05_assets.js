@@ -25,6 +25,13 @@ const Assets = {
     if (o.map && !m.map) return null;
     return m;
   },
+  async bin(url) {
+    const r = await fetch(url);
+    if (!r.ok) throw new Error(r.status + ' ' + url);
+    const s = atob((await r.text()).trim()), n = s.length, u = new Uint8Array(n);
+    for (let i = 0; i < n; i++) u[i] = s.charCodeAt(i);
+    return u.buffer;
+  },
   preload(onProgress) {
     const total = this.list.length;
     if (!total) return Promise.resolve();
@@ -35,9 +42,18 @@ const Assets = {
       const ok = (v) => { this.data.set(it.path, v); this.loaded++; onProgress && onProgress(this.loaded / total); res(); };
       const fail = (e) => { console.warn('asset fehlt', it.path, e && e.message); this.loaded++; onProgress && onProgress(this.loaded / total); res(); };
       try {
-        if (it.kind === 'model') gl.load(url, (g) => { g.scene.traverse((o) => { if (o.isMesh) { o.castShadow = it.opts.shadow !== false; o.receiveShadow = true; } }); ok(g); }, undefined, fail);
-        else if (it.kind === 'hdr') hl.load(url, (t) => { t.mapping = THREE.EquirectangularReflectionMapping; ok(t); }, undefined, fail);
-        else tl.load(url, (t) => { t.colorSpace = it.opts.srgb ? THREE.SRGBColorSpace : THREE.NoColorSpace; t.anisotropy = aniso; t.wrapS = t.wrapT = THREE.RepeatWrapping; ok(t); }, undefined, fail);
+        // Modelle und HDRs liegen gepackt als Base64-Text vor (pack.py), Bilder als .jpg/.png
+        if (it.kind === 'model') {
+          const dir = url.slice(0, url.lastIndexOf('/') + 1);
+          this.bin(url.replace(/\.(gltf|glb)$/, '.glb.txt')).then((buf) => gl.parse(buf, dir, (g) => { g.scene.traverse((o) => { if (o.isMesh) { o.castShadow = it.opts.shadow !== false; o.receiveShadow = true; } }); ok(g); }, fail)).catch(fail);
+        } else if (it.kind === 'hdr') {
+          this.bin(url + '.txt').then((buf) => {
+            const d = hl.parse(buf);
+            const t = new THREE.DataTexture(d.data, d.width, d.height, THREE.RGBAFormat, d.type);
+            t.colorSpace = THREE.LinearSRGBColorSpace; t.minFilter = t.magFilter = THREE.LinearFilter; t.generateMipmaps = false; t.flipY = true;
+            t.mapping = THREE.EquirectangularReflectionMapping; t.needsUpdate = true; ok(t);
+          }).catch(fail);
+        } else tl.load(url, (t) => { t.colorSpace = it.opts.srgb ? THREE.SRGBColorSpace : THREE.NoColorSpace; t.anisotropy = aniso; t.wrapS = t.wrapT = THREE.RepeatWrapping; ok(t); }, undefined, fail);
       } catch (e) { fail(e); }
     });
     // max. 6 gleichzeitig

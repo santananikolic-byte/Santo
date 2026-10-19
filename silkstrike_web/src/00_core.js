@@ -403,6 +403,9 @@ function daySkyTexture() {
   }, false);
 }
 function applyEnvironment(scene, tod, fogDensity) {
+  // echtes HDR-Panorama (06_env.js), sonst prozeduraler Himmel als Ersatz
+  if (typeof EnvHDR !== 'undefined' && EnvHDR.apply(scene, tod, fogDensity)) return;
+  scene.backgroundIntensity = 1; scene.backgroundBlurriness = 0;
   const day = tod === 'day';
   const sky = day ? daySkyTexture() : skyTexture(tod);
   sky.mapping = THREE.EquirectangularReflectionMapping;

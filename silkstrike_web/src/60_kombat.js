@@ -104,7 +104,17 @@ function buildArena(id, scene, anim) {
   applyEnvironment(scene, A.tod, id === 'subway' ? 0.03 : 0.012);
   const root = new THREE.Group(); scene.add(root);
   const q = Settings.data.quality;
-  const floorMat = {
+  // Foto-Böden (Poly Haven CC0; Boden-UV = 4 m), prozeduraler Ersatz falls Texturen fehlen
+  const photoFloor = {
+    rainRooftop: ['concrete', { color: 0x8a8a90, roughness: 0.36, metal: 0.12 }], // nasser Dachbeton
+    subway: ['tiles', { color: 0xc8d0d2, roughness: 0.6 }],
+    foundry: ['plate', { color: 0x8e8a84, roughness: 0.85, metal: 0.85 }],
+    burningSquare: ['cobble', { color: 0xa89c92, roughness: 0.9 }],
+    riftRealm: ['rock', { color: 0x5e4468, roughness: 0.85 }],
+    bloodTower: ['slab', { color: 0x9a3434, roughness: 0.4, metal: 0.2 }],
+    templeGarden: ['flagstone', { color: 0xf0e8dc }],
+  }[id];
+  const floorMat = (photoFloor && photoMat(photoFloor[0], 4, photoFloor[1])) || {
     rainRooftop: new THREE.MeshStandardMaterial({ map: Tex.concrete(), roughness: 0.3, metalness: 0.15 }),
     subway: new THREE.MeshStandardMaterial({ map: Tex.tiles(), roughness: 0.3 }),
     foundry: new THREE.MeshStandardMaterial({ map: Tex.metal(), roughness: 0.5, metalness: 0.8 }),
@@ -129,7 +139,7 @@ function buildArena(id, scene, anim) {
     for (let k = 0; k < 7; k++) m.box(-18 + k * 6 - 0.4, 0, -6, -18 + k * 6 + 0.4, 7.5, -5.2, 0.25);
     m.box(-4, -0.9, -12.3, 16, 3.2, -7.4, 0.2);
     for (let k = 0; k < 5; k++) { g.box(-2.5 + k * 3.6, 1.2, -7.38, -0.3 + k * 3.6, 2.4, -7.3, 1); }
-    root.add(m.mesh(new THREE.MeshStandardMaterial({ map: Tex.tiles(), roughness: 0.35 })), g.mesh(glowMat(0xb0e6ff, 1.6), false));
+    root.add(m.mesh(photoMat('tiles', 4, { color: 0xd8dee0, roughness: 0.5 }) || new THREE.MeshStandardMaterial({ map: Tex.tiles(), roughness: 0.35 })), g.mesh(glowMat(0xb0e6ff, 1.6), false));
     const tubes = new MeshBuilder(); for (let k = 0; k < 5; k++) { tubes.box(-14 + k * 7 - 1.2, 7.3, -3.1, -14 + k * 7 + 1.2, 7.42, -2.9, 1); point(0xc0fff0, 22, 14, -14 + k * 7, 7, -3, k % 2 === 1); }
     root.add(tubes.mesh(glowMat(0xd0fff4, 5), false));
   } else if (id === 'foundry') {
@@ -201,18 +211,19 @@ function buildArena(id, scene, anim) {
     // Boden: Pflasterweg zum Tempel, Bordsteine, Grasfläche bis zum Horizont
     pv.box(-3, -0.4, -43, 3, 0.02, -16, 0.25);
     for (const sx of [-1, 1]) { st.box(sx > 0 ? 3 : -20.4, -0.4, -16.6, sx > 0 ? 20.4 : -3, 0.16, -16, S); st.box(sx * 20 - (sx > 0 ? 0 : 0.6), -0.4, -16.6, sx * 20 + (sx > 0 ? 0.6 : 0), 0.16, 8, S); }
-    const grassT = templeTex('grass'); grassT.repeat.set(90, 36);
-    const ground = new THREE.Mesh(new THREE.PlaneGeometry(520, 210), new THREE.MeshStandardMaterial({ map: grassT, roughness: 0.95 }));
+    const grassMat = photoMat('grass', [520, 210], { color: 0xdde6cc, roughness: 0.95, normalScale: 0.8 }) || (() => { const grassT = templeTex('grass'); grassT.repeat.set(90, 36); return new THREE.MeshStandardMaterial({ map: grassT, roughness: 0.95 }); })();
+    const ground = new THREE.Mesh(new THREE.PlaneGeometry(520, 210), grassMat);
     ground.rotation.x = -Math.PI / 2; ground.position.set(0, -0.03, -85); ground.receiveShadow = true; root.add(ground);
     // gemalte Bergkette mit Schneekappen weit hinten
     const mt = new THREE.Mesh(new THREE.PlaneGeometry(600, 75), new THREE.MeshBasicMaterial({ map: templeTex('mountains'), transparent: true, depthWrite: false, fog: false }));
-    mt.scale.y = 1.6; mt.position.set(0, 54, -190); root.add(mt);
+    mt.scale.y = 1.6; mt.position.set(0, 54, -190); if (!Assets.hdr(ENV_HDRI.day.path)) root.add(mt); // echte Alpen aus dem HDRI, sonst gemalt
     // rundes Steinpodest mit Bronze-Räucherbecken
     st.cyl(0, 0, -13.5, 4.8, 0.35, 32, S); st.cyl(0, 0.35, -13.5, 4.1, 0.35, 32, S); st.cyl(0, 0.7, -13.5, 3.4, 0.3, 32, S);
     br.cyl(0, 1.0, -13.5, 0.75, 0.25, 12); br.cyl(0, 1.25, -13.5, 1.0, 0.75, 14); br.cyl(0, 2.0, -13.5, 1.15, 0.12, 14); br.cone(0, 2.12, -13.5, 0.9, 0.6, 14); br.cyl(0, 2.7, -13.5, 0.12, 0.3, 8);
     // zwei steinerne Kriegerstatuen mit gesenktem Schwert
     const statue = (cx, cz) => {
       st.box(cx - 1.7, 0, cz - 1.7, cx + 1.7, 0.45, cz + 1.7, S); st.box(cx - 1.35, 0.45, cz - 1.35, cx + 1.35, 1.7, cz + 1.35, S); st.box(cx - 1.5, 1.7, cz - 1.5, cx + 1.5, 1.95, cz + 1.5, S, true);
+      if (propsHave('lion_head')) return; // echter Wächterlöwe statt prozeduraler Figur (62_props.js)
       const Y = 1.95;
       for (const sx of [-1, 1]) {
         st.box(cx + sx * 0.62 - 0.28, Y, cz - 0.35, cx + sx * 0.62 + 0.28, Y + 0.32, cz + 0.6, S);
@@ -348,6 +359,7 @@ function buildArena(id, scene, anim) {
     const stoneMat = new THREE.MeshStandardMaterial({ map: templeTex('stone'), color: 0xd6d0c4, roughness: 0.92 });
     root.add(roofs, st.mesh(stoneMat), red.mesh(pbr(0xa3221a, 0.55, 0)), pl.mesh(pbr(0xe9dfca, 0.85, 0)), gold.mesh(pbr(0xd4a640, 0.35, 0.85)), tk.mesh(pbr(0x3a2924, 0.9, 0)), br.mesh(pbr(0x6b5636, 0.45, 0.8)), pv.mesh(floorMat, false), g.mesh(glowMat(0xffb35a, 2.2), false));
   }
+  propsForArena(id, root, anim, q); // echte Requisiten (62_props.js)
   const key = new THREE.DirectionalLight(0xc8d0ff, 1.8);
   key.position.set(6, 12, 9); key.castShadow = q !== 'performance';
   key.shadow.mapSize.set(1024, 1024); const sc = key.shadow.camera; sc.left = -12; sc.right = 12; sc.top = 10; sc.bottom = -4; key.shadow.bias = -0.0006;
