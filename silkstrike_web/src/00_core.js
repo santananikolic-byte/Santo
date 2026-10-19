@@ -144,7 +144,7 @@ const Input = {
 };
 // Tastatur (Desktop/iPad mit Tastatur)
 const KEYMAP = { Space: ['jump'], KeyJ: ['attack', 'punch'], KeyK: ['kick', 'web'], KeyL: ['block'], ShiftLeft: ['web', 'block'],
-  KeyQ: ['zip'], KeyE: ['interact', 'execute'], KeyU: ['special1'], KeyI: ['special2'], KeyO: ['brutal'], KeyF: ['execute'], Escape: ['pause'], Enter: ['skip'] };
+  KeyQ: ['zip'], KeyE: ['interact', 'execute'], KeyU: ['special1'], KeyI: ['special2'], KeyO: ['brutal'], KeyH: ['throw'], KeyG: ['ex'], KeyF: ['execute'], Escape: ['pause'], Enter: ['skip'] };
 const keysHeld = new Set();
 function keyMove() {
   let x = 0, y = 0;

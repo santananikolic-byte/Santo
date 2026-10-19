@@ -3,7 +3,56 @@
 // =====================================================================
 const BUILD = { lean: [0.92, 0.95], athletic: [1, 1], heavy: [1.25, 1.12], giant: [1.38, 1.2] };
 
+// ---- Anzüge des Helden: Farben + Körpermaterial (phys = MeshPhysicalMaterial-Einstellungen für den Skin-Körper)
+const SUITS = {
+  klassik: { name: 'Klassik', desc: 'Roter Kampfstoff mit schwarzen Netzbahnen – das Original.', unlock: null, look: {} },
+  nachtseide: { name: 'Nachtseide', desc: 'Lebende Schwarzseide: spiegelglatt, violetter Schimmer, glühende Linsen.', unlock: { chapter: 2, text: 'Story: Kapitel 2 erreichen' },
+    look: { primary: '#07060B', secondary: '#120C1E', glow: '#A55BFF', metal: 0.2, rough: 0.12 },
+    phys: { rough: 0.16, metal: 0.18, clearcoat: 1, clearcoatRoughness: 0.04, iridescence: 0.85, iridescenceIOR: 1.6, iridescenceThicknessRange: [180, 520], sheen: 0.6, sheenColor: '#7A3DFF', sheenRoughness: 0.35 } },
+  panzer: { name: 'Panzer', desc: 'Dunkle Stahlplatten über Kevlar – schwer, kalt, glänzend.', unlock: { chapter: 4, text: 'Story: Kapitel 4 erreichen' },
+    look: { primary: '#3A3E45', secondary: '#15171B', glow: '#FFB347', metal: 0.85, rough: 0.22 },
+    phys: { rough: 0.24, metal: 0.92, clearcoat: 0.45, clearcoatRoughness: 0.18, normalScale: 1.4 } },
+  stealth: { name: 'Stealth', desc: 'Mattgrauer Tarnstoff mit schwach grün glühenden Leitbahnen.', unlock: { seals: 10, text: '10 Blutsiegel sammeln' },
+    look: { primary: '#2B2E31', secondary: '#141618', glow: '#5CFF9A', metal: 0.05, rough: 0.9 },
+    phys: { rough: 0.92, metal: 0.04, sheen: 0.35, sheenColor: '#46524A', sheenRoughness: 0.8, lines: '#38FF8A', linesIntensity: 1.1 } },
+  gold: { name: 'Gold', desc: 'Der Anzug des Champions – poliertes Gold für den Sieger des Blutturniers.', unlock: { done: true, text: 'Story abschließen' },
+    look: { primary: '#C8961E', secondary: '#3A2A10', glow: '#FFF1B8', metal: 1.0, rough: 0.2 },
+    phys: { rough: 0.2, metal: 1.0, clearcoat: 0.6, clearcoatRoughness: 0.08, normalScale: 0.6 } },
+};
+function suitUnlocked(id) {
+  const s = SUITS[id]; if (!s) return false; const u = s.unlock;
+  if (!u) return true;
+  if (u.done) return !!Progress.done;
+  if (u.chapter) return Progress.done || Progress.chapter >= u.chapter;
+  if (u.seals) return Progress.done || Progress.seals.length >= u.seals;
+  return true;
+}
+function currentSuit() { const id = Settings.data.suit; return SUITS[id] && suitUnlocked(id) ? id : 'klassik'; }
+// Physikalisches Körpermaterial für den Skin (Klarlack/Schimmer/Irisieren); wird von attachSkin aufgerufen
+function suitMaterial(rig, L, nor, ro) {
+  const P = L.suit.phys, perf = rig.quality === 'performance';
+  const m = new THREE.MeshPhysicalMaterial({ color: 0xffffff, roughness: P.rough, metalness: P.metal });
+  if (P.clearcoat) { m.clearcoat = P.clearcoat; m.clearcoatRoughness = P.clearcoatRoughness || 0.1; }
+  if (P.sheen && !perf) { m.sheen = P.sheen; m.sheenColor = new THREE.Color(P.sheenColor || '#ffffff'); m.sheenRoughness = P.sheenRoughness || 0.5; }
+  if (P.iridescence && !perf) { m.iridescence = P.iridescence; m.iridescenceIOR = P.iridescenceIOR || 1.4; m.iridescenceThicknessRange = P.iridescenceThicknessRange || [100, 400]; }
+  if (nor) { m.normalMap = nor.clone(); m.normalMap.repeat.set(6, 6); m.normalMap.needsUpdate = true; const k = 0.9 * (P.normalScale || 1); m.normalScale.set(k, k); }
+  if (ro && P.rough > 0.5) { m.roughnessMap = ro.clone(); m.roughnessMap.repeat.set(6, 6); m.roughnessMap.needsUpdate = true; }
+  if (P.lines) { // feine Leuchtbahnen als Emissive-Map
+    m.emissiveMap = canvasTex('suitLines', 256, 256, (g, w, h) => {
+      g.fillStyle = '#000'; g.fillRect(0, 0, w, h); g.strokeStyle = '#fff'; g.lineWidth = 2; g.shadowColor = '#fff'; g.shadowBlur = 4;
+      g.beginPath(); g.moveTo(w * 0.3, 0); g.lineTo(w * 0.3, h * 0.45); g.lineTo(w * 0.62, h * 0.62); g.lineTo(w * 0.62, h); g.moveTo(0, h * 0.2); g.lineTo(w, h * 0.2); g.moveTo(w * 0.85, h * 0.2); g.lineTo(w * 0.85, h * 0.8); g.stroke();
+    });
+    m.emissiveMap.repeat.set(3, 3); m.emissive = new THREE.Color(P.lines); m.emissiveIntensity = P.linesIntensity || 1;
+  }
+  m.userData.base = { color: m.color.clone(), rough: m.roughness, metal: m.metalness, emissive: m.emissive.clone(), ei: m.emissiveIntensity };
+  rig.mats.push(m);
+  return m;
+}
 function lookFor(cast) {
+  if (cast === 'silkstrike') { // gewählter Anzug überschreibt Farben/Material
+    const id = currentSuit(), S = SUITS[id], base = ROSTER.fighters.silkstrike.look;
+    return S.phys || Object.keys(S.look).length ? Object.assign({}, base, S.look, { suit: { id, phys: S.phys || null } }) : base;
+  }
   if (cast === 'darksuit') return ROSTER.cast.heroDarkSuitLook;
   if (cast === 'lena') return ROSTER.cast.lenaLook;
   if (cast === 'morgrim') return ROSTER.cast.morgrimLook;

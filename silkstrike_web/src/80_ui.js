@@ -95,7 +95,7 @@ const UI = {
     if (!on) return;
     $('k-n1').textContent = p1.name.toUpperCase(); $('k-n2').textContent = p2.name.toUpperCase();
     $('btn-s1').querySelector('span').textContent = p1.specials[0].name; $('btn-s2').querySelector('span').textContent = p1.specials[1].name;
-    this.kombatControls(false); this.executePrompt(false);
+    this.kHits = [-1, -1]; this.kombatControls(false); this.executePrompt(false);
   },
   kombatCinematic(on) { $('hud-kombat').classList.toggle('cine', on); },
   kombatControls(on) { $('k-controls').hidden = !on; if (!on) Input.reset(); },
@@ -113,6 +113,20 @@ const UI = {
     if ($('k-r2').innerHTML !== d2) $('k-r2').innerHTML = d2;
     $('btn-s1').classList.toggle('dim', !s.s1); $('btn-s2').classList.toggle('dim', !s.s2);
     $('btn-brutal').hidden = !s.brutal;
+    const ex = $('btn-ex'); ex.classList.toggle('dim', !s.ex && !s.exOn); ex.classList.toggle('armed', !!s.exOn);
+    this.kombatHits(0, s.c1 || 0); this.kombatHits(1, s.c2 || 0);
+  },
+  // kleiner Trefferzähler je Seite (nur bei Änderung ins DOM schreiben)
+  kombatHits(side, n) {
+    const k = this.kHits || (this.kHits = [-1, -1]); if (k[side] === n) return;
+    const e = $(side ? 'k-c2' : 'k-c1'); if (n >= 2) e.innerHTML = '<b>' + n + '</b>TREFFER'; e.classList.toggle('show', n >= 2);
+    if (n >= 2 && n > k[side]) { e.classList.remove('pop'); void e.offsetWidth; e.classList.add('pop'); }
+    k[side] = n;
+  },
+  // „EX“-Blitz über dem Kämpfer, der die Leiste einsetzt
+  kombatEx(side, name) {
+    const e = $('k-ex'); e.innerHTML = 'EX<small>' + esc(name || '') + '</small>';
+    e.className = side ? 'r' : 'l'; void e.offsetWidth; e.classList.add('show');
   },
   // ---- Zwischensequenz
   cutscene(on, title) { $('hud-cut').hidden = !on; this.subtitle(null); this.cutTitle(on ? title : null); if (on) this.fade(1); else this.fade(0); },
@@ -157,6 +171,23 @@ const UI = {
     ar.value = Flow.vs.arena; ar.onchange = () => { Flow.vs.arena = ar.value; };
     const df = $('fs-diff'); df.value = Flow.vs.diff; df.onchange = () => { Flow.vs.diff = df.value; };
   },
+  buildSuits() {
+    const list = $('suit-list'); list.innerHTML = ''; const cur = currentSuit();
+    Object.keys(SUITS).forEach((id) => {
+      const S = SUITS[id], L = Object.assign({}, ROSTER.fighters.silkstrike.look, S.look), open = suitUnlocked(id);
+      const card = el('button', 'suit' + (id === cur ? ' sel' : '') + (open ? '' : ' locked'));
+      card.style.setProperty('--sig', L.primary); card.style.setProperty('--sec', L.secondary); card.style.setProperty('--glow', L.glow);
+      card.innerHTML = `<div class="orb"></div><h3>${esc(S.name)}</h3><p>${esc(S.desc)}</p><em>${open ? (id === cur ? 'AUSGERÜSTET' : 'Antippen zum Anlegen') : 'GESPERRT · ' + esc(S.unlock.text)}</em>`;
+      card.onclick = () => {
+        if (!open) { Audio.play('ui', 0.5); UI.toast('Gesperrt – ' + S.unlock.text); return; }
+        if (id === currentSuit()) return;
+        Audio.play('uiConfirm'); Haptic(12); Settings.data.suit = id; Settings.save();
+        const h = Game.active && Game.active.hero; if (h && h.cast === 'silkstrike') h.setLook('silkstrike');
+        this.buildSuits();
+      };
+      list.appendChild(card);
+    });
+  },
   buildSettings() {
     const d = Settings.data;
     const bind = (id, key, num) => { const e = $(id); if (e.type === 'checkbox') e.checked = d[key]; else e.value = d[key]; e.onchange = () => { d[key] = e.type === 'checkbox' ? e.checked : (num ? parseFloat(e.value) : e.value); Settings.save(); Audio.apply(); if (key === 'quality') applyQuality(); }; };
@@ -183,7 +214,8 @@ window.UI = UI;
 // ---------------------------------------------------------------- Spielablauf
 const TIPS = ['Halte NETZ gedrückt, um zu schwingen – lass im tiefsten Punkt los, um am weitesten zu fliegen.', 'ZIP zieht dich blitzschnell dorthin, wohin die Kamera zeigt.',
   'Blocken fängt fast den ganzen Schaden ab – Würfe brechen aber jede Deckung.', 'Ist deine Brutal-Leiste voll, erscheint der BRUTAL-Knopf.', 'Bei „VOLLENDE ES!“ bleiben dir 6 Sekunden für die Exekution.',
-  'Auf den Dächern von Neo-Haven liegen 40 Blutsiegel versteckt.', 'Ducken + Schlag ist ein Uppercut, Ducken + Tritt ein Feger.', 'Schlag, Schlag, Tritt ist die Dreierkette.'];
+  'Auf den Dächern von Neo-Haven liegen 40 Blutsiegel versteckt.', 'Ducken + LEICHT ist ein Uppercut, Zurück + SCHWER ein Feger, Vor + LEICHT ein Überkopf-Hieb.', 'LEICHT, LEICHT, SCHWER schleudert den Gegner in die Luft.',
+  'WURF bricht jede Deckung – drück selbst sofort WURF, um dich zu befreien.', 'Ab einem Drittel Leiste macht EX deinen nächsten Trick stärker.'];
 const Flow = {
   mode: 'story', ci: 0, lastSetup: null, unlocked: null,
   vs: { p1: 'silkstrike', p2: 'vex', arena: 'templeGarden', diff: 'normal' },
@@ -208,6 +240,7 @@ const Flow = {
     else if (screen === 'settings') { this.settingsFromPause = Game.paused; $('pause').hidden = true; UI.buildSettings(); UI.show('settings'); }
     else if (screen === 'settingsBack') { if (this.settingsFromPause) { UI.show('none'); $('pause').hidden = false; } else { UI.show('title'); this.refreshTitle(); } this.settingsFromPause = false; }
     else if (screen === 'credits') { toMenu(); $('credits-roll').innerHTML = STORY.credits.map((l, i) => `<p class="${i === 0 ? 'big' : ''}">${esc(l) || '&nbsp;'}</p>`).join(''); UI.show('credits'); }
+    else if (screen === 'suits') { toMenu(); Game.paused = false; $('pause').hidden = true; UI.buildSuits(); UI.show('suits'); }
     else if (screen === 'free') this.free();
     else if (screen === 'continue') this.chapter(Math.min(Progress.chapter, STORY.chapters.length - 1));
     else if (screen === 'versus') this.versus();

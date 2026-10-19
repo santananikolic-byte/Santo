@@ -27,6 +27,12 @@ function goldenSky() {
     }
   }, false);
 }
+// Netzflügel: ein Mesh (12 Ecken) zwischen Arm und Bein, wird beim Gleiten pro Frame an die Gelenke gelegt
+function webWings() {
+  const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(36), 3));
+  const m = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ color: 0xdde3ee, roughness: 0.55, metalness: 0, transparent: true, opacity: 0.5, side: THREE.DoubleSide, depthWrite: false }));
+  m.frustumCulled = false; m.visible = false; return m;
+}
 class WorldController {
   constructor(opts) {
     this.opts = opts; // { chapter, dark, onObjective }
@@ -76,6 +82,8 @@ class WorldController {
     if (this.rain) this.scene.add(this.rain.lines);
     this.pos = new V3(); this.vel = new V3(); this.yaw = 0; this.state = 'air'; this.health = 1;
     this.anchor = new V3(); this.rope = 20; this.wallN = new V3(); this.zipT = new V3();
+    this.tethers = []; this.tetherCd = 0; this.swingT = 0; this.gliding = false; this.glideK = 0; this.airT = 0;
+    this.wings = webWings(); this.scene.add(this.wings);
     this.camYaw = 0; this.camPitch = 0.25; this.camPos = new V3(); this.camLook = new V3(); this.fov = 62; this.lookIdle = 10;
     this.hitStop = 0; this.attackCd = 0; this.combo = 0; this.comboT = 0; this.flip = false; this.lastHurt = 9; this.defeated = false;
     this.thugs = []; this.spawnT = 2; this.usedSpawn = new Set();
@@ -135,16 +143,94 @@ class WorldController {
     if (Input.consume('pause')) UI.pause(true);
   }
   startSwing() {
-    const a = this.city.anchor(this.pos.clone().add(new V3(0, 1.5, 0)), this.vel, this.camForward());
+    const from = this.pos.clone().add(new V3(0, 1.5, 0));
+    const a = this.pickAnchor(from) || this.city.anchor(from, this.vel, this.camForward());
     if (!a) { Audio.play('ui', 0.4); return; }
-    this.anchor.copy(a); this.rope = Math.max(8, a.distanceTo(this.pos) * 0.92); this.state = 'swing';
+    this.anchor.copy(a); this.tethers.length = 0; this.tetherCd = 0.15; this.swingT = 0; this.gliding = false;
+    this.rope = Math.max(7, a.distanceTo(this.pos) * 0.96); this.state = 'swing';
     this.hero.play('swing'); Audio.play('webShoot'); Haptic(10);
-    if (this.vel.y < -4) this.vel.y *= 0.6;
+    if (this.vel.y < -4) this.vel.y *= 0.7;
+  }
+  // Ankerwahl: Dachkanten/Ecken voraus in Reiserichtung, mit freier Sichtlinie
+  pickAnchor(p) {
+    const fa = this.camForward(), fv = new V3(this.vel.x, 0, this.vel.z), hs = fv.length();
+    if (hs > 2) fv.divideScalar(hs); else fv.copy(fa);
+    const dir = fa.clone().multiplyScalar(0.5).addScaledVector(fv, hs > 6 ? 0.6 : 0.25), md = this.moveDir();
+    if (md.lengthSq() > 0.04 && Input.move.y > -0.3) dir.addScaledVector(md.normalize(), 0.35);
+    dir.y = 0; if (dir.lengthSq() < 1e-4) dir.copy(fa); dir.normalize();
+    const ideal = clamp(16 + hs * 0.45, 16, 34), probe = p.clone().addScaledVector(dir, ideal), cands = [];
+    for (const b of this.city.near(probe.x, probe.z, 50)) {
+      const top = b.y1 <= p.y + 34, y = top ? b.y1 + 0.2 : p.y + 34;
+      if (y < p.y + 5) continue;
+      const cx = (b.x0 + b.x1) / 2, cz = (b.z0 + b.z1) / 2;
+      const inP = probe.x > b.x0 && probe.x < b.x1 && probe.z > b.z0 && probe.z < b.z1;
+      const pts = [inP ? [clamp(p.x, b.x0, b.x1), clamp(p.z, b.z0, b.z1)] : [clamp(probe.x, b.x0, b.x1), clamp(probe.z, b.z0, b.z1)], [b.x0, b.z0], [b.x1, b.z0], [b.x0, b.z1], [b.x1, b.z1]];
+      for (const [px, pz] of pts) {
+        const ox = px - cx, oz = pz - cz, ol = Math.hypot(ox, oz) || 1;
+        const c = new V3(px + ox / ol * 0.4, y, pz + oz / ol * 0.4);
+        const dx = c.x - p.x, dz = c.z - p.z, dh = Math.hypot(dx, dz), d = c.distanceTo(p);
+        if (d < 9 || d > 70 || dh < 3) continue;
+        const fwd = (dx * dir.x + dz * dir.z) / dh;
+        if (fwd < 0.2) continue;
+        const hgt = c.y - p.y;
+        cands.push({ c, d, sc: fwd * 2.4 - Math.abs(dh - ideal) / 22 - Math.abs(hgt - 18) / 30 + (top ? 0.25 : 0) });
+      }
+    }
+    cands.sort((a, b) => b.sc - a.sc);
+    for (let i = 0; i < Math.min(6, cands.length); i++) {
+      const { c, d } = cands[i];
+      const hit = this.city.raycast(p, c.clone().sub(p), d);
+      if (!hit || hit.distanceTo(p) > d - 1.2) return c;
+    }
+    return cands.length ? cands[0].c : null;
+  }
+  // Eck-Umlenkung: läuft das Seil durch ein Gebäude, wird an Kante/Ecke neu verankert (und beim Zurückschwingen gelöst)
+  tether(dt) {
+    this.tetherCd -= dt; if (this.tetherCd > 0) return;
+    const hand = this.pos.clone().add(new V3(0, 1.4, 0));
+    if (this.tethers.length) {
+      const prev = this.tethers[this.tethers.length - 1], to = hand.clone().sub(prev), len = to.length();
+      if (!this.city.raycast(prev, to, Math.max(0.5, len - 0.8))) { this.anchor.copy(prev); this.tethers.pop(); this.rope = Math.max(6, this.pos.distanceTo(prev) * 0.98); this.tetherCd = 0.3; return; }
+    }
+    if (this.tethers.length >= 3) return;
+    const to = hand.clone().sub(this.anchor), len = to.length();
+    if (len < 4) return;
+    const hit = this.city.raycast(this.anchor, to, len - 0.8);
+    if (!hit || hit.y < 0.3) return;
+    let box = null; const e = 0.08;
+    for (const b of this.city.near(hit.x, hit.z, 1)) if (hit.x >= b.x0 - e && hit.x <= b.x1 + e && hit.z >= b.z0 - e && hit.z <= b.z1 + e && hit.y >= b.y0 - e && hit.y <= b.y1 + e) { box = b; break; }
+    if (!box) return;
+    const cx = (box.x0 + box.x1) / 2, cz = (box.z0 + box.z1) / 2, w = new V3();
+    if (hit.y > box.y1 - 0.1) { // über die Dachkante
+      if (hand.x > box.x0 && hand.x < box.x1 && hand.z > box.z0 && hand.z < box.z1) return;
+      w.set(clamp(hand.x, box.x0, box.x1), box.y1 + 0.25, clamp(hand.z, box.z0, box.z1));
+    } else { // um die Hausecke: Ecke, die der Seillinie am nächsten liegt
+      const ax = this.anchor.x, az = this.anchor.z, sx = hand.x - ax, sz = hand.z - az, sl = Math.hypot(sx, sz) || 1;
+      let bd = 1e9, bt = 0;
+      for (const [kx, kz] of [[box.x0, box.z0], [box.x1, box.z0], [box.x0, box.z1], [box.x1, box.z1]]) {
+        const t = clamp(((kx - ax) * sx + (kz - az) * sz) / (sl * sl), 0, 1), dd = Math.abs((kx - ax) * sz - (kz - az) * sx) / sl;
+        if (dd < bd) { bd = dd; bt = t; w.set(kx, 0, kz); }
+      }
+      w.y = clamp(lerp(this.anchor.y, hand.y, bt), box.y0 + 1, box.y1 - 0.2);
+    }
+    const ox = w.x - cx, oz = w.z - cz, ol = Math.hypot(ox, oz) || 1; w.x += ox / ol * 0.45; w.z += oz / ol * 0.45;
+    if (w.distanceTo(this.anchor) < 1.5 || w.distanceTo(this.pos) < 3) return;
+    this.tethers.push(this.anchor.clone()); this.anchor.copy(w);
+    this.rope = Math.max(5, this.pos.distanceTo(w) * 0.98); this.tetherCd = 0.25;
+    Audio.play('webShoot', 0.35); Haptic(6);
   }
   release(boost) {
     if (this.state !== 'swing') return;
-    this.state = 'air'; this.web.hide();
-    if (boost) { const h = new V3(this.vel.x, 0, this.vel.z); if (h.lengthSq() > 0.01) h.normalize(); else h.copy(this.camForward()); this.vel.addScaledVector(h, 4).add(new V3(0, 5, 0)); }
+    this.state = 'air'; this.web.hide(); this.web.mesh.material.color.set(0xf4f6ff); this.tethers.length = 0; this.airT = 0;
+    if (boost) {
+      // Schleuder: langes Halten lädt auf; nach dem Tiefpunkt (steigend) gibt es den vollen Schub nach vorn/oben
+      const h = new V3(this.vel.x, 0, this.vel.z); if (h.lengthSq() > 0.01) h.normalize(); else h.copy(this.camForward());
+      const charge = clamp((this.swingT - 0.4) / 1.4, 0, 1), rising = this.vel.y > -3;
+      this.vel.addScaledVector(h, (rising ? 4 : 1.5) + charge * (rising ? 9 : 3)); this.vel.y += (rising ? 5 : 2) + charge * (rising ? 7 : 2);
+      if (charge > 0.5 && rising) { this.fov += 9 * charge; this.shake.add(0.12 * charge); Haptic(18); FX.burst('webHit', this.hero.worldPos('rHand'), 0.6); }
+      const sp = this.vel.length(); if (sp > 54) this.vel.multiplyScalar(54 / sp);
+    }
+    this.swingT = 0;
     Audio.play('whoosh', 0.7);
     this.hero.play(this.vel.y > 0 ? 'jump' : 'fall', null, true);
   }
@@ -162,11 +248,30 @@ class WorldController {
       this.vel.x = damp(this.vel.x, dir.x * sp, 10, dt); this.vel.z = damp(this.vel.z, dir.z * sp, 10, dt); this.vel.y = 0;
       if (m > 0.1) this.yaw = dampAngle(this.yaw, yawOf(dir.x, dir.z), 12, dt);
     } else if (this.state === 'air') {
-      this.vel.y += g * dt; this.vel.addScaledVector(dir, 9 * dt);
-      if (Math.hypot(this.vel.x, this.vel.z) > 1) this.yaw = dampAngle(this.yaw, yawOf(this.vel.x, this.vel.z), 4, dt);
+      this.airT += dt;
+      const glide = Input.isDown('jump') && this.vel.y < 1 && this.airT > 0.15;
+      if (glide && !this.gliding) { Audio.play('whoosh', 0.45); Haptic(8); }
+      this.gliding = glide;
+      if (glide) this.glideStep(dt);
+      else {
+        const dive = (Input.move.y < -0.6 || this.camPitch > 0.85) && this.vel.y < 0; // Sturzflug: schneller fallen
+        this.vel.y += g * (dive ? 1.5 : 1) * dt; this.vel.addScaledVector(dir, (dive ? 4 : 9) * dt);
+        if (Math.hypot(this.vel.x, this.vel.z) > 1) this.yaw = dampAngle(this.yaw, yawOf(this.vel.x, this.vel.z), 4, dt);
+      }
     } else if (this.state === 'swing') {
-      this.vel.y += g * dt; this.vel.addScaledVector(dir, 13 * dt).addScaledVector(this.camForward(), 4 * dt);
-      this.rope = Math.max(8, this.rope - 1.5 * dt);
+      this.swingT += dt;
+      const toA = this.anchor.clone().sub(this.pos), L = toA.length(), u = toA.divideScalar(Math.max(L, 0.001));
+      const dive = (Input.move.y < -0.55 || this.camPitch > 0.8) && this.vel.y < 2; // Sturz im Schwung = Tempo
+      this.vel.y += g * (dive ? 1.7 : 1.1) * dt;
+      const f = this.camForward(), side = new V3(-f.z, 0, f.x).multiplyScalar(Input.move.x);
+      this.vel.addScaledVector(dive ? side : dir, 12 * dt).addScaledVector(f, 3 * dt);
+      // Seilspannung zieht den Helden den Bogen entlang (unterhalb des Ankers)
+      const below = clamp(u.y, 0, 1), tan = this.vel.clone().addScaledVector(u, -this.vel.dot(u)), tl = tan.length();
+      if (tl > 1 && L >= this.rope - 0.3) this.vel.addScaledVector(tan, (5 + 4 * Math.max(0, Input.move.y)) * below * below * dt / tl);
+      this.vel.multiplyScalar(1 - 0.05 * dt);
+      const ss = this.vel.length(); if (ss > 48) this.vel.multiplyScalar(48 / ss);
+      this.rope = Math.max(7, this.rope - (dive ? 0.5 : 1.4) * dt);
+      if (L < this.rope) this.rope = Math.max(7, L, this.rope - 9 * dt); // Durchhang einholen: Seil bleibt straff
       if (Math.hypot(this.vel.x, this.vel.z) > 1) this.yaw = dampAngle(this.yaw, yawOf(this.vel.x, this.vel.z), 6, dt);
     } else if (this.state === 'wall') {
       const up = Input.move.y < -0.5 ? -4 : 11;
@@ -182,9 +287,13 @@ class WorldController {
     let ground = false, wall = false; const wn = new V3(); const fall = this.vel.y;
     for (let k = 0; k < steps; k++) {
       this.pos.addScaledVector(this.vel, h);
-      if (this.state === 'swing') {
+      if (this.state === 'swing') { // elastisches Seil: Feder + Dämpfung, harte Grenze bei 1,3 m Dehnung
         const d = this.pos.clone().sub(this.anchor), len = d.length();
-        if (len > this.rope && len > 0.001) { d.divideScalar(len); this.pos.copy(this.anchor).addScaledVector(d, this.rope); const vr = this.vel.dot(d); if (vr > 0) this.vel.addScaledVector(d, -vr); }
+        if (len > this.rope && len > 0.001) {
+          d.divideScalar(len); const st = len - this.rope, vr = this.vel.dot(d);
+          this.vel.addScaledVector(d, -(st * 55 + vr * (vr > 0 ? 7 : 2.5)) * h);
+          if (st > 1.3) { this.pos.copy(this.anchor).addScaledVector(d, this.rope + 1.3); const v2 = this.vel.dot(d); if (v2 > 0) this.vel.addScaledVector(d, -v2); }
+        }
       }
       const info = this.city.collide(this.pos, this.vel, 0.45, 1.8);
       if (info.ground) ground = true;
@@ -201,6 +310,7 @@ class WorldController {
         if (hv.dot(wn.clone().negate()) > 0.3 || dir.dot(wn.clone().negate()) > 0.3) { if (this.state === 'swing') this.release(false); this.state = 'wall'; this.wallN.copy(wn); this.hero.play('wallRun'); }
       }
       if (this.state === 'swing' && this.pos.y > this.anchor.y - 1.5) this.release(true);
+      if (this.state === 'swing') this.tether(dt);
     } else if (this.state === 'wall') {
       const probe = this.pos.clone().addScaledVector(this.wallN, -0.25), pv = new V3();
       const info = this.city.collide(probe, pv, 0.45, 1.8);
@@ -209,7 +319,21 @@ class WorldController {
     } else if (this.state === 'ground' && !ground) {
       if (this.pos.y - this.city.surface(this.pos) > 0.35) { this.state = 'air'; this.hero.play('fall'); }
     }
+    if (this.state !== 'air') { this.gliding = false; this.airT = 0; }
     if (this.pos.y < -5 || !isFinite(this.pos.x)) this.respawn();
+  }
+  // Netzflügel: langsames Sinken, hohes Vorwärtstempo, lenkbar (Stick seitlich = Kurve, zurück = Sturzflug)
+  glideStep(dt) {
+    const hv = new V3(this.vel.x, 0, this.vel.z); let hs = hv.length();
+    let head = hs > 1 ? yawOf(hv.x, hv.z) : this.yaw;
+    head = wrapAngle(head - Input.move.x * 1.9 * dt);
+    const dive = Input.move.y < -0.55 || this.camPitch > 0.85, push = Input.move.y > 0.5;
+    const sink = dive ? -12 : -3.2, want = dive ? 40 : push ? 30 : 26;
+    const fallExcess = Math.max(0, sink - this.vel.y); // Fallenergie in Vortrieb umwandeln
+    this.vel.y = damp(this.vel.y, sink, dive ? 1.6 : 2.6, dt);
+    hs = Math.min(44, damp(hs, want, 0.9, dt) + fallExcess * 0.9 * dt);
+    this.vel.x = Math.sin(head) * hs; this.vel.z = Math.cos(head) * hs;
+    this.yaw = dampAngle(this.yaw, head, 8, dt);
   }
   arriveZip() {
     this.web.hide();
@@ -304,17 +428,28 @@ class WorldController {
       const tilt = new THREE.Quaternion().setFromUnitVectors(new V3(0, 1, 0), new V3(0, 1, 0).multiplyScalar(0.35).add(up.multiplyScalar(0.65)).normalize());
       H.root.quaternion.copy(tilt).multiply(new THREE.Quaternion().setFromAxisAngle(new V3(0, 1, 0), this.yaw));
       this.web.set(H.worldPos('rHand'), this.anchor);
+      const ch = clamp((this.swingT - 0.4) / 1.4, 0, 1); this.web.mesh.material.color.setRGB(0.96, 0.96 - ch * 0.18, 1 - ch * 0.62); // Schleuder-Ladung: Netz wird golden
     } else if (this.state === 'zip') {
       H.root.quaternion.setFromAxisAngle(new V3(0, 1, 0), yawOf(this.zipT.x - this.pos.x, this.zipT.z - this.pos.z));
       this.web.set(H.worldPos('rHand'), this.zipT);
     } else H.root.quaternion.setFromAxisAngle(new V3(0, 1, 0), this.yaw);
+    this.glideK = damp(this.glideK, this.gliding && this.state === 'air' ? 1 : 0, 6, dt);
+    if (this.glideK > 0.01 && this.state === 'air') { // Gleitlage: Körper waagerecht, in Kurven geneigt, Drehpunkt Hüfte
+      const q = new THREE.Quaternion().setFromAxisAngle(new V3(0, 1, 0), this.yaw)
+        .multiply(new THREE.Quaternion().setFromAxisAngle(new V3(0, 0, 1), Input.move.x * 0.45 * this.glideK))
+        .multiply(new THREE.Quaternion().setFromAxisAngle(new V3(1, 0, 0), 1.25 * this.glideK));
+      H.root.quaternion.copy(q);
+      const hip = new V3(0, 0.98, 0); H.root.position.add(hip).sub(hip.clone().applyQuaternion(q));
+    }
     const hs = Math.hypot(this.vel.x, this.vel.z);
     const one = ['jump', 'land', 'punch', 'kick', 'uppercut', 'webShoot', 'zip', 'hitHigh', 'knockdown'].includes(H.clip) && !H.finished;
     if (this.state === 'ground' && !one) { const w = hs < 0.6 ? (this.nearestThug(8) ? 'fightIdle' : 'idle') : (hs < 11 ? 'run' : 'sprint'); if (H.clip !== w) H.play(w, null, false, 0.15); }
+    else if (this.state === 'air' && this.gliding) { if (H.clip !== 'dive') H.play('dive', null, false, 0.25); }
     else if (this.state === 'air' && !one) { const w = this.vel.y < -16 ? 'dive' : 'fall'; if (H.clip !== w) H.play(w, null, false, 0.2); }
     else if (this.state === 'swing' && H.clip !== 'swing') H.play('swing');
     else if (this.state === 'wall' && H.clip !== 'wallRun') H.play('wallRun');
     H.update(dt);
+    this.updateWings();
     // Kamera
     const look = Input.takeLook(), k = 0.005 * Settings.data.sens;
     if (look.x || look.y) { this.camYaw = wrapAngle(this.camYaw - look.x * k); this.camPitch = clamp(this.camPitch + look.y * k * 0.8, -0.5, 1.2); this.lookIdle = 0; }
@@ -340,6 +475,18 @@ class WorldController {
     this.key.position.copy(this.pos).addScaledVector(this.sunDir, 220); this.key.target.position.copy(this.pos);
     if (this.sun) this.sun.position.copy(this.camera.position).addScaledVector(this.sunDir, 1900);
     for (const c of this.crystals) c.m.rotation.y += dt * 2.4;
+  }
+  updateWings() {
+    const W = this.wings, on = this.glideK > 0.3 && this.state === 'air';
+    W.visible = on; if (!on) return;
+    const H = this.hero, P = W.geometry.attributes.position, v = new V3();
+    let i = 0;
+    for (const sd of ['l', 'r']) {
+      const a = H.worldPos(sd + 'Upper'), b = H.worldPos(sd + 'Hand'), c = H.worldPos(sd + 'Foot'), d = H.worldPos(sd + 'Thigh');
+      for (const q of [a, b, c, a, c, d]) { v.copy(q); P.setXYZ(i++, v.x, v.y, v.z); }
+    }
+    P.needsUpdate = true; W.geometry.computeVertexNormals(); W.geometry.computeBoundingSphere();
+    W.material.opacity = 0.5 * clamp((this.glideK - 0.3) / 0.5, 0, 1);
   }
   objectiveCheck() {
     if (!this.objective) return;

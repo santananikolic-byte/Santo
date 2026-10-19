@@ -70,6 +70,18 @@ select { background: var(--ink-2); color: #fff; border: 1px solid rgba(255,255,2
 .settings-grid label { display: flex; justify-content: space-between; align-items: center; gap: 10px; font-size: 16px; }
 .settings-grid input[type=range] { width: 50%; }
 .settings-grid .note { font-size: 13px; color: rgba(215,217,226,0.6); margin: 0; }
+/* Anzüge */
+#suits { justify-content: flex-end; background: linear-gradient(0deg, rgba(7,6,10,0.92) 0%, rgba(7,6,10,0.55) 45%, rgba(7,6,10,0.05) 75%, rgba(7,6,10,0.6) 100%); }
+#suits .panel-head { margin-bottom: auto; }
+#suit-list { display: flex; gap: 10px; overflow-x: auto; padding-bottom: 6px; touch-action: pan-x; width: 100%; }
+.suit { flex: 0 0 168px; position: relative; text-align: left; border: 1px solid rgba(255,255,255,0.14); border-radius: 6px; color: #fff; padding: 9px 10px; display: grid; grid-template-columns: 34px 1fr; column-gap: 9px; row-gap: 3px; align-items: center; background: linear-gradient(180deg, color-mix(in srgb, var(--sig) 30%, transparent), rgba(7,6,10,0.92) 80%); }
+.suit .orb { width: 34px; height: 34px; border-radius: 50%; background: radial-gradient(circle at 32% 28%, rgba(255,255,255,0.85) 0 6%, var(--sig) 30%, var(--sec) 78%); box-shadow: 0 0 12px color-mix(in srgb, var(--glow) 55%, transparent), inset 0 -5px 10px rgba(0,0,0,0.6); }
+.suit h3 { font-family: var(--display); font-size: 25px; line-height: 0.95; margin: 0; text-transform: uppercase; }
+.suit p { grid-column: 1 / -1; margin: 0; font-size: 12px; line-height: 1.2; color: rgba(215,217,226,0.75); }
+.suit em { grid-column: 1 / -1; font-style: normal; font-size: 12px; color: var(--gold); letter-spacing: 0.04em; }
+.suit.sel { border-color: var(--gold); box-shadow: 0 0 0 1px var(--gold), 0 0 18px rgba(255,204,92,0.3); }
+.suit.locked { filter: grayscale(0.9) brightness(0.55); }
+.suit.locked em { color: rgba(255,255,255,0.8); }
 #results { align-items: center; justify-content: center; flex-direction: column; gap: 14px; background: rgba(7,6,10,0.78); }
 #rs-title { font-family: var(--display); font-size: clamp(60px, 12vw, 110px); line-height: 0.85; margin: 0; letter-spacing: 0.04em; }
 #rs-title.won { color: var(--gold); text-shadow: 0 0 30px rgba(255,59,47,0.6); }
@@ -151,6 +163,29 @@ select { background: var(--ink-2); color: #fff; border: 1px solid rgba(255,255,2
 .k-mid { display: flex; flex-direction: column; align-items: center; gap: 6px; }
 .k-mid .pause-btn { position: static; transform: none; }
 #hud-kombat.cine .k-top, #hud-kombat.cine #k-controls { display: none; }
+/* Kampf-Knöpfe: 2x2-Block LEICHT/SCHWER/WURF/BLOCK + Tricks/EX darüber */
+#k-controls .k-pad { gap: 8px; }
+#k-controls .k-pad .r { gap: 8px; }
+#k-controls .k-pad .r:nth-child(2) { margin-right: 10px; }
+#k-controls .btn.vio { font-size: 13px; }
+#k-controls .btn.heavy { background: rgba(120,6,20,0.62); border-color: rgba(255,204,92,0.85); }
+#k-controls .btn.throw { background: rgba(60,140,120,0.5); }
+.btn.ex { width: 58px; height: 58px; background: rgba(255,170,40,0.45); border-color: rgba(255,204,92,0.9); }
+.btn.ex.armed { background: rgba(255,204,92,0.95); color: #2a0004; box-shadow: 0 0 18px rgba(255,204,92,0.95); animation: exPulse 0.5s infinite alternate; }
+@keyframes exPulse { to { box-shadow: 0 0 5px rgba(255,204,92,0.4); } }
+#k-controls .k-hits, #k-controls #k-ex { pointer-events: none; }
+.k-hits { position: absolute; top: calc(max(8px, env(safe-area-inset-top, 0px)) + 76px); left: max(16px, env(safe-area-inset-left, 0px)); font-family: var(--display); font-size: 17px; letter-spacing: 0.06em; color: var(--gold); text-shadow: 0 0 8px var(--blood); opacity: 0; transition: opacity 0.25s; }
+.k-hits.r { left: auto; right: max(16px, env(safe-area-inset-right, 0px)); }
+.k-hits.show { opacity: 1; }
+.k-hits b { display: inline-block; font-size: 30px; color: #fff; margin-right: 4px; }
+.k-hits.pop b { animation: hitPop 0.22s ease-out; }
+@keyframes hitPop { from { transform: scale(1.6); color: var(--gold); } }
+#k-ex { position: absolute; top: 22%; left: 50%; font-family: var(--display); font-size: 46px; color: var(--gold); text-shadow: 0 0 16px rgba(255,204,92,0.9), 0 3px 0 #2a0004; opacity: 0; transform: translateX(-50%); white-space: nowrap; text-align: center; line-height: 0.9; }
+#k-ex small { display: block; font-size: 18px; color: #fff; }
+#k-ex.l { left: 30%; } #k-ex.r { left: 70%; }
+#k-ex.show { animation: exIn 0.95s forwards; }
+@keyframes exIn { 0% { opacity: 0; transform: translateX(-50%) scale(1.9); } 18% { opacity: 1; transform: translateX(-50%) scale(1); } 75% { opacity: 1; } 100% { opacity: 0; transform: translateX(-50%) scale(1.05); } }
+@media (max-height: 430px) { .btn.ex { width: 50px; height: 50px; } #k-controls .btn.vio { font-size: 12px; } .k-hits { top: calc(max(8px, env(safe-area-inset-top, 0px)) + 66px); } }
 .letterbox { position: absolute; left: 0; right: 0; height: 0; background: #000; transition: height 0.45s; }
 .letterbox.t { top: 0; } .letterbox.b { bottom: 0; }
 #hud-kombat.cine .letterbox, #hud-cut .letterbox { height: 11vh; }
@@ -218,6 +253,7 @@ select { background: var(--ink-2); color: #fff; border: 1px solid rgba(255,255,2
     <button class="menu-btn main" data-go="chapters">STORY<small>Das Blutturnier · 7 Kapitel</small></button>
     <button class="menu-btn" data-go="fighters">KAMPF<small>1 gegen 1 gegen die KI</small></button>
     <button class="menu-btn" data-go="free">FREIES SCHWINGEN<small>Ganz Neo-Haven erkunden</small></button>
+    <button class="menu-btn" data-go="suits">ANZÜGE<small>Kampfanzug wählen und freischalten</small></button>
     <button class="menu-btn" data-go="settings">EINSTELLUNGEN<small>Grafik, Blut, Ton, Steuerung</small></button>
     <button class="menu-btn" data-go="credits">CREDITS</button>
   </div>
@@ -265,6 +301,11 @@ select { background: var(--ink-2); color: #fff; border: 1px solid rgba(255,255,2
   </div>
 </div>
 
+<div class="screen gutter col" id="suits" hidden>
+  <div class="panel-head"><button class="back" data-go="title">‹ Zurück</button><h2>ANZÜGE</h2><span></span></div>
+  <div id="suit-list"></div>
+</div>
+
 <div class="screen gutter" id="results" hidden>
   <h2 id="rs-title">SIEG</h2>
   <div id="rs-stats"></div>
@@ -308,9 +349,11 @@ select { background: var(--ink-2); color: #fff; border: 1px solid rgba(255,255,2
   </div>
   <div id="k-controls" class="tap" hidden>
     <div class="stick-zone tap"><div class="stick-base"><div class="stick-knob"></div></div></div>
-    <div class="pad tap">
-      <div class="r"><button class="btn vio" id="btn-s1" data-btn="special1">S1<span></span></button><button class="btn vio" id="btn-s2" data-btn="special2">S2<span></span></button><button class="btn" id="btn-brutal" data-btn="brutal" hidden>BRUTAL</button></div>
-      <div class="r"><button class="btn gray" data-btn="block">BLOCK</button><button class="btn big" data-btn="punch">SCHLAG</button><button class="btn big" data-btn="kick">TRITT</button></div>
+    <div class="k-hits" id="k-c1"></div><div class="k-hits r" id="k-c2"></div><div id="k-ex"></div>
+    <div class="pad k-pad tap">
+      <div class="r"><button class="btn" id="btn-brutal" data-btn="brutal" hidden>BRUTAL</button><button class="btn vio" id="btn-s1" data-btn="special1">TRICK 1<span></span></button><button class="btn vio" id="btn-s2" data-btn="special2">TRICK 2<span></span></button><button class="btn ex dim" id="btn-ex" data-btn="ex">EX<span>⅓ Leiste</span></button></div>
+      <div class="r"><button class="btn gray throw" data-btn="throw">WURF</button><button class="btn big heavy" data-btn="kick">SCHWER</button></div>
+      <div class="r"><button class="btn gray" data-btn="block">BLOCK</button><button class="btn big" data-btn="punch">LEICHT</button></div>
     </div>
   </div>
   <button class="btn tap" id="btn-exec" data-btn="execute" hidden><div id="exec-ring"></div>EXEKUTION</button>

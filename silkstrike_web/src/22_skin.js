@@ -96,7 +96,9 @@ function attachSkin(rig) {
     if (!geo) { geo = boneColorGeometry(o.geometry, o.skeleton, pal); SkinLib.geoCache.set(key, geo); }
     o.geometry = geo;
     let m;
-    if (kind === 'suit') {
+    if (kind === 'suit' && L.suit && L.suit.phys) { // Anzug-Hook: physikalisches Material (Klarlack/Schimmer/Irisieren)
+      m = suitMaterial(rig, L, Assets.tex(SUIT_NOR), Assets.tex(SUIT_ROUGH));
+    } else if (kind === 'suit') {
       m = rig.mat('#ffffff', Math.max(0.3, L.rough * 0.9), L.metal);
       const nor = Assets.tex(SUIT_NOR), ro = Assets.tex(SUIT_ROUGH);
       if (nor) { m.normalMap = nor.clone(); m.normalMap.repeat.set(6, 6); m.normalMap.needsUpdate = true; m.normalScale.set(0.9, 0.9); }

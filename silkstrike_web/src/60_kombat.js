@@ -393,8 +393,18 @@ const MOVES = {
   jumpKick: { name: 'jumpKick', clip: 'jumpKick', s: 0.06, a: 0.25, r: 0.1, dmg: 75, reach: 1.5, lvl: 'overhead', kd: false, launch: false, lunge: 0 },
   jumpPunch: { name: 'jumpPunch', clip: 'punch', s: 0.05, a: 0.2, r: 0.1, dmg: 55, reach: 1.3, lvl: 'overhead', kd: false, launch: false, lunge: 0 },
   throw: { name: 'throw', clip: 'grab', s: 0.08, a: 0.06, r: 0.5, dmg: 110, reach: 1.25, lvl: 'unblockable', kd: true, launch: false, lunge: 0.4 },
+  // SCHWER: langsamer Anlauf, mehr Schaden
+  heavy: { name: 'heavy', clip: 'kick2', s: 0.17, a: 0.08, r: 0.34, dmg: 92, reach: 1.75, lvl: 'mid', kd: false, launch: false, lunge: 1.1 },
+  heavy2: { name: 'heavy2', clip: 'kick', s: 0.12, a: 0.16, r: 0.36, dmg: 58, hits: 2, reach: 1.7, lvl: 'mid', kd: true, launch: false, lunge: 1.3 },
+  midKick: { name: 'midKick', clip: 'kick', s: 0.1, a: 0.08, r: 0.3, dmg: 72, reach: 1.65, lvl: 'mid', kd: false, launch: false, lunge: 1.2 },
+  launcher: { name: 'launcher', clip: 'uppercut', s: 0.1, a: 0.09, r: 0.4, dmg: 85, reach: 1.35, lvl: 'mid', kd: false, launch: true, lunge: 1.4 },
+  overhead: { name: 'overhead', clip: 'dashStrike', s: 0.22, a: 0.08, r: 0.3, dmg: 68, reach: 1.45, lvl: 'overhead', kd: false, launch: false, lunge: 1.6 },
+  throwEnd: { name: 'throwEnd', clip: 'throwToss', s: 0, a: 0, r: 0.42, dmg: 0, reach: 0, lvl: 'mid', kd: false, launch: false, lunge: 0 },
 };
-const CHAINS = { 'jab:P': 'cross', 'cross:K': 'chainKick', 'kick:K': 'roundhouse', 'kick:P': 'kickPunch' };
+// Kettentabelle: '<Technik>:<L|H>' -> Folgetechnik (L = LEICHT, H = SCHWER)
+const CHAINS = { 'jab:L': 'cross', 'cross:H': 'launcher', 'jab:H': 'midKick', 'midKick:H': 'roundhouse', 'heavy:H': 'heavy2', 'overhead:L': 'cross', 'cross:L': 'chainKick' };
+const BUF_KEYS = ['punch', 'kick', 's1', 's2', 'throw'], BUF_T = 0.15, EX_COST = 34;
+const exGlow = (f) => f.exGlow || (f.exGlow = new THREE.Color(f.def.look.glow || '#ffcc5c').getHex());
 
 class Fighter {
   constructor(id, cast, isPlayer, x) {
@@ -404,13 +414,13 @@ class Fighter {
     this.max = this.def.stats.hp; this.hp = this.max; this.lag = this.max; this.meter = 0;
     this.state = 'idle'; this.t = 0; this.move = null; this.moveHit = false; this.connected = false;
     this.stun = 0; this.juggled = false; this.blockLow = false; this.inv = 0; this.cd = [0, 0];
-    this.sp = 0; this.spStep = 0; this.spDone = false; this.counter = 0; this.comboTaken = 0; this.comboDealt = 0; this.maxCombo = 0; this.dealt = 0; this.rounds = 0;
+    this.sp = 0; this.spStep = 0; this.spDone = false; this.buf = {}; this.hitIdx = 0; this.ex = false; this.exArmed = false; this.exHit = false; this.exPend = 0; this.counter = 0; this.comboTaken = 0; this.comboDealt = 0; this.maxCombo = 0; this.dealt = 0; this.rounds = 0;
   }
   set(s) { this.state = s; this.t = 0; }
   get grounded() { return this.y <= 0.001; }
   get down() { return this.state === 'knockdown' || this.state === 'getUp'; }
   reset(x) {
-    this.x = x; this.y = 0; this.vx = 0; this.vy = 0; this.hp = this.max; this.lag = this.max; this.set('idle'); this.move = null; this.stun = 0; this.juggled = false; this.inv = 0; this.counter = 0; this.comboTaken = 0; this.comboDealt = 0; this.cd = [0, 0];
+    this.x = x; this.y = 0; this.vx = 0; this.vy = 0; this.hp = this.max; this.lag = this.max; this.set('idle'); this.move = null; this.stun = 0; this.juggled = false; this.inv = 0; this.counter = 0; this.comboTaken = 0; this.comboDealt = 0; this.cd = [0, 0]; this.buf = {}; this.ex = false; this.exArmed = false; this.exPend = 0;
     this.rig.resetBody(); this.rig.root.visible = true; this.rig.play('fightIdle', null, true);
   }
 }
@@ -423,7 +433,9 @@ class KombatAI {
     this.block -= dt; this.walkT -= dt; this.t -= dt;
     if (this.queue.length) { this.qt -= dt; if (this.qt <= 0) { const p = this.queue.shift(); this.apply(p, I, tw); this.qt = this.queue.length ? this.gap() : 0; } }
     if (this.t <= 0 && !this.queue.length) { this.t = lerp(0.5, 0.11, clamp(this.level, 0, 1.2) / 1.2) * rand(0.8, 1.3); this.decide(me, opp, dist, tw, incoming); }
-    if (this.block > 0) { I.block = true; I.crouch = this.blockLow; } else if (this.walkT > 0 && !this.queue.length) I.moveX = this.walk;
+    if (this.block > 0) { I.block = true; I.crouch = this.blockLow; } else if (this.walkT > 0 && !this.queue.length && I.moveX === undefined) I.moveX = this.walk;
+    // Wurf befreien: kurze Reaktionszeit, dann mit Glück WURF im Zeitfenster
+    if (me.state === 'thrown') { if (!this.techTry && me.t > 0.07) { this.techTry = true; if (Math.random() < 0.12 + 0.4 * clamp(this.level, 0, 1.2)) I.throw = true; } } else this.techTry = false;
     return I;
   }
   gap() { return lerp(0.24, 0.11, clamp(this.level, 0, 1.2) / 1.2); }
@@ -431,7 +443,8 @@ class KombatAI {
     if (p === 'P') I.punch = true; else if (p === 'K') I.kick = true;
     else if (p === 'dP') { I.crouch = true; I.punch = true; } else if (p === 'dK') { I.crouch = true; I.kick = true; }
     else if (p === 'S1') I.s1 = true; else if (p === 'S2') I.s2 = true; else if (p === 'J') { I.jump = true; I.moveX = tw; }
-    else if (p === 'T') { I.block = true; I.punch = true; } else if (p === 'B') I.brutal = true;
+    else if (p === 'T' || p === 'W') I.throw = true; else if (p === 'B') I.brutal = true; else if (p === 'X') I.ex = true;
+    else if (p === 'bK') { I.kick = true; I.moveX = -tw; } else if (p === 'fP') { I.punch = true; I.moveX = tw; }
   }
   decide(me, opp, dist, tw, incoming) {
     const r = Math.random(), L = this.level, bc = clamp(0.12 + 0.62 * L, 0, 0.88);
@@ -439,10 +452,10 @@ class KombatAI {
     if (incoming && r < bc) { if (Math.random() < 0.4 * L) this.queue = ['J']; else { this.block = 0.5; this.blockLow = false; } return; }
     if (opp.state === 'air' && dist < 2.6 && r < 0.75 * L) { this.queue = ['dP']; return; }
     if (me.meter >= 100 && dist < 2 && r < 0.65 * L) { this.queue = ['B']; return; }
-    const sp = me.def.specials;
+    const sp = me.def.specials, ex = me.meter >= EX_COST && Math.random() < 0.2 + 0.35 * clamp(L, 0, 1);
     if (dist > 3.2) {
       const q = Math.random();
-      if (me.cd[0] <= 0 && dist < sp[0].range && q < 0.3 + 0.25 * L) this.queue = ['S1'];
+      if (me.cd[0] <= 0 && dist < sp[0].range && q < 0.3 + 0.25 * L) this.queue = ex ? ['X', 'S1'] : ['S1'];
       else if (me.cd[1] <= 0 && dist < sp[1].range && q < 0.25 + 0.2 * L) this.queue = ['S2'];
       else if (q < 0.12 + (this.boss ? 0.1 : 0)) this.queue = ['J', 'K'];
       else { this.walk = tw; this.walkT = 0.4; }
@@ -451,18 +464,20 @@ class KombatAI {
     if (dist > 1.5) {
       const q = Math.random();
       if (q < 0.55 + (this.boss ? 0.2 : 0)) { this.walk = tw; this.walkT = 0.3; }
-      else if (q < 0.7 && me.cd[1] <= 0 && dist < sp[1].range) this.queue = ['S2'];
-      else if (q < 0.82) { this.walk = -tw; this.walkT = 0.25; }
-      else this.queue = ['K'];
+      else if (q < 0.7 && me.cd[1] <= 0 && dist < sp[1].range) this.queue = ex ? ['X', 'S2'] : ['S2'];
+      else if (q < 0.8) { this.walk = -tw; this.walkT = 0.25; }
+      else this.queue = Math.random() < 0.5 ? ['K'] : ['fP'];
       return;
     }
     const q = Math.random(), s = clamp(L, 0, 1.2);
-    if (opp.state === 'block' && q < 0.35 * s) this.queue = ['T'];
-    else if (q < 0.28 + 0.2 * s) this.queue = ['P', 'P', 'K'];
-    else if (q < 0.45 + 0.15 * s) this.queue = ['K', 'K'];
-    else if (q < 0.58) this.queue = ['dK'];
-    else if (q < 0.68) this.queue = ['dP'];
-    else if (q < 0.76 && me.cd[0] <= 0) this.queue = ['S1'];
+    if ((opp.state === 'block' || opp.state === 'crouch') && q < 0.4 * s) this.queue = ['W'];
+    else if (opp.state === 'block' && opp.blockLow && q < 0.55 * s) this.queue = ['fP'];
+    else if (q < 0.22 + 0.16 * s) this.queue = Math.random() < 0.5 ? ['P', 'P', 'K'] : ['P', 'K', 'K'];
+    else if (q < 0.38 + 0.12 * s) this.queue = Math.random() < 0.6 ? ['K', 'K'] : ['K'];
+    else if (q < 0.46) this.queue = ['bK'];
+    else if (q < 0.53) this.queue = ['W'];
+    else if (q < 0.6) this.queue = ['dP'];
+    else if (q < 0.72 && me.cd[0] <= 0) this.queue = ex ? ['X', 'S1'] : ['S1'];
     else if (q < 0.88) { this.block = 0.35; this.blockLow = Math.random() < 0.4; }
     else { this.walk = -tw; this.walkT = 0.3; }
     this.qt = 0;
@@ -755,7 +770,8 @@ class KombatController {
   readPlayer() {
     const m = Input.move, up = m.y > 0.6;
     const I = { moveX: Math.abs(m.x) > 0.25 ? m.x : 0, crouch: m.y < -0.55, jump: up && !this.lastUp, block: Input.isDown('block'),
-      punch: Input.consume('punch'), kick: Input.consume('kick'), s1: Input.consume('special1'), s2: Input.consume('special2'), brutal: Input.consume('brutal') };
+      punch: Input.consume('punch'), kick: Input.consume('kick'), s1: Input.consume('special1'), s2: Input.consume('special2'), brutal: Input.consume('brutal'),
+      throw: Input.consume('throw'), ex: Input.consume('ex') };
     this.lastUp = up;
     return I;
   }
@@ -854,18 +870,21 @@ class KombatController {
   }
   // ---- Brutal-Schlag
   tryBrutal(i) {
-    const A = this.f[i], Vv = this.f[1 - i];
-    if (A.meter < 100 || Math.abs(Vv.x - A.x) > 2.4 || Vv.down || !Vv.grounded) return false;
-    A.meter = 0; this.bi = i; A.set('cinematic'); Vv.set('cinematic');
-    UI.kombatCinematic(true); UI.kombatControls(false); UI.banner(A.def.brutal, 'brutal', 1.6);
+    const A = this.f[i], Vv = this.f[1 - i], fb = A.meter < 100 && this.fatalReady(i);
+    if ((A.meter < 100 && !fb) || Math.abs(Vv.x - A.x) > 2.4 || Vv.down || !Vv.grounded) return false;
+    if (fb) { A.meter -= 50; (this.fatalUsed || (this.fatalUsed = []))[i] = true; } else A.meter = 0;
+    this.bi = i; A.set('cinematic'); Vv.set('cinematic');
+    UI.kombatCinematic(true); UI.kombatControls(false); UI.banner(fb ? 'TODESSTOSS' : A.def.brutal, 'brutal', 1.6);
     const tl = new Timeline(A.rig, Vv.rig, this), f = tl.facing;
     A.rig.root.position.x = Vv.rig.root.position.x - f * 1.25;
     tl.shot(0, 0.5, tl.c(-1.2, 1.4, 2.6, 1.4, 40, tl.ap), tl.c(-0.6, 1.5, 1.8, 1.5, 30, tl.ap));
     tl.cue(0, () => { this.setScale(0.4); UI.flash(A.def.look.glow); Audio.play('whoosh'); });
-    const clips = ['punch', 'kick2', 'uppercut'], parts = [70, 80, 130];
+    const clips = ['punch', 'kick2', 'uppercut'], parts = [70, 80, 130], xr = ['skull', 'ribs', 'spine'];
+    XRay.begin(Vv.rig, this.scene, this);
     for (let k = 0; k < 3; k++) {
       const t0 = 0.5 + k * 0.8;
       tl.cue(t0, () => A.rig.play(clips[k], null, true));
+      tl.cue(t0 + 0.12, () => XRay.focus(xr[k], new V3(f, 0.1, 0)));
       tl.cue(t0 + 0.22, () => {
         UI.flash('#ffffff'); this.shake.add(k === 2 ? 1 : 0.55);
         Vv.rig.play(k === 2 ? 'knockdown' : 'hitHigh', null, true); Vv.rig.setMaterialState('frozen', 0.65);
@@ -873,6 +892,7 @@ class KombatController {
         FX.burst('bloodSpray', Vv.rig.worldPos(k === 1 ? 'hips' : 'head'), 1.1, new V3(f, 0.6, 0)); Haptic(50);
         const dmg = parts[k] * A.def.stats.power / Math.max(0.3, Vv.def.stats.defense);
         Vv.hp = Math.max(1, Vv.hp - dmg); A.dealt += dmg; A.comboDealt++; A.maxCombo = Math.max(A.maxCombo, A.comboDealt);
+        XRay.hit(xr[k], new V3(f, k === 2 ? 0.5 : 0.1, 0));
       });
       tl.cue(t0 + 0.55, () => Vv.rig.setMaterialState('normal', 0));
       const sd = k % 2 ? -1 : 1;
@@ -884,11 +904,13 @@ class KombatController {
     this.tl = tl; this.setPhase('brutal');
     return true;
   }
+  fatalReady(i) { const A = this.f[i]; return A.meter >= 50 && A.hp < A.max * 0.3 && !(this.fatalUsed && this.fatalUsed[i]); }
   brutalUpdate(dt) {
-    const fin = this.tl.advance(dt, 3.4);
+    const rdt = dt / Math.max(0.001, this.scale), fin = this.tl.advance(dt, 3.4);
     this.cam.pos.copy(this.tl.cam.pos); this.cam.look.copy(this.tl.cam.look); this.cam.fov = this.tl.cam.fov;
+    XRay.update(rdt, this.cam);
     if (fin) {
-      this.setScale(1);
+      XRay.end(); this.setScale(1);
       const A = this.f[this.bi], Vv = this.f[1 - this.bi];
       A.x = A.rig.root.position.x; Vv.x = Vv.rig.root.position.x;
       A.set('idle'); Vv.set('knockdown'); Vv.rig.play('lieDown');
@@ -900,16 +922,24 @@ class KombatController {
     const f = this.f[i], o = this.f[1 - i];
     f.t += dt; f.inv -= dt; f.counter -= dt; f.cd[0] -= dt; f.cd[1] -= dt;
     f.lag = f.lag > f.hp ? Math.max(f.hp, f.lag - f.max * 0.35 * dt) : f.hp;
+    // Eingabepuffer: Drücke bleiben BUF_T Sekunden gültig und werden ausgeführt, sobald der Kämpfer handeln kann
+    const B = f.buf;
+    for (const k of BUF_KEYS) { if (I[k]) B[k] = BUF_T; else if (B[k] > 0) B[k] -= dt; I[k] = B[k] > 0; }
+    if (I.ex) this.exToggle(f);
+    if (f.exArmed && f.meter < EX_COST) f.exArmed = false;
+    if (f.exPend > 0) { f.exPend -= dt; if (f.exPend <= 0) this.exFollow(i); }
+    const fwd = (I.moveX || 0) * f.facing;
     switch (f.state) {
       case 'idle': case 'walk': case 'crouch': case 'block':
         if (f.comboTaken) f.comboTaken = 0;
         f.facing = o.x >= f.x ? 1 : -1;
         if (I.brutal && this.tryBrutal(i)) return;
         if (I.jump) { f.set('air'); f.vy = f.def.stats.jump; f.vx = (I.moveX || 0) * 3.6; f.move = null; f.rig.play('jump', null, true); Audio.play('whoosh', 0.4); }
-        else if (I.s1 && f.cd[0] <= 0) this.special(f, 0);
-        else if (I.s2 && f.cd[1] <= 0) this.special(f, 1);
-        else if (I.punch) { if (I.block && Math.abs(o.x - f.x) < 1.5) this.startMove(f, MOVES.throw); else this.startMove(f, I.crouch ? MOVES.uppercut : MOVES.jab); }
-        else if (I.kick) this.startMove(f, I.crouch ? MOVES.sweep : MOVES.kick);
+        else if (I.s1 && f.cd[0] <= 0) { B.s1 = 0; this.special(f, 0); }
+        else if (I.s2 && f.cd[1] <= 0) { B.s2 = 0; this.special(f, 1); }
+        else if (I.throw || (I.punch && I.block && Math.abs(o.x - f.x) < 1.5)) { B.throw = B.punch = 0; this.startMove(f, MOVES.throw); }
+        else if (I.punch) { B.punch = 0; this.startMove(f, I.crouch ? MOVES.uppercut : fwd > 0.5 ? MOVES.overhead : MOVES.jab); }
+        else if (I.kick) { B.kick = 0; this.startMove(f, I.crouch || fwd < -0.5 ? MOVES.sweep : MOVES.heavy); }
         else if (I.block) { if (f.state !== 'block') f.set('block'); f.blockLow = !!I.crouch; f.vx = 0; }
         else if (I.crouch) { if (f.state !== 'crouch') f.set('crouch'); f.vx = 0; }
         else if (Math.abs(I.moveX || 0) > 0.1) { if (f.state !== 'walk') f.set('walk'); const back = I.moveX * f.facing < 0; f.vx = I.moveX * f.def.stats.walk * (back ? 0.8 : 1); }
@@ -917,7 +947,7 @@ class KombatController {
         break;
       case 'air':
         f.vy -= 22 * dt;
-        if (!f.move && (I.kick || I.punch)) { const m = I.kick ? MOVES.jumpKick : MOVES.jumpPunch; f.move = m; f.moveHit = false; f.t = 0; f.rig.play(m.clip, m.s + m.a + m.r, true); Audio.play('whoosh', 0.5); }
+        if (!f.move && (I.kick || I.punch)) { const m = I.kick ? MOVES.jumpKick : MOVES.jumpPunch; B.kick = B.punch = 0; f.move = m; f.moveHit = false; f.t = 0; f.rig.play(m.clip, m.s + m.a + m.r, true); Audio.play('whoosh', 0.5); }
         if (f.move && !f.moveHit && f.t >= f.move.s && f.t < f.move.s + f.move.a) this.tryHit(i, f.move);
         if (f.y <= 0 && f.vy <= 0) { f.y = 0; f.vy = 0; f.move = null; f.set('idle'); f.rig.play('land', null, true); FX.burst('dust', new V3(f.x, 0.02, 0), 0.5); }
         break;
@@ -925,12 +955,27 @@ class KombatController {
         const m = f.move; if (!m) { f.set('idle'); break; }
         const t = f.t, tot = m.s + m.a + m.r;
         if (t < m.s + m.a) f.vx = f.facing * m.lunge; else f.vx *= 0.8;
-        if (!f.moveHit && t >= m.s && t < m.s + m.a) this.tryHit(i, m);
-        if (f.connected && t >= m.s && t < tot - 0.03 && (I.punch || I.kick)) { const n = CHAINS[m.name + ':' + (I.punch ? 'P' : 'K')]; if (n) { this.startMove(f, MOVES[n]); return; } }
+        // Trefferzone nur in der aktiven Phase; Mehrfachtreffer teilen die aktive Phase auf
+        const nh = m.hits || 1;
+        if (t >= m.s && t < m.s + m.a) { const k = Math.min(nh - 1, Math.floor((t - m.s) / (m.a / nh))); if (k > f.hitIdx) { f.hitIdx = k; f.moveHit = false; } if (!f.moveHit) this.tryHit(i, m); }
+        if (f.connected && t >= m.s + m.a * (nh - 1) / nh && t < tot - 0.03 && (I.punch || I.kick)) {
+          const L = I.punch && CHAINS[m.name + ':L'], H = I.kick && CHAINS[m.name + ':H'], n = L || H;
+          if (n) { if (L) B.punch = 0; else B.kick = 0; this.startMove(f, MOVES[n]); return; }
+        }
         if (t >= tot) { f.move = null; f.set('idle'); }
         break;
       }
-      case 'special': this.updateSpecial(i, dt); break;
+      case 'thrown':
+        f.vx = 0;
+        if (I.throw && f.t < 0.2) { B.throw = 0; this.techThrow(i); }
+        else if (f.t > 0.8) f.set('idle');
+        break;
+      case 'throwing':
+        f.vx = 0;
+        if (o.state !== 'thrown') { f.set('idle'); break; }
+        if (f.t >= 0.2) this.throwToss(i);
+        break;
+      case 'special': this.exSpecial(i, dt); break;
       case 'hitstun': case 'blockstun':
         f.stun -= dt;
         if (f.juggled || !f.grounded) { f.vy -= 22 * dt; if (f.y <= 0 && f.vy <= 0) { f.y = 0; f.vy = 0; f.juggled = false; f.set('knockdown'); f.rig.play('knockdown', null, true); FX.burst('dust', new V3(f.x, 0.02, 0), 0.8); Audio.play('bodyFall'); this.shake.add(0.25); } }
@@ -957,7 +1002,7 @@ class KombatController {
     const [a, b] = this.f, dx = b.x - a.x;
     if (Math.abs(dx) < 0.75 && Math.abs(a.y - b.y) < 1.2) { const p = (0.75 - Math.abs(dx)) / 2, s = dx >= 0 ? 1 : -1; a.x = clamp(a.x - s * p, -this.arena.half, this.arena.half); b.x = clamp(b.x + s * p, -this.arena.half, this.arena.half); }
   }
-  startMove(f, m) { f.set('attack'); f.move = m; f.moveHit = false; f.connected = false; f.rig.play(m.clip, m.s + m.a + m.r, true); Audio.play('whoosh', 0.45, rand(0.9, 1.15)); }
+  startMove(f, m) { f.set('attack'); f.move = m; f.moveHit = false; f.connected = false; f.hitIdx = 0; f.rig.play(m.clip, m.s + m.a + m.r, true); Audio.play('whoosh', 0.45, rand(0.9, 1.15)); }
   tryHit(i, m) {
     const a = this.f[i], d = this.f[1 - i], dx = d.x - a.x;
     if (Math.abs(dx) > m.reach + 0.3) return;
@@ -967,13 +1012,73 @@ class KombatController {
     if (d.y - a.y > 1.6) return;
     if (m.lvl === 'high' && d.state === 'crouch') return;
     if (m.lvl === 'unblockable' && (!d.grounded || d.state === 'attack')) return;
+    if (m.name === 'throw' && ['hitstun', 'blockstun', 'thrown', 'throwing', 'knockdown', 'getUp'].includes(d.state)) return;
     a.moveHit = true; a.connected = true;
-    if (d.counter > 0 && m.lvl !== 'unblockable') { d.counter = 0; this.combo(d, 'KONTER!'); this.hit(1 - i, 90, true, false, 'unblockable'); d.rig.play('uppercut', null, true); return; }
-    this.hit(i, m.dmg, m.kd, m.launch, m.lvl);
-    if (m.name === 'throw' && d.state !== 'idle') { d.x = clamp(a.x - a.facing * 1.2, -this.arena.half, this.arena.half); a.rig.play('throwToss', null, true); FX.burst('dust', new V3(d.x, 0.05, 0), 1.2); }
+    if (d.counter > 0 && m.lvl !== 'unblockable') { d.counter = 0; this.combo(d, d.ex ? 'EX-KONTER!' : 'KONTER!'); this.hit(1 - i, d.ex ? 125 : 90, true, false, 'unblockable'); d.rig.play('uppercut', null, true); if (d.ex) d.exPend = 0.2; return; }
+    if (m.name === 'throw') { this.grab(i); return; }
+    const last = a.hitIdx >= (m.hits || 1) - 1;
+    this.hit(i, m.dmg, m.kd && last, m.launch && last, m.lvl);
+  }
+  // ---- Würfe: Packen, 0,2 s Befreiungsfenster (WURF drücken), dann Schleudern
+  grab(i) {
+    const a = this.f[i], d = this.f[1 - i], H = this.arena.half;
+    a.set('throwing'); d.set('thrown'); a.vx = d.vx = 0; d.move = null;
+    d.x = clamp(a.x + a.facing * 0.85, -H, H); d.facing = -a.facing;
+    a.rig.play('grab', 0.4, true); d.rig.play('hitHigh', null, true); d.rig.flashHit(0xffffff);
+    Audio.play('block', 0.5, 0.7); this.hitStop = 0.05;
+    if (a.isPlayer || d.isPlayer) Haptic(12);
+  }
+  throwToss(i) {
+    const a = this.f[i], d = this.f[1 - i], H = this.arena.half;
+    d.x = clamp(a.x - a.facing * 1.2, -H, H);
+    this.startMove(a, MOVES.throwEnd); a.moveHit = true;
+    this.hit(i, MOVES.throw.dmg, true, false, 'unblockable');
+    d.vx = -a.facing * 4.5;
+    FX.burst('dust', new V3(d.x, 0.05, 0), 1.3); this.shake.add(0.5); Audio.play('bodyFall');
+    if (a.isPlayer) UI.combo('WURF!');
+  }
+  techThrow(i) {
+    const d = this.f[i], a = this.f[1 - i];
+    for (const f of [a, d]) { f.set('blockstun'); f.stun = 0.28; f.move = null; f.vx = -f.facing * 4.2; f.rig.play('block', null, true); }
+    FX.burst('sparks', new V3((a.x + d.x) / 2, 1.3, 0), 1.1); Audio.play('block'); this.shake.add(0.25); this.hitStop = 0.06;
+    if (d.isPlayer) UI.combo('BEFREIT!'); else if (a.isPlayer) UI.combo('WURF ABGEWEHRT!');
+    if (a.isPlayer || d.isPlayer) Haptic(20);
+  }
+  // ---- EX: ab EX_COST Leiste verstärkt die nächste Trick-Technik (mehr Schaden, Zusatztreffer, Leuchten)
+  exToggle(f) {
+    if (f.state === 'special' && !f.ex && f.t < 0.12 && f.meter >= EX_COST) { this.exStart(f); return; }
+    if (f.exArmed) { f.exArmed = false; return; }
+    if (f.meter >= EX_COST) { f.exArmed = true; if (f.isPlayer) Audio.play('whoosh', 0.35, 1.6); }
+  }
+  exStart(f) {
+    f.meter -= EX_COST; f.ex = true; f.exArmed = false; f.exHit = false;
+    const g = exGlow(f), p = f.rig.worldPos('chest');
+    FX.burst('electric', p, 1.2, new V3(0, 1, 0), g); FX.burst('embers', p, 0.8, undefined, g); f.rig.flashHit(g);
+    Audio.play('teleport', 0.6, 1.3); this.hitStop = Math.max(this.hitStop, 0.05);
+    UI.kombatEx(f.isPlayer ? 0 : 1, f.def.specials[f.sp].name);
+    if (f.isPlayer) Haptic(25);
+  }
+  exSpecial(i, dt) {
+    const f = this.f[i], o = this.f[1 - i];
+    if (!f.ex) { this.updateSpecial(i, dt); return; }
+    const s = f.def.specials[f.sp], k = s.kind, hp0 = o.hp, st0 = o.state;
+    this.dmgMul = 1.4; this.updateSpecial(i, dt);
+    // Zusatztreffer: zweites Geschoss bzw. Nachschlag nach dem ersten Treffer
+    if ((k === 'projectile' || k === 'groundWave') && f.state === 'special' && f.spStep === 1 && f.t >= 0.32) { f.spStep = 2; this.spawnProj(i, s, k === 'groundWave'); }
+    else if (k !== 'projectile' && k !== 'groundWave' && !f.exHit && o.hp < hp0 && o.state === 'hitstun' && st0 !== 'block') { f.exHit = true; f.exPend = 0.18; }
+    this.dmgMul = 1;
+    if (Math.random() < 0.8) FX.spray(FX.add, f.rig.worldPos(Math.random() < 0.5 ? 'rHand' : 'chest'), 3, 1.4, new V3(0, 1, 0), 1.3, exGlow(f), 0.07, 0.35, -0.6, 1.5);
+    if (f.state !== 'special') f.ex = false;
+  }
+  exFollow(i) {
+    const f = this.f[i], o = this.f[1 - i];
+    if (o.down || o.state === 'cinematic' || o.state === 'thrown' || Math.abs(o.x - f.x) > 2.8) return;
+    const sf = f.facing; f.facing = o.x >= f.x ? 1 : -1;
+    this.hit(i, 48, false, true, 'unblockable'); f.facing = sf;
+    FX.burst('electric', o.rig.worldPos('chest'), 1, new V3(f.facing, 0.5, 0), exGlow(f));
   }
   hit(i, base, kd, launch, lvl) {
-    const a = this.f[i], d = this.f[1 - i];
+    const a = this.f[i], d = this.f[1 - i]; base *= this.dmgMul || 1;
     const hp = new V3(d.x - a.facing * 0.15, d.y + (lvl === 'low' ? 0.4 : 1.35), 0);
     const blocking = d.state === 'block' || d.state === 'blockstun';
     let blocked = false;
@@ -999,15 +1104,16 @@ class KombatController {
     this.hitStop = heavy ? 0.11 : 0.06; this.shake.add(heavy ? 0.45 : 0.22);
     Audio.play(heavy ? 'punchHeavy' : 'punchLight'); if (heavy) Audio.play('boneCrack', 0.6);
     if (a.isPlayer || d.isPlayer) Haptic(heavy ? 35 : 15);
-    if (d.comboTaken >= 2) { const w = ['', '', '', 'BRUTAL!', 'GNADENLOS!', 'BLUTRAUSCH!', 'UNAUFHALTSAM!', 'VERNICHTEND!'][d.comboTaken] || 'LEGENDÄR!'; this.combo(a, d.comboTaken + ' TREFFER' + (w ? '  ' + w : '')); }
+    if (d.comboTaken >= 2) { const W = ['', '', '', 'BRUTAL!', 'GNADENLOS!', 'BLUTRAUSCH!', 'UNAUFHALTSAM!', 'VERNICHTEND!'], w = d.comboTaken < W.length ? W[d.comboTaken] : 'LEGENDÄR!'; this.combo(a, d.comboTaken + ' TREFFER' + (w ? '  ' + w : '')); }
   }
   combo(f, text) { if (f.isPlayer) UI.combo(text); }
   special(f, k) {
     const s = f.def.specials[k];
-    f.cd[k] = s.cooldown; f.set('special'); f.sp = k; f.spDone = false; f.spStep = 0; f.vx = 0;
+    f.cd[k] = s.cooldown; f.set('special'); f.sp = k; f.spDone = false; f.spStep = 0; f.vx = 0; f.ex = false;
+    if (f.exArmed && f.meter >= EX_COST) this.exStart(f);
     if (s.kind === 'dashStrike') f.rig.play('dashStrike', 0.6, true);
     else if (s.kind === 'grabSlam') f.rig.play('grab', 0.5, true);
-    else if (s.kind === 'counter') { f.rig.play('block', null, true); f.counter = 0.7; }
+    else if (s.kind === 'counter') { f.rig.play('block', null, true); f.counter = f.ex ? 1.0 : 0.7; }
     else f.rig.play('cast', 0.45, true);
     Audio.play(s.sound);
     if (f.isPlayer) Haptic(10);
@@ -1047,7 +1153,8 @@ class KombatController {
     const mesh = new THREE.Mesh(new THREE.SphereGeometry(low ? 0.35 : 0.22, 14, 10), new THREE.MeshBasicMaterial({ color: s.color }));
     if (low) mesh.scale.set(1.6, 0.6, 1.2);
     const y = low ? 0.2 : 1.3;
-    const p = { mesh, owner: i, x: f.x + f.facing * 0.8, y, vx: f.facing * (low ? 10 : 13), dmg: s.damage, low, life: 2.2, alive: true, color: s.color };
+    if (f.ex) mesh.scale.multiplyScalar(1.35);
+    const p = { mesh, owner: i, x: f.x + f.facing * 0.8, y, vx: f.facing * (low ? 10 : 13), dmg: s.damage * (this.dmgMul || 1), low, life: 2.2, alive: true, color: s.color };
     mesh.position.set(p.x, y, 0); this.scene.add(mesh); this.proj.push(p);
   }
   updateProj(dt) {
@@ -1099,6 +1206,7 @@ class KombatController {
   hud() {
     const [a, b] = this.f;
     UI.kombatUpdate({ h1: a.hp / a.max, h2: b.hp / b.max, l1: a.lag / a.max, l2: b.lag / b.max, m1: a.meter / 100, m2: b.meter / 100, r1: a.rounds, r2: b.rounds, toWin: this.setup.toWin || 2,
-      timer: this.timer, s1: a.cd[0] <= 0, s2: a.cd[1] <= 0, brutal: this.phase === 'fight' && a.meter >= 100 });
+      timer: this.timer, s1: a.cd[0] <= 0, s2: a.cd[1] <= 0, brutal: this.phase === 'fight' && (a.meter >= 100 || this.fatalReady(0)),
+      ex: a.meter >= EX_COST, exOn: a.exArmed || a.ex, c1: b.comboTaken, c2: a.comboTaken });
   }
 }
