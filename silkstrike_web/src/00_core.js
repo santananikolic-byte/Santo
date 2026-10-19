@@ -30,12 +30,16 @@ const yawOf = (x, z) => Math.atan2(x, z);
 
 // ---------------------------------------------------------------- Einstellungen
 const Settings = {
-  data: { quality: 'balanced', blood: true, voices: true, music: true, sfx: 0.9, musicVol: 0.5, difficulty: 'normal', sens: 1.0, fps: false },
+  data: { quality: 'ultra', blood: true, voices: true, music: true, sfx: 0.9, musicVol: 0.5, difficulty: 'normal', sens: 1.0, fps: false, v: 2 },
   load() {
     try {
       const raw = localStorage.getItem('silkstrike.web.settings');
-      if (raw) Object.assign(this.data, JSON.parse(raw));
-      else this.data.quality = (navigator.hardwareConcurrency || 4) >= 6 ? 'ultra' : 'balanced';
+      if (raw) {
+        const d = JSON.parse(raw);
+        // ab Version 2 startet jedes Gerät mit maximaler Grafik
+        if (!d.v || d.v < 2) { d.quality = 'ultra'; d.v = 2; }
+        Object.assign(this.data, d);
+      }
     } catch (e) { /* kein Speicher verfügbar */ }
   },
   save() { try { localStorage.setItem('silkstrike.web.settings', JSON.stringify(this.data)); } catch (e) { } },
