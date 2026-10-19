@@ -1746,6 +1746,9 @@ function retarget(rig) {
 // Kopf/Hände/Füße des Rigs an das sichtbare Modell heften (Effekte, Zubehör)
 const SKIN_SNAP = [['head', 'Head'], ['lHand', 'LeftHand'], ['rHand', 'RightHand'], ['lFoot', 'LeftFoot'], ['rFoot', 'RightFoot']];
 const SKIN_FADE = 0.14;
+const SKIN_JOINT = [['hips', 'Hips'], ['spine', 'Spine'], ['chest', 'Spine2'], ['neck', 'Neck'], ['head', 'Head'],
+  ['lUpper', 'LeftArm'], ['lFore', 'LeftForeArm'], ['lHand', 'LeftHand'], ['rUpper', 'RightArm'], ['rFore', 'RightForeArm'], ['rHand', 'RightHand'],
+  ['lThigh', 'LeftUpLeg'], ['lShin', 'LeftLeg'], ['lFoot', 'LeftFoot'], ['rThigh', 'RightUpLeg'], ['rShin', 'RightLeg'], ['rFoot', 'RightFoot']];
 function skinStep(rig, dt) {
   const S = rig.skin;
   if (!S || !S.on) return;
@@ -1764,6 +1767,16 @@ function skinStep(rig, dt) {
     B.Hips.position.lerpVectors(S.fromHip, B.Hips.position.clone(), k);
   }
   S.bones.forEach((o, i) => S.last[i].copy(o.quaternion)); S.lastHip.copy(B.Hips.position);
+  // Rig-Gelenke auf die sichtbaren Knochen drehen (Zubehör wie Polster, Kapuze, Umhang folgt)
+  rig.root.updateMatrixWorld(true);
+  const rq = rig.root.getWorldQuaternion(new THREE.Quaternion()).invert(), tq = {};
+  for (const [j, b] of SKIN_JOINT) {
+    const g = J[j], bone = B[b];
+    if (!g || !bone || !S.calib[b] || g.userData.detached) continue;
+    tq[j] = rq.clone().multiply(bone.getWorldQuaternion(new THREE.Quaternion())).multiply(S.calib[b].clone().invert());
+    const pj = RIG_PARENT[j];
+    g.quaternion.copy(pj && tq[pj] ? tq[pj].clone().invert().multiply(tq[j]) : tq[j]);
+  }
   rig.root.updateMatrixWorld(true);
   for (const [j, b] of SKIN_SNAP) {
     const g = J[j];
