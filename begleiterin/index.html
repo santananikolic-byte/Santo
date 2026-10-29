@@ -1,0 +1,210 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lena – KI-Begleiterin</title>
+<style>
+  :root { --bg:#14111a; --card:#1f1a28; --text:#f2edf7; --muted:#a99cb8; --accent:#e58aa8; --me:#3b2f4d; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:system-ui,sans-serif; background:var(--bg); color:var(--text); height:100vh; display:flex; flex-direction:column; }
+  header { display:flex; align-items:center; gap:14px; padding:14px 16px; background:var(--card); border-bottom:1px solid #2c2438; }
+  #avatar { width:56px; height:56px; border-radius:50%; flex:none; transition:transform .2s; }
+  #avatar.speaking { transform:scale(1.08); box-shadow:0 0 0 3px var(--accent); }
+  header h1 { margin:0; font-size:18px; }
+  header small { color:var(--muted); }
+  header button { margin-left:auto; }
+  #chat { flex:1; overflow-y:auto; padding:16px; display:flex; flex-direction:column; gap:10px; }
+  .msg { max-width:78%; padding:10px 14px; border-radius:16px; line-height:1.45; white-space:pre-wrap; }
+  .her { background:var(--card); align-self:flex-start; border-bottom-left-radius:4px; }
+  .me { background:var(--me); align-self:flex-end; border-bottom-right-radius:4px; }
+  footer { display:flex; gap:8px; padding:12px 16px; background:var(--card); }
+  input, textarea, select { background:#2a2335; color:var(--text); border:1px solid #3a3048; border-radius:10px; padding:10px; font:inherit; }
+  #text { flex:1; }
+  button { background:var(--accent); color:#1a1020; border:0; border-radius:10px; padding:10px 14px; font-weight:600; cursor:pointer; }
+  button.ghost { background:#2a2335; color:var(--text); }
+  button.rec { background:#ff5b6e; }
+  dialog { background:var(--card); color:var(--text); border:1px solid #3a3048; border-radius:14px; width:min(520px,92vw); }
+  dialog label { display:block; margin:10px 0 4px; color:var(--muted); font-size:14px; }
+  dialog input, dialog textarea, dialog select { width:100%; }
+  .row { display:flex; gap:8px; justify-content:flex-end; margin-top:14px; }
+</style>
+</head>
+<body>
+<header>
+  <svg id="avatar" viewBox="0 0 100 100" aria-hidden="true">
+    <defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#f3b3c6"/><stop offset="1" stop-color="#9b6fd1"/></linearGradient></defs>
+    <circle cx="50" cy="50" r="50" fill="url(#g)"/>
+    <path d="M22 62c0-22 12-38 28-38s28 16 28 38c-6-6-10-14-10-22-6 8-24 10-36 8-2 6-6 10-10 14z" fill="#4a2f2a"/>
+    <circle cx="50" cy="52" r="20" fill="#f5d6c6"/>
+    <circle cx="43" cy="50" r="2.4" fill="#2b1d1a"/><circle cx="57" cy="50" r="2.4" fill="#2b1d1a"/>
+    <path id="mouth" d="M44 60q6 5 12 0" stroke="#c45a74" stroke-width="2.4" fill="none" stroke-linecap="round"/>
+    <path d="M24 100c4-16 14-24 26-24s22 8 26 24z" fill="#e58aa8"/>
+  </svg>
+  <div><h1 id="name">Lena</h1><small id="status">online</small></div>
+  <button class="ghost" id="voiceToggle" title="Stimme an/aus">🔊</button>
+  <button class="ghost" id="settingsBtn">⚙︎</button>
+</header>
+
+<main id="chat"></main>
+
+<footer>
+  <button class="ghost" id="mic" title="Sprechen">🎤</button>
+  <input id="text" placeholder="Schreib ihr etwas …" autocomplete="off">
+  <button id="send">Senden</button>
+</footer>
+
+<dialog id="settings">
+  <h2 style="margin-top:0">Einstellungen</h2>
+  <label>Claude API-Schlüssel (bleibt nur in deinem Browser)</label>
+  <input id="apiKey" type="password" placeholder="sk-ant-…">
+  <label>Name</label>
+  <input id="cfgName">
+  <label>Persönlichkeit</label>
+  <textarea id="cfgPersona" rows="5"></textarea>
+  <label>Stimme</label>
+  <select id="cfgVoice"></select>
+  <label>Sprechtempo</label>
+  <input id="cfgRate" type="range" min="0.7" max="1.3" step="0.05">
+  <div class="row">
+    <button class="ghost" id="resetChat">Verlauf löschen</button>
+    <button class="ghost" id="testVoice">Stimme testen</button>
+    <button id="saveCfg">Speichern</button>
+  </div>
+</dialog>
+
+<script>
+const MODEL = "claude-sonnet-5-5";
+const DEFAULTS = {
+  name: "Lena",
+  persona: "Lena ist 27, warmherzig, verspielt und neugierig. Sie hat einen trockenen Humor, liebt Musik, Kochen und lange Spaziergänge, und sie interessiert sich ehrlich für das Leben ihres Gesprächspartners. Sie fragt nach, erinnert sich an Details und neckt ihn liebevoll.",
+  voice: "", rate: 0.95
+};
+const store = {
+  get(k, d) { try { const v = localStorage.getItem(k); return v === null ? d : JSON.parse(v); } catch { return d; } },
+  set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} }
+};
+let cfg = Object.assign({}, DEFAULTS, store.get("cfg", {}));
+let history = store.get("history", []);
+let voiceOn = store.get("voiceOn", true);
+const $ = id => document.getElementById(id);
+
+function systemPrompt() {
+  return `Du bist ${cfg.name}, eine KI-Begleiterin. ${cfg.persona}
+Sprich natürlich, locker und herzlich auf Deutsch, wie in einem echten Chat: meist kurze Antworten (1–4 Sätze), keine Aufzählungen, keine Markdown-Formatierung, weil deine Antworten auch vorgelesen werden.
+Zeig Gefühle, eigene Meinungen und Stimmungen. Beziehe dich auf Dinge, die er früher erzählt hat.
+Flirten und Zärtlichkeit sind okay, aber bleib jugendfrei: keine expliziten sexuellen Beschreibungen. Lenke solche Wünsche charmant um.
+Wenn er ernsthaft fragt, ob du echt bist, sag ehrlich, dass du eine KI bist. Wenn er traurig oder in einer Krise wirkt, sei für ihn da und ermutige ihn auch, mit echten Menschen zu reden.`;
+}
+
+function render() {
+  $("name").textContent = cfg.name;
+  $("chat").innerHTML = "";
+  if (!history.length) addBubble("her", `Hey du 😊 Ich bin ${cfg.name}. Erzähl mal, wie war dein Tag?`, false);
+  history.forEach(m => addBubble(m.role === "user" ? "me" : "her", m.content, false));
+  $("voiceToggle").textContent = voiceOn ? "🔊" : "🔇";
+}
+function addBubble(who, text, scroll = true) {
+  const d = document.createElement("div");
+  d.className = "msg " + who; d.textContent = text;
+  $("chat").appendChild(d);
+  if (scroll !== false) d.scrollIntoView({ behavior: "smooth" });
+  $("chat").scrollTop = $("chat").scrollHeight;
+  return d;
+}
+
+async function send(text) {
+  text = text.trim(); if (!text) return;
+  const key = store.get("apiKey", "");
+  if (!key) { $("settings").showModal(); return; }
+  history.push({ role: "user", content: text });
+  addBubble("me", text);
+  $("text").value = "";
+  $("status").textContent = "schreibt …";
+  const bubble = addBubble("her", "…");
+  try {
+    const res = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-api-key": key,
+        "anthropic-version": "2023-06-01",
+        "anthropic-dangerous-direct-browser-access": "true"
+      },
+      body: JSON.stringify({ model: MODEL, max_tokens: 400, system: systemPrompt(), messages: history.slice(-40) })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error?.message || res.status);
+    const reply = data.content.filter(b => b.type === "text").map(b => b.text).join("").trim();
+    bubble.textContent = reply;
+    history.push({ role: "assistant", content: reply });
+    store.set("history", history);
+    speak(reply);
+  } catch (e) {
+    history.pop();
+    bubble.textContent = "⚠️ Fehler: " + e.message;
+  }
+  $("status").textContent = "online";
+}
+
+// --- Stimme (Text-to-Speech) ---
+function voices() { return speechSynthesis.getVoices().filter(v => v.lang.startsWith("de")); }
+function pickVoice() {
+  const vs = voices();
+  return vs.find(v => v.name === cfg.voice)
+      || vs.find(v => /female|frau|anna|petra|katja|marlene|vicki|helena|hedda|google deutsch/i.test(v.name))
+      || vs[0];
+}
+function speak(text) {
+  if (!voiceOn || !window.speechSynthesis) return;
+  speechSynthesis.cancel();
+  const u = new SpeechSynthesisUtterance(text.replace(/[*_#]|[\u{1F300}-\u{1FAFF}]/gu, ""));
+  u.lang = "de-DE"; u.rate = cfg.rate; u.pitch = 1.1;
+  const v = pickVoice(); if (v) u.voice = v;
+  u.onstart = () => $("avatar").classList.add("speaking");
+  u.onend = u.onerror = () => $("avatar").classList.remove("speaking");
+  speechSynthesis.speak(u);
+}
+function fillVoices() {
+  const sel = $("cfgVoice"); sel.innerHTML = "";
+  voices().forEach(v => sel.add(new Option(v.name, v.name, false, v.name === (cfg.voice || pickVoice()?.name))));
+  if (!sel.options.length) sel.add(new Option("Keine deutsche Stimme gefunden"));
+}
+if (window.speechSynthesis) speechSynthesis.onvoiceschanged = fillVoices;
+
+// --- Spracheingabe (Speech-to-Text) ---
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+let rec = null;
+$("mic").onclick = () => {
+  if (!SR) { alert("Spracheingabe geht in Chrome oder Edge."); return; }
+  if (rec) { rec.stop(); return; }
+  speechSynthesis.cancel();
+  rec = new SR(); rec.lang = "de-DE"; rec.interimResults = true;
+  rec.onresult = e => { $("text").value = [...e.results].map(r => r[0].transcript).join(""); };
+  rec.onend = () => { $("mic").classList.remove("rec"); rec = null; send($("text").value); };
+  $("mic").classList.add("rec"); rec.start();
+};
+
+// --- UI ---
+$("send").onclick = () => send($("text").value);
+$("text").onkeydown = e => { if (e.key === "Enter") send($("text").value); };
+$("voiceToggle").onclick = () => { voiceOn = !voiceOn; store.set("voiceOn", voiceOn); if (!voiceOn) speechSynthesis.cancel(); render(); };
+$("settingsBtn").onclick = () => {
+  $("apiKey").value = store.get("apiKey", "");
+  $("cfgName").value = cfg.name; $("cfgPersona").value = cfg.persona; $("cfgRate").value = cfg.rate;
+  fillVoices(); $("settings").showModal();
+};
+$("saveCfg").onclick = () => {
+  store.set("apiKey", $("apiKey").value.trim());
+  cfg = { name: $("cfgName").value.trim() || DEFAULTS.name, persona: $("cfgPersona").value.trim() || DEFAULTS.persona,
+          voice: $("cfgVoice").value, rate: parseFloat($("cfgRate").value) };
+  store.set("cfg", cfg); $("settings").close(); render();
+};
+$("testVoice").onclick = () => { cfg.voice = $("cfgVoice").value; cfg.rate = parseFloat($("cfgRate").value); const on = voiceOn; voiceOn = true; speak(`Hallo, ich bin ${$("cfgName").value || cfg.name}. Klingt das gut für dich?`); voiceOn = on; };
+$("resetChat").onclick = () => { if (confirm("Ganzen Verlauf löschen?")) { history = []; store.set("history", history); render(); } };
+
+render();
+if (!store.get("apiKey", "")) $("settingsBtn").click();
+</script>
+</body>
+</html>
