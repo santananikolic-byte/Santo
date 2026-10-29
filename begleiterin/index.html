@@ -2,25 +2,37 @@
 <html lang="de">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#1f1a28">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon.svg">
+<link rel="apple-touch-icon" href="icon.svg">
 <title>Lena – KI-Begleiterin</title>
 <style>
   :root { --bg:#14111a; --card:#1f1a28; --text:#f2edf7; --muted:#a99cb8; --accent:#e58aa8; --me:#3b2f4d; }
   * { box-sizing:border-box; }
-  body { margin:0; font-family:system-ui,sans-serif; background:var(--bg); color:var(--text); height:100vh; display:flex; flex-direction:column; }
-  header { display:flex; align-items:center; gap:14px; padding:14px 16px; background:var(--card); border-bottom:1px solid #2c2438; }
+  body { margin:0; font-family:system-ui,sans-serif; background:var(--bg); color:var(--text); height:100vh; height:100dvh; display:flex; overscroll-behavior:none; -webkit-tap-highlight-color:transparent; flex-direction:column; }
+  header { display:flex; align-items:center; gap:14px; padding:calc(10px + env(safe-area-inset-top)) 16px 10px; background:var(--card); border-bottom:1px solid #2c2438; }
   #avatar { width:56px; height:56px; border-radius:50%; flex:none; transition:transform .2s; }
   #avatar.speaking { transform:scale(1.08); box-shadow:0 0 0 3px var(--accent); }
   header h1 { margin:0; font-size:18px; }
   header small { color:var(--muted); }
-  header button { margin-left:auto; }
+  header button { min-width:42px; min-height:42px; padding:8px; }
+  #convo { margin-left:auto; }
   #chat { flex:1; overflow-y:auto; padding:16px; display:flex; flex-direction:column; gap:10px; }
   .msg { max-width:78%; padding:10px 14px; border-radius:16px; line-height:1.45; white-space:pre-wrap; }
   .her { background:var(--card); align-self:flex-start; border-bottom-left-radius:4px; }
   .me { background:var(--me); align-self:flex-end; border-bottom-right-radius:4px; }
-  footer { display:flex; gap:8px; padding:12px 16px; background:var(--card); }
-  input, textarea, select { background:#2a2335; color:var(--text); border:1px solid #3a3048; border-radius:10px; padding:10px; font:inherit; }
-  #text { flex:1; }
+  footer { display:flex; gap:8px; padding:10px 12px calc(10px + env(safe-area-inset-bottom)); background:var(--card); align-items:center; }
+  footer button { flex:none; min-width:48px; min-height:48px; border-radius:24px; }
+  #text { min-height:48px; border-radius:24px; padding:0 16px; }
+  #convo.on { background:#7bd88f; }
+  #status.listening { color:#7bd88f; }
+  @media (max-width:600px) { .msg { max-width:88%; } header h1 { font-size:17px; } #avatar { width:46px; height:46px; } }
+  input, textarea, select { background:#2a2335; color:var(--text); border:1px solid #3a3048; border-radius:10px; padding:10px; font:inherit; font-size:16px; }
+  #text { flex:1; min-width:0; }
   button { background:var(--accent); color:#1a1020; border:0; border-radius:10px; padding:10px 14px; font-weight:600; cursor:pointer; }
   button.ghost { background:#2a2335; color:var(--text); }
   button.rec { background:#ff5b6e; }
@@ -42,6 +54,7 @@
     <path d="M24 100c4-16 14-24 26-24s22 8 26 24z" fill="#e58aa8"/>
   </svg>
   <div><h1 id="name">Lena</h1><small id="status">online</small></div>
+  <button class="ghost" id="convo" title="Gesprächsmodus: freihändig reden">💬</button>
   <button class="ghost" id="voiceToggle" title="Stimme an/aus">🔊</button>
   <button class="ghost" id="settingsBtn">⚙︎</button>
 </header>
@@ -51,7 +64,7 @@
 <footer>
   <button class="ghost" id="mic" title="Sprechen">🎤</button>
   <input id="text" placeholder="Schreib ihr etwas …" autocomplete="off">
-  <button id="send">Senden</button>
+  <button id="send" aria-label="Senden">➤</button>
 </footer>
 
 <dialog id="settings">
@@ -140,6 +153,7 @@ async function send(text) {
     history.push({ role: "assistant", content: reply });
     store.set("history", history);
     speak(reply);
+    if (convo && !voiceOn) setTimeout(listen, 300);
   } catch (e) {
     history.pop();
     bubble.textContent = "⚠️ Fehler: " + e.message;
@@ -162,7 +176,7 @@ function speak(text) {
   u.lang = "de-DE"; u.rate = cfg.rate; u.pitch = 1.1;
   const v = pickVoice(); if (v) u.voice = v;
   u.onstart = () => $("avatar").classList.add("speaking");
-  u.onend = u.onerror = () => $("avatar").classList.remove("speaking");
+  u.onend = u.onerror = () => { $("avatar").classList.remove("speaking"); if (convo) setTimeout(listen, 300); };
   speechSynthesis.speak(u);
 }
 function fillVoices() {
@@ -174,15 +188,25 @@ if (window.speechSynthesis) speechSynthesis.onvoiceschanged = fillVoices;
 
 // --- Spracheingabe (Speech-to-Text) ---
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-let rec = null;
-$("mic").onclick = () => {
-  if (!SR) { alert("Spracheingabe geht in Chrome oder Edge."); return; }
-  if (rec) { rec.stop(); return; }
+let rec = null, convo = false;
+function listen() {
+  if (!SR) { alert("Spracheingabe geht in Chrome (Android) oder Safari (iPhone)."); return; }
+  if (rec) return;
   speechSynthesis.cancel();
   rec = new SR(); rec.lang = "de-DE"; rec.interimResults = true;
   rec.onresult = e => { $("text").value = [...e.results].map(r => r[0].transcript).join(""); };
-  rec.onend = () => { $("mic").classList.remove("rec"); rec = null; send($("text").value); };
-  $("mic").classList.add("rec"); rec.start();
+  rec.onend = () => {
+    $("mic").classList.remove("rec"); $("status").classList.remove("listening"); rec = null;
+    const t = $("text").value.trim();
+    if (t) send(t); else if (convo) setTimeout(listen, 500); else $("status").textContent = "online";
+  };
+  $("mic").classList.add("rec"); $("status").textContent = "hört zu …"; $("status").classList.add("listening");
+  rec.start();
+}
+$("mic").onclick = () => rec ? rec.stop() : listen();
+$("convo").onclick = () => {
+  convo = !convo; $("convo").classList.toggle("on", convo);
+  if (convo) { if (!voiceOn) $("voiceToggle").click(); listen(); } else if (rec) rec.abort();
 };
 
 // --- UI ---
@@ -203,6 +227,7 @@ $("saveCfg").onclick = () => {
 $("testVoice").onclick = () => { cfg.voice = $("cfgVoice").value; cfg.rate = parseFloat($("cfgRate").value); const on = voiceOn; voiceOn = true; speak(`Hallo, ich bin ${$("cfgName").value || cfg.name}. Klingt das gut für dich?`); voiceOn = on; };
 $("resetChat").onclick = () => { if (confirm("Ganzen Verlauf löschen?")) { history = []; store.set("history", history); render(); } };
 
+if ("serviceWorker" in navigator && location.protocol.startsWith("http")) navigator.serviceWorker.register("sw.js").catch(() => {});
 render();
 if (!store.get("apiKey", "")) $("settingsBtn").click();
 </script>
