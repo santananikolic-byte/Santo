@@ -1,7 +1,7 @@
 # BRAIN
 
-Bestätigter Stand aus den Interviews, Runde 1 und 2 (30.10.2026). Nur Einträge,
-die bestätigt wurden — nichts geraten.
+Bestätigter Stand aus den Interviews, Runde 1 und 2, und dem Daily Brain Update
+(30.10.2026). Nur Einträge, die bestätigt wurden — nichts geraten.
 
 ---
 
@@ -33,6 +33,11 @@ die bestätigt wurden — nichts geraten.
 - **C14** Hauptsorge: **Identitätsbetrug** — Leute geben sich als Inhaber oder
   Vertreter einer Firma aus; das kostet Zeit und Nerven.
 - **C15** Geräte: **Mac und Handy**.
+- **C16** Ergebnisse will ich **vor dem Speichern zur Bestätigung sehen**.
+- **C17** Ich formuliere Aufträge in festen Blöcken (ZIEL, KONTEXT, REGELN,
+  GRENZEN, OUTPUT, STOP).
+- **C18** Interviews: höchstens 10 Fragen pro Runde, eine nach der anderen,
+  jeweils mit einem Satz Begründung.
 
 ## PROJECT BRAIN
 
@@ -47,6 +52,8 @@ die bestätigt wurden — nichts geraten.
 | P7 | **Firmen- und Anruferprüfung** | Neu. Vor jedem Auftrag prüfen: Firma im Handelsregister, Geschäftsführer/Prokuristen, Impressum, passt die E-Mail-Domain, Bewertungen, Insolvenzen. **Rückruf-Regel:** immer über die offizielle Nummer, nie über die vom Anrufer genannte. Schriftliche Bestätigung von der Firmenadresse. |
 | P8 | **Feste Preiskalkulation** | Neu. Stundensatz und Leistungswerte statt Preise nach Gefühl. |
 | P9 | **Mitarbeiter gewinnen** | Neu. Eigenes Ziel, damit mehr Aufträge angenommen werden können. |
+| P10 | **Brain und Arbeitsregeln** | `BRAIN.md` (dieses Profil) und `CLAUDE.md` (Arbeitsregeln, die Claude bei jeder Sitzung automatisch liest) liegen im Repo. |
+| P11 | **JARVIS Master Prompt** | `jarvis-master-prompt.html`: der Prompt als Webseite, offline per Doppelklick, auch auf dem Handy lesbar. |
 
 ## DECISION LOG
 
@@ -59,6 +66,30 @@ die bestätigt wurden — nichts geraten.
 | D5 | 30.10.2026 | Priorität der nächsten 3 Monate: **mehr Aufträge gewinnen**. |
 | D6 | 30.10.2026 | „Inoffizielle Quellen“ heißt vor allem: **früh von Aufträgen erfahren** und **Kunden auf Echtheit prüfen**. |
 | D7 | 30.10.2026 | Prüfung nur über legale, öffentliche Quellen und offizielle Rückrufe — keine Ausforschung privater Nummern oder E-Mails, keine Persönlichkeitsprofile von Privatpersonen. |
+| D8 | 30.10.2026 | `BRAIN.md` und `CLAUDE.md` liegen im GitHub-Repo — bewusst entschieden, trotz Hinweis auf das Risiko eines öffentlichen Repos. |
+| D9 | 30.10.2026 | Finanzziele stehen nur in `BRAIN.md`, nicht in `CLAUDE.md`. |
+
+## RULES
+
+- **Nichts senden, löschen oder bezahlen ohne mein ausdrückliches Ja.** Vorher
+  kurz zeigen, was genau passiert. Ein Ja gilt nur für diese eine Aktion.
+- Keinem Kunden Preise, Termine oder Leistungen zusagen, ohne dass wir es
+  geprüft haben.
+
+## LEARNINGS
+
+- Bei offenen Zahlenfragen nicht mehrfach nachbohren, sondern sie am Ende zur
+  Bestätigung vorlegen.
+
+## ERLEDIGT
+
+| Datum | Aufgabe |
+|---|---|
+| 30.10.2026 | JARVIS-Prompt als einzelne HTML-Datei gebaut, auf Handy und Desktop getestet, gepusht. |
+| 30.10.2026 | Interview Runde 1 und 2 abgeschlossen und bestätigt. |
+| 30.10.2026 | OZ-CORE-Zusammenfassung (13 Abschnitte) erstellt. |
+| 30.10.2026 | `CLAUDE.md` erstellt, bestätigt und gepusht. |
+| 30.10.2026 | README angepasst: Familienbetrieb in Bau und Reinigung statt Einzelunternehmer in der Gebäudereinigung. |
 
 ## NACHTRÄGE (offen)
 
@@ -70,6 +101,8 @@ die bestätigt wurden — nichts geraten.
 
 ## NÄCHSTER SCHRITT
 
+0. Prüfen, ob das Repo öffentlich ist (GitHub → Settings → General → Danger
+   Zone), und gegebenenfalls auf privat stellen. Offen.
 1. Jarvis auf dem Mac installieren (Installationszeile aus der README).
 2. Anthropic-Schlüssel nur lokal in der Einrichtung eintragen — nie in einen Chat.
 3. Danach als erste neue Funktion: Firmen- und Anruferprüfung (P7).

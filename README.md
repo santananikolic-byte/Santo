@@ -1,7 +1,7 @@
 # Jarvis
 
-Ein persönlicher Sprachassistent für einen Einzelunternehmer in der
-Gebäudereinigung. Er läuft auf dem Mac, wird per Sprache bedient und antwortet
+Ein persönlicher Sprachassistent für einen Familienbetrieb in Bau und
+Reinigung. Er läuft auf dem Mac, wird per Sprache bedient und antwortet
 gesprochen.
 
 Alle Daten bleiben auf dem eigenen Rechner. Was nach außen geht, geht nur nach
@@ -117,7 +117,7 @@ Trennung ist echt — der Verkäufer sieht 11 von 58 Werkzeugen und kann weder b
 Rechercheur kann gar nichts eintragen. Wer alles darf, macht irgendwann alles,
 auch das Falsche.
 
-**Was der Betrieb tragen muss.** Ein Einzelunternehmer hat kein Gehalt. Jarvis
+**Was der Betrieb tragen muss.** Selbstständige haben kein festes Gehalt. Jarvis
 führt private und betriebliche Fixkosten getrennt — beim Steuerberater dürfen
 sie sich nicht vermischen — und rechnet daraus rückwärts den **nötigen
 Monatsumsatz**: Firmenkosten plus Privatkosten geteilt durch eins minus
