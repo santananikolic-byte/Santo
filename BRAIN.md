@@ -53,6 +53,7 @@ Bestätigter Stand aus den Interviews, Runde 1 und 2, und dem Daily Brain Update
 | P8 | **Feste Preiskalkulation** | Neu. Stundensatz und Leistungswerte statt Preise nach Gefühl. |
 | P9 | **Mitarbeiter gewinnen** | Neu. Eigenes Ziel, damit mehr Aufträge angenommen werden können. |
 | P10 | **Brain und Arbeitsregeln** | `BRAIN.md` (dieses Profil) und `CLAUDE.md` (Arbeitsregeln, die Claude bei jeder Sitzung automatisch liest) liegen im Repo. |
+| P12 | **Jarvis als Einzeldatei** | `jarvis.html`: Jarvis zum Doppelklicken im Browser, mit „Hey Jarvis“, Stimme, Websuche (Firmenprüfung) und Gedächtnis mit Bestätigung. Braucht einen Claude-API-Schlüssel, der nur im Browser gespeichert wird. Mit echtem Schlüssel noch nicht getestet. |
 | P11 | **JARVIS Master Prompt** | `jarvis-master-prompt.html`: der Prompt als Webseite, offline per Doppelklick, auch auf dem Handy lesbar. |
 
 ## DECISION LOG
@@ -90,6 +91,7 @@ Bestätigter Stand aus den Interviews, Runde 1 und 2, und dem Daily Brain Update
 | 30.10.2026 | OZ-CORE-Zusammenfassung (13 Abschnitte) erstellt. |
 | 30.10.2026 | `CLAUDE.md` erstellt, bestätigt und gepusht. |
 | 30.10.2026 | README angepasst: Familienbetrieb in Bau und Reinigung statt Einzelunternehmer in der Gebäudereinigung. |
+| 30.10.2026 | `jarvis.html` gebaut (Jarvis als Einzeldatei mit Sprache), mit simulierten Antworten getestet. |
 
 ## NACHTRÄGE (offen)
 
