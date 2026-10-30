@@ -1,12 +1,21 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Jarvis im Terminal - eine einzige Datei, nur Python-Bordmittel.
+"""Jarvis im Mac-Terminal - eine einzige Datei, nur Bordmittel des Mac.
 
 Starten:  python3 jarvis_terminal.py
 
-Stimme raus: macOS ``say`` (schon auf jedem Mac).
-Sprache rein: die Diktierfunktion des Mac - Mikrofontaste oder zweimal Fn,
-sprechen, Enter. Dafür braucht es kein Zusatzprogramm.
+Eigenes Sprachsystem:
+    Ohr:    Apples Spracherkennung (Speech-Framework), auf dem Mac selbst,
+            wenn der Mac das kann. Jarvis hört dauerhaft zu und reagiert auf
+            „Hey Jarvis“. Das Ohr ist ein kleines Swift-Programm, das diese
+            Datei beim ersten Start selbst übersetzt - mit Apples
+            Befehlszeilenwerkzeugen, die auch python3 auf dem Mac braucht.
+    Stimme: macOS ``say``.
+    Während Jarvis spricht, ist das Ohr stumm geschaltet, damit er sich nicht
+    selbst zuhört.
+
+Ohne Ohr (kein Mac, keine Werkzeuge, kein Mikrofon-Recht) wird getippt oder
+mit der Diktierfunktion des Mac gesprochen.
 
 Gedächtnis, Aufgaben und Verlauf liegen in ~/.jarvis-terminal/. Der
 API-Schlüssel liegt dort in einer eigenen Datei, die nur der eigene Benutzer
@@ -17,6 +26,7 @@ import datetime
 import getpass
 import json
 import os
+import queue
 import re
 import shutil
 import subprocess
@@ -39,6 +49,195 @@ SCHLUESSEL = os.path.join(ORDNER, "schluessel")
 MAX_VERLAUF = 30
 WUNSCHSTIMMEN = ["Markus", "Yannick", "Viktor", "Martin", "Helena", "Anna"]
 ENDEWOERTER = {"/ende", "ende", "exit", "quit", "tschüss", "tschuess", "feierabend"}
+
+# Die Spracherkennung schreibt den Namen selten richtig. Alle diese Formen
+# gelten als Weckwort - die längeren zuerst, damit „hey“ mit abgeschnitten wird.
+WECKWOERTER = ["hey jarvis", "hey javis", "hey dscharvis", "hey charvis", "hey travis",
+               "hey jervis", "hey jarwis", "hey service", "jarvis", "javis", "jarwis"]
+SPRACH_ENDE = {"feierabend", "tschüss", "tschüs", "ende", "beenden", "auf wiedersehen"}
+SPRACH_PAUSE = {"pause", "hör auf", "stopp", "stop", "tastatur", "nicht mehr zuhören"}
+
+OHR_ORDNER = os.path.join(ORDNER, "ohr")
+OHR_PROGRAMM = os.path.join(OHR_ORDNER, "jarvis-ohr")
+OHR_VERSION = "1"
+
+# Das Ohr: hört über das Mikrofon zu und schreibt erkannte Sätze zeilenweise
+# auf stdout ("TEIL\t…" während des Sprechens, "SATZ\t…" nach einer
+# Sprechpause). Über stdin wird es mit "pause" und "weiter" gesteuert.
+OHR_SWIFT = r'''
+import Foundation
+import Speech
+import AVFoundation
+
+setvbuf(stdout, nil, _IOLBF, 0)
+
+func melde(_ zeile: String) {
+    print(zeile.replacingOccurrences(of: "\n", with: " "))
+    fflush(stdout)
+}
+
+final class Ohr {
+    let erkenner: SFSpeechRecognizer
+    let engine = AVAudioEngine()
+    let sperre = NSLock()
+    var anfrage: SFSpeechAudioBufferRecognitionRequest?
+    var aufgabe: SFSpeechRecognitionTask?
+    var aufgabenNummer = 0
+    var letzterText = ""
+    var stille: Timer?
+    var pausiert = true
+
+    init?(sprache: String) {
+        guard let e = SFSpeechRecognizer(locale: Locale(identifier: sprache)) else { return nil }
+        erkenner = e
+    }
+
+    func start() throws {
+        let eingang = engine.inputNode
+        let format = eingang.outputFormat(forBus: 0)
+        if format.sampleRate == 0 {
+            throw NSError(domain: "Ohr", code: 1, userInfo: [NSLocalizedDescriptionKey: "kein Mikrofon gefunden"])
+        }
+        eingang.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak self] puffer, _ in
+            guard let self = self else { return }
+            self.sperre.lock()
+            let a = self.anfrage
+            self.sperre.unlock()
+            a?.append(puffer)
+        }
+        engine.prepare()
+        try engine.start()
+        melde(erkenner.supportsOnDeviceRecognition ? "MODUS\tlokal" : "MODUS\tapple")
+        // Eine Erkennung darf nicht ewig laufen: ohne Sprache regelmäßig neu beginnen.
+        Timer.scheduledTimer(withTimeInterval: 50, repeats: true) { [weak self] _ in
+            guard let self = self, !self.pausiert, self.letzterText.isEmpty else { return }
+            self.neueAufgabe()
+        }
+    }
+
+    func neueAufgabe() {
+        stille?.invalidate()
+        aufgabe?.cancel()
+        aufgabenNummer += 1
+        let nummer = aufgabenNummer
+        let a = SFSpeechAudioBufferRecognitionRequest()
+        a.shouldReportPartialResults = true
+        a.taskHint = .dictation
+        if erkenner.supportsOnDeviceRecognition { a.requiresOnDeviceRecognition = true }
+        sperre.lock()
+        anfrage = a
+        sperre.unlock()
+        letzterText = ""
+        aufgabe = erkenner.recognitionTask(with: a) { [weak self] ergebnis, fehler in
+            DispatchQueue.main.async { self?.verarbeite(nummer, ergebnis, fehler) }
+        }
+    }
+
+    func verarbeite(_ nummer: Int, _ ergebnis: SFSpeechRecognitionResult?, _ fehler: Error?) {
+        if nummer != aufgabenNummer || pausiert { return }
+        if let ergebnis = ergebnis {
+            let text = ergebnis.bestTranscription.formattedString
+            if text != letzterText {
+                letzterText = text
+                melde("TEIL\t" + text)
+                stille?.invalidate()
+                stille = Timer.scheduledTimer(withTimeInterval: 1.3, repeats: false) { [weak self] _ in
+                    self?.abschliessen()
+                }
+            }
+            if ergebnis.isFinal { abschliessen() }
+        } else if fehler != nil {
+            // z. B. "nichts gehört" - einfach weiter zuhören.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in
+                guard let self = self, !self.pausiert, nummer == self.aufgabenNummer else { return }
+                self.neueAufgabe()
+            }
+        }
+    }
+
+    func abschliessen() {
+        stille?.invalidate()
+        let text = letzterText.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !text.isEmpty { melde("SATZ\t" + text) }
+        sperre.lock()
+        anfrage?.endAudio()
+        sperre.unlock()
+        if !pausiert { neueAufgabe() }
+    }
+
+    func pause() {
+        pausiert = true
+        stille?.invalidate()
+        aufgabenNummer += 1
+        aufgabe?.cancel()
+        aufgabe = nil
+        sperre.lock()
+        anfrage = nil
+        sperre.unlock()
+        letzterText = ""
+    }
+
+    func weiter() {
+        pausiert = false
+        neueAufgabe()
+    }
+}
+
+guard let ohr = Ohr(sprache: "de-DE") else {
+    melde("FEHLER\tDeutsche Spracherkennung ist auf diesem Mac nicht verfügbar.")
+    exit(1)
+}
+
+Thread {
+    while let zeile = readLine() {
+        let befehl = zeile.trimmingCharacters(in: .whitespaces)
+        DispatchQueue.main.async {
+            if befehl == "pause" { ohr.pause() }
+            if befehl == "weiter" { ohr.weiter() }
+        }
+    }
+    exit(0)
+}.start()
+
+SFSpeechRecognizer.requestAuthorization { status in
+    DispatchQueue.main.async {
+        guard status == .authorized else {
+            melde("FEHLER\tSpracherkennung nicht erlaubt. Systemeinstellungen → Datenschutz & Sicherheit → Spracherkennung → Terminal einschalten.")
+            exit(2)
+        }
+        AVCaptureDevice.requestAccess(for: .audio) { erlaubt in
+            DispatchQueue.main.async {
+                guard erlaubt else {
+                    melde("FEHLER\tMikrofon nicht erlaubt. Systemeinstellungen → Datenschutz & Sicherheit → Mikrofon → Terminal einschalten.")
+                    exit(3)
+                }
+                do {
+                    try ohr.start()
+                    melde("BEREIT\t")
+                } catch {
+                    melde("FEHLER\tMikrofon konnte nicht starten: \(error.localizedDescription)")
+                    exit(4)
+                }
+            }
+        }
+    }
+}
+
+RunLoop.main.run()
+'''
+
+# Ohne diese Angaben verweigert macOS einem Programm Mikrofon und Spracherkennung.
+OHR_PLIST = '''<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleIdentifier</key><string>de.jarvis.ohr</string>
+    <key>CFBundleName</key><string>Jarvis Ohr</string>
+    <key>NSMicrophoneUsageDescription</key><string>Jarvis hört zu, wenn du „Hey Jarvis“ sagst.</string>
+    <key>NSSpeechRecognitionUsageDescription</key><string>Jarvis versteht, was du sagst.</string>
+</dict>
+</plist>
+'''
 
 GRUNDLAGE = "\n".join([
     "Du bist JARVIS, der persönliche Assistent eines Familienbetriebs für Bau und Reinigung (Vater und Sohn) aus Leverkusen bei Köln.",
@@ -66,11 +265,12 @@ GRUNDLAGE = "\n".join([
 ])
 
 HILFE = """
-  Einfach schreiben oder diktieren und Enter drücken.
+  Sprechen     /hoeren – Jarvis hört zu, du sagst „Hey Jarvis“ und dann,
+               was du brauchst. Zurück zur Tastatur: Strg+C oder
+               „Hey Jarvis, Pause“. Beenden: „Hey Jarvis, Feierabend“.
+  Tippen       einfach schreiben und Enter drücken.
 
-  Sprechen     Diktierfunktion des Mac: Mikrofontaste oder zweimal Fn,
-               sprechen, dann Enter. (Einschalten: Systemeinstellungen →
-               Tastatur → Diktierfunktion)
+  /hoeren an|aus       beim Start automatisch zuhören oder nicht
 
   /notizen             was Jarvis über dich weiß
   /merke <Text>        selbst etwas eintragen
@@ -112,7 +312,7 @@ def fett(t): return f(t, "1")
 
 def laden():
     leer = {"fakten": [], "aufgaben": [], "verlauf": [],
-            "einstellungen": {"stimme": "", "tempo": 185, "vorlesen": True, "web": True}}
+            "einstellungen": {"stimme": "", "tempo": 185, "vorlesen": True, "web": True, "hoeren": True}}
     try:
         with open(DATEN, "r", encoding="utf-8") as datei:
             daten = json.load(datei)
@@ -233,6 +433,167 @@ class Stimme:
             self.prozess.stdin.close()
         except OSError:
             self.prozess = None
+
+    def warte(self):
+        """Wartet, bis Jarvis ausgesprochen hat. Strg+C bricht das Vorlesen ab."""
+        if not self.prozess:
+            return
+        try:
+            self.prozess.wait()
+        except KeyboardInterrupt:
+            self.stopp()
+            raise
+        self.prozess = None
+
+
+# -------------------------------------------------------------------- Ohr ---
+
+class Ohr:
+    """Steuert das kleine Swift-Programm, das über das Mikrofon zuhört."""
+
+    def __init__(self):
+        self.prozess = None
+        self.ereignisse = queue.Queue()
+        self.fehler = ""
+        self.modus = ""
+
+    def moeglich(self):
+        return sys.platform == "darwin"
+
+    def laeuft(self):
+        return self.prozess is not None and self.prozess.poll() is None
+
+    def _swiftc(self):
+        gefunden = shutil.which("swiftc")
+        if gefunden:
+            return gefunden
+        try:
+            pfad = subprocess.run(["xcrun", "--find", "swiftc"], capture_output=True, text=True, timeout=30).stdout.strip()
+            return pfad or None
+        except (OSError, subprocess.SubprocessError):
+            return None
+
+    def bauen(self):
+        """Übersetzt das Ohr einmalig. Danach startet es sofort."""
+        versionsdatei = os.path.join(OHR_ORDNER, "version")
+        try:
+            with open(versionsdatei, "r", encoding="utf-8") as datei:
+                if datei.read().strip() == OHR_VERSION and os.path.exists(OHR_PROGRAMM):
+                    return True
+        except OSError:
+            pass
+        swiftc = self._swiftc()
+        if not swiftc:
+            self.fehler = ("Für „Hey Jarvis“ fehlen Apples Befehlszeilenwerkzeuge. Einmal im Terminal "
+                           "„xcode-select --install“ eingeben, installieren lassen und Jarvis neu starten.")
+            return False
+        os.makedirs(OHR_ORDNER, exist_ok=True)
+        quelle = os.path.join(OHR_ORDNER, "ohr.swift")
+        plist = os.path.join(OHR_ORDNER, "Info.plist")
+        with open(quelle, "w", encoding="utf-8") as datei:
+            datei.write(OHR_SWIFT)
+        with open(plist, "w", encoding="utf-8") as datei:
+            datei.write(OHR_PLIST)
+        print(grau("  Richte das Ohr einmalig ein, das dauert etwa eine Minute …"))
+        try:
+            ergebnis = subprocess.run(
+                [swiftc, "-O", quelle, "-o", OHR_PROGRAMM,
+                 "-Xlinker", "-sectcreate", "-Xlinker", "__TEXT", "-Xlinker", "__info_plist", "-Xlinker", plist],
+                capture_output=True, text=True, timeout=900)
+        except (OSError, subprocess.SubprocessError) as fehler:
+            self.fehler = "Das Ohr ließ sich nicht übersetzen: %s" % fehler
+            return False
+        if ergebnis.returncode != 0:
+            letzte = (ergebnis.stderr or ergebnis.stdout or "").strip().splitlines()[-3:]
+            self.fehler = "Das Ohr ließ sich nicht übersetzen: " + " / ".join(letzte)
+            return False
+        # Eine feste Kennung, damit macOS sich die erteilten Rechte merkt.
+        subprocess.run(["codesign", "--force", "--sign", "-", "--identifier", "de.jarvis.ohr", OHR_PROGRAMM],
+                       capture_output=True)
+        with open(versionsdatei, "w", encoding="utf-8") as datei:
+            datei.write(OHR_VERSION)
+        return True
+
+    def starten(self):
+        if self.laeuft():
+            return True
+        if not self.bauen():
+            return False
+        self.ereignisse = queue.Queue()
+        try:
+            self.prozess = subprocess.Popen([OHR_PROGRAMM], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                            stderr=subprocess.DEVNULL, text=True, bufsize=1)
+        except OSError as fehler:
+            self.fehler = "Das Ohr startet nicht: %s" % fehler
+            return False
+        threading.Thread(target=self._lesen, daemon=True).start()
+        print(grau("  Beim ersten Mal fragt macOS nach Mikrofon und Spracherkennung – bitte erlauben."))
+        frist = time.time() + 120
+        while time.time() < frist:
+            try:
+                art, text = self.ereignisse.get(timeout=1)
+            except queue.Empty:
+                continue
+            if art == "MODUS":
+                self.modus = text
+            elif art == "BEREIT":
+                return True
+            elif art in ("FEHLER", "ENDE"):
+                self.fehler = text or "Das Ohr wurde unerwartet beendet."
+                self.stopp()
+                return False
+        self.fehler = "Keine Antwort vom Mikrofon. Wurde die Erlaubnis erteilt?"
+        self.stopp()
+        return False
+
+    def _lesen(self):
+        for zeile in self.prozess.stdout:
+            art, _, text = zeile.rstrip("\n").partition("\t")
+            self.ereignisse.put((art, text))
+        self.ereignisse.put(("ENDE", ""))
+
+    def _sende(self, befehl):
+        if self.laeuft():
+            try:
+                self.prozess.stdin.write(befehl + "\n")
+                self.prozess.stdin.flush()
+            except OSError:
+                pass
+
+    def pause(self):
+        self._sende("pause")
+
+    def weiter(self):
+        self.leeren()
+        self._sende("weiter")
+
+    def leeren(self):
+        while True:
+            try:
+                self.ereignisse.get_nowait()
+            except queue.Empty:
+                return
+
+    def naechstes(self, timeout=None):
+        try:
+            return self.ereignisse.get(timeout=timeout)
+        except queue.Empty:
+            return None
+
+    def stopp(self):
+        if self.prozess and self.prozess.poll() is None:
+            self.prozess.terminate()
+        self.prozess = None
+
+
+def nach_weckwort(satz):
+    """Gibt den Befehl nach dem Weckwort zurück, "" für nur das Weckwort, None ohne Weckwort."""
+    klein = satz.lower()
+    for wort in WECKWOERTER:
+        pos = klein.find(wort)
+        if pos != -1:
+            return satz[pos + len(wort):].strip(" ,.!?;:-").strip()
+    return None
 
 
 # ----------------------------------------------------------------- Claude ---
@@ -399,7 +760,10 @@ def kopf(daten, stimme):
     offen = len([a for a in daten["aufgaben"] if not a.get("erledigt")])
     teile.append("Offene Aufgaben: %d" % offen)
     print("  " + grau(" · ".join(teile)))
-    print("  " + grau("Sprechen: Mikrofontaste oder zweimal Fn, dann Enter.  Hilfe: /hilfe"))
+    if sys.platform == "darwin":
+        print("  " + grau("Sprechen: „Hey Jarvis“ (/hoeren).  Hilfe: /hilfe"))
+    else:
+        print("  " + grau("„Hey Jarvis“ gibt es nur auf dem Mac – hier wird getippt.  Hilfe: /hilfe"))
 
 
 # ---------------------------------------------------------------- Befehle ---
@@ -509,6 +873,16 @@ def befehl(eingabe, daten, stimme, zustand):
         print(gruen("  ✓ Vorlesen an."))
     elif cmd == "/still":
         stimme.stopp()
+    elif cmd in ("/hoeren", "/hören"):
+        if arg.lower() in ("an", "ein", "on"):
+            einst["hoeren"] = True
+        elif arg.lower() in ("aus", "off"):
+            einst["hoeren"] = False
+        else:
+            print(grau("  So: /hoeren an  oder  /hoeren aus"))
+            return True
+        speichern(daten)
+        print(gruen("  ✓ Beim Start %s." % ("zuhören" if einst["hoeren"] else "nicht zuhören")))
     elif cmd == "/web":
         if arg.lower() in ("an", "ein", "on"):
             einst["web"] = True
@@ -568,7 +942,7 @@ def befehl(eingabe, daten, stimme, zustand):
 
 # ------------------------------------------------------------------ Ablauf ---
 
-def gespraech(text, daten, stimme, zustand):
+def gespraech(text, daten, stimme, zustand, ohr=None):
     if not zustand["schluessel"]:
         zustand["schluessel"] = schluessel_abfragen()
         if not zustand["schluessel"]:
@@ -603,25 +977,128 @@ def gespraech(text, daten, stimme, zustand):
     stimme.sprich(text_rein)
     for art, inhalt in vorschlaege:
         print()
-        if art == "MERKEN":
-            if ja(cyan("Merken?") + " „%s“" % inhalt):
-                daten["fakten"].append({"text": inhalt})
-                speichern(daten)
-                print(gruen("  ✓ Gemerkt."))
+        frage = "Merken?" if art == "MERKEN" else "Als Aufgabe eintragen?"
+        if ohr is not None:
+            zugestimmt = ja_gesprochen(frage, inhalt, stimme, ohr)
         else:
-            if ja(cyan("Als Aufgabe eintragen?") + " „%s“" % inhalt):
-                daten["aufgaben"].append({"text": inhalt, "erledigt": False})
-                speichern(daten)
-                print(gruen("  ✓ Eingetragen."))
+            zugestimmt = ja(cyan(frage) + " „%s“" % inhalt)
+        if not zugestimmt:
+            continue
+        if art == "MERKEN":
+            daten["fakten"].append({"text": inhalt})
+            print(gruen("  ✓ Gemerkt."))
+        else:
+            daten["aufgaben"].append({"text": inhalt, "erledigt": False})
+            print(gruen("  ✓ Eingetragen."))
+        speichern(daten)
+
+
+def ja_gesprochen(frage, inhalt, stimme, ohr):
+    """Fragt im Hörmodus laut nach und wartet auf ein gesprochenes Ja oder Nein."""
+    print("  " + cyan(frage) + " „%s“ " % inhalt + grau("(sag „ja“ oder „nein“)"))
+    stimme.warte()
+    stimme.sprich(("Soll ich mir merken: " if frage == "Merken?" else "Soll ich als Aufgabe eintragen: ") + inhalt + "?",
+                  erzwingen=True)
+    stimme.warte()
+    ohr.weiter()
+    antwort = ""
+    frist = time.time() + 10
+    while time.time() < frist:
+        ereignis = ohr.naechstes(timeout=0.5)
+        if ereignis and ereignis[0] == "SATZ":
+            antwort = ereignis[1].lower().strip(" .!?")
+            break
+    ohr.pause()
+    zugestimmt = bool(re.match(r"^(ja|jawohl|gerne|gern|okay|ok|mach|bitte|genau)\b", antwort))
+    print("  " + grau("» " + (antwort or "keine Antwort")))
+    if not zugestimmt:
+        print(grau("  Nicht gespeichert."))
+    return zugestimmt
+
+
+def hoermodus(daten, stimme, zustand, ohr):
+    """Jarvis hört dauerhaft zu. Gibt False zurück, wenn Jarvis ganz beendet werden soll."""
+    if not ohr.starten():
+        print("  " + rot("✕ " + ohr.fehler))
+        print(grau("  Du kannst weiter tippen oder mit der Diktierfunktion sprechen."))
+        return True
+    print()
+    hinweis = "auf diesem Mac" if ohr.modus == "lokal" else "über Apple"
+    print("  " + rot("●") + " " + fett("Mikrofon an") + grau("  –  sag „Hey Jarvis“ und dann, was du brauchst."))
+    print(grau("  Spracherkennung %s. Zurück zur Tastatur: Strg+C oder „Hey Jarvis, Pause“." % hinweis))
+    wartet_auf_befehl = False
+    ohr.weiter()
+    try:
+        while True:
+            ereignis = ohr.naechstes(timeout=10 if wartet_auf_befehl else None)
+            if ereignis is None:
+                wartet_auf_befehl = False
+                continue
+            art, text = ereignis
+            if art == "TEIL":
+                if FARBE:
+                    sys.stdout.write("\r\033[K  " + grau("🎙  " + text[-90:]))
+                    sys.stdout.flush()
+                continue
+            if art in ("FEHLER", "ENDE"):
+                print("\n  " + rot("✕ " + (text or "Das Mikrofon wurde beendet.")))
+                ohr.stopp()
+                return True
+            if art != "SATZ":
+                continue
+            if FARBE:
+                sys.stdout.write("\r\033[K")
+            if wartet_auf_befehl:
+                befehl_text, wartet_auf_befehl = text.strip(), False
+            else:
+                befehl_text = nach_weckwort(text)
+                if befehl_text is None:
+                    continue
+                if not befehl_text:
+                    ohr.pause()
+                    print("  " + fett(cyan("JARVIS")) + "  Ja?")
+                    stimme.sprich("Ja?", erzwingen=True)
+                    stimme.warte()
+                    ohr.weiter()
+                    wartet_auf_befehl = True
+                    continue
+            klein = befehl_text.lower().strip(" .!?")
+            if klein in SPRACH_ENDE:
+                ohr.pause()
+                stimme.sprich("Bis später.", erzwingen=True)
+                stimme.warte()
+                return False
+            if klein in SPRACH_PAUSE:
+                # Ganz beenden, damit das Mikrofon wirklich aus ist und macOS das auch anzeigt.
+                ohr.stopp()
+                print(grau("  Mikrofon aus. Zurück mit /hoeren."))
+                return True
+            print()
+            print("  " + fett(blau("DU")) + "  " + befehl_text)
+            ohr.pause()
+            gespraech(befehl_text, daten, stimme, zustand, ohr=ohr)
+            stimme.warte()
+            ohr.weiter()
+    except KeyboardInterrupt:
+        ohr.stopp()
+        stimme.stopp()
+        print("\n" + grau("  Mikrofon aus. Zurück mit /hoeren."))
+        return True
 
 
 def main():
     daten = laden()
     stimme = Stimme(daten["einstellungen"])
-    zustand = {"schluessel": schluessel_lesen()}
+    ohr = Ohr()
+    zustand = {"schluessel": schluessel_lesen(), "ohr": ohr}
     kopf(daten, stimme)
     if not zustand["schluessel"]:
         zustand["schluessel"] = schluessel_abfragen()
+    if ohr.moeglich() and daten["einstellungen"].get("hoeren", True) and "tippen" not in sys.argv[1:]:
+        if not hoermodus(daten, stimme, zustand, ohr):
+            ohr.stopp()
+            print(grau("  Bis später.") + "\n")
+            return
     while True:
         try:
             print()
@@ -633,11 +1110,18 @@ def main():
             continue
         if eingabe.lower() in ENDEWOERTER:
             break
+        if eingabe.lower() in ("/hoeren", "/hören"):
+            if not ohr.moeglich():
+                print(grau("  „Hey Jarvis“ gibt es nur auf dem Mac."))
+            elif not hoermodus(daten, stimme, zustand, ohr):
+                break
+            continue
         if eingabe.startswith("/"):
             if not befehl(eingabe, daten, stimme, zustand):
                 break
             continue
         gespraech(eingabe, daten, stimme, zustand)
+    ohr.stopp()
     stimme.stopp()
     print(grau("  Bis später.") + "\n")
 

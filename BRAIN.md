@@ -54,7 +54,7 @@ Bestätigter Stand aus den Interviews, Runde 1 und 2, und dem Daily Brain Update
 | P9 | **Mitarbeiter gewinnen** | Neu. Eigenes Ziel, damit mehr Aufträge angenommen werden können. |
 | P10 | **Brain und Arbeitsregeln** | `BRAIN.md` (dieses Profil) und `CLAUDE.md` (Arbeitsregeln, die Claude bei jeder Sitzung automatisch liest) liegen im Repo. |
 | P12 | **Jarvis als Einzeldatei** | `jarvis.html`: Jarvis zum Doppelklicken im Browser, mit „Hey Jarvis“, Stimme, Websuche (Firmenprüfung) und Gedächtnis mit Bestätigung. Braucht einen Claude-API-Schlüssel, der nur im Browser gespeichert wird. Mit echtem Schlüssel noch nicht getestet. |
-| P13 | **Jarvis im Terminal** | `jarvis_terminal.py`: dieselben Funktionen wie `jarvis.html`, aber im Terminal. Start mit `python3 jarvis_terminal.py`. Stimme über macOS `say`, Sprechen über die Diktierfunktion des Mac. Daten in `~/.jarvis-terminal/`. Mit echtem Schlüssel noch nicht getestet. |
+| P13 | **Jarvis im Mac-Terminal** | `jarvis_terminal.py`: Start mit `python3 jarvis_terminal.py`. Eigenes Sprachsystem: hört dauerhaft zu und reagiert auf „Hey Jarvis“ (Apples Spracherkennung, auf dem Mac selbst, wenn der Mac das kann), spricht mit der Mac-Stimme, Merken per gesprochenem Ja/Nein. Daten in `~/.jarvis-terminal/`. Auf einem echten Mac und mit echtem Schlüssel noch nicht getestet. |
 | P11 | **JARVIS Master Prompt** | `jarvis-master-prompt.html`: der Prompt als Webseite, offline per Doppelklick, auch auf dem Handy lesbar. |
 
 ## DECISION LOG
