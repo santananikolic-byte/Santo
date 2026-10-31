@@ -9,6 +9,8 @@ eine erledigte Sache.
 """
 
 import os
+import shutil
+import subprocess
 
 from . import gedaechtnis, rollen, umgebung
 from .freigaben import Berechtigung
@@ -165,13 +167,32 @@ class Agent:
         self.log.ereignis("werkzeug", werkzeug=w.name, berechtigungsstufe=stufe, status=status, auftrag=ctx.auftrag_id)
         return self._ergebnis(w, w.name, status, text, stufe=stufe, freigabe_id=freigabe_id, params=params)
 
+    def zaehle_aufruf(self, auftrag_id):
+        """Zählt einen Modellaufruf für den Auftrag und stoppt beim Limit."""
+        if self.speicher.auftrag_aufruf_zaehlen(auftrag_id) > self.konfig.max_aufrufe_pro_auftrag:
+            raise ProviderFehler("aufruflimit", "Das Aufruflimit dieses Auftrags (%d Modellaufrufe) ist erreicht."
+                                 % self.konfig.max_aufrufe_pro_auftrag)
+
+    @staticmethod
+    def rollen_modell(rolle):
+        return rollen.ROLLEN.get(rolle, rollen.ROLLEN["allgemein"])["modell"]
+
+    def benachrichtigen(self, titel, text, sprechen=False):
+        """Mitteilung des Macs (der Text geht als Argument an osascript, nie in den Skripttext) und optional laut."""
+        programm = shutil.which("osascript")
+        if programm:
+            try:
+                subprocess.run([programm, "-e", "on run argv", "-e", "display notification (item 1 of argv) with title (item 2 of argv)",  # noqa: S603
+                                "-e", "end run", text[:200], titel[:60]], capture_output=True, timeout=10)
+            except (OSError, subprocess.SubprocessError):
+                pass
+        if sprechen and self.stimme and self.konfig.vorlesen:
+            self.stimme.sprich("%s. %s" % (titel, text))
+
     def runde(self, ctx, transkript, art="chat", frage=""):
         """Ein Modellaufruf samt Ausführung der Aktionen. Wirft ProviderFehler."""
         if ctx.auftrag_id:
-            aufrufe = self.speicher.auftrag_aufruf_zaehlen(ctx.auftrag_id)
-            if aufrufe > self.konfig.max_aufrufe_pro_auftrag:
-                raise ProviderFehler("aufruflimit", "Das Aufruflimit dieses Auftrags (%d Modellaufrufe) ist erreicht."
-                                     % self.konfig.max_aufrufe_pro_auftrag)
+            self.zaehle_aufruf(ctx.auftrag_id)
         roh = self.provider.fragen(self.prompt_bauen(ctx, transkript, frage), self.system_prompt(ctx.rolle), art=art,
                                    auftrag_id=ctx.auftrag_id)
         text, aktionen = aktionen_parsen(roh["antwort"])

@@ -92,6 +92,8 @@ class Stimme:
                                                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 self._prozess.stdin.write(sauber.encode("utf-8"))
                 self._prozess.stdin.close()
+                # Das Ende abwarten (in einem eigenen Faden), damit keine Zombie-Prozesse übrig bleiben.
+                threading.Thread(target=self._prozess.wait, daemon=True).start()
         except OSError:
             self._prozess = None
             return False

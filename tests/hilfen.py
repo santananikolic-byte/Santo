@@ -84,8 +84,18 @@ class Umgebung(unittest.TestCase):
         shutil.rmtree(self.ordner, ignore_errors=True)
 
     def drehbuch(self, regeln):
+        """Neues Drehbuch. Die Regelzähler ("max") beginnen neu; die Aufrufnummer läuft weiter."""
         with open(self.drehbuch_datei, "w", encoding="utf-8") as f:
             json.dump(regeln, f, ensure_ascii=False)
+        stand_datei = os.environ["FAKE_STAND"]
+        try:
+            with open(stand_datei, "r", encoding="utf-8") as f:
+                stand = json.load(f)
+        except (OSError, ValueError):
+            stand = {}
+        stand["regeln"] = {}
+        with open(stand_datei, "w", encoding="utf-8") as f:
+            json.dump(stand, f)
 
     def aufrufe(self):
         """Alle bisherigen Aufrufe des Ersatz-Claude (nur echte Anfragen, ohne --version/auth)."""
@@ -111,3 +121,47 @@ class Umgebung(unittest.TestCase):
             return antwort.status, json.loads(inhalt.decode("utf-8")), kopfzeilen
         except ValueError:
             return antwort.status, inhalt.decode("utf-8", "replace"), kopfzeilen
+
+
+class AgentBasis(Umgebung):
+    """Umgebung plus fertig verdrahteter Agent (Speicher, Provider, Berechtigung)."""
+
+    def setUp(self):
+        super().setUp()
+        from jarvis_core import konfig as konfig_modul
+        from jarvis_core.agent import Agent
+        from jarvis_core.protokoll import Protokoll
+        from jarvis_core.provider import ProviderManager
+        from jarvis_core.speicher import Speicher
+        self.konfig = konfig_modul.laden()
+        self.log = Protokoll(self.konfig)
+        self.sp = Speicher(self.konfig.db_datei)
+        self.pm = ProviderManager(self.konfig, self.log)
+        self.agent = Agent(self.konfig, self.log, self.sp, self.pm)
+
+    def tearDown(self):
+        self.sp.schliessen()
+        self.log.schliessen()
+        super().tearDown()
+
+    def ctx(self, bereich="geschaeft", **kw):
+        from jarvis_core.werkzeuge import Kontext
+        return Kontext(self.agent, bereich, **kw)
+
+    def aktion(self, name, koerper=None, ctx=None, **roh):
+        return self.agent.aktion_ausfuehren(ctx or self.ctx(), {"name": name, "roh": roh, "koerper": koerper})
+
+    def werkstatt_datei(self, name, inhalt):
+        pfad = os.path.join(self.werkstatt, name)
+        os.makedirs(os.path.dirname(pfad), exist_ok=True)
+        with open(pfad, "w", encoding="utf-8") as f:
+            f.write(inhalt)
+        return pfad
+
+    def lesen(self, name):
+        with open(os.path.join(self.werkstatt, name), encoding="utf-8") as f:
+            return f.read()
+
+    def chat_antworten(self, *antworten):
+        """Das Modell antwortet der Reihe nach mit diesen Texten (je Aufruf eine)."""
+        self.drehbuch([{"nr": i + 1, "antwort": a} for i, a in enumerate(antworten)])

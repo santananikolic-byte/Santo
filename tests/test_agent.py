@@ -11,50 +11,12 @@ import os
 import time
 import unittest
 
-from tests.hilfen import Umgebung
+from tests.hilfen import AgentBasis
 
 from jarvis_core import konfig as konfig_modul  # noqa: E402
 from jarvis_core.agent import Agent  # noqa: E402
-from jarvis_core.protokoll import Protokoll  # noqa: E402
 from jarvis_core.provider import ProviderManager  # noqa: E402
-from jarvis_core.speicher import Speicher  # noqa: E402
-from jarvis_core.werkzeuge import Kontext, aktionen_parsen  # noqa: E402
-
-
-class AgentBasis(Umgebung):
-    def setUp(self):
-        super().setUp()
-        self.konfig = konfig_modul.laden()
-        self.log = Protokoll(self.konfig)
-        self.sp = Speicher(self.konfig.db_datei)
-        self.pm = ProviderManager(self.konfig, self.log)
-        self.agent = Agent(self.konfig, self.log, self.sp, self.pm)
-
-    def tearDown(self):
-        self.sp.schliessen()
-        self.log.schliessen()
-        super().tearDown()
-
-    def ctx(self, bereich="geschaeft", **kw):
-        return Kontext(self.agent, bereich, **kw)
-
-    def aktion(self, name, koerper=None, ctx=None, **roh):
-        return self.agent.aktion_ausfuehren(ctx or self.ctx(), {"name": name, "roh": roh, "koerper": koerper})
-
-    def werkstatt_datei(self, name, inhalt):
-        pfad = os.path.join(self.werkstatt, name)
-        os.makedirs(os.path.dirname(pfad), exist_ok=True)
-        with open(pfad, "w", encoding="utf-8") as f:
-            f.write(inhalt)
-        return pfad
-
-    def lesen(self, name):
-        with open(os.path.join(self.werkstatt, name), encoding="utf-8") as f:
-            return f.read()
-
-    def chat_antworten(self, *antworten):
-        """Das Modell antwortet der Reihe nach mit diesen Texten (je Aufruf eine)."""
-        self.drehbuch([{"nr": i + 1, "antwort": a} for i, a in enumerate(antworten)])
+from jarvis_core.werkzeuge import aktionen_parsen  # noqa: E402
 
 
 class ParsenTest(unittest.TestCase):

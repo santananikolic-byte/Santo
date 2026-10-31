@@ -141,6 +141,12 @@ class Berechtigung:
                                        bereich=rec["bereich"], auftrag_id=rec["auftrag_id"], freigabe_id=freigabe_id)
             self._signalisieren(freigabe_id)
 
+    def freigaben_von_auftrag_beenden(self, auftrag_id, grund):
+        """Offene Freigaben eines Auftrags verfallen (Abbruch, Löschen, Unterbrechung)."""
+        for rec in self.agent.speicher.freigaben("offen", limit=500):
+            if rec["auftrag_id"] == auftrag_id:
+                self._beenden(rec["id"], "abgelehnt", grund)
+
     def alle_offenen_ablehnen(self, grund):
         a = self.agent
         for rec in a.speicher.freigaben("offen", limit=500):
