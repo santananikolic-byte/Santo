@@ -20,7 +20,8 @@ class _JsonFormat(logging.Formatter):
             "stufe": record.levelname,
             "ereignis": record.getMessage(),
         }
-        eintrag.update(getattr(record, "felder", {}))
+        for name, wert in getattr(record, "felder", {}).items():
+            eintrag[name if name not in ("zeit", "stufe", "ereignis") else "feld_" + name] = wert
         return json.dumps(eintrag, ensure_ascii=False)
 
 
@@ -38,9 +39,10 @@ class Protokoll:
             self._logger.addHandler(handler)
         self._sperre = threading.Lock()
 
-    def ereignis(self, name, stufe="INFO", **felder):
+    def ereignis(self, name, niveau="INFO", **felder):
+        """Schreibt ein Ereignis. ``niveau`` ist die Log-Stufe (INFO, WARNING, ERROR); alles andere sind Felder."""
         with self._sperre:
-            self._logger.log(getattr(logging, stufe), name, extra={"felder": felder})
+            self._logger.log(getattr(logging, niveau), name, extra={"felder": felder})
 
     def schliessen(self):
         for handler in list(self._logger.handlers):
