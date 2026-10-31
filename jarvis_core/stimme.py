@@ -99,7 +99,12 @@ class Stimme:
             return False
         return True
 
+    def spricht(self):
+        """Läuft die Sprachausgabe gerade wirklich? (Der Prozess ist noch da.)"""
+        with self._sperre:
+            return bool(self._prozess and self._prozess.poll() is None)
+
     def status(self):
-        return {"verfuegbar": self.verfuegbar(), "stimme": self.gewaehlt() or None,
+        return {"verfuegbar": self.verfuegbar(), "spricht": self.spricht(), "stimme": self.gewaehlt() or None,
                 "gewuenscht": (self.konfig.stimme or "") or None, "tempo": self.konfig.tempo,
                 "vorlesen": bool(self.konfig.vorlesen), "auswahl": self.deutsche_stimmen()}

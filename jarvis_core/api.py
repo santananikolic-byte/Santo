@@ -80,6 +80,8 @@ class Api:
                 "ordner": sorted(n for n in k.wurzeln() if n != "werkstatt"), "daten_ordner": k.daten_ordner,
                 "verbrauch": sp.verbrauch_heute(), "letzte_sicherung": sp.meta("letzte_sicherung"),
                 "beschaeftigt": s.provider.beschaeftigt(), "gesperrt": s.agent.gesperrt.is_set(),
+                "freigabe_minuten": k.freigabe_minuten, "erinnerungen_sprechen": bool(k.erinnerungen_sprechen),
+                "lan": bool(k.lan), "max_aufrufe_pro_auftrag": k.max_aufrufe_pro_auftrag,
                 "werkzeuge": [{"name": w.name, "beschreibung": w.beschreibung, "gesperrt": w.name in k.deaktivierte_werkzeuge,
                                "stufe": "wechselnd" if callable(w.stufe) else werkzeuge.STUFEN[w.stufe]}
                               for w in s.agent.register.alle()],
@@ -97,6 +99,9 @@ class Api:
             "agenten": {"orchestrator": {"name": "Orchestrator", "modell": k.modell_fuer("chat"),
                                          "zustand": "gesperrt" if s.agent.gesperrt.is_set()
                                          else ("arbeitet" if s.provider.beschaeftigt() else "bereit")},
+                        "rollen": [{"id": rolle_id, "name": rolle["name"], "modell": k.modell_fuer(rolle["modell"]),
+                                    "werkzeuge": list(rolle["werkzeuge"]) if rolle["werkzeuge"] else []}
+                                   for rolle_id, rolle in rollen.ROLLEN.items() if rolle_id != "allgemein"],
                         "aktiv": aktiv, "zuletzt": zuletzt},
             "diagramme": {"stunden": sp.anfragen_stunden(24), "antwortzeiten": sp.antwortzeiten(30)},
             "log": letzte_eintraege(s.log.datei, 14),

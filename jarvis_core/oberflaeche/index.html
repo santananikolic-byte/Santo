@@ -1,1 +1,177 @@
-<!DOCTYPE html><html lang="de"><head><meta charset="utf-8"><title>JARVIS</title></head><body><h1>JARVIS</h1><div class="core"></div></body></html>
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#07080b">
+<title>JARVIS</title>
+<link rel="icon" href="/icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/stil.css">
+<script src="/kern.js" defer></script>
+<script src="/app.js" defer></script>
+</head>
+<body data-bereich="geschaeft">
+
+<div id="sperre" class="banner banner-sperre" role="alert" hidden>
+  <strong>NOTSTOPP AKTIV</strong>
+  <span>JARVIS tut nichts, bis du entsperrst. Offene Freigaben wurden abgelehnt.</span>
+  <button type="button" class="knopf knopf-klein" id="entsperren">Entsperren</button>
+</div>
+
+<header class="kopf">
+  <div class="marke"><img src="/icon.svg" alt=""><span>JARVIS</span></div>
+  <div class="bereichswahl" id="bereichswahl" role="group" aria-label="Bereich wählen"></div>
+  <button type="button" class="notstopp" id="notstopp" title="Hält sofort alles an: laufende Anfrage, Aufträge, Sprache, offene Freigaben">NOTSTOPP</button>
+  <div class="chips" id="chips" aria-label="Zustand"></div>
+</header>
+<div id="privat-hinweis" class="banner banner-privat" hidden>Privater Bereich: Geschäftsdaten sind ausgeblendet. Das Gedächtnis und die Gespräche sind getrennt.</div>
+
+<nav class="reiter" id="reiter" role="tablist" aria-label="Ansichten"></nav>
+
+<main id="haupt">
+
+  <!-- ===== Jarvis: Kern, Sprache, Gespräch ===== -->
+  <section class="ansicht" id="ansicht-jarvis" role="tabpanel">
+    <div class="jarvis-raster">
+      <div class="kern-spalte">
+        <div class="kern-box"><canvas id="kern" aria-hidden="true"></canvas></div>
+        <div class="kern-status"><span id="kern-zustand">bereit</span><small id="kern-detail"></small></div>
+        <div class="sprachleiste">
+          <button type="button" class="knopf rund" id="mikro" aria-pressed="false" aria-label="Einmal zuhören" title="Einmal zuhören und senden"></button>
+          <label class="schalter" title="Dauerhaft zuhören und auf „Hey Jarvis“ reagieren"><input type="checkbox" id="hey-jarvis"><span class="regler"></span><span class="text">„Hey Jarvis“</span></label>
+          <label class="schalter" title="Antworten laut vorlesen (Stimme des Macs)"><input type="checkbox" id="vorlesen"><span class="regler"></span><span class="text">Vorlesen</span></label>
+          <button type="button" class="knopf knopf-klein" id="still">Stimme stoppen</button>
+        </div>
+        <div class="sprach-hinweis" id="sprach-hinweis" aria-live="polite"></div>
+        <div class="karte mini-karte"><h2>Jetzt</h2><div class="zahlen" id="mini"></div></div>
+      </div>
+      <div class="chat-spalte">
+        <div class="stapel" id="freigaben-inline"></div>
+        <div class="chat" id="chat" aria-live="polite" aria-label="Gespräch"></div>
+        <form class="eingabe" id="eingabe" autocomplete="off">
+          <textarea id="text" rows="1" placeholder="Schreib oder sprich mit JARVIS …" aria-label="Nachricht an JARVIS"></textarea>
+          <button type="button" class="knopf knopf-gefahr" id="abbrechen" hidden>Abbrechen</button>
+          <button type="submit" class="knopf knopf-primaer" id="senden">Senden</button>
+        </form>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== Leitstand: nur echte Zahlen ===== -->
+  <section class="ansicht" id="ansicht-leitstand" role="tabpanel">
+    <div class="gitter">
+      <section class="karte" id="k-anfragen"><h2>Anfragen pro Stunde <small>letzte 24 Stunden</small></h2><div class="inhalt"></div></section>
+      <section class="karte" id="k-antwort"><h2>Antwortzeit <small>letzte Antworten</small></h2><div class="inhalt"></div></section>
+      <section class="karte" id="k-auftraege"><h2>Aufträge</h2><div class="inhalt"></div></section>
+      <section class="karte" id="k-heute"><h2>Heute <small>seit Mitternacht</small></h2><div class="inhalt"></div></section>
+      <section class="karte" id="k-wissen"><h2>Gedächtnis und Aufgaben</h2><div class="inhalt"></div></section>
+      <section class="karte" id="k-server"><h2>Server</h2><div class="inhalt"></div></section>
+      <section class="karte" id="k-agenten"><h2>Agenten <small>nur echte Ausführungen</small></h2><div class="inhalt"></div></section>
+      <section class="karte" id="k-freigaben"><h2>Freigaben</h2><div class="inhalt"></div></section>
+      <section class="karte breit" id="k-log"><h2>Ereignisse <small>Log des Servers</small></h2><div class="inhalt"></div></section>
+    </div>
+  </section>
+
+  <!-- ===== Aufträge ===== -->
+  <section class="ansicht" id="ansicht-auftraege" role="tabpanel">
+    <section class="karte abschnitt">
+      <h2>Neuer Auftrag</h2>
+      <form class="formular" id="plan-form">
+        <label class="feld">Was soll erledigt werden?
+          <textarea id="plan-ziel" rows="3" placeholder="Zum Beispiel: Erstelle eine Checkliste, mit der wir neue Firmen vor einem Auftrag prüfen."></textarea>
+        </label>
+        <div class="knopfreihe">
+          <button type="submit" class="knopf knopf-primaer" id="plan-knopf">Plan erstellen</button>
+          <span class="hinweis">JARVIS macht daraus nur einen Entwurf. Gestartet wird erst, wenn du auf „Starten“ drückst.</span>
+        </div>
+      </form>
+      <pre id="plan-ergebnis" class="klein" hidden></pre>
+    </section>
+    <div class="liste" id="auftraege-liste"></div>
+  </section>
+
+  <!-- ===== Wissen: Gedächtnis, Aufgaben, Erinnerungen ===== -->
+  <section class="ansicht" id="ansicht-wissen" role="tabpanel">
+    <div class="werkzeugzeile">
+      <label class="feld">Anzeige
+        <select id="wissen-filter" aria-label="Welche Bereiche anzeigen"></select>
+      </label>
+      <label class="feld">Im Gedächtnis suchen
+        <input type="search" id="suche" placeholder="Stichwort, zum Beispiel „Preise“ oder „Handelsregister“">
+      </label>
+    </div>
+    <div class="liste abschnitt" id="suche-treffer" hidden></div>
+    <div class="spalten">
+      <section class="abschnitt">
+        <h2 class="abschnitt-titel">Gedächtnis</h2>
+        <form class="formular" id="fakt-form">
+          <label class="feld">Etwas merken
+            <textarea id="fakt-text" rows="2" placeholder="Was soll JARVIS dauerhaft wissen?"></textarea>
+          </label>
+          <div class="formzeile">
+            <label class="feld">Bereich <select id="fakt-bereich"></select></label>
+            <label class="feld">Art <select id="fakt-art"></select></label>
+          </div>
+          <div class="knopfreihe">
+            <label class="schalter"><input type="checkbox" id="fakt-wichtig"><span class="regler"></span><span class="text">Wichtig (immer im Blick)</span></label>
+            <button type="submit" class="knopf knopf-primaer">Merken</button>
+          </div>
+        </form>
+        <div class="liste" id="fakten-liste"></div>
+      </section>
+      <div class="stapel">
+        <section class="abschnitt">
+          <h2 class="abschnitt-titel">Aufgaben</h2>
+          <form class="formular" id="todo-form">
+            <input type="text" id="todo-titel" placeholder="Neue Aufgabe" aria-label="Neue Aufgabe">
+            <div class="formzeile">
+              <label class="feld">Wichtigkeit
+                <select id="todo-prio"><option value="normal">normal</option><option value="hoch">hoch</option><option value="niedrig">niedrig</option></select>
+              </label>
+              <label class="feld">Fällig (optional) <input type="datetime-local" id="todo-faellig"></label>
+            </div>
+            <div class="knopfreihe"><button type="submit" class="knopf knopf-primaer">Aufgabe anlegen</button></div>
+          </form>
+          <div class="liste" id="todo-liste"></div>
+        </section>
+        <section class="abschnitt">
+          <h2 class="abschnitt-titel">Erinnerungen</h2>
+          <form class="formular" id="erinnerung-form">
+            <input type="text" id="erinnerung-text" placeholder="Woran soll JARVIS dich erinnern?" aria-label="Erinnerungstext">
+            <label class="feld">Wann? <input type="datetime-local" id="erinnerung-faellig" required></label>
+            <div class="knopfreihe"><button type="submit" class="knopf knopf-primaer">Erinnerung anlegen</button></div>
+          </form>
+          <div class="liste" id="erinnerung-liste"></div>
+        </section>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== System ===== -->
+  <section class="ansicht" id="ansicht-system" role="tabpanel">
+    <div class="gitter">
+      <section class="karte" id="s-anbieter"><h2>Claude Code</h2><div class="inhalt"></div></section>
+      <section class="karte" id="s-modelle"><h2>Modelle</h2><div class="inhalt"></div></section>
+      <section class="karte" id="s-stimme"><h2>Stimme</h2><div class="inhalt"></div></section>
+      <section class="karte" id="s-sicherheit"><h2>Sicherheit</h2><div class="inhalt"></div></section>
+      <section class="karte breit" id="s-werkzeuge"><h2>Werkzeuge <small>was JARVIS tun darf</small></h2><div class="inhalt"></div></section>
+      <section class="karte" id="s-daten"><h2>Daten</h2><div class="inhalt"></div></section>
+      <section class="karte" id="s-protokolle"><h2>Protokolle</h2><div class="inhalt"></div></section>
+    </div>
+  </section>
+
+</main>
+
+<div class="vollbild" id="zugang-fehlt" hidden>
+  <div class="karte">
+    <h2>KEIN ZUGANG</h2>
+    <p>JARVIS lässt nur dich herein – über deinen persönlichen Link. Öffne ihn im Terminal mit:</p>
+    <p><code>./jarvis.sh oeffnen</code></p>
+    <p class="hinweis">Der Link enthält einen geheimen Schlüssel. Gib ihn an niemanden weiter.</p>
+  </div>
+</div>
+
+<div id="toast" role="status" aria-live="polite"></div>
+</body>
+</html>

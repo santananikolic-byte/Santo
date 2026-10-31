@@ -405,6 +405,24 @@ class GespraechTest(ServerBasis):
         self.assertEqual(self.api("POST", "/api/still", {})[0], 200)
         self.assertEqual(self.zustand()["system"]["stimme"]["stimme"], "Markus (Premium)")
 
+    def test_sprechanzeige_ist_echt(self):
+        os.environ["SAY_DAUER"] = "20"  # der Ersatz-say "spricht" 20 Sekunden
+        self.assertFalse(self.zustand()["system"]["stimme"]["spricht"])
+        self.api("POST", "/api/sprich", {"text": "Ein langer Satz."})
+        self.warte(lambda: self.api("GET", "/api/stimmen")[1]["stimme"]["spricht"], text="Sprechanzeige an")
+        self.assertTrue(self.zustand()["system"]["stimme"]["spricht"])
+        self.api("POST", "/api/still", {})
+        self.warte(lambda: not self.api("GET", "/api/stimmen")[1]["stimme"]["spricht"], text="Sprechanzeige aus")
+
+    def test_zustand_enthaelt_angaben_fuer_die_oberflaeche(self):
+        z = self.zustand()
+        self.assertEqual(z["system"]["freigabe_minuten"], self.konfig.freigabe_minuten)
+        self.assertEqual((z["system"]["lan"], z["system"]["erinnerungen_sprechen"]), (False, True))
+        rollen_ids = [r["id"] for r in z["agenten"]["rollen"]]
+        self.assertEqual(rollen_ids, ["recherche", "architektur", "entwicklung", "sicherheit", "dokumentation"])
+        self.assertTrue(all(r["modell"] for r in z["agenten"]["rollen"]))  # echtes Modell, nicht leer
+        self.assertEqual(z["agenten"]["aktiv"], [])  # ohne laufenden Auftrag arbeitet kein Schritt
+
     def test_provider_sicherung_umgebung_und_profil(self):
         self.assertTrue(self.api("POST", "/api/provider/pruefen", {})[1]["provider"]["claude_code"]["nutzbar"])
         sicherung = self.api("POST", "/api/sicherung", {})[1]["datei"]

@@ -210,6 +210,7 @@ def _handler_fuer(server):
     class Handler(BaseHTTPRequestHandler):
         server_version = "JARVIS/" + VERSION
         sys_version = ""
+        timeout = 60  # Sekunden ohne Daten vom Gegenüber: Verbindung beenden (Schutz vor hängenden Verbindungen)
 
         def log_message(self, format, *args):
             pass  # eigene, strukturierte Logs statt der Standardausgabe

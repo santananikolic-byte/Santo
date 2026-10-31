@@ -128,7 +128,7 @@ class Planer:
             schaetzung = min(2 * len(plan["schritte"]), a.konfig.max_aufrufe_pro_auftrag)
             zeilen = ["%d. [%s] %s – Kriterium: %s" % (s["nr"], s["rolle"], s["titel"], s["kriterium"]) for s in plan["schritte"]]
             text = ("Plan #%d erstellt (nur Entwurf): %s\n%s\nGeschätzt etwa %d Modellaufrufe aus deinem Abo-Limit. "
-                    "Er startet erst, wenn du ihn im Bereich Aufgaben startest."
+                    "Er startet erst, wenn du ihn unter „Aufträge“ startest."
                     % (auftrag_id, plan["titel"] or ziel[:80], "\n".join(zeilen), schaetzung))
             status = "entwurf"
         if ersetze:

@@ -279,6 +279,8 @@ class Laeufer(threading.Thread):
                     continue
                 raise
             pruefung = self.pruefung.pruefen(auftrag, s, text, belege)
+            pruefung["werkzeuge"] = [{"werkzeug": b["werkzeug"], "kurz": b.get("kurz") or b["werkzeug"], "status": b["status"]}
+                                     for b in belege]
             sp.schritt_setzen(s["id"], ergebnis=text[:20000], pruefung=pruefung, extern=int(extern or extern_neu))
             if pruefung["ok"]:
                 sp.schritt_setzen(s["id"], status="fertig", beendet=zeit.jetzt(), dauer_ms=int((time.time() - start) * 1000))

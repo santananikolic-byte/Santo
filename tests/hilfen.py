@@ -27,10 +27,12 @@ daten = sys.stdin.buffer.read().decode("utf-8") if "-f" in sys.argv else ""
 if log:
     with open(log, "a") as f:
         f.write(repr(sys.argv[1:]) + "\t" + daten + "\n")
+import time
+time.sleep(float(os.environ.get("SAY_DAUER") or 0))
 """
 
 ENV_NAMEN = ("JARVIS_DATEN", "JARVIS_PORT", "JARVIS_LOGSTUFE", "JARVIS_CLAUDE", "JARVIS_MODELL", "JARVIS_SAY",
-             "JARVIS_WERKSTATT", "SAY_LOG", "FAKE_DREHBUCH", "FAKE_STAND", "FAKE_PROTOKOLL", "FAKE_AUTH",
+             "JARVIS_WERKSTATT", "SAY_LOG", "SAY_DAUER", "FAKE_DREHBUCH", "FAKE_STAND", "FAKE_PROTOKOLL", "FAKE_AUTH",
              "FAKE_UNBEKANNT", "ANTHROPIC_API_KEY", "CLAUDE_CODE_USE_BEDROCK")
 
 
