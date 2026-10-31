@@ -64,6 +64,21 @@ print(json.dumps({"type": "result", "is_error": False, "session_id": sitzung,
 '''
 
 
+ERSATZ_SAY = r'''#!/usr/bin/env python3
+import os, sys
+if sys.argv[1:3] == ["-v", "?"]:
+    print("Anna                de_DE    # Hallo")
+    print("Markus (Premium)    de_DE    # Hallo")
+    print("Daniel              en_GB    # Hello")
+    sys.exit(0)
+log = os.environ.get("SAY_LOG")
+daten = sys.stdin.buffer.read().decode("utf-8") if "-f" in sys.argv else ""
+if log:
+    with open(log, "a") as f:
+        f.write(repr(sys.argv[1:]) + "\t" + daten + "\n")
+'''
+
+
 def freier_port():
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
@@ -74,7 +89,7 @@ class Grundlage(unittest.TestCase):
     def setUp(self):
         self.ordner = tempfile.mkdtemp(prefix="jarvis_test_")
         self.port = freier_port()
-        self._alt = {k: os.environ.get(k) for k in ("JARVIS_DATEN", "JARVIS_PORT", "JARVIS_LOGSTUFE", "JARVIS_CLAUDE", "JARVIS_MODELL",
+        self._alt = {k: os.environ.get(k) for k in ("JARVIS_DATEN", "JARVIS_PORT", "JARVIS_LOGSTUFE", "JARVIS_CLAUDE", "JARVIS_MODELL", "JARVIS_SAY", "SAY_LOG",
                                                     "FAKE_MODUS", "FAKE_PROTOKOLL", "ANTHROPIC_API_KEY",
                                                     "CLAUDE_CODE_USE_BEDROCK")}
         os.environ["JARVIS_DATEN"] = self.ordner
@@ -89,6 +104,13 @@ class Grundlage(unittest.TestCase):
         os.environ["FAKE_PROTOKOLL"] = self.aufrufe
         os.environ["FAKE_MODUS"] = "ok"
         os.environ.pop("JARVIS_MODELL", None)
+        self.say = os.path.join(self.ordner, "say-ersatz")
+        with open(self.say, "w") as f:
+            f.write(ERSATZ_SAY.replace("#!/usr/bin/env python3", "#!" + sys.executable, 1))
+        os.chmod(self.say, 0o755)  # noqa: S103 - Ersatzprogramm muss ausführbar sein
+        self.say_log = os.path.join(self.ordner, "say.log")
+        os.environ["JARVIS_SAY"] = self.say
+        os.environ["SAY_LOG"] = self.say_log
 
     def tearDown(self):
         for k, v in self._alt.items():
@@ -210,7 +232,7 @@ class ServerTest(Grundlage):
         code, seite = self.anfrage("GET", "/")
         self.assertEqual(code, 200)
         self.assertIn("JARVIS", seite)
-        self.assertIn("läuft", seite)
+        self.assertIn("core", seite)
 
     def aufrufe_lesen(self):
         with open(self.aufrufe) as f:
@@ -321,6 +343,44 @@ class ServerTest(Grundlage):
         self.assertEqual(code, 200)
         code, _ = self.anfrage("POST", "/api/provider/pruefen", kopf={"Origin": "https://boese.example"})
         self.assertEqual(code, 403)
+
+    def test_stimme_im_status(self):
+        _, s = self.anfrage("GET", "/status")
+        self.assertTrue(s["stimme"]["verfuegbar"])
+        self.assertEqual(s["stimme"]["stimme"], "Markus (Premium)")  # beste Stimme automatisch
+        code, a = self.anfrage("GET", "/api/stimmen")
+        self.assertEqual(code, 200)
+        self.assertIn("Markus (Premium)", a["stimme"]["auswahl"])
+
+    def test_sprich(self):
+        code, a = self.anfrage("POST", "/api/sprich", {"text": "Hallo, ich bin Jarvis."})
+        self.assertEqual(code, 200)
+        self.assertTrue(a["gesprochen"])
+        for _ in range(50):  # say läuft im Hintergrund
+            if os.path.exists(self.say_log) and os.path.getsize(self.say_log) > 0:
+                break
+            time.sleep(0.1)
+        with open(self.say_log) as f:
+            self.assertIn("Hallo, ich bin Jarvis.", f.read())
+        self.assertEqual(self.anfrage("POST", "/api/sprich", {"text": "  "})[0], 400)
+        self.assertEqual(self.anfrage("POST", "/api/still")[0], 200)
+
+    def test_einstellungen_werden_gespeichert(self):
+        code, a = self.anfrage("POST", "/api/einstellungen", {"tempo": 220, "vorlesen": False, "stimme": "Anna"})
+        self.assertEqual(code, 200, a)
+        self.assertEqual(a["stimme"]["tempo"], 220)
+        self.assertEqual(a["stimme"]["stimme"], "Anna")
+        with open(os.path.join(self.ordner, "config.json")) as f:
+            gespeichert = json.load(f)
+        self.assertEqual(gespeichert["tempo"], 220)
+        self.assertFalse(gespeichert["vorlesen"])
+        self.assertEqual(self.anfrage("POST", "/api/einstellungen", {"tempo": "schnell"})[0], 400)
+
+    def test_seite_enthaelt_stimme_und_kern(self):
+        _, seite = self.anfrage("GET", "/")
+        self.assertIn("Hey Jarvis", seite)
+        self.assertIn("core", seite)
+        self.assertIn("/api/sprich", seite)
 
     def test_logs_endpunkt(self):
         code, a = self.anfrage("GET", "/api/logs?anzahl=5")

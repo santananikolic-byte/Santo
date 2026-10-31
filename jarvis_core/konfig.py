@@ -6,6 +6,7 @@ Umgebungsvariablen:
     JARVIS_PORT      Port (Standard 8770 - der alte Jarvis nutzt 8765)
     JARVIS_LOGSTUFE  DEBUG, INFO, WARNING oder ERROR (Standard INFO)
     JARVIS_MODELL    Claude-Modell, z. B. opus (Standard) oder sonnet
+    JARVIS_SAY       Pfad zu einem Ersatz für macOS ``say`` (nur für Tests)
 
 Der Server hört ausschließlich auf der eigenen Maschine. Eine andere Adresse
 in der Konfiguration wird abgelehnt - Fernzugriff ist bewusst noch nicht
@@ -24,6 +25,9 @@ STANDARD = {
     "log_dateien": 5,
     "provider_timeout": 300,
     "modell": "opus",
+    "stimme": "",
+    "tempo": 185,
+    "vorlesen": True,
 }
 
 ERLAUBTE_HOSTS = ("127.0.0.1", "localhost")
@@ -110,6 +114,12 @@ def laden(daten_ordner=None):
     werte["modell"] = str(werte["modell"] or "").strip()
     if werte["modell"] and not re.match(r"^[a-z0-9][a-z0-9.\-]*$", werte["modell"]):
         raise KonfigFehler("Unbekanntes Modell %r. Zum Beispiel \"opus\" oder \"sonnet\"." % (werte["modell"],))
+    werte["stimme"] = str(werte["stimme"] or "").strip()
+    try:
+        werte["tempo"] = max(80, min(400, int(werte["tempo"])))
+    except (TypeError, ValueError):
+        raise KonfigFehler("tempo muss eine Zahl sein (Wörter pro Minute, z. B. 185).") from None
+    werte["vorlesen"] = bool(werte["vorlesen"])
     werte["logstufe"] = str(werte["logstufe"]).upper()
     if werte["logstufe"] not in LOGSTUFEN:
         raise KonfigFehler("Unbekannte Logstufe %r. Erlaubt: %s." % (werte["logstufe"], ", ".join(LOGSTUFEN)))
@@ -117,3 +127,13 @@ def laden(daten_ordner=None):
         raise KonfigFehler("Der Server darf nur auf dieser Maschine laufen (127.0.0.1). "
                            "Die Adresse %r wird abgelehnt." % (werte["host"],))
     return Konfig(werte, ordner)
+
+
+def speichern_werte(konfig):
+    """Schreibt die aktuellen Werte zurück in die config.json."""
+    nur_bekannte = {k: konfig.werte[k] for k in STANDARD if k in konfig.werte}
+    zwischen = konfig.datei + ".neu"
+    with open(zwischen, "w", encoding="utf-8") as f:
+        json.dump(nur_bekannte, f, indent=2, ensure_ascii=False)
+        f.write("\n")
+    os.replace(zwischen, konfig.datei)
