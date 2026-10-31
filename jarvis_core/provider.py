@@ -9,8 +9,12 @@ Ersatz. Konkret:
   angemeldet, nutzt JARVIS es nicht - das würde pro Anfrage kosten.
   Umgebungsvariablen, die Claude Code auf eine bezahlte Abrechnung umlenken
   würden (API-Schlüssel, Bedrock, Vertex), werden für den Aufruf entfernt.
-* **Codex** und **Gemini CLI** werden nur erkannt. Eine Anbindung gibt es
-  erst, wenn sie installiert sind und einzeln geprüft wurden.
+* Andere Anbieter (Codex, Gemini CLI) nutzt JARVIS bewusst nicht - der Nutzer
+  will nur Claude Code.
+
+Das Modell ist einstellbar (``modell`` in config.json): "opus" ist das
+klügste, "sonnet" das schnellere mit mehr Spielraum im Abo-Limit. Wie gründlich
+nachgedacht wird, regelt Claude Code bei diesen Modellen selbst.
 
 Claude Code läuft mit ``claude -p`` (Modus ohne Bildschirm) und in Phase 3
 ganz ohne Werkzeuge: Es antwortet nur, es liest keine Dateien und führt
@@ -63,9 +67,11 @@ class ClaudeCode:
     name = "claude_code"
     anzeige = "Claude Code"
 
-    def __init__(self, arbeitsordner, timeout=300):
+    def __init__(self, arbeitsordner, timeout=300, modell=""):
         self.arbeitsordner = arbeitsordner
         self.timeout = timeout
+        # Leer = Claude Code wählt selbst. "opus" = klügstes Modell, "sonnet" = schneller.
+        self.modell = (modell or "").strip()
 
     def finden(self):
         fest = os.environ.get("JARVIS_CLAUDE")
@@ -114,7 +120,9 @@ class ClaudeCode:
                                    "weil es pro Anfrage kosten würde" % ergebnis["anmeldeart"])
         else:
             ergebnis["nutzbar"] = True
-            ergebnis["hinweis"] = "bereit (Claude-Abo%s)" % (", " + ergebnis["plan"] if ergebnis["plan"] else "")
+            ergebnis["hinweis"] = "bereit (Claude-Abo%s, Modell: %s)" % (
+                ", " + ergebnis["plan"] if ergebnis["plan"] else "", self.modell or "Standard von Claude Code")
+        ergebnis["modell"] = self.modell or None
         return ergebnis
 
     def fragen(self, text, system, sitzung=None):
@@ -123,6 +131,8 @@ class ClaudeCode:
         if not programm:
             raise ProviderFehler("nicht_installiert", "Claude Code ist nicht installiert.")
         argumente = ["-p", "--output-format", "json", "--system-prompt", system, "--tools", ""]
+        if self.modell:
+            argumente += ["--model", self.modell]
         if sitzung:
             argumente += ["--resume", sitzung]
         try:
@@ -156,41 +166,11 @@ class ClaudeCode:
         raise ProviderFehler("fehler", "Claude Code meldet: " + meldung[:300])
 
 
-class NurErkennung:
-    """Ein Anbieter, den JARVIS nur erkennt, aber (noch) nicht nutzt."""
-
-    def __init__(self, name, anzeige, programm, voraussetzung):
-        self.name = name
-        self.anzeige = anzeige
-        self.programm = programm
-        self.voraussetzung = voraussetzung
-
-    def pruefen(self):
-        pfad = shutil.which(self.programm)
-        ergebnis = {"name": self.name, "anzeige": self.anzeige, "installiert": bool(pfad), "version": None,
-                    "angemeldet": None, "anmeldeart": None, "plan": None, "nutzbar": False}
-        if not pfad:
-            ergebnis["hinweis"] = "nicht installiert (%s)" % self.voraussetzung
-            return ergebnis
-        try:
-            lauf = subprocess.run([pfad, "--version"], capture_output=True, text=True, timeout=15,
-                                  env=saubere_umgebung())
-            ergebnis["version"] = (lauf.stdout or lauf.stderr or "").strip().splitlines()[0] or None
-        except (OSError, subprocess.SubprocessError, IndexError):
-            pass
-        ergebnis["hinweis"] = "installiert, aber noch nicht angebunden und nicht geprüft"
-        return ergebnis
-
-
 class ProviderManager:
     def __init__(self, konfig, protokoll):
         self.log = protokoll
-        self.claude = ClaudeCode(konfig.daten_ordner, timeout=konfig.provider_timeout)
-        self.anbieter = [
-            self.claude,
-            NurErkennung("codex", "Codex", "codex", "braucht Node.js und ein ChatGPT-Konto"),
-            NurErkennung("gemini", "Gemini CLI", "gemini", "braucht Node.js und ein Google-Konto"),
-        ]
+        self.claude = ClaudeCode(konfig.daten_ordner, timeout=konfig.provider_timeout, modell=konfig.modell)
+        self.anbieter = [self.claude]
         self._status = {a.name: {"name": a.name, "anzeige": a.anzeige, "nutzbar": False,
                                  "hinweis": "wird geprüft …"} for a in self.anbieter}
         self._status_sperre = threading.Lock()

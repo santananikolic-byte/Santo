@@ -5,6 +5,7 @@ Umgebungsvariablen:
     JARVIS_DATEN     Datenordner (Standard ~/.jarvis)
     JARVIS_PORT      Port (Standard 8770 - der alte Jarvis nutzt 8765)
     JARVIS_LOGSTUFE  DEBUG, INFO, WARNING oder ERROR (Standard INFO)
+    JARVIS_MODELL    Claude-Modell, z. B. opus (Standard) oder sonnet
 
 Der Server hört ausschließlich auf der eigenen Maschine. Eine andere Adresse
 in der Konfiguration wird abgelehnt - Fernzugriff ist bewusst noch nicht
@@ -13,6 +14,7 @@ vorgesehen (siehe JARVIS-SERVER.md).
 
 import json
 import os
+import re
 
 STANDARD = {
     "host": "127.0.0.1",
@@ -21,6 +23,7 @@ STANDARD = {
     "log_max_bytes": 1000000,
     "log_dateien": 5,
     "provider_timeout": 300,
+    "modell": "opus",
 }
 
 ERLAUBTE_HOSTS = ("127.0.0.1", "localhost")
@@ -91,6 +94,8 @@ def laden(daten_ordner=None):
         werte["port"] = os.environ["JARVIS_PORT"]
     if os.environ.get("JARVIS_LOGSTUFE"):
         werte["logstufe"] = os.environ["JARVIS_LOGSTUFE"]
+    if os.environ.get("JARVIS_MODELL") is not None:
+        werte["modell"] = os.environ["JARVIS_MODELL"]
 
     try:
         werte["port"] = int(werte["port"])
@@ -102,6 +107,9 @@ def laden(daten_ordner=None):
         werte["provider_timeout"] = max(10, int(werte["provider_timeout"]))
     except (TypeError, ValueError):
         raise KonfigFehler("provider_timeout muss eine Zahl (Sekunden) sein.") from None
+    werte["modell"] = str(werte["modell"] or "").strip()
+    if werte["modell"] and not re.match(r"^[a-z0-9][a-z0-9.\-]*$", werte["modell"]):
+        raise KonfigFehler("Unbekanntes Modell %r. Zum Beispiel \"opus\" oder \"sonnet\"." % (werte["modell"],))
     werte["logstufe"] = str(werte["logstufe"]).upper()
     if werte["logstufe"] not in LOGSTUFEN:
         raise KonfigFehler("Unbekannte Logstufe %r. Erlaubt: %s." % (werte["logstufe"], ", ".join(LOGSTUFEN)))

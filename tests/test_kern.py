@@ -74,7 +74,7 @@ class Grundlage(unittest.TestCase):
     def setUp(self):
         self.ordner = tempfile.mkdtemp(prefix="jarvis_test_")
         self.port = freier_port()
-        self._alt = {k: os.environ.get(k) for k in ("JARVIS_DATEN", "JARVIS_PORT", "JARVIS_LOGSTUFE", "JARVIS_CLAUDE",
+        self._alt = {k: os.environ.get(k) for k in ("JARVIS_DATEN", "JARVIS_PORT", "JARVIS_LOGSTUFE", "JARVIS_CLAUDE", "JARVIS_MODELL",
                                                     "FAKE_MODUS", "FAKE_PROTOKOLL", "ANTHROPIC_API_KEY",
                                                     "CLAUDE_CODE_USE_BEDROCK")}
         os.environ["JARVIS_DATEN"] = self.ordner
@@ -88,6 +88,7 @@ class Grundlage(unittest.TestCase):
         os.environ["JARVIS_CLAUDE"] = self.ersatz
         os.environ["FAKE_PROTOKOLL"] = self.aufrufe
         os.environ["FAKE_MODUS"] = "ok"
+        os.environ.pop("JARVIS_MODELL", None)
 
     def tearDown(self):
         for k, v in self._alt.items():
@@ -127,6 +128,15 @@ class KonfigTest(Grundlage):
 
     def test_unbekannte_logstufe(self):
         os.environ["JARVIS_LOGSTUFE"] = "laut"
+        with self.assertRaises(konfig.KonfigFehler):
+            konfig.laden()
+
+    def test_modell_einstellbar(self):
+        os.environ["JARVIS_MODELL"] = "sonnet"
+        self.assertEqual(konfig.laden().modell, "sonnet")
+        os.environ["JARVIS_MODELL"] = ""  # leer = Claude-Code-Standard
+        self.assertEqual(konfig.laden().modell, "")
+        os.environ["JARVIS_MODELL"] = "böse; rm -rf"
         with self.assertRaises(konfig.KonfigFehler):
             konfig.laden()
 
@@ -274,10 +284,16 @@ class ServerTest(Grundlage):
         self.assertEqual(code, 504, a)
         self.assertLess(time.time() - start, 10)
 
-    def test_codex_und_gemini_werden_nur_erkannt(self):
+    def test_nur_claude_code(self):
         status = self.server.provider.pruefen()
-        for name in ("codex", "gemini"):
-            self.assertFalse(status[name]["nutzbar"])
+        self.assertEqual(list(status.keys()), ["claude_code"])
+
+    def test_modell_wird_mitgegeben(self):
+        os.environ["JARVIS_MODELL"] = "opus"
+        self.server.provider.claude.modell = "opus"
+        self.anfrage("POST", "/api/anfrage", {"text": "Hallo"})
+        args = [x for x in self.aufrufe_lesen() if "-p" in x["args"]][-1]["args"]
+        self.assertEqual(args[args.index("--model") + 1], "opus")
 
     def test_fehlerhafte_eingaben(self):
         self.assertEqual(self.anfrage("POST", "/api/anfrage", {"text": "   "})[0], 400)

@@ -67,11 +67,16 @@ Kontingent und den Mac. Eine zweite wartet bis zu 2 Minuten.
 
 Geprüft auf deinem iMac am 31.10.2026 (Phase 1) und im Code abgesichert:
 
-| Anbieter | Stand | Was er kann | Grenzen |
+| Anbieter | Stand | Modell | Grenzen |
 |---|---|---|---|
-| **Claude Code** | ✅ installiert (2.1.316), angemeldet mit Claude-Abo (Pro) | Fragen beantworten, Gespräche fortsetzen | Zählt zu deinem Abo-Limit. Ist es erreicht, meldet JARVIS, ab wann es weitergeht. Jede Anfrage braucht ein paar Sekunden Startzeit. In Phase 3 ohne Werkzeuge. |
-| Codex | ❌ nicht installiert | – | braucht Node.js und ein ChatGPT-Konto; Installation nur nach deiner Freigabe |
-| Gemini CLI | ❌ nicht installiert | – | braucht Node.js und ein Google-Konto; Installation nur nach deiner Freigabe |
+| **Claude Code** | ✅ installiert (2.1.316), angemeldet mit Claude-Abo (Pro) | **opus** (klügstes; einstellbar auf **sonnet** = schneller, mehr Spielraum) | Zählt zu deinem Abo-Limit. Opus ist klüger, aber verbraucht das Limit schneller als Sonnet. Ist es erreicht, meldet JARVIS, ab wann es weitergeht. Jede Anfrage braucht ein paar Sekunden Startzeit. Noch ohne Werkzeuge. |
+
+Andere Anbieter (Codex, Gemini) nutzt JARVIS auf deinen Wunsch **nicht**.
+
+Das Modell stellst du in `~/.jarvis/config.json` unter `"modell"` ein: `"opus"`
+(klügste Antworten), `"sonnet"` (schneller, mehr Anfragen im Limit) oder `""`
+(Claude Code entscheidet). Wie gründlich nachgedacht wird, regelt Claude Code
+bei diesen Modellen von selbst.
 
 So stellt JARVIS sicher, dass **nichts extra kostet**:
 
