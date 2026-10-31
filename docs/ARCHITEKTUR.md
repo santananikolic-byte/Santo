@@ -47,12 +47,13 @@ werden „blockiert“, wenn ein Vorgänger scheitert → Neustart markiert Lauf
 - Nur 127.0.0.1 (Handy/WLAN nur nach ausdrücklicher Freigabe `./jarvis.sh lan an`).
 - Zugangsschlüssel (Datei mit Rechten 600, Cookie `HttpOnly`, `SameSite=Strict`), Host- und Origin-Prüfung.
 - Werkzeuge arbeiten nur in der Werkstatt und in ausdrücklich freigegebenen Ordnern; nichts wird endgültig gelöscht.
-- Kein freier Shell-Zugriff: nur eine kleine, geprüfte Befehlsliste; Skripte nur nach Freigabe mit vollem Code.
+- Kein Shell-Zugriff und keine Programmausführung. Das ist bewusst noch nicht gebaut; es käme später nur mit Freigabe und vollständiger Vorschau.
 - Webinhalte und Werkzeugausgaben sind Daten, keine Anweisungen. Nach Außenkontakt braucht jede weitere Aktion eine Freigabe.
 - Private und geschäftliche Daten sind getrennte Bereiche; das Modell sieht immer nur einen.
 - Notstopp sperrt alles, bis du entsperrst. Werkzeuge lassen sich einzeln abschalten.
 
 ## Bewusst (noch) nicht gebaut
 
-Browser-Automation, Mail/Kalender, Finanzmodul, Kundenverwaltung, Selbstverbesserung des eigenen Codes,
-parallele Arbeiter (ein Modellaufruf zugleich schont dein Abo-Limit), verschlüsselter Fernzugriff.
+Programme und Skripte ausführen, Autostart, Browser-Automation, Mail/Kalender, Finanzmodul, Kundenverwaltung,
+Selbstverbesserung des eigenen Codes, parallele Arbeiter (ein Modellaufruf zugleich schont dein Abo-Limit),
+verschlüsselter Fernzugriff.

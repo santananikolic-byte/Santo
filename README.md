@@ -7,6 +7,12 @@ gesprochen.
 Alle Daten bleiben auf dem eigenen Rechner. Was nach außen geht, geht nur nach
 ausdrücklicher Freigabe.
 
+> **Neu und empfohlen: der JARVIS-Server** (`jarvis_core/`). Orange Leitstand mit leuchtendem Kern, Gedächtnis,
+> Aufträge mit Prüfschicht, Freigaben, Notstopp, läuft über dein Claude-Abo – ohne API-Schlüssel.
+> Start: `./jarvis.sh start && ./jarvis.sh oeffnen`. Anleitung: [`JARVIS-SERVER.md`](JARVIS-SERVER.md),
+> ehrlicher Stand: [`docs/STATUS.md`](docs/STATUS.md). Der Rest dieser Datei beschreibt den älteren Jarvis
+> (`jarvis.py`, `jarvis_terminal.py`).
+
 ---
 
 Weiterzugeben ist das als Paket aus `BAUAUFTRAG-jarvis.md` und `ANLEITUNG.md` —

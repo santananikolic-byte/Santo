@@ -35,7 +35,7 @@ JUDGE = "unabhängige Prüfer"
 PLAN = json.dumps({"titel": "Notiz", "schritte": [
     {"rolle": "dokumentation", "titel": "Schreiben", "anweisung": "Schreibe die Notiz.", "kriterium": "Datei da",
      "datei": "notiz.md", "abhaengig_von": []}]})
-STATUS_FELDER = {"name", "version", "phase", "laeuft", "seit", "laufzeit_sekunden", "pid", "adresse", "python", "anfragen",
+STATUS_FELDER = {"name", "version", "laeuft", "seit", "laufzeit_sekunden", "pid", "adresse", "python", "anfragen",
                  "gesperrt", "lan"}
 
 
@@ -139,6 +139,7 @@ class ZugangTest(ServerBasis):
 
     def test_schluesseldatei_ist_nur_fuer_den_benutzer(self):
         self.assertEqual(os.stat(self.konfig.token_datei).st_mode & 0o777, 0o600)
+        self.assertEqual(os.stat(self.konfig.daten_ordner).st_mode & 0o777, 0o700)  # der ganze Datenordner ist privat
         self.assertEqual(auth.token_holen(self.konfig), self.token)  # bleibt stabil
         self.assertGreaterEqual(len(self.token), 40)
 

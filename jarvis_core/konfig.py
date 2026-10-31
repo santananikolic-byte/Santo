@@ -274,7 +274,11 @@ def normalisieren(werte, daten_ordner):
 def laden(daten_ordner=None):
     """Liest die Konfiguration. Fehlt die Datei, wird sie mit Standardwerten angelegt."""
     ordner = daten_ordner or daten_ordner_ermitteln()
-    os.makedirs(ordner, exist_ok=True)
+    os.makedirs(ordner, mode=0o700, exist_ok=True)
+    try:
+        os.chmod(ordner, 0o700)  # persönliche Daten: andere Benutzer dieses Macs dürfen nicht hinein
+    except OSError:
+        pass
     datei = os.path.join(ordner, "config.json")
     werte = copy.deepcopy(STANDARD)
     neu_anlegen = False

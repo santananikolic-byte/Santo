@@ -25,7 +25,7 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
-from . import PHASE, VERSION, umgebung, zeit
+from . import VERSION, umgebung, zeit
 from .agent import Agent
 from .api import Api
 from .auth import Ratenbegrenzer, Zugang
@@ -109,7 +109,7 @@ class JarvisServer:
     def status(self):
         """Harmlose Angaben, auch ohne Zugangsschlüssel abrufbar."""
         return {
-            "name": "JARVIS", "version": VERSION, "phase": PHASE, "laeuft": True,
+            "name": "JARVIS", "version": VERSION, "laeuft": True,
             "seit": datetime.datetime.fromtimestamp(self.gestartet).astimezone().isoformat(timespec="seconds"),
             "laufzeit_sekunden": int(time.time() - self.gestartet), "pid": os.getpid(), "adresse": self.konfig.adresse,
             "python": platform.python_version(), "anfragen": self.anfragen,

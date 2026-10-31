@@ -1,196 +1,108 @@
-# JARVIS-Server (Phase 3)
+# JARVIS-Server
 
-Der lokale Server ist der Kern des neuen JARVIS. Stand Phase 3 kann er:
+Der lokale JARVIS läuft auf deinem Mac und denkt über **Claude Code mit deinem Claude-Abo**. Er braucht nur Python 3.9 oder neuer
+(auf dem Mac schon da), keine Zusatzpakete, **keinen API-Schlüssel und keinen bezahlten Dienst**.
 
-- laufen und anzeigen, dass er läuft (Statusseite und `/status`),
-- **Fragen beantworten – über Claude Code mit deinem Claude-Abo**,
-- Gespräche fortsetzen, auch nach einem Neustart,
-- dein Wissen aus `CLAUDE.md` und `BRAIN.md` mitgeben,
-- alles Wichtige als strukturierte Logs festhalten.
+Was gebaut, getestet und noch nicht auf dem echten Mac geprüft ist, steht ehrlich in `docs/STATUS.md`. Die Selbstprüfung steht in
+`docs/SELBSTPRUEFUNG.md`, der Aufbau in `docs/ARCHITEKTUR.md`.
 
-**Er hat noch keine Werkzeuge:** Er sucht nicht im Internet, liest keine
-Dateien, führt nichts aus und sendet nichts. Er sagt das auch ehrlich, wenn
-eine Aufgabe das bräuchte. Werkzeuge kommen mit der Berechtigungsschicht.
+## Starten
 
-Er braucht nur Python 3.9 oder neuer (auf dem Mac schon vorhanden), keine
-Zusatzpakete, keinen API-Schlüssel und keinen bezahlten Dienst.
+Im Ordner `~/Santo` (Terminal):
 
-## Starten und Beenden
+```
+git pull
+./jarvis.sh start
+./jarvis.sh oeffnen
+```
 
-Im Ordner `~/Santo`:
+Oder per Doppelklick im Finder: **Jarvis-starten.command** (startet und öffnet), **Jarvis-stoppen.command**.
 
-| Befehl | Was passiert |
+`oeffnen` öffnet deinen persönlichen Link. Er enthält einen geheimen Schlüssel, setzt ein Cookie im Browser und verschwindet dann aus
+der Adresszeile. Ohne diesen Link kommt niemand an JARVIS heran.
+
+## Die Oberfläche
+
+| Reiter | Was du dort machst |
 |---|---|
-| `./jarvis.sh start` | startet im Hintergrund und zeigt die Adresse |
-| `./jarvis.sh stopp` | beendet ihn |
-| `./jarvis.sh status` | läuft er? seit wann? wie viele Anfragen? |
-| `./jarvis.sh logs 50` | die letzten 50 Log-Einträge |
-| `./jarvis.sh oeffnen` | Statusseite mit Eingabefeld im Browser öffnen |
-| `./jarvis.sh frage "Was steht an?"` | eine Frage im Terminal stellen |
-| `./jarvis.sh provider` | ist Claude Code bereit? (verbraucht kein Kontingent) |
+| **Jarvis** | Der leuchtende Kern zeigt, was JARVIS gerade tut (bereit, hört zu, denkt, spricht, Notstopp). Schreiben oder sprechen, Antworten vorlesen lassen, Freigaben erteilen. |
+| **Leitstand** | Nur echte Zahlen: Anfragen pro Stunde, Antwortzeiten, Aufträge, Verbrauch, Agenten, Freigaben, Ereignisse. Nichts ist erfunden oder simuliert. |
+| **Aufträge** | Ziel beschreiben → JARVIS macht einen **Entwurf** mit Schritten → du startest ihn (sofort oder zeitgeplant) → Prüfschicht kontrolliert jeden Schritt. Pausieren, Abbrechen, Fortsetzen, Wiederholen. |
+| **Wissen** | Gedächtnis (JARVIS schlägt nur vor, du bestätigst), Aufgaben, Erinnerungen, Suche. **Geschäft** und **Privat** sind getrennt. |
+| **System** | Modelle, Stimme, Werkzeuge einzeln sperren, Sicherung, Export, Protokolle, „Alles löschen“. |
 
-Oder per Doppelklick im Finder: **Jarvis-starten.command** und
-**Jarvis-stoppen.command**.
+Oben rechts: **NOTSTOPP**. Er hält sofort alles an (laufende Anfrage, Aufträge, Sprache) und lehnt offene Freigaben ab.
 
-Statusseite: <http://127.0.0.1:8770>
+## Sprache
 
-Läuft er schon, startet `start` keinen zweiten. Ist der Port belegt, meldet
-`start` das sofort, statt zu hängen.
+- **Vorlesen:** über die Stimme des Macs (`say`). JARVIS wählt automatisch die beste deutsche Stimme. Für eine natürlichere Stimme:
+  Systemeinstellungen → Bedienungshilfen → Gesprochene Inhalte → Systemstimme → Stimmen verwalten → Deutsch → „Premium“ oder „Erweitert“ laden.
+- **Zuhören:** Mikrofon-Taste (einmal) oder Schalter **„Hey Jarvis“** (dauerhaft: „Hey Jarvis, was steht heute an?“). Die Erkennung macht
+  dein **Browser** (Safari: Apple, Chrome: Google), nicht JARVIS. Sie läuft nur direkt auf dem Mac (Adresse 127.0.0.1).
+- **Freigaben gibst du nur per Klick**, nie per Sprache.
 
-## Fragen stellen
+## Was JARVIS darf
 
-Am einfachsten auf der Statusseite (<http://127.0.0.1:8770>): Text eingeben,
-**Senden** (oder Strg+Enter). Das Gespräch läuft weiter, bis du auf
-**Neues Gespräch** klickst. Oder im Terminal:
+Drei Stufen, im Code erzwungen (nicht nur im Prompt):
 
-```
-./jarvis.sh frage "Wie gewinnen wir mehr Daueraufträge in Leverkusen?"
-```
+1. **Frei:** lesen, auflisten, planen.
+2. **Mit Meldung:** neue Dateien in der Werkstatt, Aufgaben, Erinnerungen, Recherche.
+3. **Nur nach deinem Ja:** Dateien überschreiben oder löschen (mit Vorschau, nichts wird endgültig gelöscht), alles nach einer Webrecherche im privaten Bereich.
 
-Für Programme (`curl` & Co.):
+JARVIS **sendet, bezahlt und installiert nichts** und führt keine Programme aus. Seine Dateien liegen in `~/Jarvis-Werkstatt`; weitere Ordner gibst du
+selbst in `~/.jarvis/config.json` frei (nur lesen).
 
-```
-curl -s -X POST http://127.0.0.1:8770/api/anfrage \
-     -H 'Content-Type: application/json' \
-     -d '{"text": "Hallo", "gespraech": "<Kennung aus der letzten Antwort, optional>"}'
-```
+## Befehle (`./jarvis.sh …`)
 
-Antwort: `{"ok": true, "antwort": "…", "gespraech": "…", "provider": "claude_code", "dauer_ms": …}`.
-Bei Fehlern: `{"ok": false, "art": "…", "fehler": "…"}` mit HTTP 503 (nicht
-installiert, nicht angemeldet, falsche Anmeldeart), 429 (Limit erreicht oder
-beschäftigt), 504 (zu langsam) oder 502 (sonstiger Fehler von Claude Code).
+| Befehl | Wirkung |
+|---|---|
+| `start` / `stopp` / `status` | starten, beenden, Zustand anzeigen |
+| `oeffnen` / `link` | Oberfläche öffnen / Link anzeigen |
+| `frage "…"` | eine Frage im Terminal stellen |
+| `notstopp` / `entsperren` | alles anhalten / wieder freigeben |
+| `provider` | ist Claude Code bereit? (verbraucht kein Kontingent) |
+| `logs [N]` | die letzten Log-Einträge |
+| `backup` / `wiederherstellen DATEI` | Datenbank sichern / zurückholen (nur bei gestopptem Server) |
+| `export [DATEI]` | alle Daten als JSON (Rechte 600) |
+| `lan an` / `lan aus` | Zugriff aus dem WLAN erlauben / sperren |
+| `umgebung` | was JARVIS über diesen Mac erkennt |
 
-JARVIS bearbeitet **immer nur eine Anfrage gleichzeitig**. Das schont dein
-Kontingent und den Mac. Eine zweite wartet bis zu 2 Minuten.
+## Handy im WLAN
 
-## Anbieter: was geht, was nicht
+1. `./jarvis.sh lan an` (zeigt die Risiken und fragt nach „ja“), dann `./jarvis.sh stopp` und `./jarvis.sh start`.
+2. `./jarvis.sh link` zeigt zusätzlich die WLAN-Adressen. Diesen Link auf dem Handy öffnen.
 
-Geprüft auf deinem iMac am 31.10.2026 (Phase 1) und im Code abgesichert:
+Grenzen, ehrlich: Die Verbindung ist **nicht verschlüsselt** (nur in einem Netz nutzen, dem du vertraust). Spracheingabe geht auf dem Handy so nicht
+(der Browser verlangt dafür eine sichere Verbindung); tippen und Diktieren der Tastatur gehen. **Von unterwegs** geht es nicht; dafür bräuchte es einen
+verschlüsselten Weg wie Tailscale, den es hier noch nicht gibt. Den Router niemals für JARVIS öffnen.
 
-| Anbieter | Stand | Modell | Grenzen |
-|---|---|---|---|
-| **Claude Code** | ✅ installiert (2.1.316), angemeldet mit Claude-Abo (Pro) | **opus** (klügstes; einstellbar auf **sonnet** = schneller, mehr Spielraum) | Zählt zu deinem Abo-Limit. Opus ist klüger, aber verbraucht das Limit schneller als Sonnet. Ist es erreicht, meldet JARVIS, ab wann es weitergeht. Jede Anfrage braucht ein paar Sekunden Startzeit. Noch ohne Werkzeuge. |
+## Sicherheit in Kürze
 
-Andere Anbieter (Codex, Gemini) nutzt JARVIS auf deinen Wunsch **nicht**.
+- Hört nur auf `127.0.0.1` (außer du schaltest `lan an`). Host-Prüfung gegen DNS-Rebinding, Herkunftsprüfung gegen fremde Webseiten.
+- Alles unter `/api/` braucht den Schlüssel (Datei `~/.jarvis/token`, Rechte 600; Cookie `HttpOnly`, `SameSite=Strict`). Datenordner `~/.jarvis` hat Rechte 700.
+- Ratenbegrenzung, Größenlimit, Zeitlimit pro Verbindung.
+- Inhalte aus dem Internet und Werkzeugausgaben gelten als **unvertrauenswürdige Daten**, nie als Anweisung. Danach braucht jede weitere Aktion eine Freigabe.
+- Geschäft und Privat sind getrennt: Das Modell sieht pro Gespräch nur einen Bereich.
+- Alles Verändernde steht im **Audit** (System → Protokolle).
 
-Das Modell stellst du in `~/.jarvis/config.json` unter `"modell"` ein: `"opus"`
-(klügste Antworten), `"sonnet"` (schneller, mehr Anfragen im Limit) oder `""`
-(Claude Code entscheidet). Wie gründlich nachgedacht wird, regelt Claude Code
-bei diesen Modellen von selbst.
+## Daten
 
-So stellt JARVIS sicher, dass **nichts extra kostet**:
+Alles liegt in `~/.jarvis/`: Datenbank `jarvis.db`, `config.json`, `token`, `logs/`, `backups/` (täglich, die letzten 7 bleiben). Einstellungen änderst du
+unter System; weitere Möglichkeiten (Port, WLAN, Ordner, Limits) stehen in `config.json`. Umgebungsvariablen gehen vor: `JARVIS_PORT`, `JARVIS_DATEN`,
+`JARVIS_WERKSTATT`, `JARVIS_MODELL`, `JARVIS_LOGSTUFE`.
 
-- Claude Code wird nur genutzt, wenn die Anmeldeart `claude.ai` ist, also das
-  Abo. Ist es über einen API-Schlüssel angemeldet, verweigert JARVIS die
-  Nutzung, und Claude wird gar nicht erst gefragt.
-- Umgebungsvariablen, die Claude Code auf eine bezahlte Abrechnung umlenken
-  würden (`ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`,
-  `CLAUDE_CODE_USE_BEDROCK`, `CLAUDE_CODE_USE_VERTEX`,
-  `CLAUDE_CODE_USE_FOUNDRY`), werden für jeden Aufruf entfernt.
-- Es gibt keinen Ersatzweg über eine API. Ist Claude Code nicht bereit, sagt
-  JARVIS das, statt still woanders hinzugehen.
+Beim ersten Start liest JARVIS `BRAIN.md` ein (**ersetzt** beim erneuten Einlesen die importierten Einträge; deine eigenen bleiben).
 
-Claude Code läuft im eigenen Datenordner `~/.jarvis` mit `--tools ""`, also
-ohne Zugriff auf Dateien oder Befehle. Dein Wissen bekommt es über den
-Systemprompt: die JARVIS-Regeln plus `CLAUDE.md` und `BRAIN.md` aus dem
-Projektordner. **Änderst du diese Dateien, starte den Server neu**
-(`./jarvis.sh stopp` und `./jarvis.sh start`).
-## Konfiguration
+## So bleibt es kostenlos
 
-Beim ersten Start entsteht `~/.jarvis/config.json`:
-
-```json
-{
-  "host": "127.0.0.1",
-  "port": 8770,
-  "logstufe": "INFO",
-  "log_max_bytes": 1000000,
-  "log_dateien": 5
-}
-```
-
-Umgebungsvariablen gehen vor: `JARVIS_PORT`, `JARVIS_LOGSTUFE`, `JARVIS_DATEN`
-(anderer Datenordner). Der Port ist 8770, weil der alte Jarvis 8765 nutzt.
-
-## Logs
-
-`~/.jarvis/logs/jarvis.jsonl` – eine JSON-Zeile pro Ereignis, zum Beispiel:
-
-```json
-{"zeit": "2026-10-31T16:02:11+01:00", "stufe": "INFO", "ereignis": "anfrage_angenommen", "id": "3f2a…", "laenge": 21, "anfang": "Prüfe die Muster GmbH"}
-```
-
-Ab 1 MB wird die Datei rotiert, die letzten 5 bleiben erhalten. Fehler beim
-Start stehen zusätzlich in `~/.jarvis/logs/konsole.log`.
-
-Ereignisse: `server_gestartet`, `server_gestoppt`, `stopp_signal`,
-`provider_geprueft`, `anfrage_angenommen`, `anfrage_beantwortet`,
-`anfrage_fehlgeschlagen`, `zugriff_abgelehnt`, `start_fehlgeschlagen`,
-`interner_fehler`.
-
-Von jeder Frage stehen die ersten 200 Zeichen im Log, von Antworten nur die
-Länge. Gesprächszuordnungen liegen in `~/.jarvis/gespraeche.json`.
-
-## Sicherheit
-
-- Der Server hört **nur auf 127.0.0.1**, also nur auf diesem Mac. Eine andere
-  Adresse in der Konfiguration wird abgelehnt.
-- Der Host-Kopf jeder Anfrage muss auf diesen Mac zeigen. Das schützt vor
-  DNS-Rebinding, einem Trick, mit dem fremde Webseiten lokale Server ansprechen.
-- Anfragen, die eine fremde Webseite aus dem Browser schickt, werden abgelehnt.
-- Höchstens 64 KB pro Anfrage, höchstens 10 000 Zeichen Text.
-- Andere Programme und Benutzer **auf demselben Mac** können den Server
-  erreichen und die Logs lesen (`/api/logs` zeigt den Anfang jeder Anfrage).
-  Auf einem iMac mit einem Benutzer ist das in Ordnung. Ein Zugangsschlüssel
-  für lokale Programme kommt, sobald JARVIS Aktionen ausführen kann (Phase 5).
-
-## Was du wissen musst
-
-- **Erreichbar nur, solange der Mac läuft.** Ruhezustand, Ausschalten oder
-  Abmelden beenden den Server bzw. lassen ihn nicht antworten.
-- **Kein automatischer Neustart.** Ein Autostart (über einen macOS-LaunchAgent)
-  kommt erst, wenn JARVIS Aufgaben nach einem Neustart sicher wiederaufnehmen
-  kann (Phase 5). Sonst startet er womöglich halbe Aufgaben neu.
-- **Ohne Internet** läuft der Server weiter, kann aber nicht antworten, weil
-  Claude Code online denkt.
-
-## Fernzugriff später (noch nicht eingebaut)
-
-Vom Handy aus geht es nur, wenn man den Server bewusst erreichbar macht. Die
-sicheren Wege, jeweils nur nach deiner Freigabe:
-
-| Weg | Kosten | Risiko |
-|---|---|---|
-| **Tailscale** (privates Netz zwischen deinen Geräten) | für private Nutzung kostenlos | gering: nur deine angemeldeten Geräte; braucht ein zusätzliches Programm und ein Konto |
-| **SSH-Tunnel** | kostenlos | gering, aber umständlich am Handy |
-| Port im Router öffnen | kostenlos | **hoch**: der Server stünde im ganzen Internet. Nicht empfohlen. |
-
-In jedem Fall käme vorher ein Zugangsschlüssel dazu.
-
-## Umzug in die Cloud (nur zur Einordnung)
-
-Damit JARVIS auch bei ausgeschaltetem Mac läuft, bräuchte er einen Rechner,
-der immer an ist:
-
-- **Bezahlter Server (VPS):** monatliche Kosten. Außerdem müsste Claude Code
-  dort angemeldet werden, deine Daten lägen auf fremder Hardware, und der
-  Server wäre aus dem Internet erreichbar. Das erfordert deutlich mehr
-  Absicherung.
-- **Ein eigener Rechner, der immer läuft** (zum Beispiel ein alter Mac oder ein
-  Mini-PC): keine laufenden Gebühren außer Strom.
-
-Nichts davon ist vorgesehen, solange du es nicht ausdrücklich willst.
+- Claude Code wird nur genutzt, wenn die Anmeldeart das **Abo** (`claude.ai`) ist. Bei einer Anmeldung über API-Schlüssel verweigert JARVIS die Nutzung.
+- Umgebungsvariablen, die auf eine bezahlte Abrechnung umlenken würden (`ANTHROPIC_API_KEY` u. a.), werden bei jedem Aufruf entfernt.
+- Es gibt keinen Ersatzweg über eine bezahlte Schnittstelle. Ist Claude Code nicht bereit, sagt JARVIS das.
+- Immer nur **ein** Modellaufruf zugleich. Bei Abo-Limit weicht er **sichtbar** von Opus auf Sonnet aus (abschaltbar).
 
 ## Tests
 
 ```
-python3 -m unittest tests.test_kern -v
+python3 -m unittest discover -s tests -t . -p "test_*.py"        # 156 Tests, Claude Code simuliert
+node tests/ui/ui_pruefung.js [Ordner für Bildschirmfotos]       # Browser-Test (nur Entwicklung: braucht Node und Playwright)
 ```
-
-25 Tests: Konfiguration, Logs, alle Endpunkte, fehlerhafte Eingaben, fremder
-Host, fremde Webseite, doppelter Start, belegter Port, fremdes Programm auf dem
-Port, veraltete PID-Datei, Start und Stopp über `jarvis.sh` als echter
-Hintergrundprozess – und Claude Code (simuliert, damit kein Kontingent
-verbraucht wird): Antwort, Gespräch fortsetzen, keine Weitergabe von
-API-Schlüsseln, keine Werkzeuge, nicht installiert, nicht angemeldet,
-API-Schlüssel-Anmeldung abgelehnt, Limit, kaputte Ausgabe, Zeitüberschreitung.
