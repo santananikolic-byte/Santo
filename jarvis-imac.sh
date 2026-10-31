@@ -27,6 +27,24 @@ if ! xcode-select -p >/dev/null 2>&1; then
     exit 1
 fi
 
+# Jarvis denkt über Claude Code - also über das eigene Claude-Abo, ohne API-Schlüssel.
+CLAUDE=""
+for ort in "$(command -v claude 2>/dev/null)" "$HOME/.local/bin/claude" "$HOME/.claude/local/claude" \
+           /opt/homebrew/bin/claude /usr/local/bin/claude; do
+    if [ -n "$ort" ] && [ -x "$ort" ]; then CLAUDE="$ort"; break; fi
+done
+if [ -z "$CLAUDE" ]; then
+    echo "Claude Code ist auf diesem Mac noch nicht installiert."
+    printf "Jetzt installieren? [J/n] "
+    read -r antwort < /dev/tty || antwort="n"
+    case "$antwort" in
+        n|N|nein|Nein) echo "Ohne Claude Code kann Jarvis nicht antworten. Abgebrochen."; exit 1 ;;
+    esac
+    curl -fsSL https://claude.ai/install.sh | bash
+    echo
+    echo "Wichtig: Einmal „claude“ ins Terminal tippen und mit deinem Claude-Konto anmelden."
+fi
+
 echo "Jarvis wird eingerichtet …"
 mkdir -p "$ZIEL"
 curl -fsSL "$QUELLE" -o "$ZIEL/jarvis_terminal.py.neu"
