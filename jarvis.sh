@@ -5,7 +5,9 @@
 #   ./jarvis.sh stopp     beenden
 #   ./jarvis.sh status    läuft er? seit wann? wie viele Anfragen?
 #   ./jarvis.sh logs [N]  die letzten N Log-Einträge (Standard 20)
-#   ./jarvis.sh oeffnen   Statusseite im Browser öffnen
+#   ./jarvis.sh oeffnen   Statusseite mit Eingabefeld im Browser öffnen
+#   ./jarvis.sh provider  ist Claude Code bereit? (verbraucht kein Kontingent)
+#   ./jarvis.sh frage "…" eine Frage stellen (der Server muss laufen)
 #
 # Der Server ist nur auf diesem Mac erreichbar (127.0.0.1) und läuft nur,
 # solange der Mac an ist. Beschreibung: JARVIS-SERVER.md
@@ -62,11 +64,18 @@ case "${1:-status}" in
     logs)
         "$PYTHON" -m jarvis_core logs "${2:-20}"
         ;;
+    provider)
+        "$PYTHON" -m jarvis_core provider
+        ;;
+    frage)
+        shift
+        "$PYTHON" -m jarvis_core frage "$@"
+        ;;
     oeffnen|öffnen)
         open "$(adresse)" 2>/dev/null || echo "Im Browser öffnen: $(adresse)"
         ;;
     *)
-        echo "So: ./jarvis.sh start | stopp | status | logs [N] | oeffnen"
+        echo "So: ./jarvis.sh start | stopp | status | logs [N] | oeffnen | provider | frage \"…\""
         exit 2
         ;;
 esac

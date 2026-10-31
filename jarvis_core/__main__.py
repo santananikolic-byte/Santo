@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Befehle: python3 -m jarvis_core serve | status | stopp | logs [anzahl]
+"""Befehle: python3 -m jarvis_core serve | status | stopp | logs [anzahl] | provider | frage "<text>"
 
 ``serve`` läuft im Vordergrund. Für den Alltag startet und stoppt man über
 ``./jarvis.sh``.
@@ -82,7 +82,9 @@ def status():
     print("JARVIS läuft  –  %s" % s["adresse"])
     print("  seit         %s (%s Sekunden)" % (s["seit"], s["laufzeit_sekunden"]))
     print("  Anfragen     %s" % s["anfragen"])
-    print("  Claude Code  %s" % s["provider"]["claude_code"])
+    for p in s["provider"].values():
+        print("  %-12s %s %s" % (p.get("anzeige", p["name"]), "●" if p.get("nutzbar") else "○", p.get("hinweis", "")))
+    print("  Wissen       %s" % (", ".join(s.get("wissen") or []) or "keine Wissensdateien"))
     print("  Version      %s (Phase %s), Python %s, Prozess %s" % (s["version"], s["phase"], s["python"], s["pid"]))
     print("  Daten        %s" % s["daten_ordner"])
     return 0
@@ -110,6 +112,49 @@ def stopp():
     return 1
 
 
+def provider():
+    """Prüft die Anbieter direkt - auch ohne laufenden Server. Verbraucht kein Kontingent."""
+    from .provider import ProviderManager
+
+    class _StillesLog:
+        def ereignis(self, *args, **kwargs):
+            pass
+
+    ergebnis = ProviderManager(_konfig(), _StillesLog()).pruefen()
+    for p in ergebnis.values():
+        print("%-12s %s %s" % (p["anzeige"], "●" if p["nutzbar"] else "○", p["hinweis"]))
+        if p.get("version"):
+            print("             Version %s" % p["version"])
+    return 0 if ergebnis["claude_code"]["nutzbar"] else 1
+
+
+def frage(text):
+    """Schickt eine Frage an den laufenden Server und zeigt die Antwort."""
+    k = _konfig()
+    if not _status_abfragen(k):
+        print("JARVIS läuft nicht. Zuerst: ./jarvis.sh start")
+        return 1
+    daten = json.dumps({"text": text}).encode("utf-8")
+    anfrage = urllib.request.Request(k.adresse + "/api/anfrage", data=daten, method="POST",  # noqa: S310
+                                     headers={"Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(anfrage, timeout=k.provider_timeout + 30) as antwort:  # noqa: S310
+            ergebnis = json.loads(antwort.read().decode("utf-8"))
+    except urllib.error.HTTPError as fehler:
+        try:
+            ergebnis = json.loads(fehler.read().decode("utf-8"))
+        except ValueError:
+            ergebnis = {"ok": False, "fehler": "HTTP %s" % fehler.code}
+    except (urllib.error.URLError, OSError, ValueError) as fehler:
+        print("Keine Antwort vom Server: %s" % fehler)
+        return 1
+    if ergebnis.get("ok"):
+        print(ergebnis["antwort"])
+        return 0
+    print("Fehler: %s" % ergebnis.get("fehler"))
+    return 1
+
+
 def logs(anzahl=20):
     k = _konfig()
     eintraege = letzte_eintraege(k.log_datei, anzahl)
@@ -131,13 +176,20 @@ def main(argumente):
         return status()
     if befehl in ("stopp", "stop"):
         return stopp()
+    if befehl == "provider":
+        return provider()
+    if befehl == "frage":
+        if len(argumente) < 2 or not " ".join(argumente[1:]).strip():
+            print('So: python3 -m jarvis_core frage "Was steht heute an?"', file=sys.stderr)
+            return 2
+        return frage(" ".join(argumente[1:]))
     if befehl == "logs":
         try:
             return logs(int(argumente[1]) if len(argumente) > 1 else 20)
         except ValueError:
             print("So: python3 -m jarvis_core logs 50", file=sys.stderr)
             return 2
-    print("Befehle: serve | status | stopp | logs [anzahl]", file=sys.stderr)
+    print("Befehle: serve | status | stopp | logs [anzahl] | provider | frage \"<text>\"", file=sys.stderr)
     return 2
 
 

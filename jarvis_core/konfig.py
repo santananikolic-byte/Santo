@@ -20,6 +20,7 @@ STANDARD = {
     "logstufe": "INFO",
     "log_max_bytes": 1000000,
     "log_dateien": 5,
+    "provider_timeout": 300,
 }
 
 ERLAUBTE_HOSTS = ("127.0.0.1", "localhost")
@@ -97,6 +98,10 @@ def laden(daten_ordner=None):
         raise KonfigFehler("Der Port muss eine Zahl sein, nicht %r." % (werte["port"],)) from None
     if not 1024 <= werte["port"] <= 65535:
         raise KonfigFehler("Der Port muss zwischen 1024 und 65535 liegen, nicht %d." % werte["port"])
+    try:
+        werte["provider_timeout"] = max(10, int(werte["provider_timeout"]))
+    except (TypeError, ValueError):
+        raise KonfigFehler("provider_timeout muss eine Zahl (Sekunden) sein.") from None
     werte["logstufe"] = str(werte["logstufe"]).upper()
     if werte["logstufe"] not in LOGSTUFEN:
         raise KonfigFehler("Unbekannte Logstufe %r. Erlaubt: %s." % (werte["logstufe"], ", ".join(LOGSTUFEN)))

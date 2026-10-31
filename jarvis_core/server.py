@@ -2,14 +2,16 @@
 """Der lokale JARVIS-Server.
 
 Endpunkte:
-    GET  /              Statusseite zum Ansehen im Browser
-    GET  /status        Status als JSON
-    GET  /api/logs      die letzten Log-Einträge (?anzahl=50)
-    POST /api/anfrage   eine Anfrage annehmen: {"text": "..."}
+    GET  /                      Statusseite mit Eingabefeld
+    GET  /status                Status als JSON (inklusive Anbieter)
+    GET  /api/logs              die letzten Log-Einträge (?anzahl=50)
+    POST /api/anfrage           {"text": "...", "gespraech": "<optional>"} -> Antwort von Claude Code
+    POST /api/provider/pruefen  Anbieter neu prüfen (verbraucht kein Kontingent)
 
-In Phase 2 nimmt der Server Anfragen an, prüft und protokolliert sie und
-bestätigt sie. Beantwortet werden sie erst ab Phase 3, wenn Claude Code
-angebunden ist - das steht so auch in jeder Antwort.
+Ein Gespräch wird über seine Kennung fortgesetzt: Die Antwort enthält
+"gespraech", und wer sie bei der nächsten Anfrage mitschickt, setzt das
+Gespräch fort. Die Zuordnung zur Claude-Code-Sitzung liegt in
+gespraeche.json im Datenordner und übersteht einen Neustart.
 
 Sicherheit: Der Server hört nur auf 127.0.0.1. Zusätzlich muss der Host-Kopf
 auf die eigene Maschine zeigen (schützt vor DNS-Rebinding), und eine Anfrage
@@ -21,6 +23,7 @@ import html
 import json
 import os
 import platform
+import re
 import signal
 import threading
 import time
@@ -28,12 +31,17 @@ import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
-from . import PHASE, VERSION
+from . import PHASE, VERSION, wissen
 from .protokoll import letzte_eintraege
+from .provider import ProviderFehler, ProviderManager
 
 MAX_KOERPER = 64 * 1024
 MAX_TEXT = 10000
 LOKALE_NAMEN = ("127.0.0.1", "localhost", "[::1]")
+GESPRAECH_MUSTER = re.compile(r"^[0-9a-f]{8,32}$")
+# Welcher HTTP-Code zu welchem Anbieterfehler gehört.
+FEHLER_CODES = {"nicht_installiert": 503, "nicht_angemeldet": 503, "nicht_erlaubt": 503, "kein_provider": 503,
+                "limit": 429, "beschaeftigt": 429, "zeitueberschreitung": 504, "fehler": 502}
 
 
 class PidFehler(Exception):
@@ -66,6 +74,10 @@ class JarvisServer:
         self.anfragen = 0
         self._sperre = threading.Lock()
         self._httpd = None
+        self.provider = ProviderManager(konfig, protokoll)
+        self.system, self.wissen = wissen.system_prompt()
+        self._gespraeche_datei = os.path.join(konfig.daten_ordner, "gespraeche.json")
+        self._gespraeche = self._gespraeche_laden()
 
     # ------------------------------------------------------------ Status ---
 
@@ -82,23 +94,55 @@ class JarvisServer:
             "adresse": self.konfig.adresse,
             "python": platform.python_version(),
             "anfragen": self.anfragen,
-            "provider": {"claude_code": "noch nicht angebunden (Phase 3)"},
+            "provider": self.provider.status(),
+            "wissen": self.wissen,
             "daten_ordner": self.konfig.daten_ordner,
         }
 
-    def anfrage_annehmen(self, text):
+    # -------------------------------------------------------- Gespräche ---
+
+    def _gespraeche_laden(self):
+        try:
+            with open(self._gespraeche_datei, "r", encoding="utf-8") as f:
+                daten = json.load(f)
+            return daten if isinstance(daten, dict) else {}
+        except (OSError, ValueError):
+            return {}
+
+    def _gespraech_merken(self, gespraech, sitzung):
+        with self._sperre:
+            self._gespraeche[gespraech] = {"sitzung": sitzung,
+                                           "geaendert": datetime.datetime.now().isoformat(timespec="seconds")}
+            zwischen = self._gespraeche_datei + ".neu"
+            with open(zwischen, "w", encoding="utf-8") as f:
+                json.dump(self._gespraeche, f, indent=2)
+            os.replace(zwischen, self._gespraeche_datei)
+
+    # --------------------------------------------------------- Anfragen ---
+
+    def anfrage_bearbeiten(self, text, gespraech=None):
+        """Gibt (HTTP-Code, Antwort) zurück."""
         with self._sperre:
             self.anfragen += 1
         kennung = uuid.uuid4().hex[:12]
-        self.log.ereignis("anfrage_angenommen", id=kennung, laenge=len(text), anfang=text[:200])
-        return {
-            "ok": True,
-            "id": kennung,
-            "status": "angenommen",
-            "antwort": None,
-            "hinweis": "Die Anfrage ist angekommen und protokolliert. Beantwortet wird sie ab Phase 3, "
-                       "wenn Claude Code angebunden ist.",
-        }
+        if gespraech is not None and (not isinstance(gespraech, str) or not GESPRAECH_MUSTER.match(gespraech)):
+            return 400, {"ok": False, "id": kennung, "fehler": "Ungültige Gesprächskennung."}
+        gespraech = gespraech or uuid.uuid4().hex[:16]
+        sitzung = self._gespraeche.get(gespraech, {}).get("sitzung")
+        self.log.ereignis("anfrage_angenommen", id=kennung, gespraech=gespraech, fortsetzung=bool(sitzung),
+                          laenge=len(text), anfang=text[:200])
+        try:
+            ergebnis = self.provider.fragen(text, self.system, sitzung)
+        except ProviderFehler as fehler:
+            self.log.ereignis("anfrage_fehlgeschlagen", "WARNING", id=kennung, art=fehler.art, grund=str(fehler))
+            return FEHLER_CODES.get(fehler.art, 502), {"ok": False, "id": kennung, "gespraech": gespraech,
+                                                       "art": fehler.art, "fehler": str(fehler)}
+        if ergebnis.get("sitzung"):
+            self._gespraech_merken(gespraech, ergebnis["sitzung"])
+        self.log.ereignis("anfrage_beantwortet", id=kennung, provider=ergebnis["provider"],
+                          dauer_ms=ergebnis.get("dauer_ms"), laenge=len(ergebnis["antwort"]))
+        return 200, {"ok": True, "id": kennung, "gespraech": gespraech, "antwort": ergebnis["antwort"],
+                     "provider": ergebnis["provider"], "dauer_ms": ergebnis.get("dauer_ms")}
 
     # ----------------------------------------------------------- Ablauf ---
 
@@ -131,7 +175,9 @@ class JarvisServer:
             signal.signal(signal.SIGTERM, self._signal)
             signal.signal(signal.SIGINT, self._signal)
         self.log.ereignis("server_gestartet", adresse=self.konfig.adresse, pid=os.getpid(),
-                          version=VERSION, python=platform.python_version())
+                          version=VERSION, python=platform.python_version(), wissen=self.wissen)
+        # Anbieter im Hintergrund prüfen, damit der Start nicht wartet.
+        threading.Thread(target=self.provider.pruefen, daemon=True).start()
         try:
             self._httpd.serve_forever(poll_interval=0.5)
         finally:
@@ -217,7 +263,10 @@ def _handler_fuer(server):
             if herkunft and herkunft not in erlaubte_herkunft:
                 server.log.ereignis("zugriff_abgelehnt", "WARNING", grund="origin", origin=herkunft)
                 return self._fehler(403, "Anfragen von fremden Webseiten werden abgelehnt.")
-            if urlparse(self.path).path != "/api/anfrage":
+            pfad = urlparse(self.path).path
+            if pfad == "/api/provider/pruefen":
+                return self._senden(200, {"ok": True, "provider": server.provider.pruefen()})
+            if pfad != "/api/anfrage":
                 return self._fehler(404, "Unbekannter Pfad.")
             if "application/json" not in (self.headers.get("Content-Type") or ""):
                 return self._fehler(415, "Bitte JSON senden (Content-Type: application/json).")
@@ -238,44 +287,99 @@ def _handler_fuer(server):
                 return self._fehler(400, "Feld \"text\" fehlt oder ist leer.")
             if len(text) > MAX_TEXT:
                 return self._fehler(413, "Der Text ist länger als %d Zeichen." % MAX_TEXT)
-            return self._senden(200, server.anfrage_annehmen(text.strip()))
+            try:
+                code, antwort = server.anfrage_bearbeiten(text.strip(), daten.get("gespraech"))
+            except Exception as fehler:  # noqa: BLE001 - nie ohne Antwort abbrechen
+                server.log.ereignis("interner_fehler", "ERROR", grund=repr(fehler))
+                return self._fehler(500, "Interner Fehler – Details im Log.")
+            return self._senden(code, antwort)
 
     return Handler
 
 
 def _statusseite(status):
-    z = {k: html.escape(str(v)) for k, v in status.items() if not isinstance(v, dict)}
-    provider = html.escape(status["provider"]["claude_code"])
+    z = {k: html.escape(str(v)) for k, v in status.items() if not isinstance(v, (dict, list))}
+    zeilen = []
+    for p in status["provider"].values():
+        farbe = "ok" if p.get("nutzbar") else "aus"
+        zeilen.append('<tr><td>%s</td><td><span class="%s">●</span> %s</td></tr>'
+                      % (html.escape(p.get("anzeige", p["name"])), farbe, html.escape(p.get("hinweis", ""))))
+    wissen_text = html.escape(", ".join(status["wissen"]) or "keine Wissensdateien gefunden")
     return """<!DOCTYPE html>
 <html lang="de"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta http-equiv="refresh" content="10">
-<title>JARVIS Status</title>
+<title>JARVIS</title>
 <style>
-  :root{--bg:#05070a;--fl:#11161d;--li:rgba(0,229,255,.25);--tx:#f2f6fa;--mu:#9aa8b6;--cy:#00e5ff;--gr:#35e0a1}
+  :root{--bg:#05070a;--fl:#11161d;--li:rgba(0,229,255,.25);--tx:#f2f6fa;--mu:#9aa8b6;--cy:#00e5ff;--gr:#35e0a1;--rt:#ff5c7a}
+  *{box-sizing:border-box}
   body{margin:0;background:var(--bg);color:var(--tx);font:16px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
-  main{max-width:640px;margin:0 auto;padding:24px 16px}
-  h1{letter-spacing:.2em;margin:0 0 4px}
-  .ok{color:var(--gr);font-weight:600}
-  table{width:100%%;border-collapse:collapse;margin-top:16px;background:var(--fl);border:1px solid var(--li);border-radius:12px;overflow:hidden}
-  td{padding:10px 14px;border-bottom:1px solid var(--li)}
-  td:first-child{color:var(--mu);width:40%%}
+  main{max-width:720px;margin:0 auto;padding:24px 16px 40px}
+  h1{letter-spacing:.2em;margin:0}
+  h2{font-size:13px;letter-spacing:.14em;text-transform:uppercase;color:var(--cy);margin:28px 0 8px}
+  .ok{color:var(--gr)} .aus{color:var(--rt)}
+  table{width:100%%;border-collapse:collapse;background:var(--fl);border:1px solid var(--li);border-radius:12px;overflow:hidden}
+  td{padding:9px 14px;border-bottom:1px solid var(--li);vertical-align:top}
+  td:first-child{color:var(--mu);width:34%%}
+  textarea{width:100%%;min-height:90px;font:inherit;color:var(--tx);background:var(--fl);border:1px solid var(--li);border-radius:12px;padding:12px}
+  button{font:inherit;border:0;border-radius:10px;padding:10px 16px;background:var(--cy);color:var(--bg);font-weight:600;cursor:pointer;margin-top:8px}
+  button.zweit{background:transparent;color:var(--cy);border:1px solid var(--li)}
+  button:disabled{opacity:.5}
+  #verlauf div{margin:10px 0;padding:10px 14px;border-radius:12px;white-space:pre-wrap}
+  .du{background:rgba(61,123,255,.18)} .jarvis{background:var(--fl);border:1px solid var(--li)} .fehler{border:1px solid var(--rt)}
   p{color:var(--mu);font-size:14px}
 </style></head><body><main>
 <h1>JARVIS</h1>
-<div class="ok">● läuft</div>
+<div class="ok">● Server läuft</div>
+
+<h2>Frag Jarvis</h2>
+<div id="verlauf"></div>
+<textarea id="text" placeholder="Was soll Jarvis tun? (Strg+Enter sendet)"></textarea>
+<button id="senden">Senden</button> <button id="neu" class="zweit">Neues Gespräch</button>
+
+<h2>Anbieter</h2>
+<table>%(provider_zeilen)s</table>
+<button id="pruefen" class="zweit">Anbieter neu prüfen</button>
+
+<h2>Status</h2>
 <table>
 <tr><td>Adresse</td><td>%(adresse)s</td></tr>
 <tr><td>Läuft seit</td><td>%(seit)s</td></tr>
-<tr><td>Laufzeit</td><td>%(laufzeit_sekunden)s Sekunden</td></tr>
 <tr><td>Anfragen</td><td>%(anfragen)s</td></tr>
-<tr><td>Claude Code</td><td>%(provider)s</td></tr>
-<tr><td>Version</td><td>%(version)s (Phase %(phase)s)</td></tr>
-<tr><td>Python</td><td>%(python)s</td></tr>
-<tr><td>Prozess</td><td>%(pid)s</td></tr>
+<tr><td>Wissen geladen</td><td>%(wissen)s</td></tr>
+<tr><td>Version</td><td>%(version)s (Phase %(phase)s), Python %(python)s, Prozess %(pid)s</td></tr>
 <tr><td>Daten</td><td>%(daten_ordner)s</td></tr>
 </table>
-<p>Nur auf diesem Mac erreichbar. Die Seite aktualisiert sich alle 10 Sekunden.
-Stoppen: <code>./jarvis.sh stopp</code></p>
+<p>Nur auf diesem Mac erreichbar. Jarvis hat noch keine Werkzeuge: Er antwortet, sucht aber nicht im Internet
+und führt nichts aus. Stoppen: <code>./jarvis.sh stopp</code></p>
+<script>
+(function(){
+  var gespraech = null;
+  try { gespraech = sessionStorage.getItem("jarvis.gespraech"); } catch (e) {}
+  var feld = document.getElementById("text"), knopf = document.getElementById("senden"), verlauf = document.getElementById("verlauf");
+  function zeile(klasse, text){ var d = document.createElement("div"); d.className = klasse; d.textContent = text; verlauf.appendChild(d); return d; }
+  function senden(){
+    var text = feld.value.trim(); if (!text) return;
+    zeile("du", text); feld.value = ""; knopf.disabled = true;
+    var warte = zeile("jarvis", "denkt nach …");
+    var koerper = {text: text}; if (gespraech) koerper.gespraech = gespraech;
+    fetch("/api/anfrage", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(koerper)})
+      .then(function(r){ return r.json(); })
+      .then(function(a){
+        if (a.gespraech) { gespraech = a.gespraech; try { sessionStorage.setItem("jarvis.gespraech", gespraech); } catch (e) {} }
+        warte.textContent = a.ok ? a.antwort : ("Fehler: " + a.fehler);
+        if (!a.ok) warte.className = "jarvis fehler";
+      })
+      .catch(function(){ warte.textContent = "Keine Verbindung zum Server."; warte.className = "jarvis fehler"; })
+      .then(function(){ knopf.disabled = false; feld.focus(); });
+  }
+  knopf.onclick = senden;
+  feld.onkeydown = function(e){ if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) senden(); };
+  document.getElementById("neu").onclick = function(){ gespraech = null; try { sessionStorage.removeItem("jarvis.gespraech"); } catch (e) {} verlauf.innerHTML = ""; };
+  document.getElementById("pruefen").onclick = function(){
+    this.disabled = true;
+    fetch("/api/provider/pruefen", {method: "POST"}).then(function(){ location.reload(); });
+  };
+})();
+</script>
 </main></body></html>
-""" % dict(z, provider=provider)
+""" % dict(z, provider_zeilen="".join(zeilen), wissen=wissen_text)

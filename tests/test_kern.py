@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Tests für den JARVIS-Kern (Phase 2): Konfiguration, Logs, Server, Start/Stopp.
+"""Tests für den JARVIS-Kern: Konfiguration, Logs, Server, Start/Stopp, Claude Code.
+
+Claude Code wird durch ein kleines Ersatzprogramm simuliert (FAKE_MODUS), damit
+die Tests kein Abo-Kontingent verbrauchen und jeden Fehlerfall gezielt prüfen.
 
 Aufruf::
 
@@ -30,6 +33,37 @@ from jarvis_core.protokoll import Protokoll, letzte_eintraege  # noqa: E402
 from jarvis_core.server import JarvisServer, PidFehler  # noqa: E402
 
 
+ERSATZ_CLAUDE = r'''#!/usr/bin/env python3
+import json, os, sys, time
+modus = os.environ.get("FAKE_MODUS", "ok")
+protokoll = os.environ.get("FAKE_PROTOKOLL")
+args = sys.argv[1:]
+eingabe = "" if args[:1] == ["--version"] or args[:2] == ["auth", "status"] else sys.stdin.read()
+if protokoll:
+    with open(protokoll, "a") as f:
+        f.write(json.dumps({"args": args, "eingabe": eingabe, "cwd": os.getcwd(),
+                            "apikey": os.environ.get("ANTHROPIC_API_KEY"),
+                            "bedrock": os.environ.get("CLAUDE_CODE_USE_BEDROCK")}) + "\n")
+if args[:1] == ["--version"]:
+    print("2.1.316 (Claude Code)"); sys.exit(0)
+if args[:2] == ["auth", "status"]:
+    if modus == "nicht_angemeldet":
+        print(json.dumps({"loggedIn": False})); sys.exit(1)
+    art = "api_key" if modus == "apikey" else "claude.ai"
+    print(json.dumps({"loggedIn": True, "authMethod": art, "subscriptionType": "pro"})); sys.exit(0)
+if modus == "limit":
+    print(json.dumps({"type": "result", "is_error": True, "result": "Claude AI usage limit reached|1761930000"}))
+    sys.exit(1)
+if modus == "langsam":
+    time.sleep(30)
+if modus == "kaputt":
+    print("das ist kein json"); sys.exit(1)
+sitzung = args[args.index("--resume") + 1] if "--resume" in args else "sitzung-neu"
+print(json.dumps({"type": "result", "is_error": False, "session_id": sitzung,
+                  "result": "Antwort auf: " + eingabe.strip(), "duration_ms": 1234}))
+'''
+
+
 def freier_port():
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
@@ -40,10 +74,20 @@ class Grundlage(unittest.TestCase):
     def setUp(self):
         self.ordner = tempfile.mkdtemp(prefix="jarvis_test_")
         self.port = freier_port()
-        self._alt = {k: os.environ.get(k) for k in ("JARVIS_DATEN", "JARVIS_PORT", "JARVIS_LOGSTUFE")}
+        self._alt = {k: os.environ.get(k) for k in ("JARVIS_DATEN", "JARVIS_PORT", "JARVIS_LOGSTUFE", "JARVIS_CLAUDE",
+                                                    "FAKE_MODUS", "FAKE_PROTOKOLL", "ANTHROPIC_API_KEY",
+                                                    "CLAUDE_CODE_USE_BEDROCK")}
         os.environ["JARVIS_DATEN"] = self.ordner
         os.environ["JARVIS_PORT"] = str(self.port)
         os.environ.pop("JARVIS_LOGSTUFE", None)
+        self.ersatz = os.path.join(self.ordner, "claude-ersatz")
+        with open(self.ersatz, "w") as f:
+            f.write(ERSATZ_CLAUDE.replace("#!/usr/bin/env python3", "#!" + sys.executable, 1))
+        os.chmod(self.ersatz, 0o755)  # noqa: S103 - Ersatzprogramm muss ausführbar sein
+        self.aufrufe = os.path.join(self.ordner, "aufrufe.jsonl")
+        os.environ["JARVIS_CLAUDE"] = self.ersatz
+        os.environ["FAKE_PROTOKOLL"] = self.aufrufe
+        os.environ["FAKE_MODUS"] = "ok"
 
     def tearDown(self):
         for k, v in self._alt.items():
@@ -148,7 +192,9 @@ class ServerTest(Grundlage):
         self.assertEqual(code, 200)
         self.assertTrue(s["laeuft"])
         self.assertEqual(s["adresse"], "http://127.0.0.1:%d" % self.port)
-        self.assertEqual(s["phase"], 2)
+        self.assertEqual(s["phase"], 3)
+        self.assertIn("claude_code", s["provider"])
+        self.assertIn("BRAIN.md", s["wissen"])
 
     def test_statusseite(self):
         code, seite = self.anfrage("GET", "/")
@@ -156,16 +202,82 @@ class ServerTest(Grundlage):
         self.assertIn("JARVIS", seite)
         self.assertIn("läuft", seite)
 
-    def test_anfrage_wird_angenommen_und_protokolliert(self):
+    def aufrufe_lesen(self):
+        with open(self.aufrufe) as f:
+            return [json.loads(z) for z in f]
+
+    def test_anfrage_wird_beantwortet_und_protokolliert(self):
+        os.environ["ANTHROPIC_API_KEY"] = "sk-darf-nicht-weitergegeben-werden"
+        os.environ["CLAUDE_CODE_USE_BEDROCK"] = "1"
         code, a = self.anfrage("POST", "/api/anfrage", {"text": "Prüfe die Muster GmbH"})
-        self.assertEqual(code, 200)
+        self.assertEqual(code, 200, a)
         self.assertTrue(a["ok"])
-        self.assertIsNone(a["antwort"])  # ehrlich: beantwortet wird erst ab Phase 3
-        self.assertIn("Phase 3", a["hinweis"])
+        self.assertEqual(a["antwort"], "Antwort auf: Prüfe die Muster GmbH")
+        self.assertEqual(a["provider"], "claude_code")
         _, s = self.anfrage("GET", "/status")
         self.assertEqual(s["anfragen"], 1)
         eintraege = letzte_eintraege(self.k.log_datei)
-        self.assertTrue(any(e["ereignis"] == "anfrage_angenommen" and e["id"] == a["id"] for e in eintraege))
+        self.assertTrue(any(e["ereignis"] == "anfrage_beantwortet" and e["id"] == a["id"] for e in eintraege))
+        frage = [x for x in self.aufrufe_lesen() if "-p" in x["args"]][-1]
+        # Keine bezahlte Abrechnung, keine Werkzeuge, eigener Arbeitsordner, Wissen im Systemprompt.
+        self.assertIsNone(frage["apikey"])
+        self.assertIsNone(frage["bedrock"])
+        self.assertEqual(frage["args"][frage["args"].index("--tools") + 1], "")
+        self.assertEqual(os.path.realpath(frage["cwd"]), os.path.realpath(self.ordner))
+        system = frage["args"][frage["args"].index("--system-prompt") + 1]
+        self.assertIn("Du bist JARVIS", system)
+        self.assertIn("===== BRAIN.md =====", system)
+        self.assertEqual(frage["eingabe"], "Prüfe die Muster GmbH")
+
+    def test_gespraech_wird_fortgesetzt(self):
+        _, a = self.anfrage("POST", "/api/anfrage", {"text": "Hallo"})
+        self.assertNotIn("--resume", [x for x in self.aufrufe_lesen() if "-p" in x["args"]][-1]["args"])
+        _, b = self.anfrage("POST", "/api/anfrage", {"text": "Und weiter?", "gespraech": a["gespraech"]})
+        self.assertEqual(b["gespraech"], a["gespraech"])
+        letzte = [x for x in self.aufrufe_lesen() if "-p" in x["args"]][-1]["args"]
+        self.assertEqual(letzte[letzte.index("--resume") + 1], "sitzung-neu")
+        with open(os.path.join(self.ordner, "gespraeche.json")) as f:
+            self.assertIn(a["gespraech"], json.load(f))
+        self.assertEqual(self.anfrage("POST", "/api/anfrage", {"text": "x", "gespraech": "../boese"})[0], 400)
+
+    def test_fehlerfaelle_von_claude(self):
+        faelle = [("nicht_angemeldet", 503, "nicht angemeldet"), ("apikey", 503, "kosten"),
+                  ("limit", 429, "Limit"), ("kaputt", 502, "Claude Code meldet")]
+        for modus, code_soll, text_soll in faelle:
+            with self.subTest(modus=modus):
+                os.environ["FAKE_MODUS"] = modus
+                self.server.provider.pruefen()
+                fragen_vorher = len([x for x in self.aufrufe_lesen() if "-p" in x["args"]])
+                code, a = self.anfrage("POST", "/api/anfrage", {"text": "Hallo"})
+                self.assertEqual(code, code_soll, a)
+                self.assertFalse(a["ok"])
+                self.assertIn(text_soll, a["fehler"])
+                fragen_nachher = len([x for x in self.aufrufe_lesen() if "-p" in x["args"]])
+                if modus in ("nicht_angemeldet", "apikey"):
+                    # Ohne Abo-Anmeldung wird Claude gar nicht erst gefragt - es entstehen keine Kosten.
+                    self.assertEqual(fragen_nachher, fragen_vorher)
+
+    def test_nicht_installiert(self):
+        os.environ["JARVIS_CLAUDE"] = os.path.join(self.ordner, "gibt-es-nicht")
+        status = self.server.provider.pruefen()
+        self.assertFalse(status["claude_code"]["installiert"])
+        self.assertIn("install.sh", status["claude_code"]["hinweis"])
+        code, a = self.anfrage("POST", "/api/anfrage", {"text": "Hallo"})
+        self.assertEqual(code, 503)
+        self.assertIn("nicht installiert", a["fehler"])
+
+    def test_zeitueberschreitung(self):
+        self.server.provider.claude.timeout = 1
+        os.environ["FAKE_MODUS"] = "langsam"
+        start = time.time()
+        code, a = self.anfrage("POST", "/api/anfrage", {"text": "Hallo"})
+        self.assertEqual(code, 504, a)
+        self.assertLess(time.time() - start, 10)
+
+    def test_codex_und_gemini_werden_nur_erkannt(self):
+        status = self.server.provider.pruefen()
+        for name in ("codex", "gemini"):
+            self.assertFalse(status[name]["nutzbar"])
 
     def test_fehlerhafte_eingaben(self):
         self.assertEqual(self.anfrage("POST", "/api/anfrage", {"text": "   "})[0], 400)
@@ -191,6 +303,8 @@ class ServerTest(Grundlage):
         code, _ = self.anfrage("POST", "/api/anfrage", {"text": "x"},
                                kopf={"Origin": "http://127.0.0.1:%d" % self.port})
         self.assertEqual(code, 200)
+        code, _ = self.anfrage("POST", "/api/provider/pruefen", kopf={"Origin": "https://boese.example"})
+        self.assertEqual(code, 403)
 
     def test_logs_endpunkt(self):
         code, a = self.anfrage("GET", "/api/logs?anzahl=5")

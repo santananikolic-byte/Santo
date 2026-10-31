@@ -4,5 +4,5 @@
 Start und Stopp über ``./jarvis.sh``. Beschreibung in ``JARVIS-SERVER.md``.
 """
 
-VERSION = "0.2.0"
-PHASE = 2
+VERSION = "0.3.0"
+PHASE = 3
