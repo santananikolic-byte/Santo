@@ -320,3 +320,10 @@ class ProviderManager:
 
     def abbrechen(self):
         return self.claude.abbrechen()
+
+    def beschaeftigt(self):
+        """Läuft gerade eine Anfrage?"""
+        frei = self._eine_anfrage.acquire(blocking=False)
+        if frei:
+            self._eine_anfrage.release()
+        return not frei

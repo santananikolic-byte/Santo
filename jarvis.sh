@@ -1,16 +1,24 @@
 #!/bin/bash
-# JARVIS-Server starten und stoppen.
+# JARVIS-Server starten, stoppen und bedienen.
 #
-#   ./jarvis.sh start     im Hintergrund starten
-#   ./jarvis.sh stopp     beenden
-#   ./jarvis.sh status    läuft er? seit wann? wie viele Anfragen?
-#   ./jarvis.sh logs [N]  die letzten N Log-Einträge (Standard 20)
-#   ./jarvis.sh oeffnen   Statusseite mit Eingabefeld im Browser öffnen
-#   ./jarvis.sh provider  ist Claude Code bereit? (verbraucht kein Kontingent)
-#   ./jarvis.sh frage "…" eine Frage stellen (der Server muss laufen)
+#   ./jarvis.sh start               im Hintergrund starten
+#   ./jarvis.sh stopp               beenden
+#   ./jarvis.sh status              läuft er? Anbieter? Was ist offen?
+#   ./jarvis.sh oeffnen             Oberfläche im Browser öffnen
+#   ./jarvis.sh link                Link mit Zugangsschlüssel (fürs Handy: erst "lan an")
+#   ./jarvis.sh frage "…"           eine Frage stellen (der Server muss laufen)
+#   ./jarvis.sh notstopp            alles anhalten, bis du entsperrst
+#   ./jarvis.sh entsperren          Notstopp aufheben
+#   ./jarvis.sh logs [N]            die letzten N Log-Einträge (Standard 20)
+#   ./jarvis.sh provider            ist Claude Code bereit? (verbraucht kein Kontingent)
+#   ./jarvis.sh backup              Sicherung der Datenbank jetzt
+#   ./jarvis.sh wiederherstellen D  Datenbank aus Sicherung D zurückholen (erst stoppen)
+#   ./jarvis.sh export [Datei]      alle gespeicherten Daten als JSON
+#   ./jarvis.sh lan an|aus          Zugriff aus dem WLAN (iPhone) erlauben oder sperren
+#   ./jarvis.sh umgebung            was JARVIS über diesen Mac erkennt
 #
-# Der Server ist nur auf diesem Mac erreichbar (127.0.0.1) und läuft nur,
-# solange der Mac an ist. Beschreibung: JARVIS-SERVER.md
+# Der Server ist nur auf diesem Mac erreichbar (127.0.0.1), außer du schaltest "lan an",
+# und läuft nur, solange der Mac an ist. Beschreibung: JARVIS-SERVER.md
 
 cd "$(dirname "$0")" || exit 1
 
@@ -25,27 +33,27 @@ datenordner() {
     "$PYTHON" -c 'from jarvis_core import konfig; print(konfig.daten_ordner_ermitteln())'
 }
 
-adresse() {
-    "$PYTHON" -c 'from jarvis_core import konfig; print(konfig.laden().adresse)'
+laeuft() {
+    "$PYTHON" -m jarvis_core status >/dev/null 2>&1
 }
 
 case "${1:-status}" in
     start)
-        if "$PYTHON" -m jarvis_core status >/dev/null 2>&1; then
-            echo "JARVIS läuft schon: $(adresse)"
+        if laeuft; then
+            echo "JARVIS läuft schon. Oberfläche: ./jarvis.sh oeffnen"
             exit 0
         fi
         ORDNER="$(datenordner)" || exit 1
         mkdir -p "$ORDNER/logs"
         nohup "$PYTHON" -m jarvis_core serve >>"$ORDNER/logs/konsole.log" 2>&1 &
         PROZESS=$!
-        for _ in $(seq 1 50); do
+        for _ in $(seq 1 75); do
             # Ist der Prozess schon wieder beendet (z. B. Port belegt), nicht weiter warten.
             if ! kill -0 "$PROZESS" 2>/dev/null; then
                 break
             fi
-            if "$PYTHON" -m jarvis_core status >/dev/null 2>&1; then
-                echo "JARVIS läuft: $(adresse)"
+            if laeuft; then
+                echo "JARVIS läuft. Oberfläche öffnen: ./jarvis.sh oeffnen"
                 exit 0
             fi
             sleep 0.2
@@ -58,24 +66,22 @@ case "${1:-status}" in
     stopp|stop)
         "$PYTHON" -m jarvis_core stopp
         ;;
-    status)
-        "$PYTHON" -m jarvis_core status
+    oeffnen|öffnen)
+        LINK="$("$PYTHON" -m jarvis_core link | head -1)" || exit 1
+        open "$LINK" 2>/dev/null || echo "Im Browser öffnen: $LINK"
+        ;;
+    status|link|provider|notstopp|entsperren|backup|export|umgebung)
+        "$PYTHON" -m jarvis_core "$@"
         ;;
     logs)
         "$PYTHON" -m jarvis_core logs "${2:-20}"
         ;;
-    provider)
-        "$PYTHON" -m jarvis_core provider
-        ;;
-    frage)
-        shift
-        "$PYTHON" -m jarvis_core frage "$@"
-        ;;
-    oeffnen|öffnen)
-        open "$(adresse)" 2>/dev/null || echo "Im Browser öffnen: $(adresse)"
+    frage|wiederherstellen|lan)
+        "$PYTHON" -m jarvis_core "$@"
         ;;
     *)
-        echo "So: ./jarvis.sh start | stopp | status | logs [N] | oeffnen | provider | frage \"…\""
+        echo "So: ./jarvis.sh start | stopp | status | oeffnen | link | frage \"…\" | notstopp | entsperren | logs [N]"
+        echo "    | provider | backup | wiederherstellen DATEI | export [DATEI] | lan an|aus | umgebung"
         exit 2
         ;;
 esac

@@ -142,8 +142,10 @@ class WerkzeugTest(AgentBasis):
         self.assertTrue(os.path.exists(os.path.join(self.werkstatt, "weg.txt")))
         self.agent.freigabe_beantworten(e["freigabe_id"], True)
         self.assertFalse(os.path.exists(os.path.join(self.werkstatt, "weg.txt")))
-        inhalte = [open(os.path.join(self.werkstatt, ".papierkorb", n), encoding="utf-8").read()  # noqa: SIM115
-                   for n in os.listdir(os.path.join(self.werkstatt, ".papierkorb"))]
+        inhalte = []
+        for n in os.listdir(os.path.join(self.werkstatt, ".papierkorb")):
+            with open(os.path.join(self.werkstatt, ".papierkorb", n), encoding="utf-8") as datei:
+                inhalte.append(datei.read())
         self.assertEqual(inhalte, ["wichtig"])  # nichts endgültig gelöscht
         os.makedirs(os.path.join(self.werkstatt, "ordner"))
         self.assertEqual(self.aktion("datei_loeschen", pfad="ordner")["status"], "freigabe_offen")
