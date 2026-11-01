@@ -263,6 +263,15 @@ class BerechtigungTest(AgentBasis):
         entwickler = self.ctx(rolle="entwicklung", quelle="auftrag")
         self.assertEqual(self.aktion("recherche", frage="x", ctx=entwickler)["status"], "gesperrt")
 
+    def test_vertrieb_darf_recherchieren_und_merken_aber_nicht_loeschen(self):
+        vertrieb = self.ctx(rolle="vertrieb", quelle="auftrag")
+        self.werkstatt_datei("a.txt", "x")
+        self.assertEqual(self.aktion("datei_loeschen", pfad="a.txt", ctx=vertrieb)["status"], "gesperrt")
+        self.assertIn("Vertrieb/Akquise", self.agent.system_prompt("vertrieb"))
+        e = self.aktion("merken", text="Hausverwaltung Muster, Köln, sucht Treppenhausreinigung", art="kontakt", ctx=vertrieb)
+        self.assertEqual(e["status"], "ausgefuehrt")
+        self.assertEqual(self.sp.fakten(status="vorschlag")[0]["art"], "kontakt")
+
     def test_gespraechswerkzeug_nicht_im_auftrag(self):
         e = self.aktion("auftrag_planen", ziel="x", ctx=self.ctx(quelle="auftrag"))
         self.assertEqual(e["status"], "gesperrt")

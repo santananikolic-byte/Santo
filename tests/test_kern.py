@@ -336,6 +336,13 @@ class GespraechTest(ServerBasis):
         self.assertEqual(treffer[0]["text"], "Geändert")
         self.assertEqual(self.api("GET", "/api/suche")[0], 400)
 
+    def test_kontakte_als_eigene_fakt_art(self):
+        a = self.api("POST", "/api/fakt", {"aktion": "hinzufuegen", "text": "Hausverwaltung Muster, Köln", "art": "kontakt",
+                                           "bereich": "geschaeft"})[1]
+        self.assertTrue(a["neu"])
+        self.assertEqual(self.server.speicher.fakt(a["id"])["art"], "kontakt")
+        self.assertEqual(self.api("POST", "/api/fakt", {"aktion": "aendern", "id": a["id"], "art": "gibtsnicht"})[0], 400)
+
     def test_aufgaben_und_erinnerungen(self):
         a = self.api("POST", "/api/todo", {"aktion": "anlegen", "titel": "Angebot", "prioritaet": "hoch", "faellig": "2026-11-02 09:00"})[1]
         self.assertEqual(self.zustand()["todos"][0]["titel"], "Angebot")
@@ -420,7 +427,7 @@ class GespraechTest(ServerBasis):
         self.assertEqual(z["system"]["freigabe_minuten"], self.konfig.freigabe_minuten)
         self.assertEqual((z["system"]["lan"], z["system"]["erinnerungen_sprechen"]), (False, True))
         rollen_ids = [r["id"] for r in z["agenten"]["rollen"]]
-        self.assertEqual(rollen_ids, ["recherche", "architektur", "entwicklung", "sicherheit", "dokumentation"])
+        self.assertEqual(rollen_ids, ["recherche", "vertrieb", "architektur", "entwicklung", "sicherheit", "dokumentation"])
         self.assertTrue(all(r["modell"] for r in z["agenten"]["rollen"]))  # echtes Modell, nicht leer
         self.assertEqual(z["agenten"]["aktiv"], [])  # ohne laufenden Auftrag arbeitet kein Schritt
 

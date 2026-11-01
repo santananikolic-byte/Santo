@@ -337,7 +337,7 @@ class Register:
                                           P("faellig", True, art="datum", hilfe="JJJJ-MM-TT HH:MM, Ortszeit")]),
             Werkzeug("merken", "Schlägt vor, etwas Dauerhaftes zu merken. Gilt erst nach Bestätigung durch den Nutzer.",
                      _merken, [P("text", True, maximal=600),
-                               P("art", art="wahl", wahl=("fakt", "praeferenz", "entscheidung", "projekt", "ziel"))]),
+                               P("art", art="wahl", wahl=("fakt", "praeferenz", "entscheidung", "projekt", "ziel", "kontakt"))]),
             Werkzeug("dateien_auflisten", "Listet Dateien eines Ordners (Standard: Werkstatt).", _auflisten,
                      [P("pfad", hilfe="Ordner, z. B. notizen oder angebote:", maximal=300)], liefert_daten=True),
             Werkzeug("datei_lesen", "Liest eine Textdatei (bis 30000 Zeichen).", _lesen, [pfad], liefert_daten=True),

@@ -17,7 +17,8 @@ Bedeutung der Stände:
 | Gedächtnis (SQLite): Fakten, Aufgaben, Erinnerungen, Gespräche, Aufträge, Audit; Bereiche Geschäft/Privat getrennt; Import aus `BRAIN.md`; Export; Löschen; tägliche Sicherung | Getestet | `tests/test_speicher.py` (32) |
 | Denken über Claude Code mit dem Abo (kein API-Schlüssel), Modell je Aufgabe, Ausweichen bei Limit, Abbruch, Token-Zählung | Getestet (simuliert) | `tests/test_provider.py` (16). **Echter Aufruf auf dem iMac nicht verifiziert.** Alle verwendeten Startoptionen (`--tools ""`, `--safe-mode`, `--system-prompt`, `--output-format json`, `--model`, `--allowedTools` …) wurden gegen die echte Hilfe von Claude Code 2.1.316 geprüft, derselben Version wie auf deinem iMac; unbekannte Zusatzoptionen lässt JARVIS selbständig weg |
 | Echter Probelauf: echtes Claude Code 2.1.316 (Modell haiku, Entwicklungsumgebung) durch den echten Agenten | **Verifiziert** (dort, nicht auf deinem Mac) | Format der Ausgabe, Startoptionen, Profilwissen, Datei anlegen, Erinnerung, ehrliche Ablehnung von „E-Mail senden“, gültiger Plan; Details in `SELBSTPRUEFUNG.md` |
-| Werkzeuge (Dateien in der Werkstatt, Aufgaben, Erinnerungen, Merken, Recherche, Mac-Umgebung, Auftrag planen) und Berechtigung in drei Stufen, Freigaben mit Vorschau, Sperren, Notstopp | Getestet | `tests/test_agent.py` (33) |
+| Werkzeuge (Dateien in der Werkstatt, Aufgaben, Erinnerungen, Merken, Recherche, Mac-Umgebung, Auftrag planen) und Berechtigung in drei Stufen, Freigaben mit Vorschau, Sperren, Notstopp | Getestet | `tests/test_agent.py` (34) |
+| Rolle **Vertrieb/Akquise**: sucht Aufträge/Kunden über öffentliche Quellen, prüft die Firma, schlägt Treffer als Kontakt vor (neue Fakt-Art „kontakt“), entwirft Anschreiben in der Werkstatt | Getestet (simuliert) | `jarvis_core/rollen.py`; **sendet nichts** - kein E-Mail-, Telefon- oder Kalenderzugriff angebunden (siehe unten) |
 | Planer, Prüfschicht, Auftragsläufer, Zeitplan, Wiederanlauf nach Neustart | Getestet | `tests/test_auftraege.py` (33) |
 | Server: Zugangsschlüssel, Cookie, Host- und Herkunftsprüfung, Ratenbegrenzung, WLAN-Schalter, Start/Stopp, Sicherung/Wiederherstellung/Export | Getestet | `tests/test_kern.py` (42) |
 | Oberfläche (orange Leitstand, leuchtender Kern, Chat, Freigaben, Aufträge, Gedächtnis, System, Handy-Layout) | Getestet im Browser (Chromium, simuliertes Claude) | `tests/ui/ui_pruefung.js`, nur für die Entwicklung. **Safari nicht geprüft** |
@@ -25,7 +26,7 @@ Bedeutung der Stände:
 | Spracheingabe „Hey Jarvis“ (Erkennung durch den Browser) | Logik getestet mit simuliertem Erkenner | echte Erkennung nicht verifiziert; nur direkt auf dem Mac möglich (sicherer Kontext) |
 | Handy im WLAN | Gebaut | `./jarvis.sh lan an`; nur unverschlüsseltes http; Spracheingabe dort nicht möglich; nicht auf einem echten Handy verifiziert |
 
-Zusammen: **158 automatische Tests** (unter Python 3.8 und 3.9, die Python-Versionen, die Apple auf dem Mac mitliefert) und 57 Prüfpunkte im Browser, alle grün.
+Zusammen: **160 automatische Tests** (unter Python 3.8 und 3.9, die Python-Versionen, die Apple auf dem Mac mitliefert) und 59 Prüfpunkte im Browser, alle grün.
 
 ## Was es nicht gibt (und warum)
 

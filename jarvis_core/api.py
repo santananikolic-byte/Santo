@@ -14,7 +14,7 @@ from .konfig import KonfigFehler
 from .protokoll import letzte_eintraege
 from .werkzeuge import WerkzeugFehler
 
-FAKT_ARTEN = ("fakt", "profil", "projekt", "entscheidung", "regel", "praeferenz", "ziel", "strategie", "technik")
+FAKT_ARTEN = ("fakt", "profil", "projekt", "entscheidung", "regel", "praeferenz", "ziel", "strategie", "technik", "kontakt")
 BESTAETIGUNG_LOESCHEN = "ALLES LÖSCHEN"
 EINSTELLUNGEN = ("stimme", "tempo", "vorlesen", "erinnerungen_sprechen", "modelle", "modell_ausweichen")
 MAX_TEXT = 10000

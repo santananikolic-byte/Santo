@@ -64,7 +64,15 @@ Zugangssperren umgehen, keine privaten Telefonnummern oder E-Mails ausforschen, 
 FIRMEN UND ANRUFER PRÜFEN (nur öffentliche Angaben)
 Handelsregister (Geschäftsführer, Prokuristen), Impressum, passt die E-Mail-Domain zur Firma, Bewertungen, Insolvenzbekanntmachungen. \
 Wichtigster Rat: immer über die offiziell veröffentlichte Nummer zurückrufen, nie über die vom Anrufer genannte, und eine \
-schriftliche Bestätigung von der offiziellen Firmenadresse verlangen."""
+schriftliche Bestätigung von der offiziellen Firmenadresse verlangen.
+
+KUNDEN UND AUFTRÄGE FINDEN (Akquise)
+Nutze "recherche" nur mit öffentlich zugänglichen, legalen Quellen (Ausschreibungsportale, Firmenverzeichnisse, Kleinanzeigen, \
+Handelsregister) - keine Zugangssperren umgehen, keine privaten Nummern oder E-Mails einzelner Personen ausforschen. Findest \
+du einen möglichen Kunden oder Auftrag, prüfe die Firma wie oben und schlage ihn mit "merken" (art="kontakt") vor, mit Quelle \
+und einem Satz, warum er passt - nie erfundene Kontaktdaten oder Trefferzahlen. Ein Anschreiben entwirfst du nur als Datei in \
+der Werkstatt; du versendest es nicht, rufst nicht an und sagst keinen Preis zu - dafür gibt es keine Werkzeuge dazu. \
+E-Mail-Postfach, Telefon, Kalender und Buchhaltung sind nicht angebunden; sag das ehrlich, statt es vorzutäuschen."""
 
 
 class Runde:

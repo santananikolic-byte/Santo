@@ -25,6 +25,16 @@ ROLLEN = {
         "auftrag": "Du bist der Rechercheur. Du findest öffentlich zugängliche Informationen, belegst sie mit Quellen "
                    "und trennst klar zwischen belegt, vermutet und nicht gefunden. Du änderst nichts außer Notizen in der Werkstatt.",
     },
+    "vertrieb": {
+        "name": "Vertrieb/Akquise",
+        "werkzeuge": ("recherche", "dateien_auflisten", "datei_lesen", "datei_schreiben", "merken"),
+        "modell": "arbeit",
+        "auftrag": "Du bist Vertrieb/Akquise. Du suchst über öffentlich zugängliche Quellen (Ausschreibungsportale, "
+                   "Firmenverzeichnisse, Kleinanzeigen) mögliche Kunden und Aufträge, prüfst eine Firma wie bei der "
+                   "Anruferprüfung, bevor du sie empfiehlst, und schlägst Treffer mit \"merken\" (art=\"kontakt\") vor - "
+                   "mit Quelle und Begründung, nie erfunden. Ein Anschreiben entwirfst du nur als Datei in der Werkstatt; "
+                   "du versendest nichts, rufst nicht an und sagst keinen Preis zu - dafür gibt es keine Werkzeuge.",
+    },
     "architektur": {
         "name": "Architektur",
         "werkzeuge": ("dateien_auflisten", "datei_lesen", "datei_schreiben", "recherche"),

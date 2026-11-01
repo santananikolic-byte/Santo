@@ -58,6 +58,19 @@ Prinzipien, die seitdem gelten: eine nicht auswertbare Prüfung gilt als nicht b
 wird beim Erteilen erneut gegen Notstopp und Sperren geprüft; nach Zugriff auf Webinhalte braucht jede weitere Aktion eine Freigabe;
 das Löschen verschiebt in den Papierkorb der Werkstatt.
 
+## Stufe 11 – Rolle Vertrieb/Akquise
+
+| Fund | Art | Stand |
+|---|---|---|
+| Die neue Regel-Passage nannte das Werkzeug `datei_schreiben` beim Namen. Dadurch stand der Name immer im Systemprompt, auch wenn das Werkzeug für eine Rolle gesperrt oder abgeschaltet war - zwei Tests schlugen genau deshalb an | Sicherheit (Information sickert durch) | **Behoben:** Werkzeugnamen nicht mehr in der allgemeinen Regel-Prosa nennen; die Werkzeugliste selbst wird schon pro Rolle gefiltert |
+| Im Browser-Test prüfte ich, ob die gesendete Nachricht das Wort „Akquise" enthält - das stand aber nur im Knopf-Namen, nicht im tatsächlich gesendeten Text | Test | **Behoben:** Test prüft jetzt ein Wort, das wirklich im gesendeten Text steht |
+| Mein erster Rollen-Test rief „Datei löschen" auf eine Datei auf, die es gar nicht gab - das schlug schon bei der Eingabeprüfung fehl, bevor die Rollenprüfung überhaupt lief, und verschleierte, was eigentlich getestet werden sollte | Test | **Behoben:** Datei vorher anlegen, damit wirklich die Rollensperre geprüft wird |
+
+Die neue Rolle **Vertrieb/Akquise** darf dieselben Werkzeuge wie die Recherche-Rolle (recherche, Dateien lesen/auflisten/schreiben, merken) und
+keine zusätzlichen. Sie bereitet nur Entwürfe und Kontaktvorschläge vor; Senden, Anrufen und Preiszusagen bleiben ausgeschlossen, weil es dafür
+keine Werkzeuge gibt - nicht weil es eine Regel verbietet, die sich umgehen ließe. E-Mail-Postfach, Telefon, Kalender und Buchhaltung sind nach
+wie vor nicht angebunden (siehe `STATUS.md`).
+
 ## Was ich nicht geprüft habe
 
 - **Dein Mac mit deinem Abo.** Die automatischen Tests simulieren Claude Code; der echte Probelauf (Stufe 10) lief in der Entwicklungsumgebung, mit

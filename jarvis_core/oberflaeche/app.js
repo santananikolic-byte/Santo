@@ -69,11 +69,11 @@
 
   var BEREICH_NAMEN = { geschaeft: "Geschäft", privat: "Privat", allgemein: "Allgemein", technik: "Technik" };
   function bereichName(b) { return BEREICH_NAMEN[b] || (b ? b.charAt(0).toUpperCase() + b.slice(1) : ""); }
-  var ART_NAMEN = { regel: "Regeln", profil: "Profil", ziel: "Ziele", strategie: "Strategie", projekt: "Projekte", entscheidung: "Entscheidungen",
-    praeferenz: "Vorlieben", fakt: "Fakten", technik: "Technik" };
-  var ART_EINZEL = { regel: "Regel", profil: "Profil", ziel: "Ziel", strategie: "Strategie", projekt: "Projekt", entscheidung: "Entscheidung",
-    praeferenz: "Vorliebe", fakt: "Fakt", technik: "Technik" };
-  var ART_REIHE = ["regel", "profil", "ziel", "strategie", "projekt", "entscheidung", "praeferenz", "fakt", "technik"];
+  var ART_NAMEN = { regel: "Regeln", profil: "Profil", ziel: "Ziele", strategie: "Strategie", projekt: "Projekte", kontakt: "Kontakte",
+    entscheidung: "Entscheidungen", praeferenz: "Vorlieben", fakt: "Fakten", technik: "Technik" };
+  var ART_EINZEL = { regel: "Regel", profil: "Profil", ziel: "Ziel", strategie: "Strategie", projekt: "Projekt", kontakt: "Kontakt",
+    entscheidung: "Entscheidung", praeferenz: "Vorliebe", fakt: "Fakt", technik: "Technik" };
+  var ART_REIHE = ["regel", "profil", "ziel", "strategie", "kontakt", "projekt", "entscheidung", "praeferenz", "fakt", "technik"];
   var AUFTRAG_NAMEN = { entwurf: "Entwurf", rueckfrage: "Rückfrage", geplant: "Geplant", wartend: "Wartet", laeuft: "Läuft",
     wartet_auf_freigabe: "Wartet auf Freigabe", pausiert: "Pausiert", unterbrochen: "Unterbrochen", fertig: "Fertig",
     fehlgeschlagen: "Fehlgeschlagen", abgebrochen: "Abgebrochen" };
@@ -375,6 +375,7 @@
   }
   var SCHNELL = [
     { name: "Tagesbriefing", senden: true, text: "Gib mir mein Tagesbriefing: Was ist offen (Aufgaben, Erinnerungen, Freigaben, Aufträge)? Was sind die drei wichtigsten nächsten Schritte, um mehr Aufträge zu gewinnen? Nutze nur, was du wirklich weißt, und trenne Wissen von Annahmen." },
+    { name: "Akquise starten", senden: true, text: "Suche über öffentlich zugängliche Quellen (Ausschreibungsportale, Firmenverzeichnisse, Kleinanzeigen) nach aktuellen Aufträgen oder möglichen Kunden für Bau- und Reinigungsarbeiten in meiner Region. Prüfe jeden Treffer kurz und schlage mir die besten als Kontakt vor, mit Quelle." },
     { name: "Firma prüfen", senden: false, text: "Prüfe diese Firma, bevor wir Zeit investieren (Handelsregister, Geschäftsführer, Impressum, E-Mail-Domain, Bewertungen, Insolvenzen): " },
     { name: "Preise kalkulieren", senden: true, text: "Hilf mir, eine feste Preiskalkulation aufzubauen (Stundensatz, Leistungswerte für Büro-, Treppenhaus- und Gebäudereinigung). Frag mich nacheinander nach dem, was dir fehlt." }
   ];
