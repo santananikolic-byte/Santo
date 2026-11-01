@@ -24,7 +24,7 @@ Bedeutung der Stände:
 | Spracheingabe „Hey Jarvis“ (Erkennung durch den Browser) | Logik getestet mit simuliertem Erkenner | echte Erkennung nicht verifiziert; nur direkt auf dem Mac möglich (sicherer Kontext) |
 | Handy im WLAN | Gebaut | `./jarvis.sh lan an`; nur unverschlüsseltes http; Spracheingabe dort nicht möglich; nicht auf einem echten Handy verifiziert |
 
-Zusammen: **156 automatische Tests** (Python 3.9) und 55 Prüfpunkte im Browser, alle grün.
+Zusammen: **157 automatische Tests** (unter Python 3.8 und 3.9, die Python-Versionen, die Apple auf dem Mac mitliefert) und 57 Prüfpunkte im Browser, alle grün.
 
 ## Was es nicht gibt (und warum)
 

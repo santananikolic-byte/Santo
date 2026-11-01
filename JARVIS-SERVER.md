@@ -1,22 +1,31 @@
 # JARVIS-Server
 
-Der lokale JARVIS läuft auf deinem Mac und denkt über **Claude Code mit deinem Claude-Abo**. Er braucht nur Python 3.9 oder neuer
+Der lokale JARVIS läuft auf deinem Mac und denkt über **Claude Code mit deinem Claude-Abo**. Er braucht nur Python 3.8 oder neuer
 (auf dem Mac schon da), keine Zusatzpakete, **keinen API-Schlüssel und keinen bezahlten Dienst**.
 
 Was gebaut, getestet und noch nicht auf dem echten Mac geprüft ist, steht ehrlich in `docs/STATUS.md`. Die Selbstprüfung steht in
 `docs/SELBSTPRUEFUNG.md`, der Aufbau in `docs/ARCHITEKTUR.md`.
 
-## Starten
+## Einrichten und Starten
 
-Im Ordner `~/Santo` (Terminal):
+**Zum ersten Mal (auch auf einem frischen Mac):** diese eine Zeile ins Terminal einfügen und Enter drücken.
 
 ```
-git pull
-./jarvis.sh start
-./jarvis.sh oeffnen
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/santananikolic-byte/Santo/claude/jarvis-voice-assistant-70695g/jarvis-einrichten.sh)"
 ```
 
-Oder per Doppelklick im Finder: **Jarvis-starten.command** (startet und öffnet), **Jarvis-stoppen.command**.
+Sie holt JARVIS nach `~/Santo`, prüft Python, Git und Claude Code, bietet an, Fehlendes zu installieren (immer erst nach Rückfrage),
+hilft bei der Anmeldung mit deinem Claude-Abo, zeigt eine Checkliste, startet JARVIS und öffnet ihn im Browser. Fehlen die
+Apple-Entwicklerwerkzeuge, öffnet sich ein Installationsfenster von Apple; danach dieselbe Zeile nochmal einfügen.
+
+**Danach:** Doppelklick auf **Jarvis-starten.command** im Ordner `Santo` (holt die neueste Fassung, startet, öffnet) und
+**Jarvis-stoppen.command**. Oder im Terminal:
+
+```
+cd ~/Santo && git pull && ./jarvis.sh start && ./jarvis.sh oeffnen
+```
+
+Läuft etwas nicht, zeigt `./jarvis.sh pruefen` eine Checkliste mit der Lösung für jeden Punkt.
 
 `oeffnen` öffnet deinen persönlichen Link. Er enthält einen geheimen Schlüssel, setzt ein Cookie im Browser und verschwindet dann aus
 der Adresszeile. Ohne diesen Link kommt niemand an JARVIS heran.
@@ -60,6 +69,7 @@ selbst in `~/.jarvis/config.json` frei (nur lesen).
 | `oeffnen` / `link` | Oberfläche öffnen / Link anzeigen |
 | `frage "…"` | eine Frage im Terminal stellen |
 | `notstopp` / `entsperren` | alles anhalten / wieder freigeben |
+| `pruefen` | Systemcheck: Python, Claude Code, Stimme, Port, Ordner – mit Lösung bei jedem Fehler |
 | `provider` | ist Claude Code bereit? (verbraucht kein Kontingent) |
 | `logs [N]` | die letzten Log-Einträge |
 | `backup` / `wiederherstellen DATEI` | Datenbank sichern / zurückholen (nur bei gestopptem Server) |
@@ -103,6 +113,6 @@ Beim ersten Start liest JARVIS `BRAIN.md` ein (**ersetzt** beim erneuten Einlese
 ## Tests
 
 ```
-python3 -m unittest discover -s tests -t . -p "test_*.py"        # 156 Tests, Claude Code simuliert
+python3 -m unittest discover -s tests -t . -p "test_*.py"        # 157 Tests (Python 3.8 und 3.9), Claude Code simuliert
 node tests/ui/ui_pruefung.js [Ordner für Bildschirmfotos]       # Browser-Test (nur Entwicklung: braucht Node und Playwright)
 ```

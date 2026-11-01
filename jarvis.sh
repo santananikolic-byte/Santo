@@ -10,6 +10,7 @@
 #   ./jarvis.sh notstopp            alles anhalten, bis du entsperrst
 #   ./jarvis.sh entsperren          Notstopp aufheben
 #   ./jarvis.sh logs [N]            die letzten N Log-Einträge (Standard 20)
+#   ./jarvis.sh pruefen             Systemcheck: ist alles da, was JARVIS braucht?
 #   ./jarvis.sh provider            ist Claude Code bereit? (verbraucht kein Kontingent)
 #   ./jarvis.sh backup              Sicherung der Datenbank jetzt
 #   ./jarvis.sh wiederherstellen D  Datenbank aus Sicherung D zurückholen (erst stoppen)
@@ -24,8 +25,9 @@ cd "$(dirname "$0")" || exit 1
 
 PYTHON="${JARVIS_PYTHON:-python3}"
 
-if ! "$PYTHON" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 9) else 1)' 2>/dev/null; then
-    echo "JARVIS braucht Python 3.9 oder neuer ($PYTHON fehlt oder ist zu alt)."
+if ! "$PYTHON" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 8) else 1)' 2>/dev/null; then
+    echo "JARVIS braucht Python 3.8 oder neuer ($PYTHON fehlt oder ist zu alt)."
+    echo "Lösung: im Terminal xcode-select --install ausführen (Apples Werkzeuge bringen Python mit) oder Python von python.org installieren."
     exit 1
 fi
 
@@ -70,7 +72,7 @@ case "${1:-status}" in
         LINK="$("$PYTHON" -m jarvis_core link | head -1)" || exit 1
         open "$LINK" 2>/dev/null || echo "Im Browser öffnen: $LINK"
         ;;
-    status|link|provider|notstopp|entsperren|backup|export|umgebung)
+    status|link|pruefen|provider|notstopp|entsperren|backup|export|umgebung)
         "$PYTHON" -m jarvis_core "$@"
         ;;
     logs)
@@ -81,7 +83,7 @@ case "${1:-status}" in
         ;;
     *)
         echo "So: ./jarvis.sh start | stopp | status | oeffnen | link | frage \"…\" | notstopp | entsperren | logs [N]"
-        echo "    | provider | backup | wiederherstellen DATEI | export [DATEI] | lan an|aus | umgebung"
+        echo "    | pruefen | provider | backup | wiederherstellen DATEI | export [DATEI] | lan an|aus | umgebung"
         exit 2
         ;;
 esac

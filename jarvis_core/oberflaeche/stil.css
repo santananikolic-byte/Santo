@@ -217,6 +217,13 @@ label.feld { display: flex; flex-direction: column; gap: 5px; font-size: 12.5px;
 .eingabe { display: flex; gap: 10px; align-items: flex-end; }
 .eingabe textarea { min-height: 46px; max-height: 160px; resize: none; }
 
+.schnell { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 2px; -webkit-overflow-scrolling: touch; }
+.schnell-knopf {
+  flex: none; padding: 5px 14px; border-radius: 999px; border: 1px solid var(--rand); background: var(--karte); color: var(--leise);
+  font-size: 13px; cursor: pointer; white-space: nowrap;
+}
+.schnell-knopf:hover { border-color: var(--orange); color: var(--orange-hell); }
+
 .freigabe { border-color: var(--warn); }
 .freigabe::before, .freigabe::after { border-color: var(--warn); }
 .freigabe-kopf { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 8px; }

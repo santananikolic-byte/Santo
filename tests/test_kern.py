@@ -631,6 +631,30 @@ class SkriptTest(Umgebung):
         finally:
             self.skript("stopp")
 
+    def test_systemcheck(self):
+        gut = self.skript("pruefen")
+        self.assertEqual(gut.returncode, 0, gut.stdout)
+        for text in ("Systemcheck", "Python", "Claude Code", "bereit", "Port %d ist frei" % self.port, "Datenordner", "Alles bereit"):
+            self.assertIn(text, gut.stdout)
+        with socket.socket() as belegt:  # Port belegt: blockiert, mit Lösung
+            belegt.bind(("127.0.0.1", self.port))
+            belegt.listen(1)
+            blockiert = self.skript("pruefen")
+        self.assertEqual(blockiert.returncode, 1)
+        self.assertIn("ist belegt", blockiert.stdout)
+        self.assertIn("JARVIS_PORT=8771", blockiert.stdout)
+        os.environ["FAKE_AUTH"] = "apikey"  # mit API-Schlüssel angemeldet statt mit dem Abo: nicht nutzbar, mit Erklärung
+        abo = self.skript("pruefen")
+        self.assertEqual(abo.returncode, 1)
+        self.assertIn("statt über das Claude-Abo", abo.stdout)
+        os.environ["FAKE_AUTH"] = "aus"
+        self.assertIn("nicht angemeldet", self.skript("pruefen").stdout)
+        os.environ["JARVIS_CLAUDE"] = os.path.join(self.ordner, "gibtsnicht")
+        keins = self.skript("pruefen")
+        self.assertEqual(keins.returncode, 1)
+        self.assertIn("nicht installiert", keins.stdout)
+        self.assertIn("claude.ai/install.sh", keins.stdout)  # die Lösung steht dabei
+
     def test_befehle_ohne_server(self):
         self.assertEqual(self.skript("notstopp").returncode, 1)
         self.assertEqual(self.skript("frage", "Hallo").returncode, 1)

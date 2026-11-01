@@ -9,7 +9,13 @@ ausdrücklicher Freigabe.
 
 > **Neu und empfohlen: der JARVIS-Server** (`jarvis_core/`). Orange Leitstand mit leuchtendem Kern, Gedächtnis,
 > Aufträge mit Prüfschicht, Freigaben, Notstopp, läuft über dein Claude-Abo – ohne API-Schlüssel.
-> Start: `./jarvis.sh start && ./jarvis.sh oeffnen`. Anleitung: [`JARVIS-SERVER.md`](JARVIS-SERVER.md),
+> Einrichten und Starten (auch auf einem frischen Mac), eine Zeile im Terminal:
+>
+> ```
+> bash -c "$(curl -fsSL https://raw.githubusercontent.com/santananikolic-byte/Santo/claude/jarvis-voice-assistant-70695g/jarvis-einrichten.sh)"
+> ```
+>
+> Danach genügt ein Doppelklick auf `Jarvis-starten.command`. Anleitung: [`JARVIS-SERVER.md`](JARVIS-SERVER.md),
 > ehrlicher Stand: [`docs/STATUS.md`](docs/STATUS.md). Der Rest dieser Datei beschreibt den älteren Jarvis
 > (`jarvis.py`, `jarvis_terminal.py`).
 

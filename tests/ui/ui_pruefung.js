@@ -103,6 +103,15 @@ const pause = (ms) => new Promise((r) => setTimeout(r, ms));
     await pause(900);
     await foto(page, "01-jarvis-desktop.png");
 
+    console.log("Schnellstart-Knöpfe");
+    await page.click(".schnell-knopf:text-is('Firma prüfen')");
+    pruefe((await page.locator("#text").inputValue()).startsWith("Prüfe diese Firma"), "„Firma prüfen“ füllt nur das Eingabefeld vor (sendet nichts)");
+    await page.fill("#text", "");
+    await page.click(".schnell-knopf:text-is('Tagesbriefing')");
+    await page.waitForSelector(".nachricht.nutzer .blase:has-text('Tagesbriefing')", { timeout: 15000 });
+    await page.waitForFunction(() => !document.querySelector(".nachricht.denkt"), null, { timeout: 15000 });
+    pruefe(true, "„Tagesbriefing“ sendet die Frage und JARVIS antwortet");
+
     console.log("Verbindungsabbruch");
     await page.route("**/api/anfrage", (route) => route.abort());
     await page.fill("#text", "Diese Nachricht darf nicht verloren gehen");

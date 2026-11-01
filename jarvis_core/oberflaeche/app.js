@@ -373,7 +373,25 @@
     var r = await api("POST", "/api/sprich", { text: text });
     if (r.code === 200) laden().then(pollenPlanen);
   }
+  var SCHNELL = [
+    { name: "Tagesbriefing", senden: true, text: "Gib mir mein Tagesbriefing: Was ist offen (Aufgaben, Erinnerungen, Freigaben, Aufträge)? Was sind die drei wichtigsten nächsten Schritte, um mehr Aufträge zu gewinnen? Nutze nur, was du wirklich weißt, und trenne Wissen von Annahmen." },
+    { name: "Firma prüfen", senden: false, text: "Prüfe diese Firma, bevor wir Zeit investieren (Handelsregister, Geschäftsführer, Impressum, E-Mail-Domain, Bewertungen, Insolvenzen): " },
+    { name: "Preise kalkulieren", senden: true, text: "Hilf mir, eine feste Preiskalkulation aufzubauen (Stundensatz, Leistungswerte für Büro-, Treppenhaus- und Gebäudereinigung). Frag mich nacheinander nach dem, was dir fehlt." }
+  ];
+  function schnellBauen() {
+    var box = $("#schnell");
+    SCHNELL.forEach(function (s) {
+      box.appendChild(h("button", { type: "button", class: "schnell-knopf", text: s.name, onclick: function () {
+        if (s.senden) { senden(s.text); return; }
+        var feld = $("#text");
+        feld.value = s.text;
+        feld.focus();
+        feld.setSelectionRange(feld.value.length, feld.value.length);
+      } }));
+    });
+  }
   function eingabeBauen() {
+    schnellBauen();
     var feld = $("#text");
     function wachsen() { feld.style.height = "auto"; feld.style.height = Math.min(feld.scrollHeight, 160) + "px"; }
     feld.addEventListener("input", wachsen);
@@ -1101,8 +1119,8 @@
     var art = e && e.error;
     if (art === "no-speech" || art === "aborted") return; // Pause ist normal; onend startet bei Bedarf neu
     var texte = {
-      "not-allowed": "Das Mikrofon ist nicht erlaubt. Erlaube es für diese Seite in den Browser-Einstellungen und klick dann nochmal.",
-      "service-not-allowed": "Der Browser erlaubt die Spracherkennung hier nicht. Erlaube sie in den Browser-Einstellungen.",
+      "not-allowed": "Das Mikrofon ist nicht erlaubt. Erlaube es für diese Seite (Safari: Einstellungen → Websites → Mikrofon) und klick dann nochmal.",
+      "service-not-allowed": "Der Browser darf hier nicht zuhören. In Safari: Systemeinstellungen → Tastatur → Diktat einschalten. Oder Chrome benutzen.",
       "audio-capture": "Es wurde kein Mikrofon gefunden.",
       "network": "Die Spracherkennung braucht eine Internetverbindung zum Anbieter deines Browsers (Safari: Apple, Chrome: Google)."
     };

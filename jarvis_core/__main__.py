@@ -6,6 +6,7 @@
     stopp                 beendet ihn
     link                  Link zur Oberfläche mit Zugangsschlüssel
     logs [anzahl]         die letzten Log-Einträge
+    pruefen               Systemcheck: ist alles da, was JARVIS braucht? (verbraucht kein Kontingent)
     provider              ist Claude Code bereit? (verbraucht kein Kontingent)
     frage "<text>"        eine Frage stellen (der Server muss laufen)
     notstopp / entsperren Notstopp auslösen oder aufheben
@@ -189,6 +190,86 @@ def provider():
     return 0 if ergebnis["claude_code"]["nutzbar"] else 1
 
 
+def pruefen():
+    """Systemcheck: alles, was JARVIS braucht, mit einer Lösung bei jedem Fehler. Verbraucht kein Kontingent."""
+    import platform
+
+    from .provider import ProviderManager
+    from .stimme import Stimme
+
+    class _StillesLog:
+        def ereignis(self, *args, **kwargs):
+            pass
+
+    k = _konfig()
+    blockiert = []
+
+    def zeile(art, text, loesung=None):
+        print("  %s %s" % ({"ok": "✓", "warn": "!", "fehler": "✗", "info": "·"}[art], text))
+        if loesung:
+            print("      → %s" % loesung)
+        if art == "fehler":
+            blockiert.append(text)
+
+    print("JARVIS – Systemcheck\n")
+    mac = platform.system() == "Darwin"
+    if mac:
+        zeile("ok", "Mac: macOS %s, %s" % (platform.mac_ver()[0], platform.machine()))
+    else:
+        zeile("warn", "Das ist kein Mac (%s): Stimme und Mitteilungen gibt es nur auf dem Mac." % platform.system())
+    v = sys.version_info
+    if v >= (3, 8):
+        zeile("ok", "Python %d.%d.%d" % (v[0], v[1], v[2]))
+    else:
+        zeile("fehler", "Python %d.%d ist zu alt (nötig: 3.8)" % (v[0], v[1]),
+              "Im Terminal: xcode-select --install  (oder Python von python.org installieren)")
+    claude = ProviderManager(k, _StillesLog()).pruefen()["claude_code"]
+    if claude["nutzbar"]:
+        zeile("ok", "Claude Code %s: %s" % (claude.get("version") or "", claude["hinweis"]))
+    else:
+        zeile("fehler", "Claude Code ist nicht bereit", claude["hinweis"])
+    stimme = Stimme(k)
+    if not stimme.verfuegbar():
+        zeile("warn", "Keine Sprachausgabe („say“ fehlt). JARVIS läuft trotzdem, nur ohne Stimme.")
+    elif stimme.gewaehlt():
+        zeile("ok", "Stimme: %s" % stimme.gewaehlt())
+    else:
+        zeile("warn", "Nur die einfache Systemstimme gefunden",
+              "Besser: Systemeinstellungen → Bedienungshilfen → Gesprochene Inhalte → Systemstimme → Stimmen verwalten → Deutsch → „Premium“ laden")
+    if _status_abfragen(k):
+        zeile("ok", "JARVIS läuft bereits (%s)" % k.adresse)
+    else:
+        probe = socket.socket()
+        try:
+            probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            probe.bind((k.bind_adresse, k.port))
+            zeile("ok", "Port %d ist frei" % k.port)
+        except OSError as fehler:
+            zeile("fehler", "Port %d ist belegt (%s)" % (k.port, fehler), "Anderen Port nehmen: JARVIS_PORT=8771 ./jarvis.sh start")
+        finally:
+            probe.close()
+    try:
+        os.makedirs(k.daten_ordner, mode=0o700, exist_ok=True)
+        schreibprobe = os.path.join(k.daten_ordner, ".schreibtest")
+        with open(schreibprobe, "w", encoding="utf-8") as f:
+            f.write("ok")
+        os.remove(schreibprobe)
+        zeile("ok", "Datenordner: %s" % k.daten_ordner)
+    except OSError as fehler:
+        zeile("fehler", "Datenordner %s ist nicht beschreibbar (%s)" % (k.daten_ordner, fehler))
+    zeile("ok", "Werkstatt: %s (%s)" % (k.werkstatt_pfad, "vorhanden" if os.path.isdir(k.werkstatt_pfad) else "wird beim ersten Gebrauch angelegt"))
+    if mac and not shutil.which("open"):
+        zeile("warn", "„open“ fehlt: den Link öffnest du selbst", "./jarvis.sh link")
+    zeile("info", "Spracheingabe („Hey Jarvis“): in Safari erst Systemeinstellungen → Tastatur → Diktat einschalten; Chrome geht ohne. "
+                  "Beim ersten Klick auf das Mikrofon fragt der Browser nach Erlaubnis.")
+    print()
+    if blockiert:
+        print("Noch nicht bereit: %d Punkt(e) mit ✗ beheben, dann nochmal ./jarvis.sh pruefen" % len(blockiert))
+        return 1
+    print("Alles bereit.")
+    return 0
+
+
 def frage(text):
     k = _konfig()
     if not _status_abfragen(k):
@@ -333,6 +414,8 @@ def main(argumente):
         return stopp()
     if befehl == "link":
         return link()
+    if befehl == "pruefen":
+        return pruefen()
     if befehl == "provider":
         return provider()
     if befehl == "frage":
