@@ -32,7 +32,7 @@ frage_ja() {
     local antwort=""
     if [ "${JARVIS_JA:-0}" = "1" ]; then return 0; fi
     printf "  %s [j/n] " "$1"
-    if ! read -r antwort < /dev/tty 2>/dev/null; then printf "\n"; return 1; fi
+    if ! read -r antwort 2>/dev/null < /dev/tty; then printf "\n"; return 1; fi
     case "$antwort" in j|J|ja|Ja|JA|y|Y|yes|Yes) return 0 ;; *) return 1 ;; esac
 }
 
@@ -141,11 +141,24 @@ fi
 schritt "6. Alles prüfen und JARVIS starten"
 cd "$ZIEL" || exit 1
 ./jarvis.sh pruefen
-./jarvis.sh start && ./jarvis.sh oeffnen
+PRUEFUNG=$?
+if ! ./jarvis.sh start; then
+    schlimm "JARVIS ist nicht gestartet (Grund siehe oben)."
+    sage "Schick mir ein Foto vom Terminal. Dann behebe ich es."
+    exit 1
+fi
+./jarvis.sh oeffnen
 
 printf "\n  ============================================================\n"
-printf "   Fertig. JARVIS läuft und ist im Browser geöffnet.\n"
+if [ "$PRUEFUNG" -eq 0 ]; then
+    printf "   Fertig. JARVIS läuft und ist im Browser geöffnet.\n"
+else
+    printf "   JARVIS läuft, kann aber noch nicht denken.\n"
+fi
 printf "  ============================================================\n"
+if [ "$PRUEFUNG" -ne 0 ]; then
+    sage "Oben steht mit ✗, was fehlt, und darunter die Lösung. Danach: cd ~/Santo && ./jarvis.sh pruefen"
+fi
 sage "Beim nächsten Mal: Finder → dein Benutzername → Santo → Doppelklick auf „Jarvis-starten.command“."
 sage "Beenden: Doppelklick auf „Jarvis-stoppen.command“. Alles Wichtige steht in JARVIS-SERVER.md."
 sage "Ist oben etwas rot, schick mir ein Foto vom Terminal. Dann behebe ich es."

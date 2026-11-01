@@ -31,6 +31,24 @@ Der Browser-Test hat Fehler gefunden, die kein Code-Lesen gezeigt hätte:
 | Die Oberfläche zeigte nicht, welche Werkzeuge ein Schritt wirklich ausgeführt hat | Ehrlichkeit | **Behoben:** „Tatsächlich ausgeführte Werkzeuge“ je Schritt |
 | Freigaben per Sprache („ja“) sind absichtlich nicht möglich: Fehlerkennung oder das Echo der eigenen Stimme dürften nie etwas freigeben | Entscheidung | Freigaben nur per Klick |
 
+## Stufe 10 – Echter Probelauf mit Claude Code
+
+In der Entwicklungsumgebung gibt es dieselbe Version von Claude Code wie auf deinem Mac (2.1.316). Damit habe ich zum ersten Mal **nicht
+simuliert** geprüft (kleines, günstiges Modell, wenige Aufrufe; die Anmeldeart dort ist kein Abo, deshalb lief es an JARVIS' Schutz vorbei
+nur in einem Wegwerf-Skript, nie im Produkt):
+
+| Fund | Stand |
+|---|---|
+| Alle Startoptionen existieren laut echter Hilfe; `--tools ""` schaltet alle Werkzeuge ab, `--safe-mode` schaltet CLAUDE.md, Plugins und Hooks ab | **Bestätigt** |
+| Die echte JSON-Ausgabe hat das erwartete Feld `result` und `usage`; der Aufruf kam nach etwa 6 Sekunden zurück | **Bestätigt** |
+| Die Token-Zahlen waren falsch: das echte Claude meldet fast die ganze Eingabe unter `cache_*`, `input_tokens` allein war „2“ | **Behoben**, Test mit der echten Form |
+| Das echte Modell kennt dein Profil aus `BRAIN.md`, legt Dateien über das Aktionsformat an, setzt Erinnerungen, plant im richtigen JSON | **Bestätigt** |
+| E-Mail senden: lehnt ehrlich ab („dafür habe ich kein Werkzeug“) und weist auf den offenen Stundensatz hin, statt einen Preis zuzusagen | **Bestätigt** |
+| Es sprach den Nutzer mit „Sie“ an und schrieb gestelzte Sätze („…sehe ich erst, wenn das Werkzeug das bestätigt“) | **Behoben:** Regeln verlangen „du“, kurze Ankündigung statt Erklärung |
+| Fehlte noch: aktives Mitdenken wie ein Geschäftsführer-Assistent (Priorität, nächster Schritt, eine Frage mit Begründung, Vorschläge für zwei Entscheider) | **Ergänzt** in den Grundregeln; im zweiten Lauf antwortete das Modell entsprechend |
+
+Das ist ein Probelauf, kein Beweis für alles: andere Modelle (Opus, Sonnet) und deine Anmeldung per Abo sind weiterhin ungetestet.
+
 ## Frühere Stufen (4 bis 6)
 
 Gefunden und behoben beim Bauen der Tests: eine Namenskollision im Log (das Feld „stufe“ überschnitt sich mit der Log-Stufe), eine Pause mitten in
@@ -42,8 +60,9 @@ das Löschen verschiebt in den Papierkorb der Werkstatt.
 
 ## Was ich nicht geprüft habe
 
-- **Echtes Claude Code auf dem iMac.** Alles Denken ist in den Tests simuliert. Ob die verwendeten Startoptionen auf deiner Version
-  (2.1.316) ankommen, zeigt erst der erste echte Start. Unbekannte Zusatzoptionen lässt JARVIS selbständig weg.
+- **Dein Mac mit deinem Abo.** Die automatischen Tests simulieren Claude Code; der echte Probelauf (Stufe 10) lief in der Entwicklungsumgebung, mit
+  einem kleinen Modell und einer Anmeldung, die kein Abo ist. Ob es auf deinem Mac mit deinem Abo und mit Opus genauso läuft, zeigt erst dein
+  erster Start (`./jarvis.sh pruefen`). Unbekannte Zusatzoptionen lässt JARVIS selbständig weg.
 - **Echte Stimme und echte Spracherkennung.** `say` und die Erkennung des Browsers laufen nur auf dem Mac. Getestet ist die Logik
   dahinter („Hey Jarvis, …“, nur Weckwort, ohne Weckwort, Mikrofon verweigert) mit einem Ersatz-Erkenner.
 - **Safari und ein echtes iPhone.** Die Oberfläche ist in Chromium geprüft, auf Handygröße simuliert.

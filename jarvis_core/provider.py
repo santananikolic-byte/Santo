@@ -83,7 +83,8 @@ def _tokens(daten):
     def zahl(name):
         wert = nutzung.get(name)
         return wert if isinstance(wert, int) else 0
-    return zahl("input_tokens") + zahl("cache_creation_input_tokens"), zahl("output_tokens")
+    # Das echte Claude Code meldet den Großteil der Eingabe unter cache_*: alles zusammen ist die verarbeitete Eingabe.
+    return zahl("input_tokens") + zahl("cache_creation_input_tokens") + zahl("cache_read_input_tokens"), zahl("output_tokens")
 
 
 class ClaudeCode:

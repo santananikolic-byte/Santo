@@ -32,6 +32,14 @@ class ProviderTest(Umgebung):
         self.log.schliessen()
         super().tearDown()
 
+    def test_tokens_wie_beim_echten_claude(self):
+        """Form der echten Ausgabe von Claude Code 2.1.316 (so gemessen): fast alles steht unter cache_*."""
+        from jarvis_core.provider import _tokens
+        echt = {"usage": {"input_tokens": 2, "cache_creation_input_tokens": 1355, "cache_read_input_tokens": 100, "output_tokens": 6}}
+        self.assertEqual(_tokens(echt), (1457, 6))
+        self.assertEqual(_tokens({}), (None, None))
+        self.assertEqual(_tokens({"usage": {"input_tokens": "x"}}), (0, 0))
+
     def test_antwort_und_tokens(self):
         erg = self.pm.fragen("Hallo Welt", "Du bist Jarvis")
         self.assertEqual(erg["antwort"], "Antwort auf: Hallo Welt")
