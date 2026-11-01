@@ -2,7 +2,13 @@
 # ---------------------------------------------------------------------------
 # JARVIS einrichten und starten. Eine Zeile im Terminal, mehr ist nicht nötig:
 #
-#   bash -c "$(curl -fsSL https://raw.githubusercontent.com/santananikolic-byte/Santo/claude/jarvis-voice-assistant-70695g/jarvis-einrichten.sh)"
+#   curl -fsSL https://raw.githubusercontent.com/santananikolic-byte/Santo/HEAD/jarvis-einrichten.sh | bash
+#
+# Oder zum Abtippen in drei kurzen Zeilen (wenn Einfügen im Terminal Probleme macht):
+#
+#   git clone https://github.com/santananikolic-byte/Santo
+#   cd Santo
+#   ./jarvis-einrichten.sh
 #
 # Das Skript holt den Code nach ~/Santo (oder aktualisiert ihn), prüft Python und
 # Claude Code, bietet an, Fehlendes zu installieren, startet JARVIS und öffnet ihn
@@ -17,6 +23,11 @@ set -u
 REPO="https://github.com/santananikolic-byte/Santo.git"
 ZWEIG="${JARVIS_ZWEIG:-claude/jarvis-voice-assistant-70695g}"
 ZIEL="${JARVIS_ZIEL:-$HOME/Santo}"
+# Läuft das Skript schon in einer JARVIS-Kopie (zum Beispiel nach "git clone"), wird genau diese Kopie benutzt.
+HIER="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd)"
+if [ -z "${JARVIS_ZIEL:-}" ] && [ -n "$HIER" ] && [ -f "$HIER/jarvis.sh" ] && [ -d "$HIER/.git" ]; then
+    ZIEL="$HIER"
+fi
 PYTHON="${JARVIS_PYTHON:-python3}"
 NUR_PRUEFEN="${JARVIS_NUR_PRUEFEN:-0}"
 TESTLAUF="${JARVIS_TESTLAUF:-0}"

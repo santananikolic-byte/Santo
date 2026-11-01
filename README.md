@@ -12,7 +12,7 @@ ausdrücklicher Freigabe.
 > Einrichten und Starten (auch auf einem frischen Mac), eine Zeile im Terminal:
 >
 > ```
-> bash -c "$(curl -fsSL https://raw.githubusercontent.com/santananikolic-byte/Santo/claude/jarvis-voice-assistant-70695g/jarvis-einrichten.sh)"
+> curl -fsSL https://raw.githubusercontent.com/santananikolic-byte/Santo/HEAD/jarvis-einrichten.sh | bash
 > ```
 >
 > Danach genügt ein Doppelklick auf `Jarvis-starten.command`. Anleitung: [`JARVIS-SERVER.md`](JARVIS-SERVER.md),

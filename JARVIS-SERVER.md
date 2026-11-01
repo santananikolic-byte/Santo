@@ -11,10 +11,18 @@ Was gebaut, getestet und noch nicht auf dem echten Mac geprüft ist, steht ehrli
 **Zum ersten Mal (auch auf einem frischen Mac):** diese eine Zeile ins Terminal einfügen und Enter drücken.
 
 ```
-bash -c "$(curl -fsSL https://raw.githubusercontent.com/santananikolic-byte/Santo/claude/jarvis-voice-assistant-70695g/jarvis-einrichten.sh)"
+curl -fsSL https://raw.githubusercontent.com/santananikolic-byte/Santo/HEAD/jarvis-einrichten.sh | bash
 ```
 
-Sie holt JARVIS nach `~/Santo`, prüft Python, Git und Claude Code, bietet an, Fehlendes zu installieren (immer erst nach Rückfrage),
+Macht das Einfügen im Terminal Probleme (zum Beispiel stehen vor jedem Zeichen Backslashes `\`), tippe stattdessen diese drei kurzen Zeilen ab:
+
+```
+git clone https://github.com/santananikolic-byte/Santo
+cd Santo
+./jarvis-einrichten.sh
+```
+
+Das Einrichten holt JARVIS nach `~/Santo`, prüft Python, Git und Claude Code, bietet an, Fehlendes zu installieren (immer erst nach Rückfrage),
 hilft bei der Anmeldung mit deinem Claude-Abo, zeigt eine Checkliste, startet JARVIS und öffnet ihn im Browser. Fehlen die
 Apple-Entwicklerwerkzeuge, öffnet sich ein Installationsfenster von Apple; danach dieselbe Zeile nochmal einfügen.
 
