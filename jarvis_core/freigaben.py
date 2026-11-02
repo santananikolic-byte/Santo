@@ -158,8 +158,11 @@ class Berechtigung:
     # ----------------------------------------------------- Warten (Läufer) ---
 
     def _signalisieren(self, freigabe_id):
+        """Entschieden - weckt eine wartende Rolle auf UND räumt sofort auf (nicht erst in ``warten``,
+        sonst bliebe bei jedem anderen Entscheidungsweg - Ablauf, Löschen des Auftrags, Abschalten des
+        Werkzeugs - ein ungenutztes Event für immer im Speicher)."""
         with self._sperre:
-            signal = self._signale.get(freigabe_id)
+            signal = self._signale.pop(freigabe_id, None)
         if signal:
             signal.set()
 

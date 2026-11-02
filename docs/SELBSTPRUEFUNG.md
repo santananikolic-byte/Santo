@@ -71,6 +71,17 @@ keine zusätzlichen. Sie bereitet nur Entwürfe und Kontaktvorschläge vor; Send
 keine Werkzeuge gibt - nicht weil es eine Regel verbietet, die sich umgehen ließe. E-Mail-Postfach, Telefon, Kalender und Buchhaltung sind nach
 wie vor nicht angebunden (siehe `STATUS.md`).
 
+## Stufe 12 – gezielte Nachprüfung ohne neue Funktionen
+
+Auf ausdrücklichen Wunsch durchgesehen: nicht neue Features gebaut, sondern bestehenden Code auf echte Schwachstellen geprüft.
+
+| Fund | Art | Stand |
+|---|---|---|
+| Das interne Warte-Signal einer Freigabe (`Berechtigung._signale`) wurde nur aufgeräumt, wenn ein Auftragsschritt selbst `warten()` aufrief. Lief eine Freigabe stattdessen ab, wurde ein Werkzeug währenddessen abgeschaltet, oder wurde der Auftrag gelöscht, blieb das ungenutzte Signal für immer im Speicher (kleines, aber echtes Leck über sehr lange Laufzeit) | Robustheit | **Behoben:** Aufräumen passiert jetzt beim Entscheiden selbst, nicht erst beim Warten - Test prüft alle Wege |
+| Geprüft und für in Ordnung befunden: Pausieren/Abbrechen von Aufträgen (keine hängenden Einträge nach Neustart oder Löschen), Zombie-Prozesse bei `provider.abbrechen()` (werden korrekt über `communicate()` eingesammelt), die Ratenbegrenzung (feste, kleine Schlüsselmenge, kein unbegrenztes Wachstum) | - | Kein Fund, keine Änderung nötig |
+
+162 Tests, alle grün. Keine neue Funktion, kein neues Risiko - nur ein echter, kleiner Fehler weniger.
+
 ## Was ich nicht geprüft habe
 
 - **Dein Mac mit deinem Abo.** Die automatischen Tests simulieren Claude Code; der echte Probelauf (Stufe 10) lief in der Entwicklungsumgebung, mit

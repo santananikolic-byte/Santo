@@ -296,6 +296,21 @@ class BerechtigungTest(AgentBasis):
         self.assertEqual(self.sp.freigabe(g)["status"], "abgelaufen")
         self.assertIn("freigabe_abgelaufen", {e["art"] for e in self.sp.audit_liste()})
 
+    def test_keine_undichten_freigabe_signale(self):
+        """Jeder Weg, eine Freigabe zu beenden, räumt das interne Warte-Signal auf - sonst bliebe bei jeder
+        Freigabe, auf die eine Rolle wartet (Auftrag), ein ungenutztes Event für immer im Speicher."""
+        self.werkstatt_datei("a.txt", "alt")
+        wartend = self.ctx(warten=True)
+        f1 = self.aktion("datei_schreiben", koerper="neu", pfad="a.txt", ctx=wartend)["freigabe_id"]
+        self.assertIn(f1, self.agent.berechtigung._signale)
+        self.agent.freigabe_beantworten(f1, True)
+        self.assertEqual(self.agent.berechtigung._signale, {})
+        self.aktion("datei_schreiben", koerper="neu2", pfad="a.txt", ctx=wartend)
+        self.konfig.werte["freigabe_minuten"] = 0  # sofort abgelaufen (Test)
+        time.sleep(1.1)
+        self.agent.berechtigung.ablaufen_lassen()
+        self.assertEqual(self.agent.berechtigung._signale, {})
+
 
 class ChatTest(AgentBasis):
     def test_einfaches_gespraech_mit_verlauf(self):
