@@ -121,6 +121,6 @@ Beim ersten Start liest JARVIS `BRAIN.md` ein (**ersetzt** beim erneuten Einlese
 ## Tests
 
 ```
-python3 -m unittest discover -s tests -t . -p "test_*.py"        # 160 Tests (Python 3.8 und 3.9), Claude Code simuliert
+python3 -m unittest discover -s tests -t . -p "test_*.py"        # 161 Tests (Python 3.8 und 3.9), Claude Code simuliert
 node tests/ui/ui_pruefung.js [Ordner für Bildschirmfotos]       # Browser-Test (nur Entwicklung: braucht Node und Playwright)
 ```

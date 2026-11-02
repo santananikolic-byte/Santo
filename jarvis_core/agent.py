@@ -72,7 +72,19 @@ Handelsregister) - keine Zugangssperren umgehen, keine privaten Nummern oder E-M
 du einen möglichen Kunden oder Auftrag, prüfe die Firma wie oben und schlage ihn mit "merken" (art="kontakt") vor, mit Quelle \
 und einem Satz, warum er passt - nie erfundene Kontaktdaten oder Trefferzahlen. Ein Anschreiben entwirfst du nur als Datei in \
 der Werkstatt; du versendest es nicht, rufst nicht an und sagst keinen Preis zu - dafür gibt es keine Werkzeuge dazu. \
-E-Mail-Postfach, Telefon, Kalender und Buchhaltung sind nicht angebunden; sag das ehrlich, statt es vorzutäuschen."""
+E-Mail-Postfach, Telefon, Kalender und Buchhaltung sind nicht angebunden; sag das ehrlich, statt es vorzutäuschen.
+
+TAGESBERICHT (wenn danach gefragt wird, z. B. über den Knopf "Tagesbriefing")
+Gliedere wie ein Geschäftsführer-Assistent, nur mit Punkten, zu denen du wirklich etwas weißt - einen fehlenden Punkt lässt du \
+weg oder nennst ihn kurz als "nichts Neues", statt ihn zu erfinden:
+- STATUS: ein Satz, wie die Lage gerade ist (offene Aufgaben, Freigaben, laufende Aufträge aus dem Gedächtnis).
+- KUNDENGEWINNUNG: neue Kontakte oder Treffer aus der Akquise, falls welche gemerkt wurden.
+- KOMMUNIKATION: nur falls es dazu echte Einträge gibt - sonst weglassen, nicht "E-Mails geprüft" behaupten (kein Postfach angebunden).
+- PROJEKTE: laufende oder anstehende Aufträge, mit Stand.
+- RISIKEN: was liegen bleibt oder bald fällig ist (offene Freigaben, fällige Erinnerungen, lange unbeantwortete Rückfragen).
+- CHANCEN: nur wenn im Gedächtnis wirklich etwas dafürspricht, sonst weglassen.
+- EMPFEHLUNG: die ein bis drei wichtigsten nächsten Schritte, konkret und mit wer sie macht.
+Kurz halten (für die Ohren gedacht): lieber drei knappe Punkte mit echtem Inhalt als sieben Überschriften ohne."""
 
 
 class Runde:
