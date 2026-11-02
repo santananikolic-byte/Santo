@@ -341,7 +341,14 @@ class GespraechTest(ServerBasis):
                                            "bereich": "geschaeft"})[1]
         self.assertTrue(a["neu"])
         self.assertEqual(self.server.speicher.fakt(a["id"])["art"], "kontakt")
+        self.assertEqual(self.server.speicher.fakt(a["id"])["pipeline"], "neu")  # Kundenstatus, erste Stufe
         self.assertEqual(self.api("POST", "/api/fakt", {"aktion": "aendern", "id": a["id"], "art": "gibtsnicht"})[0], 400)
+        self.assertEqual(self.api("POST", "/api/fakt", {"aktion": "aendern", "id": a["id"], "pipeline": "gibtsnicht"})[0], 400)
+        code, _ = self.api("POST", "/api/fakt", {"aktion": "aendern", "id": a["id"], "pipeline": "gewonnen"})
+        self.assertEqual(code, 200)
+        self.assertEqual(self.server.speicher.fakt(a["id"])["pipeline"], "gewonnen")
+        aus_api = next(f for f in self.zustand()["fakten"] if f["id"] == a["id"])
+        self.assertEqual(aus_api["pipeline"], "gewonnen")  # steht in der Oberfläche zur Verfügung
 
     def test_aufgaben_und_erinnerungen(self):
         a = self.api("POST", "/api/todo", {"aktion": "anlegen", "titel": "Angebot", "prioritaet": "hoch", "faellig": "2026-11-02 09:00"})[1]

@@ -14,7 +14,8 @@ Bedeutung der Stände:
 
 | Baustein | Stand | Beleg / Hinweis |
 |---|---|---|
-| Gedächtnis (SQLite): Fakten, Aufgaben, Erinnerungen, Gespräche, Aufträge, Audit; Bereiche Geschäft/Privat getrennt; Import aus `BRAIN.md`; Export; Löschen; tägliche Sicherung | Getestet | `tests/test_speicher.py` (32) |
+| Gedächtnis (SQLite): Fakten, Aufgaben, Erinnerungen, Gespräche, Aufträge, Audit; Bereiche Geschäft/Privat getrennt; Import aus `BRAIN.md`; Export; Löschen; tägliche Sicherung; Datenbank-Migration (neue Spalten rüsten sich bei einer schon bestehenden Datenbank selbst nach) | Getestet | `tests/test_speicher.py` (34) |
+| Kundenstatus (CRM-Kern) für Kontakte: Stufen Neu → Kontaktiert → Interessiert → Angebot → Gewonnen/Verloren, in der Oberfläche änderbar, JARVIS liest sie nur und setzt sie nie selbst | Getestet | `jarvis_core/api.py` (`PIPELINE_STUFEN`); lokal in der Datenbank - **kein echtes CRM mit Postfach, Telefon oder Kalender** |
 | Denken über Claude Code mit dem Abo (kein API-Schlüssel), Modell je Aufgabe, Ausweichen bei Limit, Abbruch, Token-Zählung | Getestet (simuliert) | `tests/test_provider.py` (16). **Echter Aufruf auf dem iMac nicht verifiziert.** Alle verwendeten Startoptionen (`--tools ""`, `--safe-mode`, `--system-prompt`, `--output-format json`, `--model`, `--allowedTools` …) wurden gegen die echte Hilfe von Claude Code 2.1.316 geprüft, derselben Version wie auf deinem iMac; unbekannte Zusatzoptionen lässt JARVIS selbständig weg |
 | Echter Probelauf: echtes Claude Code 2.1.316 (Modell haiku, Entwicklungsumgebung) durch den echten Agenten | **Verifiziert** (dort, nicht auf deinem Mac) | Format der Ausgabe, Startoptionen, Profilwissen, Datei anlegen, Erinnerung, ehrliche Ablehnung von „E-Mail senden“, gültiger Plan; Details in `SELBSTPRUEFUNG.md` |
 | Werkzeuge (Dateien in der Werkstatt, Aufgaben, Erinnerungen, Merken, Recherche, Mac-Umgebung, Auftrag planen) und Berechtigung in drei Stufen, Freigaben mit Vorschau, Sperren, Notstopp | Getestet | `tests/test_agent.py` (34) |
@@ -26,7 +27,7 @@ Bedeutung der Stände:
 | Spracheingabe „Hey Jarvis“ (Erkennung durch den Browser) | Logik getestet mit simuliertem Erkenner | echte Erkennung nicht verifiziert; nur direkt auf dem Mac möglich (sicherer Kontext) |
 | Handy im WLAN | Gebaut | `./jarvis.sh lan an`; nur unverschlüsseltes http; Spracheingabe dort nicht möglich; nicht auf einem echten Handy verifiziert |
 
-Zusammen: **162 automatische Tests** (unter Python 3.8 und 3.9, die Python-Versionen, die Apple auf dem Mac mitliefert) und 59 Prüfpunkte im Browser, alle grün.
+Zusammen: **164 automatische Tests** (unter Python 3.8 und 3.9, die Python-Versionen, die Apple auf dem Mac mitliefert) und 61 Prüfpunkte im Browser, alle grün.
 
 ## Was es nicht gibt (und warum)
 

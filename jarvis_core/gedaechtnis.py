@@ -89,7 +89,7 @@ def kontext_text(speicher, konfig, bereich, frage=""):
     fakten = kontext_fakten(speicher, bereich, frage)
     if fakten:
         zeilen.append("[BESTÄTIGTES WISSEN]")
-        zeilen += ["- (%s) %s" % (f["art"], f["text"]) for f in fakten]
+        zeilen += ["- (%s%s) %s" % (f["art"], " · %s" % f["pipeline"] if f.get("pipeline") else "", f["text"]) for f in fakten]
     else:
         zeilen.append("[BESTÄTIGTES WISSEN] noch nichts gespeichert")
     f = fokus(speicher, bereich)

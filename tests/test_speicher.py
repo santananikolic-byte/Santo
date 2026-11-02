@@ -160,6 +160,33 @@ class SpeicherTest(Grundlage):
         self.assertEqual(again, fid)
         self.assertEqual(self.sp.fakt(fid)["status"], "bestaetigt")
 
+    def test_kontakt_bekommt_pipeline_stufe(self):
+        fid, _ = self.sp.fakt_hinzufuegen("Hausverwaltung Muster, Köln", art="kontakt")
+        self.assertEqual(self.sp.fakt(fid)["pipeline"], "neu")  # ohne Angabe: erste Stufe
+        self.sp.fakt_setzen(fid, pipeline="interessiert")
+        self.assertEqual(self.sp.fakt(fid)["pipeline"], "interessiert")
+        normal, _ = self.sp.fakt_hinzufuegen("Ein gewöhnlicher Fakt")
+        self.assertIsNone(self.sp.fakt(normal)["pipeline"])  # keine Pipeline außerhalb von "kontakt"
+
+    def test_alte_datenbank_ohne_pipeline_spalte_wird_nachgeruestet(self):
+        pfad = os.path.join(self.ordner, "alt.db")
+        alt = sqlite3.connect(pfad)
+        alt.execute("CREATE TABLE fakten (id INTEGER PRIMARY KEY AUTOINCREMENT, bereich TEXT, art TEXT, text TEXT, "
+                   "status TEXT, wichtig INTEGER, quelle TEXT, erstellt TEXT, geaendert TEXT)")
+        alt.execute("INSERT INTO fakten (bereich, art, text, status, wichtig, quelle, erstellt, geaendert) "
+                   "VALUES ('geschaeft', 'kontakt', 'Alter Kontakt vor dem Update', 'bestaetigt', 0, 'nutzer', 'x', 'x')")
+        alt.commit()
+        alt.close()
+        nachgeruestet = Speicher(pfad)
+        try:
+            eintrag = nachgeruestet.fakten()[0]
+            self.assertEqual(eintrag["text"], "Alter Kontakt vor dem Update")  # nichts verloren
+            self.assertIsNone(eintrag["pipeline"])  # Spalte ist jetzt da, alte Zeilen bleiben ohne Wert
+            nachgeruestet.fakt_setzen(eintrag["id"], pipeline="gewonnen")
+            self.assertEqual(nachgeruestet.fakt(eintrag["id"])["pipeline"], "gewonnen")
+        finally:
+            nachgeruestet.schliessen()
+
     def test_bearbeiten_markiert_als_nutzereintrag(self):
         fid, _ = self.sp.fakt_hinzufuegen("alter Text", quelle="BRAIN.md")
         self.sp.fakt_setzen(fid, text="neuer Text")

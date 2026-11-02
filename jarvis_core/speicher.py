@@ -36,6 +36,7 @@ CREATE TABLE IF NOT EXISTS fakten (
   status TEXT NOT NULL DEFAULT 'bestaetigt',
   wichtig INTEGER NOT NULL DEFAULT 0,
   quelle TEXT NOT NULL DEFAULT 'nutzer',
+  pipeline TEXT,
   erstellt TEXT NOT NULL,
   geaendert TEXT NOT NULL
 );
@@ -176,7 +177,7 @@ JSON_FELDER = {
 
 # Diese Felder dürfen die *_setzen-Methoden ändern. Alles andere wird abgelehnt.
 ERLAUBT = {
-    "fakten": {"text", "bereich", "art", "status", "wichtig", "quelle"},
+    "fakten": {"text", "bereich", "art", "status", "wichtig", "quelle", "pipeline"},
     "aufgaben": {"titel", "beschreibung", "status", "prioritaet", "faellig", "bereich"},
     "erinnerungen": {"text", "faellig", "status", "bereich"},
     "gespraeche": {"titel", "bereich"},
@@ -201,8 +202,16 @@ class Speicher:
             self._db.execute("PRAGMA journal_mode=WAL")
             self._db.execute("PRAGMA synchronous=NORMAL")
             self._db.executescript(SCHEMA)
+            self._migrieren()
         if self.meta("schema_version") is None:
             self.meta_setzen("schema_version", str(SCHEMA_VERSION))
+
+    def _migrieren(self):
+        """Fügt Spalten nachträglich ein, wenn die Datenbank älter ist als dieser Code (``CREATE TABLE IF NOT
+        EXISTS`` legt neue Tabellen an, ändert aber keine bestehenden - das muss diese Methode erledigen)."""
+        spalten = {z["name"] for z in self._db.execute("PRAGMA table_info(fakten)").fetchall()}
+        if "pipeline" not in spalten:
+            self._db.execute("ALTER TABLE fakten ADD COLUMN pipeline TEXT")
 
     # --------------------------------------------------------- Grundlagen ---
 
@@ -269,11 +278,15 @@ class Speicher:
 
     # -------------------------------------------------------------- Fakten ---
 
-    def fakt_hinzufuegen(self, text, bereich="allgemein", art="fakt", status="bestaetigt", quelle="nutzer", wichtig=0):
-        """Legt einen Eintrag an. Gibt (id, neu) zurück; ein Duplikat im selben Bereich wird nicht doppelt gespeichert."""
+    def fakt_hinzufuegen(self, text, bereich="allgemein", art="fakt", status="bestaetigt", quelle="nutzer", wichtig=0,
+                        pipeline=None):
+        """Legt einen Eintrag an. Gibt (id, neu) zurück; ein Duplikat im selben Bereich wird nicht doppelt gespeichert.
+        Ein Kontakt (``art="kontakt"``) bekommt ohne Angabe die erste Stufe "neu" (siehe PIPELINE_STUFEN in api.py)."""
         text = " ".join((text or "").split())[:MAX_FAKT]
         if not text:
             raise ValueError("Der Eintrag ist leer.")
+        if art == "kontakt" and pipeline is None:
+            pipeline = "neu"
         with self._sperre:
             for vorhanden in self._lesen("SELECT id, text, status FROM fakten WHERE bereich=?", (bereich,)):
                 if textsuche.ist_duplikat(vorhanden["text"], text):
@@ -283,8 +296,9 @@ class Speicher:
                     return vorhanden["id"], False
             jetzt = zeit.jetzt()
             cur = self._schreiben(
-                "INSERT INTO fakten (bereich, art, text, status, wichtig, quelle, erstellt, geaendert) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)", (bereich, art, text, status, int(bool(wichtig)), quelle, jetzt, jetzt))
+                "INSERT INTO fakten (bereich, art, text, status, wichtig, quelle, pipeline, erstellt, geaendert) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (bereich, art, text, status, int(bool(wichtig)), quelle, pipeline, jetzt, jetzt))
             return cur.lastrowid, True
 
     def fakten(self, status="bestaetigt", bereiche=None, art=None):

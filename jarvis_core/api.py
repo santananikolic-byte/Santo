@@ -15,6 +15,8 @@ from .protokoll import letzte_eintraege
 from .werkzeuge import WerkzeugFehler
 
 FAKT_ARTEN = ("fakt", "profil", "projekt", "entscheidung", "regel", "praeferenz", "ziel", "strategie", "technik", "kontakt")
+# Kundenstatus für Einträge der Art "kontakt" (CRM-Kern: nur das Verfolgen des Stands, kein Postfach/Kalender angebunden).
+PIPELINE_STUFEN = ("neu", "kontaktiert", "interessiert", "angebot", "gewonnen", "verloren")
 BESTAETIGUNG_LOESCHEN = "ALLES LÖSCHEN"
 EINSTELLUNGEN = ("stimme", "tempo", "vorlesen", "erinnerungen_sprechen", "modelle", "modell_ausweichen")
 MAX_TEXT = 10000
@@ -220,6 +222,10 @@ class Api:
                     felder["art"] = daten["art"]
                 if "wichtig" in daten:
                     felder["wichtig"] = int(bool(daten["wichtig"]))
+                if "pipeline" in daten:
+                    if daten["pipeline"] not in PIPELINE_STUFEN:
+                        return 400, {"ok": False, "fehler": "Unbekannte Kontakt-Stufe. Erlaubt: %s." % ", ".join(PIPELINE_STUFEN)}
+                    felder["pipeline"] = daten["pipeline"]
                 sp.fakt_setzen(fakt_id, **felder)
             else:
                 return 400, {"ok": False, "fehler": "Unbekannte Aktion."}

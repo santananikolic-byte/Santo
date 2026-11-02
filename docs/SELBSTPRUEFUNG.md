@@ -82,6 +82,24 @@ Auf ausdrücklichen Wunsch durchgesehen: nicht neue Features gebaut, sondern bes
 
 162 Tests, alle grün. Keine neue Funktion, kein neues Risiko - nur ein echter, kleiner Fehler weniger.
 
+## Stufe 13 – Kundenstatus (aus dem „Master Prompt“ das herausgenommen, was lokal und ehrlich geht)
+
+Der Nutzer hat ein langes „Master Prompt"-Dokument mit einem sehr weitreichenden Funktionsumfang geschickt (autonomer
+CEO-Agent mit Bewusstsein, E-Mail/Kalender/Finanzen-Integration, Browser-Automatisierung, 500 bzw. 20 "Agenten", Live-Kamera,
+Personalverwaltung). Die meisten Punkte habe ich **nicht** gebaut - aus denselben Gründen wie schon zuvor (kein Bewusstsein,
+keine erfundene Agentenzahl, keine Zugangsdaten für fremde Dienste, nichts automatisch senden/bezahlen). Ein Punkt war aber
+real, lokal umsetzbar und ohne jede externe Anbindung machbar: **Abschnitt 3, „CRM" - der Kundenstatus.**
+
+Gebaut: eine `pipeline`-Spalte an Kontakten mit sechs Stufen (neu, kontaktiert, interessiert, angebot, gewonnen, verloren),
+änderbar als Auswahlfeld in der Oberfläche, sichtbar als Badge. JARVIS bekommt die Stufe jetzt auch wirklich in seinen
+Kontext (vorher wäre sie dem Modell gar nicht sichtbar gewesen, obwohl die Tagesbericht-Regel schon davon sprach - das wäre
+sonst ein stiller Fehler gewesen: eine Regel, die auf Daten verweist, die das Modell nie zu sehen bekommt). JARVIS liest und
+nennt die Stufe nur, er setzt sie nie selbst - die entscheidet allein der Nutzer, weil nur er weiß, ob ein Kunde wirklich
+gewonnen oder verloren ist.
+
+Kein vollständiges CRM: keine Kommunikationshistorie, keine automatische Nachfass-Erkennung, kein Postfach. Das wäre genau
+die Art von „noch nicht gebaut, weil es echte Konten bräuchte", die in `STATUS.md` schon so steht.
+
 ## Was ich nicht geprüft habe
 
 - **Dein Mac mit deinem Abo.** Die automatischen Tests simulieren Claude Code; der echte Probelauf (Stufe 10) lief in der Entwicklungsumgebung, mit

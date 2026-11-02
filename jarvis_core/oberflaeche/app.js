@@ -74,6 +74,10 @@
   var ART_EINZEL = { regel: "Regel", profil: "Profil", ziel: "Ziel", strategie: "Strategie", projekt: "Projekt", kontakt: "Kontakt",
     entscheidung: "Entscheidung", praeferenz: "Vorliebe", fakt: "Fakt", technik: "Technik" };
   var ART_REIHE = ["regel", "profil", "ziel", "strategie", "kontakt", "projekt", "entscheidung", "praeferenz", "fakt", "technik"];
+  // Kundenstatus für Kontakte (CRM-Kern) - hält die Liste in api.py (PIPELINE_STUFEN) nach, da beide statisch sind.
+  var PIPELINE_REIHE = ["neu", "kontaktiert", "interessiert", "angebot", "gewonnen", "verloren"];
+  var PIPELINE_NAMEN = { neu: "Neu", kontaktiert: "Kontaktiert", interessiert: "Interessiert", angebot: "Angebot",
+    gewonnen: "Gewonnen", verloren: "Verloren" };
   var AUFTRAG_NAMEN = { entwurf: "Entwurf", rueckfrage: "Rückfrage", geplant: "Geplant", wartend: "Wartet", laeuft: "Läuft",
     wartet_auf_freigabe: "Wartet auf Freigabe", pausiert: "Pausiert", unterbrochen: "Unterbrochen", fertig: "Fertig",
     fehlgeschlagen: "Fehlgeschlagen", abgebrochen: "Abgebrochen" };
@@ -776,9 +780,12 @@
     zeichnenErinnerungen();
   }
   function fakt(f) {
+    var istKontakt = f.art === "kontakt";
     var inhalt = [h("div", {}, f.text),
       h("div", { class: "chips2" }, badge(bereichName(f.bereich), f.bereich === "privat" ? "privat" : ""),
-        f.quelle === "nutzer" ? badge("von dir") : (f.quelle === "jarvis" ? badge("von JARVIS") : null))];
+        f.quelle === "nutzer" ? badge("von dir") : (f.quelle === "jarvis" ? badge("von JARVIS") : null),
+        istKontakt && f.pipeline ? badge(PIPELINE_NAMEN[f.pipeline] || f.pipeline,
+          f.pipeline === "gewonnen" ? "ok" : (f.pipeline === "verloren" ? "fehler" : "")) : null)];
     var zeile = h("div", { class: "zeile" });
     var stern = h("button", { type: "button", class: "stern", "aria-pressed": f.wichtig ? "true" : "false", title: "Wichtig: immer im Blick", text: "★",
       onclick: function () { tun("POST", "/api/fakt", { aktion: "aendern", id: f.id, wichtig: !f.wichtig }); } });
@@ -788,9 +795,18 @@
         h("button", { type: "button", class: "knopf knopf-klein knopf-primaer", text: "Merken", onclick: function () { tun("POST", "/api/fakt", { aktion: "bestaetigen", id: f.id }, "Gemerkt."); } }),
         h("button", { type: "button", class: "knopf knopf-klein", text: "Verwerfen", onclick: function () { tun("POST", "/api/fakt", { aktion: "verwerfen", id: f.id }, "Verworfen."); } }));
     } else {
-      leiste = h("div", { class: "aktionsleiste" },
+      var knoepfe = [
         h("button", { type: "button", class: "knopf knopf-klein", text: "Bearbeiten", onclick: function () { S.bearbeiteFakt = f.id; S.cache = {}; zeichnenFakten(); } }),
-        sicherKnopf("Löschen", "Sicher?", function () { tun("POST", "/api/fakt", { aktion: "loeschen", id: f.id }, "Gelöscht."); }));
+        sicherKnopf("Löschen", "Sicher?", function () { tun("POST", "/api/fakt", { aktion: "loeschen", id: f.id }, "Gelöscht."); })
+      ];
+      if (istKontakt) {
+        var stufe = h("select", { class: "pipeline-wahl", "aria-label": "Kontaktstufe (" + f.text.slice(0, 30) + ")" },
+          PIPELINE_REIHE.map(function (p) { return h("option", { value: p, text: PIPELINE_NAMEN[p] }); }));
+        stufe.value = f.pipeline || "neu";
+        stufe.addEventListener("change", function () { tun("POST", "/api/fakt", { aktion: "aendern", id: f.id, pipeline: stufe.value }); });
+        knoepfe.unshift(stufe);
+      }
+      leiste = h("div", { class: "aktionsleiste" }, knoepfe);
     }
     anhaengen(zeile, [f.status === "vorschlag" ? null : stern, h("div", { class: "inhalt" }, inhalt), leiste]);
     return zeile;

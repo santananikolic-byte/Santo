@@ -276,7 +276,8 @@ svg.diagramm { display: block; width: 100%; max-width: 100%; height: auto; overf
 .liste { display: flex; flex-direction: column; gap: 10px; }
 .zeile { display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; border: 1px solid var(--rand); border-radius: 12px; background: rgba(0, 0, 0, 0.22); }
 .zeile .inhalt { flex: 1; min-width: 0; word-break: break-word; }
-.zeile .aktionsleiste { display: flex; gap: 6px; flex-wrap: wrap; flex: none; }
+.zeile .aktionsleiste { display: flex; gap: 6px; flex-wrap: wrap; flex: none; align-items: center; }
+.pipeline-wahl { width: auto; min-height: 30px; padding: 3px 24px 3px 10px; font-size: 13px; background-position: calc(100% - 10px) 13px, calc(100% - 6px) 13px; }
 .zeile.erledigt .inhalt { color: var(--sehr-leise); text-decoration: line-through; }
 .zeile .chips2 { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 5px; }
 .stern { background: none; border: 0; cursor: pointer; font-size: 18px; line-height: 1; color: var(--sehr-leise); padding: 2px 4px; }
