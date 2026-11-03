@@ -27,9 +27,12 @@ import json
 import os
 import re
 import shutil
+import socket
 import subprocess
 import threading
 import time
+import urllib.error
+import urllib.request
 
 # Diese Variablen würden Claude Code auf eine kostenpflichtige Abrechnung lenken.
 BEZAHL_VARIABLEN = ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_USE_BEDROCK",
@@ -40,6 +43,7 @@ ABO_ANMELDUNG = "claude.ai"
 # Diese Optionen schaden nicht, wenn eine ältere Fassung sie nicht kennt: sie werden dann weggelassen.
 OPTIONALE_FLAGS = ("--safe-mode", "--no-session-persistence", "--disable-slash-commands")
 AUSWEICH_MODELL = "sonnet"
+LOKAL_STANDARD_ADRESSE = "http://127.0.0.1:11434"
 
 RECHERCHE_SYSTEM = """Du bist der Rechercheur von JARVIS. Suche im Web nach öffentlich zugänglichen Informationen zur Frage.
 - Nutze nur öffentliche Quellen. Umgehe keine Zugangssperren, ermittle keine privaten Telefonnummern, E-Mail-Adressen \
@@ -247,12 +251,134 @@ class ClaudeCode:
         raise ProviderFehler("fehler", "Claude Code meldet: " + meldung[:300])
 
 
+class LokalesModell:
+    """JARVIS' eigenes Gehirn: ein KI-Modell, das lokal auf dem Mac über Ollama läuft.
+
+    Alles bleibt auf dem Gerät - die Anfragen gehen nur an 127.0.0.1, nie ins Internet, kein Abo, keine
+    Kosten, kein Limit. Dafür ist ein Modell, das auf ein MacBook passt, deutlich schwächer als Claude.
+    Über den Schalter ``gehirn`` in der Konfiguration entscheidet der Nutzer, was er wofür nutzt.
+    Websuche kann ein lokales Modell nicht; die Recherche läuft weiter über Claude.
+    """
+
+    name = "lokal"
+    anzeige = "Lokales Modell (Ollama)"
+
+    def __init__(self, konfig):
+        self.konfig = konfig
+        self._abbruch = threading.Event()
+        self._antwort = None
+        self._sperre = threading.Lock()
+
+    @property
+    def adresse(self):
+        return (getattr(self.konfig, "ollama_adresse", "") or LOKAL_STANDARD_ADRESSE).rstrip("/")
+
+    @property
+    def modell(self):
+        return getattr(self.konfig, "lokales_modell", "") or ""
+
+    def _holen(self, pfad, daten=None, timeout=10):
+        """Eine Anfrage an Ollama auf diesem Gerät. Nie über einen Proxy - das Modell läuft lokal.
+
+        Die Adresse ist in der Konfiguration fest auf http://127.0.0.1 bzw. localhost begrenzt
+        (siehe OLLAMA_MUSTER in konfig.py), deshalb ist das Öffnen hier unbedenklich.
+        """
+        rumpf = json.dumps(daten).encode("utf-8") if daten is not None else None
+        kopf = {"Content-Type": "application/json"} if daten is not None else {}
+        anfrage = urllib.request.Request(self.adresse + pfad, data=rumpf, headers=kopf,  # noqa: S310 - nur localhost
+                                         method="POST" if daten is not None else "GET")
+        oeffner = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        antwort = oeffner.open(anfrage, timeout=timeout)  # noqa: S310 - Adresse ist auf localhost begrenzt
+        if daten is not None:
+            with self._sperre:
+                self._antwort = antwort
+        try:
+            roh = antwort.read()
+        finally:
+            with self._sperre:
+                self._antwort = None
+            antwort.close()
+        return json.loads(roh.decode("utf-8"))
+
+    def abbrechen(self):
+        """Beendet die laufende Anfrage. Gibt True zurück, wenn eine lief."""
+        with self._sperre:
+            antwort = self._antwort
+            if antwort is not None:
+                self._abbruch.set()
+                try:
+                    antwort.close()
+                except OSError:
+                    pass
+                return True
+        return False
+
+    def pruefen(self):
+        """Läuft Ollama lokal und ist das eingestellte Modell geladen? Kostet nichts."""
+        ergebnis = {"name": self.name, "anzeige": self.anzeige, "installiert": False, "version": None,
+                    "angemeldet": True, "anmeldeart": "lokal", "plan": None, "nutzbar": False, "hinweis": "",
+                    "modelle": {"lokal": self.modell}}
+        try:
+            daten = self._holen("/api/tags", timeout=3)
+        except (urllib.error.URLError, OSError, ValueError):
+            ergebnis["hinweis"] = ("Ollama läuft nicht auf %s – zum Einrichten: Ollama von ollama.com laden, dann im "
+                                   "Terminal „ollama serve“ und ein Modell holen, z. B. „ollama pull llama3.1“" % self.adresse)
+            return ergebnis
+        ergebnis["installiert"] = True
+        geladen = [m.get("name", "") for m in (daten.get("models") or []) if isinstance(m, dict)]
+        ergebnis["version"] = ", ".join(geladen[:6]) or None
+        if not self.modell:
+            ergebnis["hinweis"] = ("Ollama läuft, aber es ist noch kein lokales Modell gewählt – in den Einstellungen "
+                                   "„lokales_modell“ setzen (geladen: %s)" % (", ".join(geladen) or "keins"))
+            return ergebnis
+        # Ollama führt Modelle oft als „name:tag“ (z. B. llama3.1:latest); der eingestellte Name darf ohne Tag passen.
+        if not any(g == self.modell or g.split(":")[0] == self.modell for g in geladen):
+            ergebnis["hinweis"] = ("Modell „%s“ ist nicht geladen – im Terminal „ollama pull %s“ (geladen: %s)"
+                                   % (self.modell, self.modell, ", ".join(geladen) or "keins"))
+            return ergebnis
+        ergebnis["nutzbar"] = True
+        ergebnis["hinweis"] = "bereit (lokal, Modell: %s)" % self.modell
+        return ergebnis
+
+    def fragen(self, prompt, system, art="chat", modell=None, tools="", web=False):
+        """Eine Anfrage an das lokale Modell. Gibt antwort, tokens, modell und ausgewichen zurück."""
+        name = modell or self.modell
+        if not name:
+            raise ProviderFehler("kein_provider", "Es ist kein lokales Modell eingestellt.")
+        self._abbruch.clear()
+        anfrage = {"model": name, "stream": False,
+                   "messages": [{"role": "system", "content": system}, {"role": "user", "content": prompt}]}
+        try:
+            daten = self._holen("/api/chat", anfrage, timeout=self.konfig.provider_timeout)
+        except (socket.timeout, TimeoutError):
+            raise ProviderFehler("zeitueberschreitung", "Das lokale Modell hat zu lange gebraucht.") from None
+        except Exception as fehler:  # noqa: BLE001 - jeder Abbruch- oder Netzwerkfehler wird hier sauber übersetzt
+            if self._abbruch.is_set():
+                self._abbruch.clear()
+                raise ProviderFehler("abgebrochen", "Die Anfrage wurde abgebrochen.") from None
+            raise ProviderFehler("fehler", "Das lokale Modell ist nicht erreichbar: %s" % fehler) from None
+        if self._abbruch.is_set():
+            self._abbruch.clear()
+            raise ProviderFehler("abgebrochen", "Die Anfrage wurde abgebrochen.")
+        nachricht = daten.get("message") if isinstance(daten, dict) else None
+        inhalt = ((nachricht or {}).get("content") or "").strip() if isinstance(nachricht, dict) else ""
+        if not inhalt:
+            raise ProviderFehler("fehler", "Das lokale Modell gab keine Antwort.")
+
+        def zahl(name_):
+            wert = daten.get(name_) if isinstance(daten, dict) else None
+            return wert if isinstance(wert, int) else None
+        return {"antwort": inhalt, "tokens_ein": zahl("prompt_eval_count"), "tokens_aus": zahl("eval_count"),
+                "modell": name, "ausgewichen": None}
+
+
 class ProviderManager:
     def __init__(self, konfig, protokoll):
         self.konfig = konfig
         self.log = protokoll
         self.claude = ClaudeCode(konfig)
-        self.anbieter = [self.claude]
+        self.lokal = LokalesModell(konfig)
+        self.anbieter = [self.claude, self.lokal]
         self._status = {a.name: {"name": a.name, "anzeige": a.anzeige, "nutzbar": False,
                                  "hinweis": "wird geprüft …"} for a in self.anbieter}
         self._status_sperre = threading.Lock()
@@ -275,31 +401,38 @@ class ProviderManager:
         with self._status_sperre:
             return {name: dict(werte) for name, werte in self._status.items()}
 
-    def _bereit(self):
+    def _anbieter_fuer(self, art):
+        """Welches Gehirn für diese Aufgabenart? Recherche braucht Websuche und läuft immer über Claude."""
+        if art != "recherche" and getattr(self.konfig, "gehirn", "claude") == "lokal":
+            return self.lokal
+        return self.claude
+
+    def _bereit(self, anbieter):
         if self.gesperrt.is_set():
             raise ProviderFehler("gesperrt", "Notstopp ist aktiv. Erst entsperren.")
-        if not self.status()[self.claude.name].get("nutzbar"):
-            self.pruefen()  # vielleicht inzwischen angemeldet
-        zustand = self.status()[self.claude.name]
+        if not self.status()[anbieter.name].get("nutzbar"):
+            self.pruefen()  # vielleicht inzwischen bereit
+        zustand = self.status()[anbieter.name]
         if not zustand.get("nutzbar"):
-            raise ProviderFehler("kein_provider", "Kein nutzbarer Anbieter: Claude Code – %s." % zustand["hinweis"])
+            raise ProviderFehler("kein_provider", "Kein nutzbarer Anbieter: %s – %s." % (anbieter.anzeige, zustand["hinweis"]))
 
-    def _aufrufen(self, art, auftrag_id, warten, funktion):
-        self._bereit()
+    def _aufrufen(self, art, auftrag_id, warten, anbieter, funktion):
+        self._bereit(anbieter)
         if not self._eine_anfrage.acquire(timeout=warten):
             raise ProviderFehler("beschaeftigt", "JARVIS bearbeitet gerade eine andere Anfrage. Bitte gleich nochmal.")
         start = time.time()
+        marke = getattr(anbieter, "modell", None) or self.konfig.modell_fuer(art)
         try:
             if self.gesperrt.is_set():
                 raise ProviderFehler("gesperrt", "Notstopp ist aktiv. Erst entsperren.")
             ergebnis = funktion()
         except ProviderFehler as fehler:
-            self._melden(art, self.konfig.modell_fuer(art), start, False, fehler.art, None, None, auftrag_id)
+            self._melden(art, marke, start, False, fehler.art, None, None, auftrag_id)
             raise
         finally:
             self._eine_anfrage.release()
         self._melden(art, ergebnis["modell"], start, True, None, ergebnis["tokens_ein"], ergebnis["tokens_aus"], auftrag_id)
-        ergebnis["provider"] = self.claude.name
+        ergebnis["provider"] = anbieter.name
         ergebnis["dauer_ms"] = int((time.time() - start) * 1000)
         return ergebnis
 
@@ -312,15 +445,17 @@ class ProviderManager:
                 self.log.ereignis("beobachter_fehler", "WARNING", grund=repr(problem))
 
     def fragen(self, prompt, system, art="chat", auftrag_id=None, warten=120):
-        return self._aufrufen(art, auftrag_id, warten, lambda: self.claude.fragen(prompt, system, art=art))
+        anbieter = self._anbieter_fuer(art)
+        return self._aufrufen(art, auftrag_id, warten, anbieter, lambda: anbieter.fragen(prompt, system, art=art))
 
     def recherchieren(self, frage, auftrag_id=None, warten=120):
         """Websuche über Claude Code (nur WebSearch und WebFetch). Das Ergebnis ist eine unvertrauenswürdige Außenquelle."""
-        return self._aufrufen("recherche", auftrag_id, warten, lambda: self.claude.fragen(
+        return self._aufrufen("recherche", auftrag_id, warten, self.claude, lambda: self.claude.fragen(
             frage, RECHERCHE_SYSTEM, art="recherche", tools="WebSearch,WebFetch", web=True))
 
     def abbrechen(self):
-        return self.claude.abbrechen()
+        """Beendet die laufende Anfrage, egal über welches Gehirn sie läuft."""
+        return any([anbieter.abbrechen() for anbieter in self.anbieter])
 
     def beschaeftigt(self):
         """Läuft gerade eine Anfrage?"""

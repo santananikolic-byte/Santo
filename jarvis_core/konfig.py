@@ -30,6 +30,11 @@ STANDARD = {
     "provider_timeout": 300,
     "modelle": {"chat": "opus", "plan": "opus", "arbeit": "opus", "pruefung": "sonnet", "recherche": "sonnet"},
     "modell_ausweichen": True,
+    # Welches Gehirn JARVIS nutzt: "claude" (stark, über das Abo) oder "lokal" (eigenes Modell über Ollama,
+    # direkt auf dem Mac, offline und kostenlos, aber schwächer). Recherche mit Websuche läuft immer über Claude.
+    "gehirn": "claude",
+    "lokales_modell": "",
+    "ollama_adresse": "http://127.0.0.1:11434",
     # Sprache
     "stimme": "",
     "tempo": 185,
@@ -66,6 +71,9 @@ BEREICH_MUSTER = re.compile(r"^[a-z][a-z0-9_]{1,19}$")
 MODELL_MUSTER = re.compile(r"^[a-z0-9][a-z0-9.\-]*$")
 NAME_MUSTER = re.compile(r"^[a-z][a-z0-9_]{1,40}$")
 DOMAIN_MUSTER = re.compile(r"^[a-z0-9]([a-z0-9.\-]*[a-z0-9])?$")
+GEHIRNE = ("claude", "lokal")
+LOKAL_MODELL_MUSTER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/\-]{0,60}$")
+OLLAMA_MUSTER = re.compile(r"^http://(127\.0\.0\.1|localhost)(:\d{1,5})?$")
 
 
 class KonfigFehler(Exception):
@@ -237,6 +245,17 @@ def normalisieren(werte, daten_ordner):
             raise KonfigFehler("Unbekanntes Modell %r für %s. Zum Beispiel \"opus\" oder \"sonnet\"." % (name, art))
         modelle[art] = name
     w["modelle"] = modelle
+
+    w["gehirn"] = str(w["gehirn"] or "claude").strip().lower()
+    if w["gehirn"] not in GEHIRNE:
+        raise KonfigFehler("gehirn muss \"claude\" oder \"lokal\" sein, nicht %r." % w["gehirn"])
+    w["lokales_modell"] = str(w["lokales_modell"] or "").strip()
+    if w["lokales_modell"] and not LOKAL_MODELL_MUSTER.match(w["lokales_modell"]):
+        raise KonfigFehler("Ungültiger Name für das lokale Modell %r (z. B. \"llama3.1\")." % w["lokales_modell"])
+    w["ollama_adresse"] = str(w["ollama_adresse"] or STANDARD["ollama_adresse"]).strip().rstrip("/")
+    if not OLLAMA_MUSTER.match(w["ollama_adresse"]):
+        raise KonfigFehler("ollama_adresse muss lokal sein (http://127.0.0.1:PORT oder http://localhost:PORT), "
+                           "nicht %r. Das lokale Gehirn läuft nur auf deinem Mac." % w["ollama_adresse"])
 
     _liste(w, "bereiche", 8)
     bereiche = []
