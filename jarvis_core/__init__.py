@@ -4,4 +4,4 @@
 Start und Stopp über ``./jarvis.sh``. Beschreibung in ``JARVIS-SERVER.md``.
 """
 
-VERSION = "0.8.0"
+VERSION = "0.8.1"

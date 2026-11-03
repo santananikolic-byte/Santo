@@ -277,6 +277,11 @@ class BerechtigungTest(AgentBasis):
         for begriff in ("TAGESBERICHT", "STATUS:", "RISIKEN:", "EMPFEHLUNG:", "statt ihn zu erfinden"):
             self.assertIn(begriff, prompt)
 
+    def test_denk_methode_ist_im_systemprompt(self):
+        prompt = self.agent.system_prompt()
+        for begriff in ("BEVOR DU ANTWORTEST", "Was ist das Ziel", "rechnest du Schritt für Schritt nach"):
+            self.assertIn(begriff, prompt)
+
     def test_gespraechswerkzeug_nicht_im_auftrag(self):
         e = self.aktion("auftrag_planen", ziel="x", ctx=self.ctx(quelle="auftrag"))
         self.assertEqual(e["status"], "gesperrt")
