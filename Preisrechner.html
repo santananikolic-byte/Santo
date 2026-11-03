@@ -1,0 +1,241 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Preisrechner – Bau & Reinigung</title>
+<style>
+  :root{
+    --bg:#0e0b06; --karte:#1a140c; --rand:#3a2c17;
+    --text:#f4e9d6; --grau:#b59a74; --orange:#ff8c1a; --orange2:#ffb55c;
+    --gut:#6fcf6f; --warn:#ff6b4a;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0; background:var(--bg); color:var(--text);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+    line-height:1.45; padding:16px;
+  }
+  .huelle{max-width:720px; margin:0 auto}
+  h1{font-size:22px; margin:4px 0 2px; color:var(--orange)}
+  .unter{color:var(--grau); font-size:13px; margin:0 0 16px}
+  .karte{background:var(--karte); border:1px solid var(--rand); border-radius:14px; padding:16px; margin-bottom:14px}
+  .karte h2{font-size:15px; margin:0 0 12px; color:var(--orange2); letter-spacing:.3px; text-transform:uppercase}
+  label{display:block; font-size:13px; color:var(--grau); margin:10px 0 4px}
+  input,select{
+    width:100%; background:#120d07; color:var(--text);
+    border:1px solid var(--rand); border-radius:10px; padding:11px 12px;
+    font-size:16px; outline:none;
+  }
+  input:focus,select:focus{border-color:var(--orange)}
+  .reihe{display:flex; gap:10px; flex-wrap:wrap}
+  .reihe>div{flex:1; min-width:130px}
+  .modus{display:flex; gap:8px; margin-bottom:4px}
+  .modus button{
+    flex:1; padding:11px; border-radius:10px; border:1px solid var(--rand);
+    background:#120d07; color:var(--grau); font-size:15px; cursor:pointer;
+  }
+  .modus button.an{background:var(--orange); color:#1a1205; border-color:var(--orange); font-weight:600}
+  .hinweis{font-size:12px; color:var(--grau); margin-top:4px}
+  .zeile{display:flex; justify-content:space-between; padding:7px 0; border-bottom:1px dashed var(--rand); font-size:15px}
+  .zeile:last-child{border-bottom:none}
+  .zeile .wert{font-variant-numeric:tabular-nums}
+  .gross{font-size:26px; color:var(--orange); font-weight:700}
+  .ergebnis .zeile.haupt{border-bottom:none; padding-top:12px; margin-top:6px; border-top:2px solid var(--orange)}
+  .angebot{background:#120d07; border:1px solid var(--rand); border-radius:10px; padding:14px; font-size:15px; white-space:pre-wrap}
+  .warnbox{color:var(--warn); font-size:13px; margin-top:10px}
+  .fuss{color:var(--grau); font-size:12px; text-align:center; margin:18px 0}
+  .knopf{width:100%; padding:13px; border-radius:10px; border:1px solid var(--orange); background:transparent; color:var(--orange2); font-size:15px; cursor:pointer; margin-top:10px}
+</style>
+</head>
+<body>
+<div class="huelle">
+  <h1>Preisrechner</h1>
+  <p class="unter">Bau &amp; Reinigung · rechnet live · funktioniert auch ohne Internet</p>
+
+  <div class="karte">
+    <h2>1 · Was rechnen wir?</h2>
+    <div class="modus">
+      <button id="btnReinigung" class="an" onclick="setModus('reinigung')">Reinigung (nach m²)</button>
+      <button id="btnBau" onclick="setModus('bau')">Bau / nach Stunden</button>
+    </div>
+
+    <div id="blockReinigung">
+      <div class="reihe">
+        <div>
+          <label>Fläche (m²)</label>
+          <input id="flaeche" type="number" inputmode="decimal" placeholder="z. B. 500" oninput="rechnen()">
+        </div>
+        <div>
+          <label>Leistungswert (m² pro Stunde)</label>
+          <input id="leistung" type="number" inputmode="decimal" placeholder="z. B. 180" oninput="rechnen()">
+        </div>
+      </div>
+      <label>Art der Reinigung (nur zur Orientierung)</label>
+      <select id="artReinigung" onchange="richtwert()">
+        <option value="">— eigenen Wert eintragen —</option>
+        <option value="200">Büro / Unterhaltsreinigung (Richtwert ~150–250)</option>
+        <option value="120">Treppenhaus (Richtwert ~100–150)</option>
+        <option value="80">Grundreinigung / stark verschmutzt (Richtwert ~60–100)</option>
+        <option value="150">Bauendreinigung grob (Richtwert ~100–200)</option>
+      </select>
+      <p class="hinweis">Das sind nur allgemeine Richtwerte. Trag euren echten Wert ein, sobald ihr ihn kennt.</p>
+    </div>
+
+    <div id="blockBau" style="display:none">
+      <div class="reihe">
+        <div>
+          <label>Stunden pro Arbeiter</label>
+          <input id="stunden" type="number" inputmode="decimal" placeholder="z. B. 8" oninput="rechnen()">
+        </div>
+        <div>
+          <label>Anzahl Arbeiter</label>
+          <input id="arbeiterBau" type="number" inputmode="decimal" placeholder="z. B. 2" value="1" oninput="rechnen()">
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="karte">
+    <h2>2 · Eure Kosten</h2>
+    <div class="reihe">
+      <div>
+        <label>Stundensatz (€ pro Stunde)</label>
+        <input id="satz" type="number" inputmode="decimal" placeholder="euer Satz, z. B. 35" oninput="rechnen()">
+      </div>
+      <div id="arbeiterReinBlock">
+        <label>Anzahl Arbeiter (nur für Dauer vor Ort)</label>
+        <input id="arbeiterRein" type="number" inputmode="decimal" placeholder="z. B. 2" value="1" oninput="rechnen()">
+      </div>
+    </div>
+    <div class="reihe">
+      <div>
+        <label>Material (€)</label>
+        <input id="material" type="number" inputmode="decimal" placeholder="0" oninput="rechnen()">
+      </div>
+      <div>
+        <label>Anfahrt (€)</label>
+        <input id="anfahrt" type="number" inputmode="decimal" placeholder="0" oninput="rechnen()">
+      </div>
+    </div>
+    <div class="reihe">
+      <div>
+        <label>Gewinn-Aufschlag (%)</label>
+        <input id="gewinn" type="number" inputmode="decimal" placeholder="z. B. 20" value="20" oninput="rechnen()">
+      </div>
+      <div>
+        <label>MwSt (%)</label>
+        <input id="mwst" type="number" inputmode="decimal" value="19" oninput="rechnen()">
+      </div>
+    </div>
+  </div>
+
+  <div class="karte ergebnis">
+    <h2>3 · Ergebnis</h2>
+    <div class="zeile"><span>Arbeitszeit gesamt</span><span class="wert" id="eStunden">–</span></div>
+    <div class="zeile" id="eDauerZeile"><span>Dauer vor Ort (mit Team)</span><span class="wert" id="eDauer">–</span></div>
+    <div class="zeile"><span>Lohnkosten</span><span class="wert" id="eLohn">–</span></div>
+    <div class="zeile"><span>Material</span><span class="wert" id="eMaterial">–</span></div>
+    <div class="zeile"><span>Anfahrt</span><span class="wert" id="eAnfahrt">–</span></div>
+    <div class="zeile"><span>Zwischensumme (Selbstkosten)</span><span class="wert" id="eZwischen">–</span></div>
+    <div class="zeile"><span>+ Gewinn-Aufschlag</span><span class="wert" id="eGewinn">–</span></div>
+    <div class="zeile"><span><b>Netto-Preis</b></span><span class="wert" id="eNetto">–</span></div>
+    <div class="zeile"><span>+ MwSt</span><span class="wert" id="eMwst">–</span></div>
+    <div class="zeile haupt"><span>Endpreis für den Kunden</span><span class="wert gross" id="eBrutto">–</span></div>
+    <div class="warnbox" id="warnung"></div>
+  </div>
+
+  <div class="karte">
+    <h2>4 · Angebotstext zum Vorlesen / Kopieren</h2>
+    <div class="angebot" id="angebot">Trag oben die Zahlen ein.</div>
+    <button class="knopf" onclick="kopieren()">Angebotstext kopieren</button>
+  </div>
+
+  <p class="fuss">Alle Zahlen sind Richtwerte. Preise und Termine immer mit deinem Vater prüfen, bevor ihr sie einem Kunden zusagt.</p>
+</div>
+
+<script>
+  var modus = 'reinigung';
+
+  function setModus(m){
+    modus = m;
+    document.getElementById('btnReinigung').classList.toggle('an', m==='reinigung');
+    document.getElementById('btnBau').classList.toggle('an', m==='bau');
+    document.getElementById('blockReinigung').style.display = m==='reinigung' ? 'block':'none';
+    document.getElementById('blockBau').style.display = m==='bau' ? 'block':'none';
+    document.getElementById('arbeiterReinBlock').style.display = m==='reinigung' ? 'block':'none';
+    document.getElementById('eDauerZeile').style.display = m==='reinigung' ? 'flex':'none';
+    rechnen();
+  }
+
+  function richtwert(){
+    var v = document.getElementById('artReinigung').value;
+    if(v){ document.getElementById('leistung').value = v; }
+    rechnen();
+  }
+
+  function z(id){ var v = parseFloat(document.getElementById(id).value); return isNaN(v)?0:v; }
+  function euro(n){ return n.toLocaleString('de-DE',{minimumFractionDigits:2, maximumFractionDigits:2}) + ' €'; }
+
+  function rechnen(){
+    var satz = z('satz'), material = z('material'), anfahrt = z('anfahrt');
+    var gewinn = z('gewinn'), mwst = z('mwst');
+    var stundenGesamt = 0, dauer = 0, arbeiter = 1;
+
+    if(modus==='reinigung'){
+      var flaeche = z('flaeche'), leistung = z('leistung');
+      arbeiter = z('arbeiterRein') || 1;
+      stundenGesamt = leistung>0 ? flaeche/leistung : 0;
+      dauer = arbeiter>0 ? stundenGesamt/arbeiter : 0;
+    } else {
+      var std = z('stunden'); arbeiter = z('arbeiterBau') || 1;
+      stundenGesamt = std * arbeiter;
+    }
+
+    var lohn = stundenGesamt * satz;
+    var zwischen = lohn + material + anfahrt;
+    var gewinnBetrag = zwischen * (gewinn/100);
+    var netto = zwischen + gewinnBetrag;
+    var mwstBetrag = netto * (mwst/100);
+    var brutto = netto + mwstBetrag;
+
+    document.getElementById('eStunden').textContent = stundenGesamt>0 ? stundenGesamt.toLocaleString('de-DE',{maximumFractionDigits:1})+' Std' : '–';
+    document.getElementById('eDauer').textContent = dauer>0 ? dauer.toLocaleString('de-DE',{maximumFractionDigits:1})+' Std' : '–';
+    document.getElementById('eLohn').textContent = euro(lohn);
+    document.getElementById('eMaterial').textContent = euro(material);
+    document.getElementById('eAnfahrt').textContent = euro(anfahrt);
+    document.getElementById('eZwischen').textContent = euro(zwischen);
+    document.getElementById('eGewinn').textContent = euro(gewinnBetrag);
+    document.getElementById('eNetto').textContent = euro(netto);
+    document.getElementById('eMwst').textContent = euro(mwstBetrag);
+    document.getElementById('eBrutto').textContent = euro(brutto);
+
+    var w = '';
+    if(satz===0) w = 'Trag euren Stundensatz ein – ohne ihn stimmt der Preis nicht.';
+    else if(modus==='reinigung' && z('leistung')===0) w = 'Trag den Leistungswert (m² pro Stunde) ein.';
+    else if(gewinn===0) w = 'Achtung: 0 % Aufschlag heißt kein Gewinn – ihr arbeitet zum Selbstkostenpreis.';
+    document.getElementById('warnung').textContent = w;
+
+    var text = '';
+    if(brutto>0){
+      text = 'Angebot\n';
+      text += '— Arbeitszeit: ' + stundenGesamt.toLocaleString('de-DE',{maximumFractionDigits:1}) + ' Stunden\n';
+      text += '— Netto: ' + euro(netto) + '\n';
+      text += '— zzgl. ' + mwst + ' % MwSt: ' + euro(mwstBetrag) + '\n';
+      text += '— Gesamtpreis: ' + euro(brutto);
+    } else {
+      text = 'Trag oben die Zahlen ein.';
+    }
+    document.getElementById('angebot').textContent = text;
+  }
+
+  function kopieren(){
+    var t = document.getElementById('angebot').textContent;
+    if(navigator.clipboard){ navigator.clipboard.writeText(t); }
+    alert('Angebotstext kopiert.');
+  }
+
+  rechnen();
+</script>
+</body>
+</html>
