@@ -946,6 +946,23 @@
       k.appendChild(h("p", { class: "klein", style: "margin:8px 0", text: "JARVIS nutzt nur die Anmeldung mit deinem Claude-Abo – nie einen API-Schlüssel. Das Prüfen verbraucht kein Kontingent." }));
       k.appendChild(h("button", { type: "button", class: "knopf knopf-klein", text: "Neu prüfen", onclick: function () { tun("POST", "/api/provider/pruefen", {}, "Geprüft."); } }));
     }
+    var lp = sys.provider.lokal || {};
+    if (neu("s-gehirn", [sys.gehirn, sys.lokales_modell, lp])) {
+      var kg = karte("s-gehirn");
+      kg.appendChild(h("div", { class: "agent" }, h("span", { class: "punkt " + (lp.nutzbar ? "ok" : (sys.gehirn === "lokal" ? "fehler" : "")) }),
+        h("span", { class: "name", text: sys.gehirn === "lokal" ? "Eigenes Gehirn aktiv" : "Claude aktiv" }),
+        h("span", { class: "info", title: lp.hinweis || "", text: lp.hinweis || "" })));
+      var wahl = h("select", {}, [h("option", { value: "claude", text: "Claude (stark, über dein Abo)" }),
+        h("option", { value: "lokal", text: "Eigenes lokales Modell (Ollama)" })]);
+      wahl.value = sys.gehirn || "claude";
+      kg.appendChild(h("label", { class: "feld", style: "margin-bottom:8px" }, "Womit JARVIS denkt", wahl));
+      var modellfeld = h("input", { type: "text", value: sys.lokales_modell || "", placeholder: "z. B. llama3.1" });
+      kg.appendChild(h("label", { class: "feld", style: "margin-bottom:8px" }, "Lokales Modell (Ollama)", modellfeld));
+      kg.appendChild(h("p", { class: "klein", style: "margin-bottom:10px", text: "Lokal läuft offline auf dem Mac, ohne Abo, aber schwächer als Claude. Recherche nutzt immer Claude. Dafür muss Ollama laufen (ollama.com)." }));
+      kg.appendChild(h("button", { type: "button", class: "knopf knopf-primaer knopf-klein", text: "Gehirn speichern", onclick: function () {
+        einstellungSpeichern({ gehirn: wahl.value, lokales_modell: modellfeld.value.trim() });
+      } }));
+    }
     if (neu("s-modelle", [sys.modelle, sys.modell_ausweichen])) {
       var km = karte("s-modelle"), felder = {};
       [["chat", "Gespräch"], ["plan", "Planung"], ["arbeit", "Arbeitsschritte"], ["pruefung", "Prüfschicht"], ["recherche", "Recherche"]].forEach(function (art) {

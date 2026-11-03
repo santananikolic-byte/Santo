@@ -18,7 +18,8 @@ FAKT_ARTEN = ("fakt", "profil", "projekt", "entscheidung", "regel", "praeferenz"
 # Kundenstatus für Einträge der Art "kontakt" (CRM-Kern: nur das Verfolgen des Stands, kein Postfach/Kalender angebunden).
 PIPELINE_STUFEN = ("neu", "kontaktiert", "interessiert", "angebot", "gewonnen", "verloren")
 BESTAETIGUNG_LOESCHEN = "ALLES LÖSCHEN"
-EINSTELLUNGEN = ("stimme", "tempo", "vorlesen", "erinnerungen_sprechen", "modelle", "modell_ausweichen")
+EINSTELLUNGEN = ("stimme", "tempo", "vorlesen", "erinnerungen_sprechen", "modelle", "modell_ausweichen",
+                 "gehirn", "lokales_modell", "ollama_adresse")
 MAX_TEXT = 10000
 
 
@@ -78,6 +79,7 @@ class Api:
             "status": s.status(),
             "system": {
                 "provider": s.provider.status(), "stimme": s.stimme.status(), "modelle": k.modelle,
+                "gehirn": k.gehirn, "lokales_modell": k.lokales_modell,
                 "modell_ausweichen": k.modell_ausweichen, "bereiche": k.bereiche, "werkstatt": k.werkstatt_pfad,
                 "ordner": sorted(n for n in k.wurzeln() if n != "werkstatt"), "daten_ordner": k.daten_ordner,
                 "verbrauch": sp.verbrauch_heute(), "letzte_sicherung": sp.meta("letzte_sicherung"),

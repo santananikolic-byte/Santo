@@ -211,6 +211,8 @@ const pause = (ms) => new Promise((r) => setTimeout(r, ms));
     await page.waitForSelector("#s-werkzeuge .zeile");
     pruefe((await page.locator("#s-anbieter").textContent()).includes("Claude-Abo"), "Anmeldung über das Abo wird angezeigt");
     pruefe((await page.locator("#s-stimme").textContent()).includes("Markus (Premium)"), "beste deutsche Stimme wird angezeigt");
+    pruefe((await page.locator("#s-gehirn").textContent()).includes("Claude aktiv"), "Gehirn-Karte zeigt, dass Claude das aktive Gehirn ist");
+    pruefe((await page.locator("#s-gehirn select").count()) === 1, "Gehirn lässt sich zwischen Claude und lokalem Modell umschalten");
     await page.locator("#s-werkzeuge .zeile:has-text('datei_loeschen') .regler").click();
     await page.waitForFunction(async () => (await (await fetch("/api/zustand")).json()).system.werkzeuge.find((w) => w.name === "datei_loeschen").gesperrt);
     pruefe(true, "Werkzeug lässt sich sperren (Server bestätigt)");
