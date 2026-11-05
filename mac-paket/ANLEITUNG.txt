@@ -1,0 +1,88 @@
+JARVIS – dein Assistent für Bau & Reinigung
+============================================
+
+ERSTER START (einmalig, etwa 10 Minuten)
+----------------------------------------
+  1. Doppelklick auf JARVIS.command.
+
+     Sperrt macOS die Datei („nicht verifizierter Entwickler“)?
+       → Rechtsklick auf JARVIS.command → „Öffnen“ → nochmal „Öffnen“.
+       Klappt das nicht: Systemeinstellungen → Datenschutz & Sicherheit
+       → ganz unten bei JARVIS.command auf „Dennoch öffnen“ klicken.
+
+  2. Fehlt Python, öffnet sich ein Fenster von Apple → „Installieren“.
+     (Das ist ein kleines Zusatzpaket, NICHT die große Xcode-App.)
+     Danach JARVIS.command nochmal doppelklicken.
+
+  3. Fehlt Claude Code (das Gehirn von JARVIS), fragt er dich.
+     Enter drücken = installieren.
+
+  4. Anmelden: Der Browser geht auf. Mit deinem Claude-Konto anmelden
+     und erlauben. Das verbindet JARVIS mit deinem Abo.
+     KEIN API-Schlüssel, KEIN Passwort in einer Datei.
+
+  5. Der orange Leitstand öffnet sich im Browser. Fertig.
+
+
+JEDEN TAG
+---------
+  Starten:   Doppelklick auf JARVIS.command
+  Beenden:   Doppelklick auf JARVIS-BEENDEN.command
+
+  Das schwarze Terminal-Fenster darfst du schließen –
+  JARVIS läuft im Hintergrund weiter, bis du ihn beendest.
+
+
+SO SPRICHST DU MIT IHM
+----------------------
+  Knöpfe im Leitstand:
+    Tagesbriefing · Akquise starten · Firma prüfen · Preise kalkulieren
+
+  Oder schreiben / sagen (Mikrofon im Leitstand antippen):
+    „Wie ist die Lage heute?“
+    „Prüf die Firma Muster GmbH aus Köln.“
+    „Such Aufträge für Treppenhausreinigung in Leverkusen.“
+    „Was kostet 500 m² Büroreinigung bei 35 Euro die Stunde?“
+    „Merk dir: Meier will ab März Fensterreinigung.“
+    „Erinnere mich Freitag um 9 an das Angebot für Berger.“
+    „Schreib ein Anschreiben an die Hausverwaltung Berger.“
+
+  Kontakte haben einen Status (Neu → Kontaktiert → Interessiert
+  → Angebot → Gewonnen/Verloren). Den stellst DU im Leitstand ein.
+
+
+WAS JARVIS NICHT TUT – mit Absicht
+----------------------------------
+  Er sendet keine E-Mails, ruft niemanden an, bezahlt nichts und sagt
+  keinem Kunden Preise oder Termine zu. Er bereitet vor – du entscheidest.
+
+  Was er sich merken will, schlägt er vor – du bestätigst.
+  Eine Datei überschreiben oder löschen geht nur mit deiner Freigabe.
+
+
+EXTRAS.command
+--------------
+  1 Leitstand öffnen         2 Selbsttest         3 Claude-Abo anmelden
+  4 JARVIS beenden           5 Handy im WLAN      6 Link fürs Handy
+  7 Sicherung jetzt          8 Preisrechner       9 Notstopp / 0 aufheben
+
+  Läuft etwas nicht: zuerst EXTRAS → 2 (Selbsttest).
+  Dann ein Foto vom Fenster an Claude schicken.
+
+
+PREISRECHNER
+------------
+  Preisrechner.html doppelklicken. Läuft ohne Internet, auch auf dem Handy.
+  Die Leistungswerte darin sind nur Richtwerte – trag eure eigenen ein.
+
+
+DEINE DATEN
+-----------
+  Bleiben auf deinem Mac:
+    - Gedächtnis und Einstellungen: versteckter Ordner „.jarvis“
+      in deinem Benutzerordner
+    - Entwürfe und Dateien: Ordner „Jarvis-Werkstatt“ in deinem Benutzerordner
+  Eine neue JARVIS-Fassung entpacken löscht nichts davon.
+
+
+Mehr steht in README.md

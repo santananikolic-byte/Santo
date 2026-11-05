@@ -190,6 +190,12 @@ def provider():
     return 0 if ergebnis["claude_code"]["nutzbar"] else 1
 
 
+def _hinweis(befehl, im_paket):
+    """Im Mac-Paket (JARVIS_PAKET=1, gesetzt von den .command-Dateien) zeigen Hinweise auf das Extras-Menü
+    statt auf Terminal-Befehle, die man dort gar nicht benutzt."""
+    return im_paket if os.environ.get("JARVIS_PAKET") == "1" else "./jarvis.sh " + befehl
+
+
 def pruefen():
     """Systemcheck: alles, was JARVIS braucht, mit einer Lösung bei jedem Fehler. Verbraucht kein Kontingent."""
     import platform
@@ -223,11 +229,28 @@ def pruefen():
     else:
         zeile("fehler", "Python %d.%d ist zu alt (nötig: 3.8)" % (v[0], v[1]),
               "Im Terminal: xcode-select --install  (oder Python von python.org installieren)")
-    claude = ProviderManager(k, _StillesLog()).pruefen()["claude_code"]
-    if claude["nutzbar"]:
-        zeile("ok", "Claude Code %s: %s" % (claude.get("version") or "", claude["hinweis"]))
+    anbieter = ProviderManager(k, _StillesLog()).pruefen()
+    claude, lokal = anbieter["claude_code"], anbieter["lokal"]
+    if k.gehirn == "lokal":
+        # Eigenes Gehirn gewählt: ohne das lokale Modell kann JARVIS nicht denken, ohne Claude nur nicht recherchieren.
+        if lokal["nutzbar"]:
+            zeile("ok", "Gehirn: eigenes lokales Modell – %s" % lokal["hinweis"])
+        else:
+            zeile("fehler", "Gehirn: das eigene lokale Modell ist nicht bereit",
+                  lokal["hinweis"] + " – oder im Leitstand → System → Gehirn wieder auf Claude stellen")
+        if claude["nutzbar"]:
+            zeile("ok", "Claude Code %s (nur für Recherche im Internet): %s" % (claude.get("version") or "", claude["hinweis"]))
+        else:
+            zeile("warn", "Claude Code nicht bereit – JARVIS denkt lokal, nur die Recherche im Internet geht so nicht",
+                  claude["hinweis"])
     else:
-        zeile("fehler", "Claude Code ist nicht bereit", claude["hinweis"])
+        if claude["nutzbar"]:
+            zeile("ok", "Claude Code %s: %s" % (claude.get("version") or "", claude["hinweis"]))
+        else:
+            zeile("fehler", "Claude Code ist nicht bereit", claude["hinweis"])
+        if lokal["nutzbar"]:
+            zeile("info", "Eigenes lokales Gehirn wäre auch bereit (%s) – umschalten im Leitstand → System → Gehirn"
+                  % lokal["hinweis"])
     stimme = Stimme(k)
     if not stimme.verfuegbar():
         zeile("warn", "Keine Sprachausgabe („say“ fehlt). JARVIS läuft trotzdem, nur ohne Stimme.")
@@ -264,7 +287,8 @@ def pruefen():
                   "Beim ersten Klick auf das Mikrofon fragt der Browser nach Erlaubnis.")
     print()
     if blockiert:
-        print("Noch nicht bereit: %d Punkt(e) mit ✗ beheben, dann nochmal ./jarvis.sh pruefen" % len(blockiert))
+        print("Noch nicht bereit: %d Punkt(e) mit ✗ beheben, dann nochmal prüfen: %s"
+              % (len(blockiert), _hinweis("pruefen", "EXTRAS.command → 2")))
         return 1
     print("Alles bereit.")
     return 0
@@ -424,7 +448,8 @@ def main(argumente):
             return 2
         return frage(" ".join(argumente[1:]))
     if befehl == "notstopp":
-        return _einfach("/api/notstopp", "NOTSTOPP aktiv. Nichts läuft mehr, offene Freigaben sind abgelehnt. Aufheben: ./jarvis.sh entsperren")
+        return _einfach("/api/notstopp", "NOTSTOPP aktiv. Nichts läuft mehr, offene Freigaben sind abgelehnt. Aufheben: %s"
+                        % _hinweis("entsperren", "EXTRAS.command → 0"))
     if befehl == "entsperren":
         return _einfach("/api/entsperren", "Entsperrt. JARVIS arbeitet wieder.")
     if befehl == "logs":

@@ -55,7 +55,11 @@ case "${1:-status}" in
                 break
             fi
             if laeuft; then
-                echo "JARVIS läuft. Oberfläche öffnen: ./jarvis.sh oeffnen"
+                if [ "${JARVIS_PAKET:-0}" = "1" ]; then
+                    echo "JARVIS läuft."   # im Mac-Paket öffnet JARVIS.command den Leitstand selbst
+                else
+                    echo "JARVIS läuft. Oberfläche öffnen: ./jarvis.sh oeffnen"
+                fi
                 exit 0
             fi
             sleep 0.2

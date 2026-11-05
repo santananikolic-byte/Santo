@@ -21,3 +21,6 @@ werkstatt/
 # Browserprofil - bleibt lokal, enthaelt Anmeldungen
 browserprofil/
 browser_aufnahme.png
+
+# Gebaute Pakete (python3 mac-paket/bauen.py)
+dist/

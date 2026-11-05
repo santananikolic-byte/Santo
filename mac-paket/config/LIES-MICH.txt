@@ -1,0 +1,18 @@
+Hier musst du nichts eintragen.
+===============================
+
+In der alten JARVIS-Fassung stand in diesem Ordner eine Datei für einen
+API-Schlüssel und für Passwörter (Mail, Kalender, Telegram).
+
+Das gibt es jetzt nicht mehr – mit Absicht:
+
+  - JARVIS denkt über dein Claude-Abo. Die Anmeldung macht Claude Code
+    selbst, sicher im Browser (EXTRAS.command → 3). Kein Schlüssel nötig.
+  - Passwörter gehören nie in eine Datei.
+
+Einstellungen änderst du im Leitstand unter „System“
+(Gehirn, Modelle, Stimme, Werkzeuge sperren).
+
+Gespeichert werden sie auf deinem Mac in einem versteckten Ordner:
+  dein Benutzerordner → .jarvis → config.json
+(Im Finder sichtbar machen: Cmd + Umschalt + Punkt.)

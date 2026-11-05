@@ -159,7 +159,7 @@ class ClaudeCode:
         programm = self.finden()
         if not programm:
             ergebnis["hinweis"] = ("nicht installiert – im Terminal: curl -fsSL https://claude.ai/install.sh | bash, "
-                                   "danach „claude“ starten und mit dem Claude-Konto anmelden")
+                                   "danach mit dem Claude-Abo anmelden: claude auth login --claudeai")
             return ergebnis
         ergebnis["installiert"] = True
         try:
@@ -175,7 +175,7 @@ class ClaudeCode:
         ergebnis["anmeldeart"] = status.get("authMethod")
         ergebnis["plan"] = status.get("subscriptionType")
         if not ergebnis["angemeldet"]:
-            ergebnis["hinweis"] = "nicht angemeldet – im Terminal „claude“ starten und mit dem Claude-Konto anmelden"
+            ergebnis["hinweis"] = "nicht angemeldet – mit deinem Claude-Abo anmelden, im Terminal: claude auth login --claudeai"
         elif ergebnis["anmeldeart"] != ABO_ANMELDUNG:
             ergebnis["hinweis"] = ("angemeldet über „%s“ statt über das Claude-Abo – JARVIS nutzt das nicht, "
                                    "weil es pro Anfrage kosten würde" % ergebnis["anmeldeart"])
@@ -240,8 +240,8 @@ class ClaudeCode:
         meldung = (meldung or fehler or ausgabe or "keine Antwort").strip()
         klein = meldung.lower()
         if "login" in klein or "logged in" in klein or "authenticat" in klein or "api key" in klein:
-            raise ProviderFehler("nicht_angemeldet", "Claude Code ist nicht angemeldet. Im Terminal „claude“ "
-                                 "starten und mit dem Claude-Konto anmelden.")
+            raise ProviderFehler("nicht_angemeldet", "Claude Code ist nicht angemeldet. Mit deinem Claude-Abo anmelden, "
+                                 "im Terminal: claude auth login --claudeai")
         if "limit" in klein:
             zeit_treffer = re.search(r"\|(\d{9,})", meldung)
             if zeit_treffer:

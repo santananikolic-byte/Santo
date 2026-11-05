@@ -142,8 +142,13 @@ else
     gut "gefunden: $CLAUDE"
     if ! (cd "$ZIEL" && ./jarvis.sh provider >/dev/null 2>&1); then
         hinweis "Claude Code ist noch nicht mit deinem Claude-Abo angemeldet."
-        if frage_ja "Jetzt anmelden? Claude Code startet; wähle die Anmeldung mit deinem Claude-Konto (Abo), melde dich im Browser an und tippe danach /exit."; then
-            "$CLAUDE" < /dev/tty
+        if frage_ja "Jetzt anmelden? Der Browser öffnet sich: mit deinem Claude-Konto anmelden und erlauben."; then
+            if "$CLAUDE" auth login --help >/dev/null 2>&1; then
+                "$CLAUDE" auth login --claudeai < /dev/tty   # Anmeldung mit dem Claude-Abo (kein API-Schlüssel)
+            else
+                sage "Claude Code startet: Anmeldung mit dem Claude-Konto (Abo) wählen, danach /exit tippen."
+                "$CLAUDE" < /dev/tty
+            fi
         fi
     fi
 fi

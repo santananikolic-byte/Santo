@@ -1,6 +1,6 @@
 # JARVIS – Status
 
-Stand: 31.10.2026. Dieser Stand wird nach jeder Stufe nachgeführt.
+Stand: 05.11.2026. Dieser Stand wird nach jeder Stufe nachgeführt.
 
 Bedeutung der Stände:
 
@@ -17,7 +17,8 @@ Bedeutung der Stände:
 | Gedächtnis (SQLite): Fakten, Aufgaben, Erinnerungen, Gespräche, Aufträge, Audit; Bereiche Geschäft/Privat getrennt; Import aus `BRAIN.md`; Export; Löschen; tägliche Sicherung; Datenbank-Migration (neue Spalten rüsten sich bei einer schon bestehenden Datenbank selbst nach) | Getestet | `tests/test_speicher.py` (34) |
 | Kundenstatus (CRM-Kern) für Kontakte: Stufen Neu → Kontaktiert → Interessiert → Angebot → Gewonnen/Verloren, in der Oberfläche änderbar, JARVIS liest sie nur und setzt sie nie selbst | Getestet | `jarvis_core/api.py` (`PIPELINE_STUFEN`); lokal in der Datenbank - **kein echtes CRM mit Postfach, Telefon oder Kalender** |
 | Denken über Claude Code mit dem Abo (kein API-Schlüssel), Modell je Aufgabe, Ausweichen bei Limit, Abbruch, Token-Zählung | Getestet (simuliert) | `tests/test_provider.py` (16). **Echter Aufruf auf dem iMac nicht verifiziert.** Alle verwendeten Startoptionen (`--tools ""`, `--safe-mode`, `--system-prompt`, `--output-format json`, `--model`, `--allowedTools` …) wurden gegen die echte Hilfe von Claude Code 2.1.316 geprüft, derselben Version wie auf deinem iMac; unbekannte Zusatzoptionen lässt JARVIS selbständig weg |
-| Eigenes lokales Gehirn (Ollama) als Alternative zu Claude: Umschalter `gehirn` (claude/lokal), Modellwahl, nur lokale Adresse (127.0.0.1/localhost) erlaubt, Websuche/Recherche bleibt bei Claude | Getestet (simuliert) | `tests/test_lokal.py` (10) mit einem Ersatz-Ollama. **Echtes Ollama auf deinem Mac nicht verifiziert** – zum Nutzen: Ollama installieren und ein Modell laden. Ein lokales Modell ist deutlich schwächer als Claude; Standard bleibt darum Claude |
+| Eigenes lokales Gehirn (Ollama) als Alternative zu Claude: Umschalter `gehirn` (claude/lokal) im Leitstand, Modellwahl, nur lokale Adresse (127.0.0.1/localhost) erlaubt, Websuche/Recherche bleibt bei Claude; der Systemcheck richtet sich nach dem gewählten Gehirn | Getestet (simuliert) | `tests/test_lokal.py` (10) mit einem Ersatz-Ollama, Systemcheck in `tests/test_kern.py`. **Echtes Ollama auf deinem Mac nicht verifiziert** – zum Nutzen: Ollama installieren und ein Modell laden. Ein lokales Modell ist deutlich schwächer als Claude; Standard bleibt darum Claude |
+| **Mac-Paket `jarvis-mac.zip`** (Aufbau wie die alte Vorlage „jarvis-mac“): `JARVIS.command` richtet beim ersten Doppelklick Python, Claude Code und die Anmeldung mit dem Abo (`claude auth login --claudeai`) ein – jede Installation nur nach Ja –, `EXTRAS.command` mit Nummernmenü, `JARVIS-BEENDEN.command`, `ANLEITUNG.txt`. Kein API-Schlüssel, keine Passwörter, keine Zusatzpakete | Getestet (in der Entwicklungsumgebung entpackt und ausgeführt, mit Ersatz-Claude) | `tests/test_paket.py` (7), u. a.: ohne Ja wird nichts installiert, Meldungen sind nicht geschönt. Der Anmeldebefehl wurde gegen die echte Hilfe von Claude Code 2.1.318 geprüft. **Auf deinem Mac nicht verifiziert** – nur dort prüfbar: Gatekeeper-Sperre beim ersten Öffnen, das Apple-Fenster für Python, `open` für den Browser |
 | Echter Probelauf: echtes Claude Code 2.1.316 (Modell haiku, Entwicklungsumgebung) durch den echten Agenten | **Verifiziert** (dort, nicht auf deinem Mac) | Format der Ausgabe, Startoptionen, Profilwissen, Datei anlegen, Erinnerung, ehrliche Ablehnung von „E-Mail senden“, gültiger Plan; Details in `SELBSTPRUEFUNG.md` |
 | Werkzeuge (Dateien in der Werkstatt, Aufgaben, Erinnerungen, Merken, Recherche, Mac-Umgebung, Auftrag planen) und Berechtigung in drei Stufen, Freigaben mit Vorschau, Sperren, Notstopp | Getestet | `tests/test_agent.py` (34) |
 | Rolle **Vertrieb/Akquise**: sucht Aufträge/Kunden über öffentliche Quellen, prüft die Firma, schlägt Treffer als Kontakt vor (neue Fakt-Art „kontakt“), entwirft Anschreiben in der Werkstatt | Getestet (simuliert) | `jarvis_core/rollen.py`; **sendet nichts** - kein E-Mail-, Telefon- oder Kalenderzugriff angebunden (siehe unten) |
@@ -28,7 +29,7 @@ Bedeutung der Stände:
 | Spracheingabe „Hey Jarvis“ (Erkennung durch den Browser) | Logik getestet mit simuliertem Erkenner | echte Erkennung nicht verifiziert; nur direkt auf dem Mac möglich (sicherer Kontext) |
 | Handy im WLAN | Gebaut | `./jarvis.sh lan an`; nur unverschlüsseltes http; Spracheingabe dort nicht möglich; nicht auf einem echten Handy verifiziert |
 
-Zusammen: **175 automatische Tests** (unter Python 3.8 und 3.9, die Python-Versionen, die Apple auf dem Mac mitliefert) und 63 Prüfpunkte im Browser, alle grün.
+Zusammen: **183 automatische Tests** (unter Python 3.8 und 3.9, die Python-Versionen, die Apple auf dem Mac mitliefert) und 63 Prüfpunkte im Browser, alle grün.
 
 ## Was es nicht gibt (und warum)
 

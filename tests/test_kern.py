@@ -669,6 +669,40 @@ class SkriptTest(Umgebung):
         self.assertIn("nicht installiert", keins.stdout)
         self.assertIn("claude.ai/install.sh", keins.stdout)  # die Lösung steht dabei
 
+    def test_systemcheck_mit_eigenem_gehirn(self):
+        """Mit gehirn=lokal blockiert nur ein fehlendes lokales Modell; fehlt Claude, geht nur die Recherche nicht."""
+        from http.server import ThreadingHTTPServer
+
+        from tests.hilfen import freier_port
+        from tests.test_lokal import OllamaHandler
+
+        def einstellen(adresse):
+            os.makedirs(os.environ["JARVIS_DATEN"], exist_ok=True)
+            with open(os.path.join(os.environ["JARVIS_DATEN"], "config.json"), "w", encoding="utf-8") as f:
+                json.dump({"gehirn": "lokal", "lokales_modell": "testmodell", "ollama_adresse": adresse}, f)
+
+        einstellen("http://127.0.0.1:%d" % freier_port())  # dort läuft kein Ollama
+        ohne = self.skript("pruefen")
+        self.assertEqual(ohne.returncode, 1, ohne.stdout)
+        self.assertIn("eigene lokale Modell ist nicht bereit", ohne.stdout)
+        self.assertIn("Ollama", ohne.stdout)
+
+        port = freier_port()
+        ollama = ThreadingHTTPServer(("127.0.0.1", port), OllamaHandler)
+        ollama.modelle, ollama.antwort, ollama.letzte = ["testmodell:latest"], "ok", None
+        threading.Thread(target=ollama.serve_forever, daemon=True).start()
+        try:
+            einstellen("http://127.0.0.1:%d" % port)
+            os.environ["JARVIS_CLAUDE"] = os.path.join(self.ordner, "gibtsnicht")
+            mit = self.skript("pruefen")
+        finally:
+            ollama.shutdown()
+            ollama.server_close()
+        self.assertEqual(mit.returncode, 0, mit.stdout)  # denkt lokal: bereit, obwohl Claude fehlt
+        self.assertIn("Gehirn: eigenes lokales Modell", mit.stdout)
+        self.assertIn("nur die Recherche im Internet geht so nicht", mit.stdout)
+        self.assertIn("Alles bereit", mit.stdout)
+
     def test_befehle_ohne_server(self):
         self.assertEqual(self.skript("notstopp").returncode, 1)
         self.assertEqual(self.skript("frage", "Hallo").returncode, 1)
