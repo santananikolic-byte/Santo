@@ -1,0 +1,30 @@
+{
+  "enabledPlugins": {
+    "unity@anthropic-plugin-directory": true,
+    "engineering@anthropic-plugin-directory": true,
+    "superpowers@anthropic-plugin-directory": true,
+    "feature-dev@anthropic-plugin-directory": true,
+    "pr-review-toolkit@anthropic-plugin-directory": true,
+    "security-guidance@anthropic-plugin-directory": true,
+    "frontend-design@anthropic-plugin-directory": true,
+    "commit-commands@anthropic-plugin-directory": true,
+    "unreal-engine-skills@anthropic-plugin-directory": true,
+    "session-orchestration@anthropic-plugin-directory": true,
+    "solofounder@anthropic-plugin-directory": true,
+    "founder-os@anthropic-plugin-directory": true,
+    "cofounders@anthropic-plugin-directory": true,
+    "agent-protocols@anthropic-plugin-directory": true,
+    "agentic-sdlc-kit@anthropic-plugin-directory": true,
+    "coding-agent-skills@anthropic-plugin-directory": true,
+    "agent-design@anthropic-plugin-directory": true,
+    "agent-debugging@anthropic-plugin-directory": true,
+    "agent-architecture-designer@anthropic-plugin-directory": true,
+    "agentic-council@anthropic-plugin-directory": true,
+    "cairn-memory@anthropic-plugin-directory": true,
+    "unity-perf@anthropic-plugin-directory": true,
+    "llm-secure-patterns@anthropic-plugin-directory": true,
+    "rag-evaluation@anthropic-plugin-directory": true,
+    "verified-security-sweep@anthropic-plugin-directory": true,
+    "source-of-truth@anthropic-plugin-directory": true
+  }
+}
