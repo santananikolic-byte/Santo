@@ -15,6 +15,7 @@ Annahmen von Claude (nicht vom Besitzer festgelegt, darum hier änderbar):
 - Höhe der Miete pro Tag, Anteil an jeder Einnahme, Reserve beim Kopieren, Höchstzahl an Agenten.
 """
 
+import re
 from dataclasses import dataclass, asdict, field
 
 EURO = 100  # Cent
@@ -29,15 +30,12 @@ def euro(cent):
 
 def cent_aus_text(text):
     """'5', '5,50', '5.50' -> Cent. Wirft ValueError bei Unsinn oder negativen Beträgen."""
-    t = str(text).strip().replace("€", "").replace(" ", "").replace(",", ".")
-    if not t or t.count(".") > 1:
-        raise ValueError(f"Kein Betrag: {text!r}")
+    t = str(text).strip().removesuffix("€").strip().replace(",", ".")
+    # Nur ASCII-Ziffern, keine Leerzeichen mitten in der Zahl ('1 000' ist eher ein Tippfehler als 1000 €).
+    if not re.fullmatch(r"[0-9]+(\.[0-9]{1,2})?", t):
+        raise ValueError(f"Kein Betrag: {text!r} (so schreiben: 12,50)")
     ganz, _, rest = t.partition(".")
-    if not ganz.isdigit() and ganz != "":
-        raise ValueError(f"Kein Betrag: {text!r}")
-    if rest and (not rest.isdigit() or len(rest) > 2):
-        raise ValueError(f"Kein Betrag: {text!r}")
-    cent = int(ganz or "0") * 100 + int((rest + "00")[:2] or "0")
+    cent = int(ganz) * 100 + int((rest + "00")[:2])
     if cent <= 0:
         raise ValueError("Betrag muss größer als 0 sein.")
     return cent
