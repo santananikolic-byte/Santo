@@ -1,0 +1,663 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Überlebens-Agent</title>
+<style>
+:root{
+  --bg:#f6f5f2; --card:#ffffff; --text:#1d1d1f; --muted:#5f6368; --line:#dcdad5;
+  --accent:#1f5fbf; --accent-text:#ffffff; --ok:#1e7d3a; --warn:#b26a00; --bad:#b3261e;
+  --bar-bg:#e8e6e1; --hint-bg:#fff4d6; --hint-line:#e0b84a; --chart:#1f5fbf; --chart2:#1e7d3a;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#141517; --card:#1f2124; --text:#eceae6; --muted:#a3a7ad; --line:#383b40;
+    --accent:#6ea2ff; --accent-text:#0d1420; --ok:#5cc47a; --warn:#f0a93b; --bad:#ff7a70;
+    --bar-bg:#2d3035; --hint-bg:#3a3017; --hint-line:#8c6d1f; --chart:#6ea2ff; --chart2:#5cc47a;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#141517; --card:#1f2124; --text:#eceae6; --muted:#a3a7ad; --line:#383b40;
+  --accent:#6ea2ff; --accent-text:#0d1420; --ok:#5cc47a; --warn:#f0a93b; --bad:#ff7a70;
+  --bar-bg:#2d3035; --hint-bg:#3a3017; --hint-line:#8c6d1f; --chart:#6ea2ff; --chart2:#5cc47a;
+}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:16px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;overflow-x:hidden}
+main{max-width:860px;margin:0 auto;padding:16px}
+h1{font-size:1.6rem;margin:4px 0 8px;line-height:1.2}
+h2{font-size:1.2rem;margin:0 0 10px}
+.hinweis{background:var(--hint-bg);border:1px solid var(--hint-line);border-radius:10px;padding:12px 14px;font-weight:600;margin:0 0 16px}
+.karte{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px;margin:0 0 16px}
+.unter{color:var(--muted);font-size:.92rem;margin:0 0 12px}
+.felder{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px}
+label.feld{display:flex;flex-direction:column;gap:4px;font-size:.92rem;color:var(--muted);min-width:0}
+label.feld input{font:inherit;color:var(--text);background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:10px;width:100%;min-height:44px}
+label.haken{display:flex;align-items:center;gap:10px;min-height:44px;font-size:.95rem}
+label.haken input{width:22px;height:22px}
+details summary{cursor:pointer;font-weight:600;min-height:44px;display:flex;align-items:center}
+.knoepfe{display:flex;flex-wrap:wrap;gap:10px;margin-top:4px}
+button{font:inherit;font-weight:600;border-radius:10px;border:1px solid var(--accent);background:var(--accent);color:var(--accent-text);padding:12px 18px;min-height:48px;cursor:pointer}
+button.zweit{background:transparent;color:var(--accent)}
+button:disabled{opacity:.5;cursor:default}
+select{font:inherit;color:var(--text);background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:10px;min-height:48px}
+.fehler{color:var(--bad);font-weight:600;margin:10px 0 0}
+.leiste{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin:12px 0}
+.kennzahlen{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px;margin:10px 0}
+.zahl{background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:10px}
+.zahl b{display:block;font-size:1.35rem;line-height:1.2}
+.zahl span{font-size:.85rem;color:var(--muted)}
+.gross b{color:var(--ok)}
+.agenten{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:10px}
+.agent{border:1px solid var(--line);border-radius:10px;padding:10px;background:var(--bg);min-width:0}
+.agent.tot{opacity:.7}
+.agent h3{margin:0 0 4px;font-size:1rem;display:flex;justify-content:space-between;gap:8px}
+.status{font-size:.82rem;font-weight:700;padding:2px 8px;border-radius:99px;white-space:nowrap}
+.status.lebt{color:var(--ok);border:1px solid var(--ok)}
+.status.tot{color:var(--bad);border:1px solid var(--bad)}
+.balken{height:14px;background:var(--bar-bg);border-radius:7px;overflow:hidden;margin:6px 0}
+.balken i{display:block;height:100%;background:var(--ok);transition:width .15s}
+.balken i.knapp{background:var(--warn)}
+.balken i.leer{background:var(--bad)}
+.agent p{margin:2px 0;font-size:.88rem;overflow-wrap:anywhere}
+.agent .grau{color:var(--muted)}
+.protokoll{max-height:300px;overflow-y:auto;border:1px solid var(--line);border-radius:10px;padding:8px 10px;background:var(--bg);font-size:.88rem}
+.protokoll div{padding:3px 0;border-bottom:1px solid var(--line);overflow-wrap:anywhere}
+.protokoll div:last-child{border-bottom:0}
+.protokoll .std{color:var(--muted);font-variant-numeric:tabular-nums}
+.protokoll .rot{color:var(--bad);font-weight:600}
+.protokoll .gruen{color:var(--ok);font-weight:600}
+.fortschritt{height:10px;background:var(--bar-bg);border-radius:5px;overflow:hidden;margin:8px 0}
+.fortschritt i{display:block;height:100%;width:0;background:var(--accent)}
+svg{display:block;width:100%;height:auto}
+svg text{fill:var(--muted);font-size:14px}
+.bedeutung ul{margin:0;padding-left:20px}
+.bedeutung li{margin:0 0 8px}
+.klein{font-size:.85rem;color:var(--muted)}
+</style>
+</head>
+<body>
+<main>
+  <h1>Überlebens-Agent</h1>
+  <p class="hinweis">Simulation mit Spielgeld. Der Markt ist ausgedacht – alle Marktzahlen sind Annahmen, keine echten Daten.</p>
+
+  <section class="karte">
+    <h2>Einstellungen</h2>
+    <p class="unter">Beträge in Euro (z. B. 10 oder 2,50). Die Standardwerte sind dieselben wie im Python-Programm.</p>
+    <div class="felder">
+      <label class="feld">Startbudget (€)<input id="startbudget" inputmode="decimal" value="10"></label>
+      <label class="feld">Kosten pro Schritt (€)<input id="kosten" inputmode="decimal" value="1"></label>
+      <label class="feld">Miete pro Tag (€)<input id="miete" inputmode="decimal" value="1"></label>
+      <label class="feld">Besitzer-Anteil (%)<input id="anteil" inputmode="numeric" value="20"></label>
+      <label class="feld">Kopie-Reserve (€)<input id="reserve" inputmode="decimal" value="5"></label>
+      <label class="feld">Max. Agenten<input id="maxagenten" inputmode="numeric" value="10"></label>
+      <label class="feld">Max. Generation<input id="maxgen" inputmode="numeric" value="5"></label>
+      <label class="feld">Tage<input id="tage" inputmode="numeric" value="30"></label>
+    </div>
+    <details style="margin-top:12px" open>
+      <summary>Ausgedachter Markt (Annahmen)</summary>
+      <div class="felder">
+        <label class="feld">Verkaufschance max (%)<input id="chance" inputmode="numeric" value="25"></label>
+        <label class="feld">Preis min (€)<input id="preismin" inputmode="decimal" value="5"></label>
+        <label class="feld">Preis max (€)<input id="preismax" inputmode="decimal" value="40"></label>
+        <label class="feld">Bauschritte min<input id="baumin" inputmode="numeric" value="3"></label>
+        <label class="feld">Bauschritte max<input id="baumax" inputmode="numeric" value="12"></label>
+        <label class="feld">Zufallszahl (Seed)<input id="seed" inputmode="numeric" value="1"></label>
+      </div>
+    </details>
+    <label class="haken"><input type="checkbox" id="kopieren" checked> Agenten dürfen sich kopieren</label>
+    <p class="fehler" id="fehler" hidden></p>
+  </section>
+
+  <section class="karte">
+    <h2>Ein Leben ansehen</h2>
+    <p class="unter">Jeder Schritt ist eine Stunde. Gleiche Zufallszahl = gleiches Leben.</p>
+    <div class="knoepfe">
+      <button id="btnLeben">Ein Leben abspielen</button>
+      <button id="btnPause" class="zweit" disabled>Pause</button>
+      <button id="btnNeuSeed" class="zweit">Neue Zufallszahl</button>
+    </div>
+    <div class="leiste">
+      <label for="tempo">Geschwindigkeit:</label>
+      <select id="tempo">
+        <option value="2">langsam (2 Std./Sek.)</option>
+        <option value="8" selected>normal (8 Std./Sek.)</option>
+        <option value="30">schnell (30 Std./Sek.)</option>
+        <option value="200">sehr schnell (200 Std./Sek.)</option>
+      </select>
+    </div>
+    <div class="kennzahlen">
+      <div class="zahl"><b id="kUhr">–</b><span>Uhr</span></div>
+      <div class="zahl"><b id="kLebend">–</b><span>Agenten lebend / gesamt</span></div>
+      <div class="zahl gross"><b id="kBekommen">0,00 €</b><span>Du hast bekommen</span></div>
+      <div class="zahl"><b id="kVerkaeufe">0</b><span>Verkäufe</span></div>
+    </div>
+    <p id="lebenEnde" class="unter" hidden></p>
+    <div class="agenten" id="agenten"></div>
+    <h2 style="margin-top:16px">Was passiert ist</h2>
+    <div class="protokoll" id="protokoll"><div class="grau">Noch nichts. Drück „Ein Leben abspielen“.</div></div>
+  </section>
+
+  <section class="karte">
+    <h2>1000 Leben durchrechnen</h2>
+    <p class="unter">Rechnet 1000 Leben mit denselben Einstellungen (Zufallszahl = Seed). Gezählt wird beim ersten Agenten A1.</p>
+    <div class="knoepfe"><button id="btnViele">1000 Leben durchrechnen</button></div>
+    <div class="fortschritt" id="mcBalken" hidden><i></i></div>
+    <p id="mcStatus" class="unter" hidden></p>
+    <div id="mcErgebnis" hidden>
+      <div class="kennzahlen">
+        <div class="zahl"><b id="mQuote">–</b><span>Kolonie lebt am Ende noch</span></div>
+        <div class="zahl"><b id="mOhne">–</b><span>ohne einen einzigen Verkauf</span></div>
+        <div class="zahl"><b id="mLeben">–</b><span>Lebensdauer A1 (Median)</span></div>
+        <div class="zahl"><b id="mAgenten">–</b><span>Agenten pro Kolonie (Schnitt)</span></div>
+        <div class="zahl gross"><b id="mMedian">–</b><span>Für dich: Median</span></div>
+        <div class="zahl"><b id="mSchnitt">–</b><span>Für dich: Schnitt</span></div>
+        <div class="zahl"><b id="mBest">–</b><span>Für dich: bester Lauf</span></div>
+      </div>
+      <h2 style="margin-top:12px">Wie lange lebt der erste Agent?</h2>
+      <p class="unter" id="mcAchse"></p>
+      <div id="diagramm"></div>
+    </div>
+  </section>
+
+  <section class="karte bedeutung">
+    <h2>Was das bedeutet</h2>
+    <ul id="bedeutung"></ul>
+  </section>
+  <p class="klein">Regeln nachgebaut aus dem Python-Paket „ueberleben“ (regeln.py, kolonie.py, welt.py, gehirne.py, simulation.py). Der Zufall ist ein anderer als in Python, die Ergebnisse weichen darum im Einzelnen ab, die Regeln sind dieselben.</p>
+</main>
+
+<script>
+"use strict";
+// ---------------------------------------------------------------- Hilfen ---
+function euro(cent){ // wie regeln.euro: ganze Cent -> "10,50 €"
+  const vz = cent < 0 ? "-" : "";
+  const c = Math.abs(Math.trunc(cent));
+  return vz + Math.floor(c / 100) + "," + String(c % 100).padStart(2, "0") + " €";
+}
+function mulberry32(a){
+  return function(){
+    a |= 0; a = a + 0x6D2B79F5 | 0;
+    let t = Math.imul(a ^ a >>> 15, 1 | a);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+class Zufall{
+  constructor(saat){ this.r = mulberry32(saat >>> 0); }
+  randint(a, b){ return a + Math.floor(this.r() * (b - a + 1)); } // wie random.randint: a und b inklusive
+  choice(liste){ return liste[Math.floor(this.r() * liste.length)]; }
+}
+class RegelVerstoss extends Error{}
+const fdiv = (a, b) => Math.floor(a / b); // Python //
+
+// ---------------------------------------------------------------- Welt ---
+const IDEEN = [
+  "Bewerbungsschreiben-Service", "Übersetzungen Deutsch-Englisch", "Produktbeschreibungen für Online-Shops",
+  "Social-Media-Texte für Handwerker", "Lebenslauf-Vorlagen", "Excel-Vorlagen für Kleinbetriebe",
+  "Reinigungs-Checklisten als PDF", "Angebotsvorlagen für Bau und Reinigung", "Kurzvideo-Skripte",
+  "Google-Bewertungen beantworten (Textentwürfe)",
+];
+const BESITZER = "besitzer", BETRIEB = "betrieb", AUSSEN = "aussen";
+
+class SimWelt{
+  constructor(a, zufall){ this.a = a; this.z = zufall; }
+  neueIdee(){
+    const z = this.z, a = this.a;
+    return { name: z.choice(IDEEN), qualitaet: z.randint(5, 100), bau_bedarf: z.randint(a.bau_min, a.bau_max),
+             preis: z.randint(fdiv(a.preis_min, 50), fdiv(a.preis_max, 50)) * 50 };
+  }
+  handeln(k, agent, e){
+    const z = this.z, a = this.a;
+    if (e.aktion === "idee"){
+      if (!agent.idee){
+        agent.idee = this.neueIdee(); agent.fortschritt = 0;
+        k.log(agent.id, `hat eine Idee: ${agent.idee.name} (Qualität ${agent.idee.qualitaet}).`);
+      } else if (z.randint(1, 100) <= a.idee_verbessern_chance){
+        agent.idee.qualitaet = Math.min(100, agent.idee.qualitaet + z.randint(5, 20));
+        k.log(agent.id, `verbessert die Idee auf Qualität ${agent.idee.qualitaet}.`);
+      } else if (e.details && e.details.neu){
+        agent.idee = this.neueIdee(); agent.fortschritt = 0;
+        k.log(agent.id, `wirft die Idee weg, neue: ${agent.idee.name}.`);
+      } else {
+        k.log(agent.id, "grübelt ohne Ergebnis.");
+      }
+    } else if (e.aktion === "bauen"){
+      if (!agent.idee){ k.log(agent.id, "will bauen, hat aber keine Idee - Stunde verschenkt."); return; }
+      agent.fortschritt += 1;
+      k.log(agent.id, `baut (${agent.fortschritt}/${agent.idee.bau_bedarf}).`);
+    } else if (e.aktion === "verkaufen"){
+      if (!agent.idee || agent.fortschritt < agent.idee.bau_bedarf){
+        k.log(agent.id, "will verkaufen, das Angebot ist aber nicht fertig - niemand kauft."); return;
+      }
+      const chance = fdiv(a.verkaufschance_max * agent.idee.qualitaet, 100);
+      if (z.randint(1, 100) <= chance) k.einnahme(agent, agent.idee.preis, `Verkauf ${agent.idee.name}`);
+      else k.log(agent.id, `findet keinen Käufer (Chance ${chance} %).`);
+    }
+  }
+}
+
+// ---------------------------------------------------------------- Gehirn ---
+class RegelGehirn{
+  constructor(zufall, kopierfreude){ this.z = zufall; this.kopierfreude = kopierfreude; this.neugier = 10; }
+  entscheiden(s){
+    const start = s.regeln.startbudget;
+    if (this.kopierfreude && s.kopie_moeglich && s.guthaben >= 3 * start)
+      return { aktion: "kopieren", begruendung: "genug Geld für eine Kopie mit Reserve", details: {} };
+    if (s.guthaben >= 5 * start)
+      return { aktion: "auszahlen", begruendung: "Überschuss an den Besitzer", details: { betrag: s.guthaben - 3 * start } };
+    const idee = s.idee;
+    if (!idee) return { aktion: "idee", begruendung: "braucht eine Geschäftsidee", details: {} };
+    if (this.z.randint(1, 100) <= this.neugier) return { aktion: "idee", begruendung: "Idee verbessern", details: {} };
+    if (s.fortschritt < (idee.bau_bedarf || 0)){
+      const rest = idee.bau_bedarf - s.fortschritt;
+      if (rest > s.schritte_uebrig) return { aktion: "idee", begruendung: "Angebot wird nicht rechtzeitig fertig, neue Idee", details: { neu: true } };
+      return { aktion: "bauen", begruendung: "Angebot fertigstellen", details: {} };
+    }
+    return { aktion: "verkaufen", begruendung: "Angebot ist fertig, Käufer suchen", details: {} };
+  }
+}
+
+// ---------------------------------------------------------------- Kolonie ---
+class Kolonie{
+  constructor(regeln, mitProtokoll){
+    this.r = regeln; this.stunde = 0; this.agenten = new Map(); this.ereignisse = [];
+    this.mitProtokoll = !!mitProtokoll; this.journal = mitProtokoll ? [] : null;
+    this.naechsteId = 1; this.besitzerBekommen = 0; this.verkaeufe = 0;
+  }
+  lebende(){ const l = []; for (const a of this.agenten.values()) if (a.gestorben < 0) l.push(a); return l; }
+  log(id, text){ if (this.mitProtokoll) this.ereignisse.push({ stunde: this.stunde, agent: id, text }); }
+  buchen(von, an, betrag, art, text){
+    betrag = Math.trunc(betrag);
+    if (betrag <= 0) return;
+    const va = this.agenten.get(von), aa = this.agenten.get(an);
+    if (va) va.guthaben -= betrag;
+    if (aa) aa.guthaben += betrag;
+    if (an === BESITZER) this.besitzerBekommen += betrag;
+    if (von === BESITZER) this.besitzerBekommen -= betrag;
+    if (art === "einnahme") this.verkaeufe += 1;
+    if (this.journal) this.journal.push({ stunde: this.stunde, von, an, betrag, art, text });
+  }
+  todescheck(agent, ursache){
+    if (agent.gestorben < 0 && agent.guthaben <= 0){
+      agent.gestorben = this.stunde; agent.todesursache = ursache;
+      this.log(agent.id, `ist tot (${ursache}). Guthaben ${euro(agent.guthaben)}.`);
+      return true;
+    }
+    return false;
+  }
+  neuerAgent(eltern, generation){
+    const a = { id: "A" + this.naechsteId, eltern, generation, geboren: this.stunde, gestorben: -1, todesursache: "",
+                guthaben: 0, schritte: 0, eingenommen: 0, an_besitzer: 0, idee: null, fortschritt: 0, kinder: [] };
+    this.naechsteId += 1; this.agenten.set(a.id, a); return a;
+  }
+  gruenden(){
+    const a = this.neuerAgent("", 0);
+    this.buchen(AUSSEN, a.id, this.r.startbudget, "start", "Startbudget vom Besitzer");
+    this.log(a.id, `wurde gegründet mit ${euro(this.r.startbudget)}.`);
+    return a;
+  }
+  kopieMoeglich(agent){
+    const r = this.r;
+    if (agent.gestorben >= 0) return "Tote Agenten können sich nicht kopieren.";
+    if (this.lebende().length >= r.max_agenten) return `Höchstzahl von ${r.max_agenten} lebenden Agenten erreicht.`;
+    if (agent.generation + 1 > r.max_generation) return `Höchstens ${r.max_generation} Generationen.`;
+    const noetig = r.startbudget + r.kosten_pro_schritt + r.kopie_reserve;
+    if (agent.guthaben < noetig) return `Zu wenig Geld: nötig ${euro(noetig)} (Startbudget + Schritt + Reserve), da sind ${euro(agent.guthaben)}.`;
+    return "";
+  }
+  kopieren(agent){
+    const grund = this.kopieMoeglich(agent);
+    if (grund) throw new RegelVerstoss(grund);
+    const kind = this.neuerAgent(agent.id, agent.generation + 1);
+    kind.idee = agent.idee ? Object.assign({}, agent.idee) : null; // erbt das Wissen, nicht den Fortschritt
+    agent.kinder.push(kind.id);
+    this.buchen(agent.id, kind.id, this.r.startbudget, "kopie", `Startbudget für ${kind.id}`);
+    this.log(agent.id, `hat sich kopiert: ${kind.id} startet mit ${euro(this.r.startbudget)}.`);
+    return kind;
+  }
+  einnahme(agent, betrag, text){
+    if (agent.gestorben >= 0) throw new RegelVerstoss(`${agent.id} ist tot und kann nichts mehr einnehmen.`);
+    this.buchen(AUSSEN, agent.id, betrag, "einnahme", text);
+    agent.eingenommen += betrag;
+    const anteil = fdiv(betrag * this.r.besitzer_anteil_prozent, 100);
+    if (anteil){
+      this.buchen(agent.id, BESITZER, anteil, "anteil", `${this.r.besitzer_anteil_prozent} % von ${euro(betrag)}`);
+      agent.an_besitzer += anteil;
+    }
+    this.log(agent.id, `hat ${euro(betrag)} eingenommen (${text}). Anteil Besitzer ${euro(anteil)}.`);
+  }
+  auszahlen(agent, betrag){
+    betrag = Math.min(Math.trunc(betrag || 0), agent.guthaben - this.r.kosten_pro_schritt - 1);
+    if (betrag <= 0) throw new RegelVerstoss("Nach der Auszahlung bliebe nichts übrig - der Agent würde sterben.");
+    this.buchen(agent.id, BESITZER, betrag, "auszahlung", "freiwillige Auszahlung");
+    agent.an_besitzer += betrag;
+    this.log(agent.id, `zahlt dem Besitzer ${euro(betrag)} aus.`);
+    return betrag;
+  }
+  miete(){
+    for (const a of this.lebende()){
+      const betrag = this.r.miete_pro_tag;
+      this.buchen(a.id, BESITZER, betrag, "miete", `Miete Tag ${fdiv(this.stunde, 24)}`);
+      a.an_besitzer += betrag;
+      this.todescheck(a, "Miete nicht bezahlbar");
+    }
+  }
+  sicht(agent){
+    const r = this.r;
+    return { id: agent.id, generation: agent.generation, stunde: this.stunde, guthaben: agent.guthaben,
+             schritte_uebrig: Math.max(0, fdiv(agent.guthaben - 1, r.kosten_pro_schritt)),
+             idee: agent.idee ? Object.assign({}, agent.idee) : null, fortschritt: agent.fortschritt,
+             eingenommen: agent.eingenommen, lebende_agenten: this.lebende().length,
+             kopie_moeglich: !this.kopieMoeglich(agent), regeln: r };
+  }
+  runde(gehirn, welt){
+    this.stunde += this.r.stunden_pro_schritt;
+    for (const agent of this.lebende()){ // feste Liste vom Rundenbeginn: neue Kopien handeln erst nächste Runde
+      if (agent.geboren === this.stunde) continue;
+      const e = gehirn.entscheiden(this.sicht(agent));
+      this.ausfuehren(agent, e, welt);
+    }
+    if (this.stunde % 24 === 0) this.miete();
+  }
+  ausfuehren(agent, e, welt){
+    if (e.aktion === "warten"){ this.log(agent.id, "wartet."); return; }
+    agent.schritte += 1;
+    try {
+      if (e.aktion === "kopieren") this.kopieren(agent);
+      else if (e.aktion === "auszahlen") this.auszahlen(agent, (e.details || {}).betrag || 0);
+      else welt.handeln(this, agent, e);
+    } catch (f){
+      if (!(f instanceof RegelVerstoss)) throw f;
+      this.log(agent.id, `wollte '${e.aktion}', geht nicht: ${f.message}`);
+    }
+    // Die Stunde Arbeit kostet in jedem Fall - auch wenn die Aktion nicht geklappt hat.
+    this.buchen(agent.id, BETRIEB, this.r.kosten_pro_schritt, "schritt", e.aktion);
+    this.todescheck(agent, "Geld für den nächsten Schritt aufgebraucht");
+  }
+  pruefen(){ // wie Kolonie.pruefen: Buchhaltung stimmt?
+    if (!this.journal) return true;
+    const summe = new Map();
+    for (const b of this.journal){
+      summe.set(b.von, (summe.get(b.von) || 0) - b.betrag);
+      summe.set(b.an, (summe.get(b.an) || 0) + b.betrag);
+    }
+    for (const a of this.agenten.values()){
+      if (a.guthaben !== (summe.get(a.id) || 0)) throw new Error(`${a.id}: Guthaben passt nicht zum Journal`);
+      if (a.gestorben >= 0 && this.journal.some(b => b.stunde > a.gestorben && (b.von === a.id || b.an === a.id)))
+        throw new Error(`${a.id} hat nach dem Tod noch gebucht`);
+    }
+    let gesamt = 0; for (const v of summe.values()) gesamt += v;
+    if (gesamt !== 0) throw new Error("Journal nicht ausgeglichen");
+    if ((summe.get(BESITZER) || 0) !== this.besitzerBekommen) throw new Error("Besitzer-Summe passt nicht");
+    return true;
+  }
+}
+
+// Wie simulation.ein_leben: ein gemeinsamer Zufall für Welt und Gehirn.
+function neuesLeben(einst, saat, mitProtokoll){
+  const zufall = new Zufall(saat);
+  const k = new Kolonie(einst.regeln, mitProtokoll);
+  k.gruenden();
+  return { k, welt: new SimWelt(einst.markt, zufall), gehirn: new RegelGehirn(zufall, einst.kopierfreude),
+           maxStunden: 24 * einst.tage };
+}
+function lebtNoch(l){ return l.k.lebende().length > 0 && l.k.stunde < l.maxStunden; }
+
+// ---------------------------------------------------------------- Eingaben ---
+const $ = id => document.getElementById(id);
+function centAusText(text, name, nullErlaubt){
+  const t = String(text).trim().replace("€", "").replace(/\s/g, "").replace(",", ".");
+  if (!/^\d*(\.\d{0,2})?$/.test(t) || t === "" || t === ".") throw new Error(`${name}: bitte einen Betrag eingeben, z. B. 10 oder 2,50.`);
+  const [g, rest = ""] = t.split(".");
+  const cent = parseInt(g || "0", 10) * 100 + parseInt((rest + "00").slice(0, 2), 10);
+  if (cent < 0 || (!nullErlaubt && cent === 0)) throw new Error(`${name} muss größer als 0 sein.`);
+  return cent;
+}
+function ganzzahl(text, name, min, max){
+  const t = String(text).trim();
+  if (!/^\d+$/.test(t)) throw new Error(`${name}: bitte eine ganze Zahl eingeben.`);
+  const n = parseInt(t, 10);
+  if (n < min || n > max) throw new Error(`${name} muss zwischen ${min} und ${max} liegen.`);
+  return n;
+}
+function einstellungenLesen(){
+  const regeln = {
+    startbudget: centAusText($("startbudget").value, "Startbudget"),
+    kosten_pro_schritt: centAusText($("kosten").value, "Kosten pro Schritt"),
+    stunden_pro_schritt: 1,
+    miete_pro_tag: centAusText($("miete").value, "Miete pro Tag", true),
+    besitzer_anteil_prozent: ganzzahl($("anteil").value, "Besitzer-Anteil", 0, 100),
+    kopie_reserve: centAusText($("reserve").value, "Kopie-Reserve", true),
+    max_agenten: ganzzahl($("maxagenten").value, "Max. Agenten", 1, 50),
+    max_generation: ganzzahl($("maxgen").value, "Max. Generation", 0, 20),
+  };
+  const markt = {
+    verkaufschance_max: ganzzahl($("chance").value, "Verkaufschance max", 0, 100),
+    preis_min: centAusText($("preismin").value, "Preis min"),
+    preis_max: centAusText($("preismax").value, "Preis max"),
+    bau_min: ganzzahl($("baumin").value, "Bauschritte min", 0, 1000),
+    bau_max: ganzzahl($("baumax").value, "Bauschritte max", 0, 1000),
+    idee_verbessern_chance: 30,
+  };
+  if (markt.preis_min > markt.preis_max) throw new Error("Preis min darf nicht größer als Preis max sein.");
+  if (markt.bau_min > markt.bau_max) throw new Error("Bauschritte min dürfen nicht größer als max sein.");
+  return { regeln, markt, kopierfreude: $("kopieren").checked,
+           tage: ganzzahl($("tage").value, "Tage", 1, 365), seed: ganzzahl($("seed").value, "Zufallszahl", 0, 4294967295) };
+}
+function fehlerZeigen(text){ const f = $("fehler"); f.textContent = text || ""; f.hidden = !text; }
+function lesenOderFehler(){
+  try { const e = einstellungenLesen(); fehlerZeigen(""); return e; }
+  catch (f){ fehlerZeigen(f.message); $("fehler").scrollIntoView({ block: "center" }); return null; }
+}
+
+// ---------------------------------------------------------------- Ein Leben ---
+let leben = null, timer = null, pausiert = false, gezeigt = 0, skala = 1, letzterTick = 0, schuld = 0;
+
+function uhrText(stunde){ return `Tag ${fdiv(stunde, 24) + 1}, ${String(stunde % 24).padStart(2, "0")}:00 Uhr`; }
+function esc(s){ return String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
+
+function karten(){
+  const k = leben.k;
+  for (const a of k.agenten.values()) skala = Math.max(skala, a.guthaben);
+  let html = "";
+  for (const a of k.agenten.values()){
+    const lebt = a.gestorben < 0;
+    const breite = lebt ? Math.max(0, Math.min(100, a.guthaben / skala * 100)) : 0;
+    const klasse = !lebt || a.guthaben <= k.r.kosten_pro_schritt ? "leer" : a.guthaben < k.r.startbudget / 2 ? "knapp" : "";
+    const idee = a.idee ? `${esc(a.idee.name)} <span class="grau">(Qualität ${a.idee.qualitaet}, Preis ${euro(a.idee.preis)})</span>` : '<span class="grau">noch keine</span>';
+    const fort = a.idee ? `${Math.min(a.fortschritt, a.idee.bau_bedarf)}/${a.idee.bau_bedarf} Schritte${a.fortschritt >= a.idee.bau_bedarf ? " – fertig" : ""}` : "–";
+    html += `<div class="agent${lebt ? "" : " tot"}">
+      <h3><span>${a.id} <span class="grau" style="font-weight:400">Gen. ${a.generation}${a.eltern ? ", von " + a.eltern : ""}</span></span>
+      <span class="status ${lebt ? "lebt" : "tot"}">${lebt ? "lebt" : "tot"}</span></h3>
+      <p><b>${euro(a.guthaben)}</b> Guthaben</p>
+      <div class="balken"><i class="${klasse}" style="width:${breite.toFixed(1)}%"></i></div>
+      ${lebt ? "" : `<p style="color:var(--bad)">Gestorben ${uhrText(a.gestorben)}: ${esc(a.todesursache)}</p>`}
+      <p>Idee: ${idee}</p>
+      <p>Fortschritt: ${fort}</p>
+      <p class="grau">Eingenommen ${euro(a.eingenommen)} · an dich ${euro(a.an_besitzer)} · ${a.schritte} Schritte</p>
+    </div>`;
+  }
+  $("agenten").innerHTML = html;
+}
+function protokollNachtragen(){
+  const k = leben.k, box = $("protokoll");
+  if (gezeigt === 0) box.innerHTML = "";
+  const frag = document.createDocumentFragment();
+  for (; gezeigt < k.ereignisse.length; gezeigt++){
+    const e = k.ereignisse[gezeigt];
+    const d = document.createElement("div");
+    const klasse = e.text.startsWith("ist tot") ? "rot" : (e.text.startsWith("hat ") && e.text.includes("eingenommen")) || e.text.startsWith("zahlt") ? "gruen" : "";
+    d.innerHTML = `<span class="std">${uhrText(e.stunde)}</span> · <b>${e.agent}</b> <span class="${klasse}">${esc(e.text)}</span>`;
+    frag.appendChild(d);
+  }
+  box.appendChild(frag);
+  while (box.children.length > 400) box.removeChild(box.firstChild);
+  box.scrollTop = box.scrollHeight;
+}
+function anzeigen(){
+  const k = leben.k;
+  $("kUhr").textContent = uhrText(k.stunde);
+  $("kLebend").textContent = `${k.lebende().length} / ${k.agenten.size}`;
+  $("kBekommen").textContent = euro(k.besitzerBekommen);
+  $("kVerkaeufe").textContent = k.verkaeufe;
+  karten(); protokollNachtragen();
+}
+function lebenBeenden(){
+  clearInterval(timer); timer = null;
+  const k = leben.k;
+  k.pruefen();
+  const lebend = k.lebende().length;
+  const ende = $("lebenEnde");
+  ende.hidden = false;
+  ende.textContent = lebend
+    ? `Ende nach ${leben.maxStunden / 24} Tagen: ${lebend} Agent(en) leben noch. Du hast ${euro(k.besitzerBekommen)} bekommen. Buchhaltung geprüft: stimmt.`
+    : `Alle Agenten sind tot (${uhrText(k.stunde)}). Du hast ${euro(k.besitzerBekommen)} bekommen. Buchhaltung geprüft: stimmt.`;
+  $("btnPause").disabled = true; $("btnPause").textContent = "Pause";
+  $("btnLeben").disabled = false;
+}
+function tick(){
+  if (pausiert || !leben) return;
+  const jetzt = performance.now();
+  const proSek = parseInt($("tempo").value, 10);
+  schuld += (jetzt - letzterTick) / 1000 * proSek; letzterTick = jetzt;
+  let n = Math.floor(schuld); schuld -= n;
+  while (n-- > 0 && lebtNoch(leben)) leben.k.runde(leben.gehirn, leben.welt);
+  anzeigen();
+  if (!lebtNoch(leben)) lebenBeenden();
+}
+function lebenStarten(){
+  const einst = lesenOderFehler(); if (!einst) return;
+  clearInterval(timer);
+  leben = neuesLeben(einst, einst.seed, true);
+  gezeigt = 0; skala = einst.regeln.startbudget; pausiert = false; schuld = 1; letzterTick = performance.now();
+  $("lebenEnde").hidden = true;
+  $("btnPause").disabled = false; $("btnPause").textContent = "Pause";
+  anzeigen();
+  timer = setInterval(tick, 50);
+}
+$("btnLeben").addEventListener("click", lebenStarten);
+$("btnPause").addEventListener("click", () => {
+  if (!timer) return;
+  pausiert = !pausiert;
+  $("btnPause").textContent = pausiert ? "Weiter" : "Pause";
+  letzterTick = performance.now();
+});
+$("btnNeuSeed").addEventListener("click", () => { $("seed").value = Math.floor(Math.random() * 1000000); });
+
+// ---------------------------------------------------------------- 1000 Leben ---
+function median(werte){ // wie statistics.median
+  const s = werte.slice().sort((a, b) => a - b), n = s.length;
+  if (!n) return 0;
+  return n % 2 ? s[(n - 1) / 2] : (s[n / 2 - 1] + s[n / 2]) / 2;
+}
+function stundenText(h){
+  const t = Math.floor(h / 24), r = h - t * 24;
+  const rt = Number.isInteger(r) ? r : r.toFixed(1).replace(".", ",");
+  return t ? `${h.toString().replace(".", ",")} Std. (${t} T. ${rt} Std.)` : `${h.toString().replace(".", ",")} Std.`;
+}
+function prozent(x){ return (x * 100).toFixed(1).replace(".", ",") + " %"; }
+
+function vieleLeben(){
+  const einst = lesenOderFehler(); if (!einst) return;
+  const ANZAHL = 1000, ergebnisse = [];
+  const btn = $("btnViele"); btn.disabled = true;
+  const balken = $("mcBalken"), status = $("mcStatus");
+  balken.hidden = false; status.hidden = false; balken.firstElementChild.style.width = "0%";
+  let i = 0;
+  function haeppchen(){
+    const bis = performance.now() + 25;
+    while (i < ANZAHL && performance.now() < bis){
+      const l = neuesLeben(einst, (einst.seed * 100003 + i) >>> 0, false);
+      while (lebtNoch(l)) l.k.runde(l.gehirn, l.welt);
+      const erster = l.k.agenten.get("A1");
+      ergebnisse.push({ ueberlebt: l.k.lebende().length > 0,
+        lebensdauer: erster.gestorben < 0 ? l.k.stunde : erster.gestorben,
+        agenten: l.k.agenten.size, besitzer: l.k.besitzerBekommen, verkaeufe: l.k.verkaeufe });
+      i++;
+    }
+    balken.firstElementChild.style.width = (i / ANZAHL * 100) + "%";
+    status.textContent = `${i} von ${ANZAHL} Leben gerechnet …`;
+    if (i < ANZAHL) setTimeout(haeppchen, 0);
+    else { zeigeErgebnis(ergebnisse, einst); btn.disabled = false; status.textContent = `${ANZAHL} Leben gerechnet, je höchstens ${einst.tage} Tage.`; }
+  }
+  setTimeout(haeppchen, 0);
+}
+function zeigeErgebnis(erg, einst){
+  const n = erg.length;
+  const besitzer = erg.map(e => e.besitzer);
+  $("mQuote").textContent = prozent(erg.filter(e => e.ueberlebt).length / n);
+  $("mOhne").textContent = prozent(erg.filter(e => e.verkaeufe === 0).length / n);
+  $("mLeben").textContent = stundenText(median(erg.map(e => e.lebensdauer)));
+  $("mAgenten").textContent = (erg.reduce((s, e) => s + e.agenten, 0) / n).toFixed(1).replace(".", ",");
+  $("mMedian").textContent = euro(median(besitzer));
+  $("mSchnitt").textContent = euro(fdiv(besitzer.reduce((s, b) => s + b, 0), n));
+  $("mBest").textContent = euro(Math.max(...besitzer));
+  $("mcErgebnis").hidden = false;
+  diagramm(erg, einst.tage);
+}
+function diagramm(erg, tage){
+  const maxStd = tage * 24;
+  const proBalken = Math.max(1, Math.ceil(tage / 30)); // Tage pro Balken
+  const anzahl = Math.ceil(tage / proBalken);
+  const zaehler = new Array(anzahl + 1).fill(0); // letzter Balken: bis zum Schluss gelebt
+  for (const e of erg){
+    if (e.lebensdauer >= maxStd) zaehler[anzahl]++;
+    else zaehler[Math.min(anzahl - 1, Math.floor(e.lebensdauer / 24 / proBalken))]++;
+  }
+  const W = 400, H = 220, L = 40, B = 26, T = 12, R = 4;
+  const max = Math.max(1, ...zaehler);
+  const bw = (W - L - R) / zaehler.length;
+  let s = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Balkendiagramm: Lebensdauer des ersten Agenten">`;
+  for (const v of [0, Math.round(max / 2), max]){
+    const y = T + (H - T - B) * (1 - v / max);
+    s += `<line x1="${L}" x2="${W - R}" y1="${y}" y2="${y}" stroke="var(--line)"/><text x="${L - 4}" y="${y + 4}" text-anchor="end">${v}</text>`;
+  }
+  zaehler.forEach((v, j) => {
+    const h = (H - T - B) * v / max, x = L + j * bw + 1, y = H - B - h;
+    const letzt = j === anzahl;
+    const von = j * proBalken + 1, bis = Math.min(tage, (j + 1) * proBalken);
+    const titel = letzt ? `bis zum Schluss gelebt: ${v}` : `gestorben an Tag ${von}${bis > von ? "–" + bis : ""}: ${v}`;
+    s += `<rect x="${x}" y="${y}" width="${Math.max(1, bw - 2)}" height="${h}" rx="2" fill="${letzt ? "var(--chart2)" : "var(--chart)"}"><title>${titel}</title></rect>`;
+  });
+  const marken = [0, Math.floor(anzahl / 2), anzahl - 1];
+  for (const j of new Set(marken)) s += `<text x="${L + j * bw + bw / 2}" y="${H - 6}" text-anchor="middle">Tag ${j * proBalken + 1}</text>`;
+  s += `<text x="${L + anzahl * bw + bw / 2}" y="${H - 6}" text-anchor="end">lebt</text>`;
+  s += `</svg>`;
+  $("diagramm").innerHTML = s;
+  $("mcAchse").textContent = `Jeder blaue Balken = ${proBalken === 1 ? "ein Tag" : proBalken + " Tage"}: so viele Leben endeten an diesem Tag. Grüner Balken ganz rechts: A1 hat alle ${tage} Tage überlebt (${zaehler[anzahl]} Leben).`;
+}
+$("btnViele").addEventListener("click", vieleLeben);
+
+// ---------------------------------------------------------------- Was das bedeutet ---
+function bedeutung(){
+  let e; try { e = einstellungenLesen(); } catch (f){ return; }
+  const r = e.regeln;
+  const stunden = Math.ceil(r.startbudget / r.kosten_pro_schritt);
+  const li = [
+    `${euro(r.startbudget)} reichen für ${stunden} Stunden Arbeit (${euro(r.kosten_pro_schritt)} pro Stunde). Kommt bis dahin kein Geld rein, ist der Agent tot${stunden < 24 ? " – noch bevor die erste Miete fällig wird" : ""}.`,
+    `Ein Verkauf ist erst möglich, wenn das Angebot fertig gebaut ist (hier ${e.markt.bau_min} bis ${e.markt.bau_max} Stunden). Das kostet schon einen großen Teil des Startgelds.`,
+    `Du bekommst Geld auf drei Wegen: ${euro(r.miete_pro_tag)} Miete pro Tag und Agent, ${r.besitzer_anteil_prozent} % jeder Einnahme und freiwillige Auszahlungen, wenn ein Agent viel übrig hat.`,
+    `Die Simulation prüft nur die Spielregeln (wann stirbt er, lohnt Kopieren, was bleibt für dich). Sie sagt nichts über den echten Markt: Verkaufschance, Preise und Bauzeit sind ausgedacht.`,
+    `Echtes Geld zählt nur, wenn es wirklich auf dem Konto ist. Im Echt-Modus des Programms bucht das nur ihr selbst, und alles nach außen braucht euer Ja.`,
+  ];
+  $("bedeutung").innerHTML = li.map(t => `<li>${esc(t)}</li>`).join("");
+}
+document.querySelectorAll("input").forEach(el => el.addEventListener("change", bedeutung));
+bedeutung();
+
+// Für Tests: Buchhaltung über viele Leben prüfen.
+window.__pruefeViele = function(anzahl){
+  const einst = einstellungenLesen();
+  for (let i = 0; i < anzahl; i++){
+    const l = neuesLeben(einst, i, true);
+    while (lebtNoch(l)) l.k.runde(l.gehirn, l.welt);
+    l.k.pruefen();
+  }
+  return true;
+};
+</script>
+</body>
+</html>
