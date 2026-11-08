@@ -257,6 +257,13 @@ class MacFeinheitenTest(OrdnungBasis):
 
     def test_gleiche_namen_wie_der_mac_sie_sieht(self):
         """Der Mac unterscheidet weder Groß/klein noch zwei Schreibweisen desselben Umlauts - Linux schon."""
+        probe = os.path.join(self.heim, "Downloads", "Gross")
+        with open(probe, "w", encoding="utf-8") as f:
+            f.write("x")
+        unempfindlich = os.path.exists(os.path.join(self.heim, "Downloads", "gROSS"))
+        os.remove(probe)
+        if unempfindlich:  # auf dem Mac verhindert schon das Dateisystem doppelte Namen - dann gibt es hier nichts zu prüfen
+            self.skipTest("Dateisystem unterscheidet Groß/klein nicht")
         self.datei("Downloads", "Foto.JPG", b"eins")
         self.datei("Downloads", "foto.jpg", b"zwei")
         self.datei("Downloads", unicodedata.normalize("NFC", "Müller.pdf"), b"drei")
@@ -284,6 +291,132 @@ class MacFeinheitenTest(OrdnungBasis):
         self.assertEqual(len(versuche), 2)
         self.assertTrue(self.da("Downloads", "Sortiert", "PDFs", "a.pdf"))
         self.assertFalse(self.da("Downloads", "a.pdf"))
+
+
+class BefundeTest(OrdnungBasis):
+    """Regressionstests zu den Befunden der unabhängigen Prüfung (SELBSTPRUEFUNG.md, Stufe 15)."""
+
+    def protokoll_dateien(self):
+        ordner = os.path.join(self.konfig.daten_ordner, "ordnung")
+        return sorted(n for n in os.listdir(ordner) if n.endswith(".json")) if os.path.isdir(ordner) else []
+
+    def test_1_unlesbare_datei_bei_der_zweiten_ausgabeform(self):
+        os.environ["FAKE_MDLS_ENDE"] = "1"
+        a, b, c = (self.datei("Pictures", n, n.encode()) for n in ("A.HEIC", "B.HEIC", "C.HEIC"))
+        self.spotlight({"A.HEIC": "2026-10-01 07:30:00 +0000", "B.HEIC": "FEHLT", "C.HEIC": "2026-10-03 07:30:00 +0000"})
+        daten = ordnung.spotlight_daten([a, b, c])
+        self.assertEqual((daten[a].day, daten[c].day), (1, 3))
+        self.assertNotIn(b, daten)  # früher bekam B das Datum von C
+
+    def test_2_protokoll_steht_vor_dem_verschieben(self):
+        self.datei("Downloads", "a.pdf", b"meine")
+        e = self.aktion("ordnen", ordner="downloads", art="nach_art")
+        with mock.patch.object(ordnung, "_json_schreiben", side_effect=OSError(28, "No space left on device")):
+            code, antwort = self.agent.freigabe_beantworten(e["freigabe_id"], True)
+        self.assertEqual(antwort["ergebnis"]["status"], "fehler")
+        self.assertIn("nichts verschoben", antwort["ergebnis"]["text"])
+        self.assertTrue(self.da("Downloads", "a.pdf"))  # Platte voll: lieber nichts tun als ohne Protokoll
+        self.assertEqual(self.protokoll_dateien(), [])
+
+    def test_2_abbruch_mittendrin_bleibt_umkehrbar(self):
+        """Stürzt JARVIS nach der ersten von zwei Dateien ab, steht trotzdem ein Protokoll da - und Rückgängig holt genau
+        die bewegte Datei zurück."""
+        self.datei("Downloads", "a.pdf", b"eins")
+        self.datei("Downloads", "b.pdf", b"zwei")
+        plan = ordnung.ordnen_planen(self.konfig, "downloads", "nach_art")
+        echt, zaehler = ordnung._verschieben_ohne_ueberschreiben, []
+
+        def absturz_beim_zweiten(von, nach):
+            zaehler.append(von)
+            if len(zaehler) == 2:
+                raise KeyboardInterrupt  # wie ein hartes Ende mitten im Lauf
+            return echt(von, nach)
+
+        protokolle = os.path.join(self.konfig.daten_ordner, "ordnung")
+        with mock.patch.object(ordnung, "_verschieben_ohne_ueberschreiben", absturz_beim_zweiten):
+            with self.assertRaises(KeyboardInterrupt):
+                ordnung.ausfuehren(plan, protokolle)
+        self.assertEqual(len(self.protokoll_dateien()), 1)
+        rueck = ordnung.rueckgaengig_planen(self.konfig, protokolle)
+        self.assertEqual([os.path.basename(x["nach"]) for x in rueck["schritte"]], ["a.pdf"])
+        ordnung.ausfuehren(rueck, protokolle, "rueckgaengig")
+        self.assertTrue(self.da("Downloads", "a.pdf") and self.da("Downloads", "b.pdf"))
+
+    def test_2_kaputtes_protokoll_kein_absturz(self):
+        self.datei("Downloads", "a.pdf", b"eins")
+        self.freigeben(self.aktion("ordnen", ordner="downloads", art="nach_art"))
+        ordner = os.path.join(self.konfig.daten_ordner, "ordnung")
+        with open(os.path.join(ordner, "29991231-235959-000000.json"), "w", encoding="utf-8") as f:
+            f.write("")  # leer, wie nach einem Absturz beim Schreiben
+        e = self.aktion("rueckgaengig")  # „letzte“ übergeht das kaputte
+        self.assertEqual(e["status"], "freigabe_offen", e)
+        kaputt = self.aktion("rueckgaengig", protokoll="29991231-235959-000000")
+        self.assertEqual(kaputt["status"], "ungueltig")
+        self.assertIn("beschädigt", kaputt["text"])
+
+    def test_2_unerwarteter_fehler_in_der_vorbereitung_ist_kein_absturz(self):
+        with mock.patch.object(ordnung, "ordnen_planen", side_effect=KeyError("x")):
+            e = self.aktion("ordnen", ordner="downloads", art="nach_art")
+        self.assertEqual(e["status"], "ungueltig")
+        self.assertIn("Es wurde nichts verändert", e["text"])
+
+    def test_3_zweimal_rueckgaengig_geht_nicht_wieder_vor(self):
+        self.datei("Downloads", "a.pdf", b"eins")
+        self.freigeben(self.aktion("ordnen", ordner="downloads", art="nach_art"))
+        rueck = self.aktion("rueckgaengig")
+        self.freigeben(rueck)
+        self.assertTrue(self.da("Downloads", "a.pdf"))
+        nochmal = self.aktion("rueckgaengig")
+        self.assertEqual(nochmal["status"], "ungueltig")
+        self.assertIn("nichts mehr zurückzunehmen", nochmal["text"])
+        self.assertTrue(self.da("Downloads", "a.pdf"))  # früher landete a.pdf wieder in Sortiert/PDFs
+        # ausdrücklich das Rückgängig zurücknehmen = Wiederherstellen, ehrlich so genannt
+        kennung = self.sp.freigabe(rueck["freigabe_id"])["ergebnis"].split("Protokoll ")[1].split(";")[0]
+        wieder = self.aktion("rueckgaengig", protokoll=kennung)
+        self.assertIn("Wiederherstellen", self.sp.freigabe(wieder["freigabe_id"])["vorschau"])
+        self.freigeben(wieder)
+        self.assertTrue(self.da("Downloads", "Sortiert", "PDFs", "a.pdf"))
+        self.assertEqual(self.aktion("rueckgaengig")["status"], "freigabe_offen")  # jetzt wieder zurücknehmbar
+
+    def test_11_rueckgaengig_nur_fuer_dieselbe_datei_und_verwaltete_ordner(self):
+        self.datei("Downloads", "Rechnung.pdf", b"meine Rechnung")
+        self.datei("Downloads", "Angebot.pdf", b"mein Angebot")
+        self.freigeben(self.aktion("ordnen", ordner="downloads", art="nach_art"))
+        sortiert = os.path.join(self.heim, "Downloads", "Sortiert", "PDFs")
+        os.rename(os.path.join(sortiert, "Rechnung.pdf"), os.path.join(self.ordner, "weg.pdf"))  # vom Nutzer weggeräumt
+        self.datei("Downloads", "Sortiert/PDFs/Rechnung.pdf", b"eine ganz andere Rechnung")
+        e = self.aktion("rueckgaengig")
+        vorschau = self.sp.freigabe(e["freigabe_id"])["vorschau"]
+        self.assertIn("Angebot.pdf", vorschau)
+        self.assertIn("Rechnung.pdf (dort liegt inzwischen eine andere Datei)", vorschau)
+        self.freigeben(e)
+        self.assertTrue(self.da("Downloads", "Sortiert", "PDFs", "Rechnung.pdf"))  # die fremde bleibt, wo sie ist
+        self.datei("Downloads", "b.pdf", b"zwei")
+        self.freigeben(self.aktion("ordnen", ordner="downloads", art="nach_art"))
+        self.konfig.aktualisieren({"verwaltete_ordner": ["bilder"]})
+        e = self.aktion("rueckgaengig")
+        self.assertEqual(e["status"], "ungueltig")
+        self.assertIn("verwaltet JARVIS nicht mehr", e["text"])
+
+    def test_12_verknuepfung_in_die_fotos_mediathek(self):
+        mediathek = os.path.join(self.heim, "Pictures", "Photos Library.photoslibrary", "originals")
+        os.makedirs(mediathek)
+        with open(os.path.join(mediathek, "IMG_1.jpg"), "wb") as f:
+            f.write(jpeg_mit_datum("2026:11:03 09:00:00"))
+        os.symlink(mediathek, os.path.join(self.heim, "Pictures", "Mediathek"))
+        e = self.aktion("ordnen", ordner="bilder", unterordner="Mediathek", art="fotos_nach_datum")
+        self.assertEqual(e["status"], "ungueltig")
+        self.assertIn("Fotos-Mediathek", e["text"])
+        self.assertEqual(self.aktion("ordner_ansehen", ordner="bilder", unterordner="Mediathek")["status"], "fehler")
+        self.assertEqual(os.listdir(mediathek), ["IMG_1.jpg"])
+
+    def test_13_pipe_wird_nicht_angefasst(self):
+        os.mkfifo(os.path.join(self.heim, "Pictures", "IMG_9.jpg"))
+        self.datei("Pictures", "IMG_1.jpg", jpeg_mit_datum("2026:11:03 09:00:00"))
+        liste, uebersprungen, _ = ordnung.dateien(os.path.join(self.heim, "Pictures"))
+        self.assertEqual([d.name for d in liste], ["IMG_1.jpg"])
+        self.assertIn(("IMG_9.jpg", "keine normale Datei"), uebersprungen)
+        ordnung.daten_bestimmen(liste, fotos=True)  # früher blieb das Lesen der Pipe für immer hängen
 
 
 class AnsehenTest(OrdnungBasis):

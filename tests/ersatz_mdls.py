@@ -24,17 +24,20 @@ def main():
         sys.exit(2)
     with open(os.environ["FAKE_MDLS"], encoding="utf-8") as f:
         karte = json.load(f)
-    werte = []
+    werte, fehlt = [], False
     for pfad in args[3:]:
         wert = karte.get(os.path.basename(pfad))
         if wert == "FEHLT":
             sys.stderr.write("%s: could not find %s.\n" % (sys.argv[0], pfad))
+            fehlt = True
             continue
         werte.append(wert or "(null)")
     if os.environ.get("FAKE_MDLS_ENDE") == "1":
         sys.stdout.write("".join(w + "\x00" for w in werte))
     else:
         sys.stdout.write("\x00".join(werte))
+    if fehlt:
+        sys.exit(1)  # wie das echte mdls
 
 
 if __name__ == "__main__":

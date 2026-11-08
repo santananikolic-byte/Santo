@@ -79,7 +79,8 @@ class BausteinTest(unittest.TestCase):
         ("Bau mir eine Webseite für die Firma", {"programmieren"}, set()),
         ("Mach mir ein kleines Programm für die Stundenzettel", {"programmieren"}, set()),
         ("Ich brauche einen Chatbot für Kundenanfragen", {"programmieren"}, set()),
-        ("Ich brauche eine App für die Zeiterfassung", {"programmieren"}, set()),
+        ("Ich brauche eine neue Homepage", {"programmieren"}, set()),
+        ("Kannst du mir ein kleines Tool schreiben?", {"programmieren"}, set()),
         # ... aber nicht bei Wörtern, die im Betrieb etwas anderes heißen
         ("Schau auf der Webseite von Berger ins Impressum", {"firmenpruefung"}, {"programmieren"}),
         ("Prüf, ob Berger eine Webseite hat", set(), {"programmieren"}),
@@ -87,6 +88,18 @@ class BausteinTest(unittest.TestCase):
         ("Der Code für die Haustür ist 4711", set(), {"programmieren"}),
         ("Schreib mir ein Skript für die Anrufe bei Hausverwaltungen", set(), {"programmieren"}),
         ("Die Baustellenfotos von der Webseite", set(), {"programmieren"}),
+        # aus der unabhängigen Prüfung (Befund 14): Alltagssätze ohne Datei-, Folien- oder Programmierauftrag
+        ("Gibt es eine App für die Zeiterfassung?", set(), {"programmieren"}),
+        ("Gibt es eine Software für die Buchhaltung?", set(), {"programmieren"}),
+        ("Ist das ein Programm der KfW?", set(), {"programmieren"}),
+        ("Schreib einen Text für unsere Webseite", set(), {"programmieren"}),
+        ("Kannst du das Thermostat programmieren?", set(), {"programmieren"}),
+        ("Angebot für die Reinigung von 20 Schreibtischen", {"preise"}, {"ordnung"}),
+        ("Welche Dokumente brauche ich für die Gewerbeanmeldung?", set(), {"ordnung"}),
+        ("Wir müssen noch den Keller aufräumen", set(), {"ordnung"}),
+        ("Ist das so in Ordnung?", set(), {"ordnung"}),
+        ("Wir brauchen Folie für den Boden", set(), {"praesentation"}),
+        ("Haben Sie Referenzen?", set(), {"praesentation"}),
         # keine Fehlgriffe durch Wortteile
         ("Wer trägt dafür die Verantwortung?", set(), {"email"}),
         ("Wie viel Ordnungsgeld droht bei Verspätung?", set(), {"ordnung"}),

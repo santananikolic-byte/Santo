@@ -10,7 +10,9 @@ Regeln (im Code erzwungen, nicht nur versprochen):
   Datei "Name (2).jpg".
 * Erst wird ein Plan gemacht, der jede einzelne Datei nennt; der Nutzer gibt ihn frei. Ausgeführt wird genau
   dieser Plan, und nur für Dateien, die sich seitdem nicht verändert haben.
-* Jede Ausführung wird protokolliert und lässt sich rückgängig machen.
+* Jede Ausführung wird protokolliert - das Protokoll wird VOR dem ersten Verschieben geschrieben (atomar), so lässt sich
+  auch ein Lauf zurücknehmen, der mittendrin abbrach. Rückgängig nimmt nur Dateien, die noch dieselben sind
+  (Gerät und Dateinummer), und zweimal „rückgängig“ geht weiter zurück, statt das Sortieren zu wiederholen.
 * Unfertige Downloads, iCloud-Platzhalter und gerade erst geänderte Dateien bleiben, wo sie sind.
 
 Aufnahmedatum von Fotos: EXIF aus JPEG (eigener kleiner Leser, ohne Zusatzpakete), bei Videos der Filmkopf
@@ -27,6 +29,7 @@ import json
 import os
 import re
 import shutil
+import stat
 import subprocess
 import time
 import unicodedata
@@ -59,7 +62,7 @@ MAX_EINZELABFRAGEN = 300  # mdls einzeln, wenn die Sammelabfrage nicht eindeutig
 MAX_ANSEHEN = 60
 _TAG = re.compile(r"^(\d{4})-(\d{2})-(\d{2})$|^(\d{1,2})\.(\d{1,2})\.(\d{4})$")
 
-Datei = namedtuple("Datei", "pfad name endung groesse mtime kategorie")
+Datei = namedtuple("Datei", "pfad name endung groesse mtime kategorie ino dev")
 
 
 class OrdnungFehler(Exception):
@@ -108,12 +111,23 @@ def _innerhalb(basis, pfad):
     return pfad == basis or pfad.startswith(basis + os.sep)
 
 
+def ort_pruefen(basis, pfad):
+    """Nach dem Auflösen von Verknüpfungen: innerhalb des Ordners, nicht versteckt, kein Paket. Eine Verknüpfung
+    "Bilder/Mediathek" in die Fotos-Mediathek fällt so auch auf. Wirft OrdnungFehler, gibt den echten Pfad zurück."""
+    echt = os.path.realpath(pfad)
+    if not _innerhalb(basis, echt):
+        raise OrdnungFehler("Der Pfad führt aus dem Ordner heraus.")
+    rel = os.path.relpath(echt, basis)
+    for teil in ([] if rel == "." else rel.split(os.sep)):
+        if teil.startswith(".") or PAKET.search(teil):
+            raise OrdnungFehler("In Pakete wie die Fotos-Mediathek und in versteckte Ordner greift JARVIS nicht ein.")
+    return echt
+
+
 def verzeichnis(konfig, ordner, unterordner=""):
     basis = ordner_pfad(konfig, ordner)
     unter = relativ_pruefen(unterordner, "Unterordner")
-    pfad = os.path.realpath(os.path.join(basis, unter)) if unter else basis
-    if not _innerhalb(basis, pfad):
-        raise OrdnungFehler("Der Pfad führt aus dem Ordner heraus.")
+    pfad = ort_pruefen(basis, os.path.join(basis, unter)) if unter else basis
     if not os.path.isdir(pfad):
         raise OrdnungFehler("%s gibt es nicht." % ("%s/%s" % (ANZEIGE.get(ordner, ordner), unter) if unter else ANZEIGE.get(ordner, ordner)))
     return basis, pfad
@@ -129,9 +143,12 @@ def datei_aufloesen(konfig, angabe):
     ordner = ordner.strip().lower()
     basis = ordner_pfad(konfig, ordner)
     relativ = relativ_pruefen(rest, "Dateiangabe", leer_erlaubt=False)
-    pfad = os.path.realpath(os.path.join(basis, relativ))
-    if not _innerhalb(basis, pfad) or os.path.islink(os.path.join(basis, relativ)):
+    if os.path.islink(os.path.join(basis, relativ)):
         raise OrdnungFehler("%r liegt außerhalb des Ordners." % angabe)
+    try:
+        pfad = ort_pruefen(basis, os.path.join(basis, relativ))
+    except OrdnungFehler:
+        raise OrdnungFehler("%r liegt außerhalb des Ordners oder in einem Paket." % angabe) from None
     if not os.path.isfile(pfad):
         raise OrdnungFehler("Die Datei %r gibt es nicht." % angabe)
     endung = pfad.rsplit(".", 1)[-1].lower() if "." in os.path.basename(pfad) else ""
@@ -165,11 +182,14 @@ def dateien(pfad, jetzt=None):
             st = os.lstat(voll)
         except OSError:
             continue
-        if os.path.islink(voll):
+        if stat.S_ISLNK(st.st_mode):
             uebersprungen.append((name, "Verknüpfung"))
             continue
-        if os.path.isdir(voll):
+        if stat.S_ISDIR(st.st_mode):
             unterordner.append(name)
+            continue
+        if not stat.S_ISREG(st.st_mode):
+            uebersprungen.append((name, "keine normale Datei"))  # z. B. eine Pipe - Lesen bliebe hängen
             continue
         if name.lower().endswith(UNFERTIG) or name.lower() in laufend:
             uebersprungen.append((name, "Download läuft noch"))
@@ -184,7 +204,7 @@ def dateien(pfad, jetzt=None):
             uebersprungen.append((name, "gerade erst geändert"))
             continue
         endung = name.rsplit(".", 1)[-1].lower() if "." in name else ""
-        bewegbar.append(Datei(voll, name, endung, st.st_size, st.st_mtime, kategorie(endung)))
+        bewegbar.append(Datei(voll, name, endung, st.st_size, st.st_mtime, kategorie(endung), st.st_ino, st.st_dev))
     return bewegbar, uebersprungen, unterordner
 
 
@@ -277,6 +297,8 @@ def _mdls(programm, pfade):
                               capture_output=True, timeout=60)
     except (OSError, subprocess.SubprocessError):
         return None
+    if lauf.returncode != 0 or lauf.stderr.strip():
+        return None  # z. B. eine Datei war nicht lesbar - dann fehlt ein Wert, und die Zuordnung wäre verschoben
     werte = lauf.stdout.decode("utf-8", "replace").split("\x00")
     if len(werte) == len(pfade) + 1 and not werte[-1].strip():
         werte = werte[:-1]  # endet die Ausgabe mit NUL, ist das kein zusätzlicher Wert
@@ -555,7 +577,7 @@ def ordnen_planen(konfig, ordner, art, ziel="Sortiert", unterordner=""):
             info = "%s %s" % (quelle, datum.strftime("%d.%m.%Y"))
         zielordner = os.path.join(pfad, ziel, unter)
         schritte.append({"von": d.pfad, "nach": _eindeutig(zielordner, d.name, belegt), "groesse": d.groesse,
-                         "mtime": d.mtime, "info": info})
+                         "mtime": d.mtime, "ino": d.ino, "dev": d.dev, "info": info})
     namen = {"nach_art": "nach Art", "nach_datum": "nach Monat", "fotos_nach_datum": "Fotos nach Aufnahmetag"}
     return _plan(basis, schritte, "%s %s in „%s“" % (ANZEIGE.get(ordner, ordner), namen[art], ziel), uebersprungen)
 
@@ -579,7 +601,8 @@ def verschieben_planen(konfig, ordner, ziel, von=None, bis=None, muster="", unte
         if (von and datum.date() < von) or (bis and datum.date() > bis):
             continue
         schritte.append({"von": d.pfad, "nach": _eindeutig(zielordner, d.name, belegt), "groesse": d.groesse,
-                         "mtime": d.mtime, "info": "%s %s" % (quelle, datum.strftime("%d.%m.%Y"))})
+                         "mtime": d.mtime, "ino": d.ino, "dev": d.dev,
+                         "info": "%s %s" % (quelle, datum.strftime("%d.%m.%Y"))})
     zeitraum = " vom %s" % von.strftime("%d.%m.%Y") if von else ""
     zeitraum += " bis %s" % bis.strftime("%d.%m.%Y") if bis else ""
     return _plan(basis, schritte, "%s%s%s nach „%s“" % (ANZEIGE.get(ordner, ordner), " (%s)" % muster if muster else "",
@@ -624,22 +647,48 @@ def _verschieben_ohne_ueberschreiben(von, nach):
     os.unlink(von)
 
 
+def _json_schreiben(pfad, daten):
+    """Atomar: erst eine Hilfsdatei, dann umbenennen - ein halb geschriebenes Protokoll gibt es so nie."""
+    hilfe = pfad + ".tmp"
+    with open(hilfe, "w", encoding="utf-8") as f:
+        json.dump(daten, f, ensure_ascii=False, indent=1)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(hilfe, pfad)
+
+
 def ausfuehren(plan, protokoll_ordner, art="verschieben"):
-    """Führt genau den freigegebenen Plan aus. Dateien, die sich seit dem Plan verändert haben, bleiben liegen."""
+    """Führt genau den freigegebenen Plan aus. Dateien, die sich seit dem Plan verändert haben, bleiben liegen.
+
+    Gibt (Kennung, Ergebnis je Datei, Warnung oder "") zurück. Das Protokoll steht schon VOR dem ersten Schritt auf der
+    Platte; lässt es sich nicht schreiben, wird gar nichts verschoben."""
     os.makedirs(protokoll_ordner, mode=0o700, exist_ok=True)
     basis = plan["basis"]
+    kennung = datetime.datetime.now().strftime("%Y%m%d-%H%M%S-%f")
+    datei = os.path.join(protokoll_ordner, "%s.json" % kennung)
+    protokoll = {"kennung": kennung, "art": art, "basis": basis, "beschreibung": plan["beschreibung"],
+                 "protokoll": plan.get("protokoll"), "schritte": [dict(s, status="geplant") for s in plan["schritte"]]}
+    try:
+        _json_schreiben(datei, protokoll)
+    except OSError as fehler:
+        raise OrdnungFehler("Das Protokoll ließ sich nicht schreiben (%s) - deshalb wurde nichts verschoben."
+                            % (fehler.strerror or fehler)) from None
     ergebnis = []
     for s in plan["schritte"]:
         von, nach = s["von"], s["nach"]
-        if not (_innerhalb(basis, von) and _innerhalb(basis, os.path.dirname(nach))):
-            ergebnis.append(dict(s, status="außerhalb des Ordners - übersprungen"))
+        try:
+            ort_pruefen(basis, os.path.dirname(von))
+            ort_pruefen(basis, os.path.dirname(nach))
+        except OrdnungFehler:
+            ergebnis.append(dict(s, status="außerhalb des Ordners oder in einem Paket - übersprungen"))
             continue
         try:
             st = os.lstat(von)
         except OSError:
             ergebnis.append(dict(s, status="nicht mehr da"))
             continue
-        if os.path.islink(von) or not os.path.isfile(von) or st.st_size != s["groesse"] or abs(st.st_mtime - s["mtime"]) > 1:
+        if (not stat.S_ISREG(st.st_mode) or st.st_size != s["groesse"] or abs(st.st_mtime - s["mtime"]) > 1
+                or (s.get("ino") is not None and (st.st_ino, st.st_dev) != (s["ino"], s["dev"]))):
             ergebnis.append(dict(s, status="seit dem Plan verändert - liegen gelassen"))
             continue
         try:
@@ -655,14 +704,43 @@ def ausfuehren(plan, protokoll_ordner, art="verschieben"):
                     continue  # gleichzeitig belegt (oder gleicher Name in anderer Schreibweise): nächster Name
             else:
                 raise FileExistsError(nach)
-            ergebnis.append(dict(s, nach=ziel, status="ok"))
+            ergebnis.append(dict(s, nach=ziel, status="ok", ino=st.st_ino, dev=st.st_dev))
         except OSError as fehler:
             ergebnis.append(dict(s, status="Fehler: %s" % (fehler.strerror or fehler)))
-    kennung = datetime.datetime.now().strftime("%Y%m%d-%H%M%S-%f")
-    with open(os.path.join(protokoll_ordner, "%s.json" % kennung), "w", encoding="utf-8") as f:
-        json.dump({"kennung": kennung, "art": art, "basis": basis, "beschreibung": plan["beschreibung"],
-                   "schritte": ergebnis}, f, ensure_ascii=False, indent=1)
-    return kennung, ergebnis
+    protokoll["schritte"] = ergebnis
+    warnung = ""
+    try:
+        _json_schreiben(datei, protokoll)
+    except OSError as fehler:
+        warnung = ("Das Protokoll ließ sich am Ende nicht aktualisieren (%s); Rückgängig geht trotzdem über das "
+                   "vorher geschriebene." % (fehler.strerror or fehler))
+    return kennung, ergebnis, warnung
+
+
+def _protokoll_lesen(protokoll_ordner, kennung):
+    """Ein Protokoll - oder None, wenn es beschädigt ist (dann wird es übergangen, nie halb benutzt)."""
+    try:
+        with open(os.path.join(protokoll_ordner, "%s.json" % kennung), encoding="utf-8") as f:
+            daten = json.load(f)
+    except (OSError, ValueError):
+        return None
+    if not isinstance(daten, dict) or not isinstance(daten.get("schritte"), list) or not isinstance(daten.get("basis"), str):
+        return None
+    return daten
+
+
+def zurueckgenommen_markieren(protokoll_ordner, kennung, durch):
+    """Nach einem Rückgängig: das Protokoll gilt als zurückgenommen. War es selbst ein Rückgängig (also jetzt
+    "wiederhergestellt"), gilt das ursprüngliche Sortieren wieder als aktiv."""
+    daten = _protokoll_lesen(protokoll_ordner, kennung)
+    if daten is None:
+        return
+    daten["rueckgaengig_durch"] = durch
+    _json_schreiben(os.path.join(protokoll_ordner, "%s.json" % kennung), daten)
+    if daten.get("art") == "rueckgaengig" and daten.get("protokoll"):
+        ursprung = _protokoll_lesen(protokoll_ordner, daten["protokoll"])
+        if ursprung is not None and ursprung.pop("rueckgaengig_durch", None) is not None:
+            _json_schreiben(os.path.join(protokoll_ordner, "%s.json" % daten["protokoll"]), ursprung)
 
 
 def protokolle(protokoll_ordner):
@@ -672,24 +750,59 @@ def protokolle(protokoll_ordner):
         return []
 
 
-def rueckgaengig_planen(protokoll_ordner, kennung="letzte"):
-    """Plan, der eine frühere Ausführung umkehrt: jede Datei zurück an ihren alten Ort (ohne zu überschreiben)."""
+def _noch_verwaltet(konfig, basis):
+    erlaubt = ["werkstatt"] + [n for n in MAC_ORDNER if n in konfig.verwaltete_ordner]
+    return any(basis == ordner_pfad(konfig, n) for n in erlaubt)
+
+
+def rueckgaengig_planen(konfig, protokoll_ordner, kennung="letzte"):
+    """Plan, der eine frühere Ausführung umkehrt: jede Datei zurück an ihren alten Ort (ohne zu überschreiben).
+
+    "letzte" = das jüngste Sortieren, das noch nicht zurückgenommen ist (ein Rückgängig wird nicht rückgängig gemacht -
+    sonst würde zweimal „rückgängig“ das Sortieren wiederholen). Zurück geht nur, was noch dieselbe Datei ist."""
     vorhanden = protokolle(protokoll_ordner)
     if not vorhanden:
         raise OrdnungFehler("Es gibt noch nichts, was sich rückgängig machen ließe.")
-    kennung = vorhanden[0] if kennung in ("", "letzte") else kennung
-    if not re.match(r"^[0-9-]+$", kennung) or kennung not in vorhanden:
-        raise OrdnungFehler("Kein Protokoll %r. Die letzten: %s." % (kennung, ", ".join(vorhanden[:5])))
-    with open(os.path.join(protokoll_ordner, "%s.json" % kennung), encoding="utf-8") as f:
-        alt = json.load(f)
-    belegt, schritte = set(), []
+    alt = None
+    if kennung in ("", "letzte"):
+        for k in vorhanden:  # jüngstes zuerst; beschädigte werden übergangen
+            daten = _protokoll_lesen(protokoll_ordner, k)
+            if daten is None or daten.get("art") == "rueckgaengig" or daten.get("rueckgaengig_durch"):
+                continue
+            alt, kennung = daten, k
+            break
+        if alt is None:
+            raise OrdnungFehler("Es gibt nichts mehr zurückzunehmen - das letzte Sortieren ist schon rückgängig gemacht.")
+    else:
+        if not re.match(r"^[0-9-]+$", kennung) or kennung not in vorhanden:
+            raise OrdnungFehler("Kein Protokoll %r. Die letzten: %s." % (kennung, ", ".join(vorhanden[:5])))
+        alt = _protokoll_lesen(protokoll_ordner, kennung)
+        if alt is None:
+            raise OrdnungFehler("Das Protokoll %s ist beschädigt - damit wird nichts bewegt." % kennung)
+    if not _noch_verwaltet(konfig, alt["basis"]):
+        raise OrdnungFehler("Den Ordner dieses Protokolls verwaltet JARVIS nicht mehr - es wird nichts bewegt.")
+    belegt, schritte, anders = set(), [], []
     for s in alt["schritte"]:
-        if s.get("status") != "ok" or not os.path.isfile(s["nach"]):
+        if not isinstance(s, dict) or s.get("status") not in ("ok", "geplant"):
             continue
-        st = os.lstat(s["nach"])
-        zurueck = _eindeutig(os.path.dirname(s["von"]), os.path.basename(s["von"]), belegt)
-        schritte.append({"von": s["nach"], "nach": zurueck, "groesse": st.st_size, "mtime": st.st_mtime,
-                         "info": "zurück"})
-    plan = _plan(alt["basis"], schritte, "Rückgängig: %s" % alt["beschreibung"], [])
+        von, nach = s.get("von"), s.get("nach")
+        if not (isinstance(von, str) and isinstance(nach, str)):
+            continue
+        try:
+            st = os.lstat(nach)
+        except OSError:
+            continue
+        if not stat.S_ISREG(st.st_mode):
+            continue
+        if s["status"] == "geplant" and os.path.lexists(von):
+            continue  # Lauf brach vorher ab: diese Datei wurde nie bewegt
+        if s.get("ino") is not None and (st.st_ino, st.st_dev) != (s.get("ino"), s.get("dev")):
+            anders.append((os.path.basename(nach), "dort liegt inzwischen eine andere Datei"))
+            continue
+        zurueck = _eindeutig(os.path.dirname(von), os.path.basename(von), belegt)
+        schritte.append({"von": nach, "nach": zurueck, "groesse": st.st_size, "mtime": st.st_mtime,
+                         "ino": st.st_ino, "dev": st.st_dev, "info": "zurück"})
+    titel = ("Wiederherstellen (hebt ein Rückgängig auf): " if alt.get("art") == "rueckgaengig" else "Rückgängig: ")
+    plan = _plan(alt["basis"], schritte, titel + alt.get("beschreibung", ""), anders)
     plan["protokoll"] = kennung
     return plan

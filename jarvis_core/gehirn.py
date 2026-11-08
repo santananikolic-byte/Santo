@@ -209,8 +209,12 @@ BAUSTEINE = (
 BAUSTEINE += (
     Baustein(
         "ordnung", "DATEIEN UND FOTOS ORDNEN (Downloads, Bilder, Schreibtisch, Dokumente, Werkstatt)",
-        _muster(r"aufr(ä|ae)um", r"\bsortier", r"\bordnung\b", r"\bdownloads?\b", r"\bfotos?\b", r"\bbilder\b",
-                r"schreibtisch", r"\bdokumente\b", r"\bordner\b", r"vorher.{0,30}nachher", r"\brückgängig|\brueckgaengig",
+        # Nur mit Datei-Bezug: "Keller aufräumen", "20 Schreibtische reinigen", "welche Dokumente brauche ich",
+        # "ist das in Ordnung" sind keine Dateiarbeit.
+        _muster(r"aufr(ä|ae)um\w*\b[^.!?\n]{0,40}\b(downloads?|dateien|ordner|desktop|fotos|bilder|mac|computer|festplatte)\b",
+                r"\b(downloads?|dateien|ordner|desktop|fotos|bilder)\b[^.!?\n]{0,40}aufr(ä|ae)um", r"\bsortier",
+                r"ordnung (in|machen|schaffen|reinbringen)|in ordnung bringen", r"\bdownloads?\b", r"\bfotos?\b",
+                r"\bbilder\b", r"\bdateien\b", r"\bordner\b", r"vorher.{0,30}nachher", r"\brückgängig|\brueckgaengig",
                 r"werkzeug:(ordner_ansehen|ordnen|dateien_verschieben|rueckgaengig)"),
         (),
         "- Erst ansehen (\"ordner_ansehen\"), dann einen kurzen Vorschlag machen. Verschoben wird nur mit \"ordnen\", "
@@ -231,8 +235,10 @@ BAUSTEINE += (
 BAUSTEINE += (
     Baustein(
         "praesentation", "PRÄSENTATIONEN",
-        _muster(r"pr(ä|ae)sentation", r"\bfolien?\b", r"\bslides?\b", r"keynote", r"powerpoint", r"\bvortrag",
-                r"firmenvorstellung", r"referenz", r"werkzeug:praesentation_erstellen"),
+        # "Folie" ist auf dem Bau meist Abdeckfolie, "Referenzen" fragt ein Kunde - beides keine Präsentation.
+        _muster(r"pr(ä|ae)sentation", r"\b(ein paar|paar|einige|wenige|\d+|drei|vier|f(ü|ue)nf|sechs|sieben|acht|zehn) folien\b",
+                r"\b(mach|erstell|bau)\w*\b[^.!?\n]{0,30}\bfolien\b", r"\bslides?\b", r"keynote", r"powerpoint",
+                r"\bvortrag", r"firmenvorstellung", r"werkzeug:praesentation_erstellen"),
         (),
         "- \"praesentation_erstellen\" baut eine Datei zum Doppelklicken (Werkstatt/praesentationen): Pfeiltasten "
         "blättern, F = Vollbild; zum Verschicken im Browser drucken → „Als PDF sichern“. Danach mit \"datei_oeffnen\" zeigen.\n"
@@ -249,17 +255,20 @@ BAUSTEINE += (
 BAUSTEINE += (
     Baustein(
         "programmieren", "PROGRAMMIEREN (über Claude Code, im Projektordner)",
-        # Bewusst eng: "Programm" (Ablauf), "Code" (Türcode), "Skript" (Anrufleitfaden) und "Webseite" (Impressum
-        # prüfen) kommen im Betrieb ständig vor, ohne dass programmiert werden soll.
-        _muster(r"programmier", r"chatbot", r"claude code", r"quellcode|programmcode", r"\bpython\b", r"javascript",
-                r"\b(ein|eine|einen|kleines|kleine|kleinen|eigenes|eigene|eigenen|neues|neue|neuen)\s+"
-                r"(app|programm|tool|software)\b",
-                r"\bmach\w* (mir|uns) (eine?n? )?(neue |eigene )?(web ?(seite|site)|homepage|internetseite|app|programm|tool)\b",
+        # Bewusst eng: "Programm" (Ablauf, Förderprogramm), "Code" (Türcode), "Skript" (Anrufleitfaden), "Webseite"
+        # (Impressum prüfen), "eine App für …" (vorhandene Software empfehlen) und "Thermostat programmieren" kommen im
+        # Betrieb ständig vor, ohne dass JARVIS programmieren soll. Gezählt wird nur ein Bau-Auftrag.
+        _muster(r"\A(?![\s\S]*\b(?:thermostat|heizung|zeitschaltuhr|fernbedienung|alarmanlage|garagentor|navi)\w*)"
+                r"[\s\S]*programmier", r"chatbot", r"claude code", r"quellcode|programmcode", r"\bpython\b", r"javascript",
+                r"\b(bau|erstell|entwick|schreib|mach|programmier)\w*\b[^.,;!?\n]{0,20}\b(ein|eine|einen|kleines|kleine|"
+                r"kleinen|eigenes|eigene|eigenen|neues|neue|neuen)\s+(app|programm|tool|software)\b",
+                r"\b(ein|eine|einen|kleines|kleine|kleinen|eigenes|eigene|eigenen|neues|neue|neuen)\s+(app|programm|tool|"
+                r"software)\b[^.,;!?\n]{0,30}\b(bauen|erstellen|entwickeln|schreiben|programmieren|machen)\b",
                 r"\b(bau(e|en|t|st)?|erstell\w*|entwick\w*|gestalt\w*)\b[^.,;!?\n]{0,30}"
                 r"\b(web ?(seite|site)|homepage|internetseite|landing ?page)",
                 r"\b(web ?(seite|site)|homepage|internetseite|landing ?page)\b[^.,;!?\n]{0,30}"
                 r"\b(bauen|erstellen|entwickeln|programmieren|gestalten|machen)\b",
-                r"\b(neue|eigene|unsere|meine)n?\s+(web ?(seite|site)|homepage|internetseite)",
+                r"\bbrauch\w*\b[^.,;!?\n]{0,20}\b(neue|eigene)n?\s+(web ?(seite|site)|homepage|internetseite)",
                 r"\bcode (schreiben|(ä|ae)ndern|anpassen|reparieren|verbessern)", r"fehler im (programm|code|skript|tool)",
                 r"werkzeug:(programmieren|programm_stand|programm_abbrechen)"),
         (),
@@ -333,6 +342,9 @@ def denkstufe(frage, bausteine=()):
 #    Mail, ein Angebot, eine Datei … geht und nichts auf einen Fremdbericht hinweist (von, dir, laut, ein Datum).
 
 Behauptung = namedtuple("Behauptung", "art woerter woerter_ich passiv verlangt belege richtigstellung")
+PROG_FERTIG = r"programmiert|gebaut|erstellt|geschrieben|entwickelt|getestet|fertiggestellt|fertig"
+_PROG_NOMEN = re.compile(r"\b(programme?|programms|apps?|rechner|preisrechner|tools?|code|quellcode|skripte?|scripts?|"
+                         r"web ?seiten?|websites?|homepages?|internetseiten?|chatbots?|software)\b")
 
 BEHAUPTUNGEN = (
     Behauptung("senden", r"gesendet|versendet|verschickt|abgeschickt|rausgeschickt|weitergeleitet|zugeschickt|gemailt|"
@@ -344,8 +356,11 @@ BEHAUPTUNGEN = (
                "Verschoben wurde nichts - dafür gibt es kein bestätigtes Werkzeugergebnis."),
     Behauptung("loeschen", r"gel(ö|oe)scht", r"entfernt", True, r"l(ö|oe)sch|entfern|papierkorb|\bweg\b",
                ("datei_loeschen",), "Gelöscht wurde nichts - dafür gibt es kein bestätigtes Werkzeugergebnis."),
-    # Nur "ich habe …": "programmiert/getestet/entwickelt" ist erst nach der Fertig-Meldung eines Laufs belegt.
-    Behauptung("programmieren", r"(fertig )?programmiert", r"getestet|entwickelt", False, "", ("programm_fertig",),
+    # Eigene Prüfung (_programm_behauptet): ein Programm-Wort UND fertig/gebaut/getestet … - "Ich habe einen Plan
+    # entwickelt" ist keine Behauptung über ein Programm. Belegt nur durch die Fertig-Meldung eines Laufs.
+    Behauptung("programmieren", PROG_FERTIG, "", True,
+               r"programm|\bapps?\b|rechner|\btools?\b|\bcode\b|skript|script|webseite|website|homepage|chatbot|"
+               r"software|fertig|getestet|l(ä|ae)uft", ("programm_fertig",),
                "Fertig programmiert ist noch nichts - dafür fehlt die Meldung „Programmier-Auftrag fertig“."),
     Behauptung("anrufen", r"angerufen|telefoniert|zur(ü|ue)ckgerufen", "", False, "", (),
                "Angerufen hat JARVIS niemanden - das kann er nicht."),
@@ -446,6 +461,25 @@ def _satz_behauptet(satz, b, sachsaetze):
     return False
 
 
+def _programm_behauptet(satz, sachsaetze):
+    """ "Ich habe dir den Rechner gebaut", "Ich habe es programmiert", "Das Programm ist fertig und getestet",
+    "Claude Code hat den Rechner fertig programmiert". Nicht: "Ich habe einen Plan entwickelt", "Ich habe den Link
+    getestet", "Sobald es fertig ist …", "laut Bericht …", Fragen und Verneinungen."""
+    if _QUELLE.search(satz) or _BEDINGUNG.search(satz) or satz.rstrip().endswith("?"):
+        return False
+    for teil in (t.strip() for t in _TEIL.split(satz) if t.strip()):
+        ich = re.search(r"\b(?:ich\s+(?:habe|hab)|(?:habe|hab)\s+ich)\b(?P<mitte>.{0,80}?)\b(?P<wort>%s)\b" % PROG_FERTIG,
+                        teil)
+        if ich and not _verneint(ich.group("mitte")) and (
+                ich.group("wort") == "programmiert" or _PROG_NOMEN.search(ich.group("mitte"))):
+            return True
+        if sachsaetze and _PROG_NOMEN.search(teil) and not _FREMD.search(teil) and not _ICH.search(teil) \
+                and not _VERNEINUNG.search(teil) \
+                and re.search(r"\b(?:ist|sind|wurde|wurden|hat|haben)\b.{0,60}?\b(?:%s)\b" % PROG_FERTIG, teil):
+            return True
+    return False
+
+
 def ehrlichkeit_pruefen(antwort, bestaetigt=(), frage=None):
     """Prüft eine Antwort auf behauptete Aktionen ohne Beleg.
 
@@ -461,7 +495,11 @@ def ehrlichkeit_pruefen(antwort, bestaetigt=(), frage=None):
         if b.belege and any(w in bestaetigt for w in b.belege):
             continue
         sachsaetze = anfrage is None or bool(b.verlangt and re.search(b.verlangt, anfrage))
-        if any(_satz_behauptet(satz, b, sachsaetze) for satz in saetze):
+        if b.art == "programmieren":
+            treffer = any(_programm_behauptet(satz, sachsaetze) for satz in saetze)
+        else:
+            treffer = any(_satz_behauptet(satz, b, sachsaetze) for satz in saetze)
+        if treffer:
             funde.append(b)
     if not funde:
         return antwort, []

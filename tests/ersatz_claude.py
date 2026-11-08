@@ -18,6 +18,8 @@ Eine Regel im Drehbuch:
      "dateien": {"pfad/im/arbeitsordner.py": "Inhalt"}, "verweigert": ["Bash"], "kind": "/pfad/kind.pid"}
 
 "kind" startet einen Kindprozess (wie ein Test, den Claude Code ausführt) und schreibt dessen Nummer in die Datei.
+Der Kindprozess erbt die Ausgaben (hält sie also offen, solange er läuft); "kind_eigene_gruppe": true lässt ihn sich
+zusätzlich in eine eigene Sitzung absetzen (wie ein Programm, das sich der Prozessgruppe entzieht).
 
 Die erste passende Regel gewinnt. Ohne passende Regel antwortet der Ersatz mit "Antwort auf: <Eingabe>".
 """
@@ -74,7 +76,7 @@ def main():
                                 "bedrock": os.environ.get("CLAUDE_CODE_USE_BEDROCK")}, ensure_ascii=False) + "\n")
 
     antwort, modus, sekunden, dateien, verweigert = "Antwort auf: " + eingabe.strip()[-200:], None, 0, {}, []
-    kind = None
+    kind, eigene_gruppe = None, False
     drehbuch = _laden(os.environ.get("FAKE_DREHBUCH"), [])
     genutzt = stand.setdefault("regeln", {})
     for i, regel in enumerate(drehbuch):
@@ -96,6 +98,7 @@ def main():
         antwort = regel.get("antwort", antwort)
         modus, sekunden = regel.get("modus"), regel.get("sekunden", 30)
         dateien, verweigert, kind = regel.get("dateien") or {}, regel.get("verweigert") or [], regel.get("kind")
+        eigene_gruppe = bool(regel.get("kind_eigene_gruppe"))
         break
     if stand_datei:
         with open(stand_datei, "w", encoding="utf-8") as f:
@@ -111,7 +114,8 @@ def main():
         print(json.dumps({"type": "result", "is_error": True, "result": "Irgendetwas ist schiefgegangen"}))
         return 1
     if kind:
-        prozess = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(120)"])  # noqa: S603
+        prozess = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(120)"],  # noqa: S603
+                                   start_new_session=eigene_gruppe)
         with open(kind, "w", encoding="utf-8") as f:
             f.write(str(prozess.pid))
     if modus == "langsam":

@@ -9,10 +9,15 @@ So ist es abgesichert (die Startoptionen folgen der Dokumentation von Claude Cod
 * Ohne Tests: keine Kommandozeile - nur Dateien lesen, anlegen, ändern.
 * Mit Tests: Kommandozeile nur in der Sandbox (``sandbox.enabled``): kein Netz, unsandboxed Wiederholungen aus.
   Ist die Sandbox nicht verfügbar, bricht Claude Code ab (``failIfUnavailable``), statt ungeschützt zu laufen.
-* Steuerdateien für Claude Code (``.claude/``, ``.mcp.json``, ``CLAUDE.md``) darf ein Auftrag nicht schreiben, und
-  Einstellungen aus dem Projektordner werden gar nicht geladen (``--setting-sources user``): Ein Auftrag kann sich so
-  keine Rechte für den nächsten Lauf geben. Keine fremden MCP-Dienste (``--strict-mcp-config``).
-* Abo, nie API-Schlüssel (Umgebung wie beim Denken bereinigt); ``--bare`` wird nie benutzt (schaltet das Abo ab).
+* Keine fremden Einstellungen: ``--setting-sources ""`` lädt weder Einstellungen (auch nicht die eigenen des Nutzers
+  mit Hooks, Plugins oder erweiterten Rechten) noch eine ``CLAUDE.md`` - mit echtem Claude Code geprüft. Steuerdateien
+  (``.claude/``, ``.mcp.json``, ``CLAUDE.md``) darf ein Auftrag zudem nicht schreiben: Er kann sich so keine Rechte für
+  den nächsten Lauf geben. Keine fremden MCP-Dienste (``--strict-mcp-config``).
+* Abo, nie API-Schlüssel. Claude Code bekommt nur die nötigsten Umgebungsvariablen (Positivliste) - keine
+  Zugangsschlüssel anderer Programme, die ein Test sonst auslesen könnte. ``--bare`` wird nie benutzt (schaltet das
+  Abo ab).
+* Claude Code läuft in einer eigenen Prozessgruppe: Abbrechen, Notstopp, Zeitlimit und das Beenden von JARVIS beenden
+  alles, was der Auftrag gestartet hat - auch Programme, die Claude Code selbst überleben.
 * Vor jedem Auftrag wird das Projekt gesichert (Werkstatt/.papierkorb/projekte) - nichts geht verloren.
 * Jeder Auftrag braucht die Freigabe des Nutzers, läuft im Hintergrund und meldet sich am Ende. Notstopp bricht ab.
 """
@@ -24,12 +29,12 @@ import os
 import re
 import shutil
 import signal
+import stat
 import subprocess
 import threading
 import time
 
 from . import zeit
-from .provider import saubere_umgebung
 
 PROJEKTNAME = re.compile(r"^[a-z0-9][a-z0-9_-]{1,39}$")
 STEUERDATEIEN = (".claude", ".mcp.json", "CLAUDE.md", "CLAUDE.local.md")
@@ -39,6 +44,7 @@ MAX_SCHRITTE = 40
 MAX_AUFTRAG = 8000
 # Nebenoptionen, auf die ein Lauf verzichten kann, falls eine neuere Version von Claude Code sie nicht mehr kennt
 VERZICHTBAR = ("--max-turns", "--disable-slash-commands", "--no-session-persistence")
+LESEN_WARTEN = 10  # Sekunden, die nach dem Ende von Claude Code höchstens noch auf offene Ausgaben gewartet wird
 
 RAHMEN = """Du programmierst für JARVIS, den Assistenten eines kleinen Bau- und Reinigungsbetriebs, im aktuellen Ordner \
 (dem Projektordner). Regeln:
@@ -84,19 +90,74 @@ def _nachkommen(pid):
 
 
 def beenden(proc):
-    """Beendet Claude Code samt allem, was es gestartet hat. Ohne die Kinder liefe z. B. eine Endlosschleife in einem
-    Test nach einem Notstopp weiter."""
-    if proc.poll() is not None:
-        return
-    for pid in reversed(_nachkommen(proc.pid)):
+    """Beendet Claude Code samt allem, was es gestartet hat - auch dann, wenn Claude Code selbst schon beendet ist, ein
+    Kind (z. B. ein Testserver) aber weiterläuft und die Ausgabe offen hält. Ohne das liefe etwa eine Endlosschleife in
+    einem Test nach einem Notstopp weiter. Claude Code läuft dafür in einer eigenen Prozessgruppe."""
+    nachkommen = _nachkommen(proc.pid) if proc.poll() is None else []
+    try:
+        os.killpg(proc.pid, signal.SIGKILL)  # die ganze Gruppe - nie die von JARVIS (eigene Sitzung beim Start)
+    except (OSError, AttributeError):
+        pass
+    for pid in reversed(nachkommen):  # wer sich eine eigene Gruppe aufgemacht hat
         try:
             os.kill(pid, signal.SIGKILL)
         except OSError:
             pass
+    if proc.poll() is None:
+        try:
+            proc.kill()
+        except OSError:
+            pass
+
+
+def _lesen(rohr, ziel):
+    """Liest eine Ausgabe bis zum Ende (eigener Faden - so blockiert ein offen gehaltenes Rohr nie den Lauf) und
+    schließt sie danach selbst, auch wenn der Lauf längst nicht mehr auf ihn wartet."""
     try:
-        proc.kill()
-    except OSError:
-        pass
+        while True:
+            stueck = rohr.read(65536)
+            if not stueck:
+                return
+            ziel.append(stueck)
+    except (OSError, ValueError):
+        return
+    finally:
+        try:
+            rohr.close()
+        except (OSError, ValueError):
+            pass
+
+
+# Nur diese Umgebungsvariablen bekommt Claude Code beim Programmieren. Alles andere (z. B. GITHUB_TOKEN oder
+# Zugangsdaten anderer Programme) könnte ein Test sonst auslesen. FAKE_* gibt es nur für die Ersatzprogramme der Tests.
+UMGEBUNG_ERLAUBT = ("PATH", "HOME", "USER", "LOGNAME", "SHELL", "TMPDIR", "TERM", "TZ", "LANG",
+                    "HTTPS_PROXY", "HTTP_PROXY", "NO_PROXY", "ALL_PROXY", "https_proxy", "http_proxy", "no_proxy",
+                    "all_proxy", "NODE_EXTRA_CA_CERTS", "SSL_CERT_FILE", "SSL_CERT_DIR", "CLAUDE_CONFIG_DIR")
+
+
+def umgebung(mit_tests):
+    """Positivliste. Die Abo-Anmeldung per Umgebungsvariable (claude setup-token) nur ohne Kommandozeile - mit Tests
+    könnte ein Programm sie sonst lesen. Die übliche Anmeldung (claude auth login) liegt ohnehin im Schlüsselbund."""
+    erlaubt = UMGEBUNG_ERLAUBT + (() if mit_tests else ("CLAUDE_CODE_OAUTH_TOKEN",))
+    return {k: v for k, v in os.environ.items() if k in erlaubt or k.startswith(("LC_", "FAKE_"))}
+
+
+# Lesen gesperrt - auch für Programme, die ein Auftrag mit Tests startet (Sandbox-Regeln laut Dokumentation von
+# Claude Code, auf dem Mac nicht nachgeprüft). Ausgelassen wird, was den Projektordner selbst enthält.
+GESPERRT_LESEN = ("~/.jarvis", "~/.ssh", "~/.aws", "~/.gnupg", "~/.config", "~/.claude", "~/Library", "~/Documents",
+                  "~/Desktop", "~/Downloads", "~/Pictures", "~/Movies", "~/Music")
+
+
+def lesesperren(projekt=None):
+    heim = os.path.realpath(os.path.expanduser("~"))
+    echt = os.path.realpath(projekt) if projekt else ""
+    regeln = []
+    for ort in GESPERRT_LESEN:
+        voll = os.path.join(heim, ort[2:])
+        if echt and (echt == voll or echt.startswith(voll + os.sep)):
+            continue
+        regeln.append("Read(%s/**)" % ort)
+    return regeln
 
 
 _LAUFENDE = set()
@@ -117,7 +178,7 @@ def projekt_pfad(konfig, name):
     return name, os.path.join(os.path.realpath(konfig.werkstatt_pfad), "projekte", name)
 
 
-def befehl(programm, modell, mit_tests, max_schritte=MAX_SCHRITTE, ohne=()):
+def befehl(programm, modell, mit_tests, max_schritte=MAX_SCHRITTE, ohne=(), projekt=None):
     """Die Startoptionen für einen Programmier-Lauf - an einer Stelle, damit sie geprüft werden können.
 
     ``ohne``: Nebenoptionen aus VERZICHTBAR, die diese Version von Claude Code nicht kennt."""
@@ -125,6 +186,7 @@ def befehl(programm, modell, mit_tests, max_schritte=MAX_SCHRITTE, ohne=()):
     verboten = ["WebFetch", "WebSearch"]
     for datei in (".claude/**", ".mcp.json", "CLAUDE.md", "CLAUDE.local.md"):
         verboten += ["Edit(%s)" % datei, "Write(%s)" % datei]
+    verboten += lesesperren(projekt)
     einstellungen = {"permissions": {"blockReadsOutsideWorkingDirectories": True,
                                      "blockWritesOutsideWorkingDirectories": True}}
     if mit_tests:
@@ -135,7 +197,7 @@ def befehl(programm, modell, mit_tests, max_schritte=MAX_SCHRITTE, ohne=()):
         verboten.append("Bash")
     return [programm, "-p", "--output-format", "json", "--model", modell or "opus", "--permission-mode", "dontAsk",
             "--allowedTools", ",".join(erlaubt), "--disallowedTools", ",".join(verboten),
-            "--settings", json.dumps(einstellungen), "--setting-sources", "user",
+            "--settings", json.dumps(einstellungen), "--setting-sources", "",
             "--strict-mcp-config", "--mcp-config", json.dumps({"mcpServers": {}})] + [
                 teil for name, teile in (("--disable-slash-commands", ["--disable-slash-commands"]),
                                          ("--no-session-persistence", ["--no-session-persistence"]),
@@ -189,26 +251,35 @@ def steuerdateien(ordner):
 
 
 def ordner_pruefen(pfad):
-    """Der Projektordner selbst darf keine Verknüpfung sein, und keine Verknüpfung darin darf nach außen zeigen -
-    sonst schriebe Claude Code über den Umweg doch außerhalb (z. B. in Dokumente)."""
+    """Der Projektordner selbst darf keine Verknüpfung sein, und nichts darin darf nach außen zeigen - weder eine
+    Verknüpfung noch eine harte Verknüpfung (zweiter Name einer Datei von außerhalb). Sonst läse oder schriebe Claude
+    Code über den Umweg doch außerhalb (z. B. in Dokumente). Geprüft wird alles, auch .git und node_modules."""
     eltern = os.path.dirname(pfad)
     if os.path.islink(pfad) or os.path.realpath(pfad) != os.path.join(os.path.realpath(eltern), os.path.basename(pfad)):
         raise ProgrammierFehler("Der Projektordner ist eine Verknüpfung - das ist aus Sicherheitsgründen nicht erlaubt.")
     if not os.path.isdir(pfad):
         return
     echt = os.path.realpath(pfad)
-    nach_aussen = []
+    nach_aussen, mehrfach = [], []
     for wurzel, unter, dateien in os.walk(pfad):
-        unter[:] = [u for u in unter if u not in UEBERSPRINGEN]
         for name in unter + dateien:
             voll = os.path.join(wurzel, name)
-            if os.path.islink(voll):
+            try:
+                st = os.lstat(voll)
+            except OSError:
+                continue
+            if stat.S_ISLNK(st.st_mode):
                 ziel = os.path.realpath(voll)
                 if ziel != echt and not ziel.startswith(echt + os.sep):
                     nach_aussen.append(os.path.relpath(voll, pfad))
+            elif stat.S_ISREG(st.st_mode) and st.st_nlink > 1:
+                mehrfach.append(os.path.relpath(voll, pfad))
     if nach_aussen:
         raise ProgrammierFehler("Im Projekt liegen Verknüpfungen nach außerhalb (%s). Bitte erst entfernen."
                                 % ", ".join(sorted(nach_aussen)[:5]))
+    if mehrfach:
+        raise ProgrammierFehler("Im Projekt liegen Dateien, die noch an anderer Stelle stehen (harte Verknüpfung: %s). "
+                                "Bitte erst entfernen oder durch eine Kopie ersetzen." % ", ".join(sorted(mehrfach)[:5]))
 
 
 class Programmierer:
@@ -227,7 +298,7 @@ class Programmierer:
         return os.path.join(self.agent.konfig.daten_ordner, "programmieren")
 
     def beschaeftigt(self):
-        return self._faden is not None and self._faden.is_alive()
+        return self.laufend is not None or (self._faden is not None and self._faden.is_alive())
 
     def claude_pruefen(self):
         provider = self.agent.provider
@@ -253,24 +324,42 @@ class Programmierer:
 
     def frei_pruefen(self):
         laufend = self.laufend
-        if self.beschaeftigt() and laufend:
+        if laufend is not None:
             raise ProgrammierFehler("Es läuft schon ein Programmier-Auftrag (Projekt %s). Bitte warten, bis er fertig "
                                     "ist, oder abbrechen." % laufend["projekt"])
 
+    def _notstopp_pruefen(self):
+        if self.agent.gesperrt.is_set():
+            raise ProgrammierFehler("Notstopp ist aktiv - es startet kein Programmier-Auftrag.")
+
     def starten(self, ctx, name, auftrag, mit_tests):
+        """Platz reservieren (unter der Sperre), dann prüfen und sichern (ohne Sperre - ein Notstopp muss nicht auf das
+        Kopieren warten), dann unter der Sperre starten, nur wenn inzwischen weder Abbruch noch Notstopp kam."""
+        name, pfad = projekt_pfad(self.agent.konfig, name)
         with self._sperre:
+            self._notstopp_pruefen()
             self.frei_pruefen()
-            programm = self.claude_pruefen()
-            name, pfad = projekt_pfad(self.agent.konfig, name)
-            ordner_pruefen(pfad)
-            os.makedirs(pfad, exist_ok=True)
             info = {"projekt": name, "pfad": pfad, "start": zeit.jetzt(), "mit_tests": bool(mit_tests),
-                    "gespraech": ctx.gespraech, "bereich": ctx.bereich, "sicherung": self._sichern(name, pfad)}
+                    "gespraech": ctx.gespraech, "bereich": ctx.bereich, "sicherung": None}
             self.laufend = info
             self._abgebrochen.clear()
-            self._faden = threading.Thread(target=self._laufen, args=(info, programm, auftrag), daemon=True,
-                                           name="jarvis-programmieren")
-            self._faden.start()
+        try:
+            programm = self.claude_pruefen()
+            ordner_pruefen(pfad)
+            os.makedirs(pfad, exist_ok=True)
+            info["sicherung"] = self._sichern(name, pfad)
+            with self._sperre:
+                self._notstopp_pruefen()
+                if self._abgebrochen.is_set():
+                    raise ProgrammierFehler("Abgebrochen, bevor der Auftrag begann. Es wurde nichts verändert.")
+                self._faden = threading.Thread(target=self._laufen, args=(info, programm, auftrag), daemon=True,
+                                               name="jarvis-programmieren")
+                self._faden.start()
+        except BaseException:
+            with self._sperre:
+                if self.laufend is info:
+                    self.laufend = None
+            raise
         return info
 
     def abbrechen(self):
@@ -284,6 +373,13 @@ class Programmierer:
             if self._proc is not None:
                 beenden(self._proc)
             return True
+
+    def stoppen(self, warten=15):
+        """Beim Beenden von JARVIS: laufenden Auftrag abbrechen und kurz warten, bis seine Meldung geschrieben ist."""
+        if self.abbrechen():
+            faden = self._faden
+            if faden is not None:
+                faden.join(warten)
 
     def _laufen(self, info, programm, auftrag):
         """Im Hintergrund: Claude Code starten, warten, Ergebnis melden. Was auch passiert - am Ende ist der Platz frei."""
@@ -307,8 +403,8 @@ class Programmierer:
         try:
             for _ in range(len(VERZICHTBAR) + 1):
                 rc, ausgabe, fehler, zu_lange = self._prozess(
-                    befehl(programm, k.modell_fuer("arbeit"), info["mit_tests"], ohne=ohne), eingabe, info["pfad"],
-                    k.programmier_minuten * 60)
+                    befehl(programm, k.modell_fuer("arbeit"), info["mit_tests"], ohne=ohne, projekt=info["pfad"]),
+                    eingabe, info["pfad"], k.programmier_minuten * 60, umgebung(info["mit_tests"]))
                 # Kennt eine neuere Version von Claude Code eine Nebenoption nicht mehr: ohne sie noch einmal.
                 # Schutzoptionen (Rechte, Einstellungen, Sandbox) fallen nie weg - ohne sie startet kein Lauf.
                 text = ((fehler or "") + (ausgabe or "")).lower()
@@ -348,28 +444,47 @@ class Programmierer:
                          "dauer_s": int(time.time() - start), "ende": zeit.jetzt()})
         return ergebnis
 
-    def _prozess(self, argumente, eingabe, ordner, timeout):
-        """Ein Aufruf von Claude Code. Gibt (Rückgabewert, Ausgabe, Fehlerausgabe, Zeit überschritten?) zurück."""
+    def _prozess(self, argumente, eingabe, ordner, timeout, env):
+        """Ein Aufruf von Claude Code. Gibt (Rückgabewert, Ausgabe, Fehlerausgabe, Zeit überschritten?) zurück.
+
+        Gewartet wird auf das Ende von Claude Code, nicht auf das Ende der Ausgabe: Hält ein übrig gebliebenes Kind die
+        Ausgabe offen, wird es beendet; wer sich auch dem entzieht, wird nach 10 s nicht weiter abgewartet."""
         proc = subprocess.Popen(argumente, stdin=subprocess.PIPE, stdout=subprocess.PIPE,  # noqa: S603
-                                stderr=subprocess.PIPE, text=True, cwd=ordner, env=saubere_umgebung())
+                                stderr=subprocess.PIPE, text=True, cwd=ordner, env=env, start_new_session=True)
         with self._sperre:
             self._proc = proc
             _LAUFENDE.add(proc)
-            if self._abgebrochen.is_set():
+            if self._abgebrochen.is_set() or self.agent.gesperrt.is_set():
+                self._abgebrochen.set()
                 beenden(proc)
+        ausgabe, fehler = [], []
+        leser = [threading.Thread(target=_lesen, args=(proc.stdout, ausgabe), daemon=True, name="jarvis-prog-aus"),
+                 threading.Thread(target=_lesen, args=(proc.stderr, fehler), daemon=True, name="jarvis-prog-fehler")]
+        for faden in leser:
+            faden.start()
         zu_lange = False
         try:
             try:
-                ausgabe, fehler = proc.communicate(input=eingabe, timeout=timeout)
+                proc.stdin.write(eingabe)
+                proc.stdin.close()
+            except (OSError, ValueError):
+                pass  # Claude Code hat schon aufgehört (z. B. unbekannte Option) - die Meldung steht in der Ausgabe
+            try:
+                proc.wait(timeout=timeout)
             except subprocess.TimeoutExpired:
                 zu_lange = True
-                beenden(proc)
-                ausgabe, fehler = proc.communicate()
+            beenden(proc)  # auch, was Claude Code überlebt hat
+            for faden in leser:
+                faden.join(LESEN_WARTEN)  # die Fäden schließen ihre Rohre selbst, sobald sie fertig sind
+            try:
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                pass
         finally:
             with self._sperre:
                 _LAUFENDE.discard(proc)
                 self._proc = None
-        return proc.returncode, ausgabe, fehler, zu_lange
+        return proc.returncode, "".join(ausgabe), "".join(fehler), zu_lange
 
     def _melden(self, info, e):
         os.makedirs(self.stand_ordner, mode=0o700, exist_ok=True)

@@ -184,6 +184,7 @@ class JarvisServer:
             self.laeufer.beenden()
             self.zeitplan.beenden()
             self.provider.abbrechen()
+            self.agent.programmierer.stoppen()  # vor dem Schließen der Datenbank: die Abbruch-Meldung soll ankommen
             self.stimme.stopp()
             self._httpd.server_close()
             self.laeufer.join(timeout=5)

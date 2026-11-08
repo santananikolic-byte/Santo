@@ -35,7 +35,8 @@ import tempfile
 from . import ordnung
 
 BILDARTEN = {"jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png", "gif": "image/gif", "webp": "image/webp"}
-UMWANDELBAR = ("heic", "heif", "tif", "tiff", "bmp", "jpg", "jpeg", "png")
+UMWANDELBAR = ("heic", "heif", "tif", "tiff", "bmp", "jpg", "jpeg", "png", "webp", "gif")
+DIREKT = ("jpg", "jpeg", "png", "gif")  # ohne sips nur, was sich sicher von Metadaten befreien lässt (kein WebP)
 MAX_BILDER = 30
 MAX_BILD_QUELLE = 40 * 1024 * 1024  # größer liest JARVIS ein Bild gar nicht erst
 MAX_BILD_DIREKT = 4 * 1024 * 1024  # ohne sips: nur kleinere Bilder direkt einbetten
@@ -148,7 +149,13 @@ def ohne_standort(daten):
     if daten[:2] != b"\xff\xd8":
         return daten, False
     teile, i, entfernt = [daten[:2]], 2, False
-    while i + 4 <= len(daten) and daten[i] == 0xFF:
+    while i + 4 <= len(daten):
+        if daten[i] != 0xFF:  # Fremdbytes zwischen Blöcken: überspringen wie ein JPEG-Leser, nicht aufhören
+            weiter = daten.find(b"\xff", i)
+            if weiter < 0:
+                break
+            i = weiter
+            continue
         marker = daten[i + 1]
         if marker == 0xFF:
             teile.append(daten[i:i + 1])
@@ -170,7 +177,36 @@ def ohne_standort(daten):
         else:
             teile.append(segment)
         i += 2 + laenge
-    teile.append(daten[i:])
+    rest = daten[i:]
+    ende = rest.find(b"\xff\xd9")  # im Bilddatenstrom kommt FF D9 nur als Bildende vor
+    if ende >= 0 and len(rest) > ende + 2:
+        rest, entfernt = rest[:ende + 2], True  # angehängte Zweitbilder (MPF, HDR-Gainmap) tragen eigene Metadaten
+    teile.append(rest)
+    return b"".join(teile), entfernt
+
+
+PNG_KOPF = b"\x89PNG\r\n\x1a\n"
+PNG_WEG = (b"eXIf", b"iTXt", b"tEXt", b"zTXt", b"tIME")  # Metadaten (EXIF, XMP, Texte) - für die Anzeige unnötig
+
+
+def png_ohne_metadaten(daten):
+    """PNG ohne EXIF/XMP/Text-Blöcke. Gibt (Bytes, ob etwas entfernt wurde) zurück; kaputte Dateien: (None, False)."""
+    if not daten.startswith(PNG_KOPF):
+        return daten, False
+    teile, i, entfernt = [PNG_KOPF], len(PNG_KOPF), False
+    while i + 12 <= len(daten):
+        laenge = int.from_bytes(daten[i:i + 4], "big")
+        typ = daten[i + 4:i + 8]
+        ende = i + 12 + laenge
+        if ende > len(daten):
+            return None, False
+        if typ in PNG_WEG:
+            entfernt = True
+        else:
+            teile.append(daten[i:ende])
+        i = ende
+        if typ == b"IEND":
+            break
     return b"".join(teile), entfernt
 
 
@@ -206,16 +242,20 @@ def bild_daten(pfad, endung):
             if lauf is not None and lauf.returncode == 0 and os.path.isfile(ziel) and os.path.getsize(ziel) > 0:
                 with open(ziel, "rb") as f:
                     mime, roh = "image/jpeg", f.read()
-    if roh is None and endung in BILDARTEN and os.path.getsize(pfad) <= MAX_BILD_DIREKT:
+    if roh is None and endung in DIREKT and os.path.getsize(pfad) <= MAX_BILD_DIREKT:
         with open(pfad, "rb") as f:
             mime, roh = BILDARTEN[endung], f.read()
     if roh is None:
-        if endung in BILDARTEN:
+        if endung in DIREKT:
             raise PraesentationFehler("zu groß zum direkten Einbetten (ohne sips nur bis 4 MB)")
-        raise PraesentationFehler("HEIC/TIFF lassen sich nur auf dem Mac umwandeln (sips fehlt)")
+        raise PraesentationFehler("%s lässt sich nur auf dem Mac umwandeln (sips fehlt)" % endung.upper())
     entfernt = False
     if mime == "image/jpeg":
         roh, entfernt = ohne_standort(roh)
+    elif mime == "image/png":
+        roh, entfernt = png_ohne_metadaten(roh)
+        if roh is None:
+            raise PraesentationFehler("die PNG-Datei ist beschädigt")
     return mime, roh, entfernt
 
 
@@ -309,9 +349,10 @@ def bauen(konfig, inhalt, titel="", untertitel="", fusszeile="", akzent="#c8561b
     hinweise, bilder_gesamt, groesse, ohne_ort = [], 0, 0, 0
     folien_html = []
     gesamt = len(daten["folien"]) + 1
-    fuss = '<div class="fuss"><span>%s</span><span>%%d / %d</span></div>' % (e(fusszeile), gesamt)
+    def fuss(nummer):  # einmal formatieren: ein "%" in der Fußzeile ("100% zuverlässig") darf nichts kaputt machen
+        return '<div class="fuss"><span>%s</span><span>%d / %d</span></div>' % (e(fusszeile), nummer, gesamt)
     folien_html.append('<section class="folie titelfolie"><div class="linie"></div><h1>%s</h1>%s%s</section>' % (
-        e(daten["titel"]), '<p class="unter">%s</p>' % e(daten["untertitel"]) if daten["untertitel"] else "", fuss % 1))
+        e(daten["titel"]), '<p class="unter">%s</p>' % e(daten["untertitel"]) if daten["untertitel"] else "", fuss(1)))
     for nummer, folie in enumerate(daten["folien"], start=2):
         teile = ["<h2>%s</h2>" % e(folie["titel"])]
         teile += ["<p>%s</p>" % e(a) for a in folie["absaetze"]]
@@ -341,10 +382,10 @@ def bauen(konfig, inhalt, titel="", untertitel="", fusszeile="", akzent="#c8561b
             hinweise.append("Folie „%s“: höchstens 2 Bilder pro Folie, der Rest ist weggelassen." % folie["titel"])
         if figuren:
             teile.append('<div class="bilder">%s</div>' % "".join(figuren))
-        folien_html.append('<section class="folie">%s%s</section>' % ("".join(teile), fuss % nummer))
+        folien_html.append('<section class="folie">%s%s</section>' % ("".join(teile), fuss(nummer)))
     if ohne_ort:
-        hinweise.append("Aus %d Foto(s) ist der Aufnahmeort (GPS) entfernt - die Präsentation verrät nicht, wo sie "
-                        "aufgenommen wurden." % ohne_ort)
+        hinweise.append("Aus %d Bild(ern) sind Aufnahmeort (GPS) und andere Metadaten entfernt - die Präsentation "
+                        "verrät nicht, wo die Fotos aufgenommen wurden." % ohne_ort)
     seite = ("<!doctype html>\n<html lang=\"de\"><head><meta charset=\"utf-8\">"
              "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">"
              "<title>%s</title><style>%s</style></head><body>"

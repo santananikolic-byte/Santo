@@ -182,7 +182,30 @@ JARVIS endet auch der Auftrag, „fertig programmiert“ ohne Fertig-Meldung bek
 **Selbst gefunden beim Durchdenken:** Die Live-Photo-Zuordnung ging nur nach dem Namen – beim Verschieben nach Zeitraum
 hätte eine `Angebot.pdf` das Datum von `Angebot.jpg` übernommen. Jetzt nur unter Fotos, Videos und `.AAE`.
 
-**Prüfer-Agent (unabhängige Durchsicht aller drei Teile):** läuft gerade; das Ergebnis und die Behebungen folgen im nächsten Stand.
+**Prüfer-Agent (unabhängige Durchsicht aller drei Teile):** kein Weg zu Datenverlust, Überschreiben oder einem Ausbruch
+aus dem Projektordner gefunden; dafür 15 Befunde (7 mittel, 8 gering), alle behoben, je mit Regressionstest:
+
+| # | Befund | Behoben durch |
+|---|---|---|
+| 1 | Spotlight-Datum konnte bei einer unlesbaren Datei bei der falschen landen (zweite Ausgabeform von `mdls`) | Sammelabfrage zählt nur ohne Fehler und Meldung, sonst einzeln |
+| 2 | Protokoll erst nach dem Verschieben und nicht atomar: volle Platte oder Absturz → kein Rückgängig, danach Absturz (HTTP 500) | Protokoll **vor** dem ersten Schritt, atomar; kaputte Protokolle werden übergangen; jeder Fehler der Vorbereitung wird eine verständliche Meldung |
+| 3 | zweimal „rückgängig“ sortierte wieder ein | „letzte“ = jüngstes noch nicht zurückgenommenes Sortieren; ausdrücklich ein Rückgängig zurücknehmen heißt ehrlich „Wiederherstellen“ |
+| 4 | Programmier-Lauf konnte ewig hängen, wenn ein Kind die Ausgabe offen hielt; Abbrechen half nicht | eigene Prozessgruppe, beendet wird die ganze Gruppe; gewartet wird auf Claude Code, nicht auf die Ausgabe; beim Beenden von JARVIS wird abgebrochen und gemeldet |
+| 5 | ganze Umgebung (z. B. GITHUB_TOKEN) ging an Claude Code; Lesen außerhalb durch ausgeführte Programme nicht geprüft; harte Verknüpfungen nicht erkannt | Positivliste der Umgebung; private Ordner zum Lesen gesperrt (laut Doku, auf dem Mac nicht nachgeprüft) und die Vorschau sagt es ehrlich; harte und versteckte Verknüpfungen sperren den Auftrag |
+| 6 | eigene Einstellungen des Nutzers (Rechte, Hooks, Plugins) und CLAUDE.md wurden mitgeladen; JARVIS selbst konnte eine CLAUDE.md anlegen | `--setting-sources ""`: **mit echtem Claude Code geprüft** – keine Einstellungen, keine CLAUDE.md, Anmeldung mit dem Abo geht trotzdem; JARVIS legt keine Steuerdateien mehr an |
+| 7 | Ehrlichkeit: „Ich habe dir den Rechner gebaut“ übersehen, „Ich habe einen Plan entwickelt“ fälschlich berichtigt | Behauptung nur mit Programm-Wort (Rechner, App, Programm …) plus fertig/gebaut/getestet; auch Sachsätze |
+| 8 | ein Notstopp kurz vor dem Start ging verloren; der Notstopp wartete auf das Sichern | Platz reservieren, prüfen und sichern ohne Sperre, Start nur ohne Abbruch und Notstopp |
+| 9 | „%“ in der Fußzeile einer Präsentation → Absturz | Fußzeile wird nur einmal eingesetzt |
+| 10 | GPS konnte in Randfällen bleiben (Fremdbytes, angehängtes Zweitbild); PNG/WebP gar nicht bereinigt | Fremdbytes überspringen, nach dem ersten Bildende abschneiden, PNG-Metadaten entfernen, WebP nur umgewandelt |
+| 11 | Rückgängig prüfte nicht, ob es noch dieselbe Datei ist, und lief auch in nicht mehr verwalteten Ordnern | Gerät und Dateinummer im Protokoll; Ordner muss noch verwaltet sein |
+| 12 | eine Verknüpfung in die Fotos-Mediathek umging die Paket-Sperre | Paket- und Versteckt-Prüfung nach dem Auflösen von Verknüpfungen, auch für jedes Ziel |
+| 13 | eine Pipe mit Fotonamen ließ das Lesen ewig hängen | nur normale Dateien |
+| 14 | Stichworte griffen bei Alltagssätzen („Folie auf den Boden“, „Keller aufräumen“, „eine App für …“) | nur noch mit Datei-, Folien- oder Bau-Bezug |
+| 15 | zwei Tests prüften auf dem Mac nichts oder das Falsche | Test überspringt sich auf dem Mac ehrlich; ein Test, der nur Felder setzte, ersetzt durch echte Wettlauf-Tests |
+
+**Echte Nachprobe danach** (Claude Code 2.1.319, haiku): Mit `--setting-sources ""` wird eine `CLAUDE.md` im Projekt
+nicht geladen (mit `project` schon), Projekt-Einstellungen ebenso nicht; mit allen neuen Optionen entsteht die Datei im
+Projekt, Schreiben und Lesen außerhalb lehnt Claude Code weiterhin selbst ab.
 
 ## Was ich nicht geprüft habe
 

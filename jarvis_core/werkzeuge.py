@@ -38,7 +38,8 @@ STUFEN = {FREI: "frei", MELDUNG: "mit Meldung", FREIGABE: "nur nach Freigabe des
 MAX_INHALT = 200000
 MAX_LESEN = 30000
 MAX_EINTRAEGE = 100
-MAX_MAILTEXT = 10000  # so lang darf eine E-Mail sein - und genau so viel zeigt die Freigabe, ungekürzt
+MAX_MAILTEXT = 10000
+STEUERNAMEN = ("claude.md", "claude.local.md", ".mcp.json", "agents.md")  # so lang darf eine E-Mail sein - und genau so viel zeigt die Freigabe, ungekürzt
 
 AKTION = re.compile(r"<aktion\s+([^<>]*?)\s*(?:/>|>(.*?)</aktion>)", re.S)
 ATTRIBUT = re.compile(r'([a-z_]+)\s*=\s*"([^"]*)"')
@@ -147,6 +148,9 @@ def pfad_aufloesen(konfig, angabe, schreiben=False, muss_existieren=False):
         raise WerkzeugFehler("\"..\" ist nicht erlaubt.")
     if any(t.startswith(".") for t in teile):
         raise WerkzeugFehler("Versteckte Dateien und Ordner sind tabu.")
+    if schreiben and any(t.lower() in STEUERNAMEN for t in teile):
+        # Eine von JARVIS geschriebene CLAUDE.md würde sonst Anweisungen für spätere Programmier-Aufträge einschleusen
+        raise WerkzeugFehler("Steuerdateien für Claude Code (CLAUDE.md, .mcp.json) legt JARVIS nicht an.")
     if name == "werkstatt" or schreiben:
         os.makedirs(basis, exist_ok=True)
     basis_echt = os.path.realpath(basis)
@@ -482,7 +486,7 @@ def _verschieben_vorbereiten(ctx, p):
 
 
 def _rueckgaengig_vorbereiten(ctx, p):
-    return {"_plan": ordnung.rueckgaengig_planen(_protokolle(ctx), p.get("protokoll", "letzte"))}
+    return {"_plan": ordnung.rueckgaengig_planen(ctx.agent.konfig, _protokolle(ctx), p.get("protokoll", "letzte"))}
 
 
 def _plan_vorschau(ctx, p):
@@ -491,14 +495,23 @@ def _plan_vorschau(ctx, p):
 
 def _plan_ausfuehren(ctx, p):
     plan = p["_plan"]
-    kennung, ergebnis = ordnung.ausfuehren(plan, _protokolle(ctx), "rueckgaengig" if plan.get("protokoll") else "verschieben")
+    try:
+        kennung, ergebnis, warnung = ordnung.ausfuehren(plan, _protokolle(ctx),
+                                                        "rueckgaengig" if plan.get("protokoll") else "verschieben")
+    except ordnung.OrdnungFehler as fehler:
+        raise WerkzeugFehler(str(fehler)) from None
     gut = [e for e in ergebnis if e["status"] == "ok"]
     rest = ["%s (%s)" % (os.path.basename(e["von"]), e["status"]) for e in ergebnis if e["status"] != "ok"]
+    if plan.get("protokoll") and gut:
+        try:
+            ordnung.zurueckgenommen_markieren(_protokolle(ctx), plan["protokoll"], kennung)
+        except OSError as fehler:
+            warnung = (warnung + " " if warnung else "") + "Vermerk „zurückgenommen“ fehlt (%s)." % (fehler.strerror or fehler)
     if not gut:
         raise WerkzeugFehler("Nichts verschoben. %s" % "; ".join(rest[:10]))
-    return {"text": "%d von %d Datei(en) verschoben – %s. Protokoll %s; zurück mit rueckgaengig (protokoll=%s).%s" % (
+    return {"text": "%d von %d Datei(en) verschoben – %s. Protokoll %s; zurück mit rueckgaengig (protokoll=%s).%s%s" % (
         len(gut), len(ergebnis), plan["beschreibung"], kennung, kennung,
-        " Nicht verschoben: " + "; ".join(rest[:10]) if rest else "")}
+        " Nicht verschoben: " + "; ".join(rest[:10]) if rest else "", " " + warnung if warnung else "")}
 
 
 # ------------------------------------------------------- Präsentationen, Öffnen ---
@@ -590,13 +603,17 @@ def _programmier_vorschau(ctx, p):
               "Darf: Dateien in diesem Ordner lesen, anlegen und ändern." + (
                   " Programme ausführen und testen - nur in der Sandbox des Macs, ohne Internet." if mit
                   else " Nichts ausführen (keine Kommandozeile)."),
-              "Darf nicht: außerhalb des Ordners lesen oder schreiben, ins Internet, Einstellungen für Claude Code anlegen.",
+              "Darf nicht: außerhalb des Ordners schreiben, ins Internet, Einstellungen für Claude Code anlegen; "
+              "die Datei-Werkzeuge lesen nichts außerhalb." + (
+                  " Ein ausgeführtes Programm könnte außerhalb lesen - private Ordner (Dokumente, Schreibtisch, Downloads, "
+                  "Bilder, JARVIS-Daten) sind dafür zusätzlich gesperrt, auf dem Mac aber noch nicht nachgeprüft." if mit else ""),
+              "Keine fremden Einstellungen: weder deine Claude-Code-Einstellungen noch eine CLAUDE.md werden geladen.",
               "Läuft im Hintergrund mit %s, höchstens %d Schritte und %d Minuten; verbraucht Kontingent deines Abos."
               % (k.modell_fuer("arbeit") or "Standard", programmierer.MAX_SCHRITTE, k.programmier_minuten)]
     steuer = programmierer.steuerdateien(pfad) if os.path.isdir(pfad) else []
     if steuer:
-        zeilen.append("Achtung: Im Projekt liegen Steuerdateien für Claude Code (%s). Einstellungen daraus werden nicht "
-                      "geladen; eine CLAUDE.md wird aber mitgelesen - bitte prüfen, ob sie von dir ist." % ", ".join(steuer))
+        zeilen.append("Hinweis: Im Projekt liegen Steuerdateien für Claude Code (%s). Sie werden nicht geladen und "
+                      "können nicht geändert werden." % ", ".join(steuer))
     if mit:
         zeilen.append("Hinweis: Dass die Sandbox mit der Abo-Anmeldung läuft, ist nicht dokumentiert. Ist sie nicht "
                       "verfügbar, bricht der Auftrag ab, statt ungeschützt zu laufen.")
@@ -839,6 +856,10 @@ class Register:
                 params.update(w.vorbereiten(ctx, params))
             except (ordnung.OrdnungFehler, programmierer.ProgrammierFehler) as fehler:
                 raise WerkzeugFehler(str(fehler)) from None
+            except Exception as fehler:  # noqa: BLE001 - nie ein Absturz (HTTP 500) statt einer verständlichen Meldung
+                ctx.agent.log.ereignis("vorbereiten_fehler", "ERROR", werkzeug=w.name, grund=repr(fehler)[:300])
+                raise WerkzeugFehler("Vorbereitung von %s ist fehlgeschlagen (%s). Es wurde nichts verändert."
+                                     % (w.name, type(fehler).__name__)) from None
         return params
 
     def katalog(self, rolle="allgemein"):
