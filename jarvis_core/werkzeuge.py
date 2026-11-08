@@ -27,7 +27,7 @@ import shutil
 import time
 from html import unescape
 
-from . import umgebung, zeit
+from . import mail, umgebung, zeit
 from .provider import ProviderFehler
 
 FREI, MELDUNG, FREIGABE = 1, 2, 3
@@ -35,6 +35,7 @@ STUFEN = {FREI: "frei", MELDUNG: "mit Meldung", FREIGABE: "nur nach Freigabe des
 MAX_INHALT = 200000
 MAX_LESEN = 30000
 MAX_EINTRAEGE = 100
+MAX_MAILTEXT = 10000  # so lang darf eine E-Mail sein - und genau so viel zeigt die Freigabe, ungekürzt
 
 AKTION = re.compile(r"<aktion\s+([^<>]*?)\s*(?:/>|>(.*?)</aktion>)", re.S)
 ATTRIBUT = re.compile(r'([a-z_]+)\s*=\s*"([^"]*)"')
@@ -62,13 +63,15 @@ class Kontext:
 class P:
     """Ein Parameter eines Werkzeugs."""
 
-    def __init__(self, name, pflicht=False, art="text", hilfe="", wahl=None, maximal=500):
+    def __init__(self, name, pflicht=False, art="text", hilfe="", wahl=None, maximal=500, bereich=None):
         self.name, self.pflicht, self.art, self.hilfe, self.wahl, self.maximal = name, pflicht, art, hilfe, wahl, maximal
+        self.bereich = bereich  # bei art="zahl": (kleinster, größter) erlaubter Wert
 
 
 class Werkzeug:
     def __init__(self, name, beschreibung, handler, parameter=(), stufe=FREI, koerper=None, liefert_daten=False,
-                 extern=False, vorschau=None, risiko="", nur_chat=False, privat_freigabe=False, zustand=None):
+                 extern=False, vorschau=None, risiko="", nur_chat=False, privat_freigabe=False, zustand=None,
+                 koerper_maximal=MAX_INHALT):
         self.name = name
         self.beschreibung = beschreibung
         self.handler = handler
@@ -82,6 +85,7 @@ class Werkzeug:
         self.nur_chat = nur_chat
         self.privat_freigabe = privat_freigabe  # im Bereich "privat" immer Stufe 3
         self.zustand = zustand  # Funktion (ctx, params) -> Text: Stand beim Anfragen (Änderungsschutz)
+        self.koerper_maximal = koerper_maximal
 
     def stufe_fuer(self, ctx, params):
         return self.stufe(ctx, params) if callable(self.stufe) else self.stufe
@@ -308,6 +312,110 @@ def _umgebung(ctx, p):
     return {"text": "\n".join(umgebung.zeilen(info))}
 
 
+# ------------------------------------------------------------- E-Mail ---
+
+def _mail(funktion):
+    """Ruft die Mail-App auf und übersetzt ihre Fehler in verständliche Werkzeugfehler."""
+    try:
+        return funktion()
+    except mail.MailFehler as fehler:
+        raise WerkzeugFehler(str(fehler)) from None
+
+
+def _mail_postfach(ctx, p):
+    tage, anzahl = p.get("tage", mail.STANDARD_TAGE), p.get("anzahl", mail.STANDARD_ANZAHL)
+    mails, gesamt, uebersprungen = _mail(lambda: ctx.agent.mail.postfach(tage, anzahl))
+    hinweis = ("\nHinweis: Bei Konto %s wurde kein Posteingang gefunden - dort wurde nicht nachgesehen."
+               % ", ".join(uebersprungen)) if uebersprungen else ""
+    if not mails:
+        return {"text": "Im Posteingang ist keine E-Mail aus den letzten %d Tagen.%s" % (tage, hinweis)}
+    zeilen = ["Posteingang, letzte %d Tage: %d E-Mail(s), hier die %d neuesten (angesehen: je Konto die %d neuesten):"
+              % (tage, gesamt, len(mails), mail.JE_KONTO)]
+    for m in mails:
+        zeilen.append("#%d · Konto %s · %s · %s · %s · %s" % (
+            m["id"], m["konto"], mail.datum_kurz(m["datum"]), "gelesen" if m["gelesen"] else "UNGELESEN",
+            m["absender"][:80], m["betreff"][:150] or "(ohne Betreff)"))
+    zeilen.append("Eine E-Mail ganz lesen: mail_lesen mit konto und id (die Nummer gilt nur zusammen mit dem Konto).")
+    return {"text": "\n".join(zeilen) + hinweis}
+
+
+def _mail_lesen(ctx, p):
+    m = _mail(lambda: ctx.agent.mail.lesen(p["konto"], p["id"]))
+    inhalt = m["inhalt"]
+    if len(inhalt) >= mail.MAX_INHALT:
+        inhalt = inhalt[:mail.MAX_INHALT] + "\n… (gekürzt, die E-Mail ist länger)"
+    return {"text": "E-Mail #%d (Konto %s)\nVon: %s\nAn: %s\nDatum: %s\nBetreff: %s\n\n%s" % (
+        m["id"], m["konto"], m["absender"], m["an"] or "?", mail.datum_kurz(m["datum"]), m["betreff"] or "(ohne Betreff)",
+        inhalt)}
+
+
+def _mail_ordner(ctx, p):
+    ordner, adressen = _mail(ctx.agent.mail.ordner)
+    if not ordner and not adressen:
+        return {"text": "Die Mail-App meldet keine Konten und Ordner (ist ein Postfach eingerichtet?)."}
+    zeilen = ["Konten der Mail-App (Absender-Adressen):"] + ["- %s: %s" % (k, a or "?") for k, a in adressen.items()]
+    zeilen += ["Ordner (Konto: Ordner):"] + ["- %s: %s" % o for o in ordner[:MAX_EINTRAEGE]]
+    return {"text": "\n".join(zeilen)}
+
+
+def _absender_text(von, benutzt=""):
+    return benutzt or von or "Standard-Absender der Mail-App (Mail → Einstellungen → Verfassen)"
+
+
+def _mail_entwurf_vorschau(ctx, p):
+    return "Diese E-Mail wird als ENTWURF in der Mail-App geöffnet (gesendet wird nichts):\n\nVon: %s\nAn: %s\n" \
+           "Betreff: %s\n\n%s" % (_absender_text(p.get("von")), p["an"], p["betreff"], p["inhalt"])
+
+
+def _mail_entwurf(ctx, p):
+    empfaenger = [a.strip() for a in p["an"].split(",")]
+    erg = _mail(lambda: ctx.agent.mail.nachricht("entwurf", empfaenger, p["betreff"], p["inhalt"], p.get("von", "")))
+    return {"text": "Entwurf in der Mail-App geöffnet - von %s an %s, Betreff „%s“. Nichts wurde gesendet: Der Nutzer "
+                    "prüft ihn und klickt selbst auf Senden." % (_absender_text(p.get("von"), erg["absender"]), p["an"],
+                                                                 p["betreff"])}
+
+
+def _mail_senden_vorschau(ctx, p):
+    """Die ganze E-Mail, ungekürzt - mit Zeichenzahl und Endmarke, damit nichts hinter dem sichtbaren Teil verborgen bleibt."""
+    text = p["inhalt"]
+    return ("Diese E-Mail wird über die Mail-App GESENDET:\n\nVon: %s\nAn: %s\nBetreff: %s\nText: %d Zeichen, %d Zeilen "
+            "- bitte bis zur Endmarke lesen.\n\n%s\n\n——— Ende der E-Mail ———\nNach dem Senden lässt sie sich nicht "
+            "zurückholen." % (_absender_text(p.get("von")), p["an"], p["betreff"], len(text), text.count("\n") + 1, text))
+
+
+def _mail_senden(ctx, p):
+    empfaenger = [a.strip() for a in p["an"].split(",")]
+    erg = _mail(lambda: ctx.agent.mail.nachricht("senden", empfaenger, p["betreff"], p["inhalt"], p.get("von", "")))
+    return {"text": "Gesendet: Die Mail-App hat die E-Mail von %s an %s übernommen (Betreff „%s“). Ohne Internet liegt "
+                    "sie im Postausgang, bis die Verbindung steht." % (_absender_text(p.get("von"), erg["absender"]),
+                                                                        p["an"], p["betreff"])}
+
+
+def _mail_ids(p):
+    return [int(i) for i in p["ids"].split(",")]
+
+
+def _mail_verschieben_vorschau(ctx, p):
+    kopf = "Diese E-Mails werden aus dem Posteingang in den Ordner „%s“ (Konto %s) verschoben - nicht gelöscht:\n" % (
+        p["ordner"], p["konto"])
+    try:
+        zeilen = ["#%d · %s · %s" % (k["id"], k["absender"][:60], k["betreff"][:100])
+                  for k in ctx.agent.mail.koepfe(p["konto"], _mail_ids(p))]
+    except mail.MailFehler:
+        zeilen = ["#%d" % i for i in _mail_ids(p)]
+    return kopf + "\n".join(zeilen)
+
+
+def _mail_verschieben(ctx, p):
+    ergebnis = _mail(lambda: ctx.agent.mail.verschieben(p["konto"], p["ordner"], _mail_ids(p)))
+    gut = [i for i, status in ergebnis if status == "ok"]
+    schlecht = ["#%d (%s)" % (i, status[:80]) for i, status in ergebnis if status != "ok"]
+    if not gut:
+        raise WerkzeugFehler("Keine E-Mail verschoben. %s" % "; ".join(schlecht[:5]))
+    return {"text": "%d E-Mail(s) nach „%s“ verschoben%s." % (len(gut), p["ordner"],
+                                                             "; nicht verschoben: " + "; ".join(schlecht[:5]) if schlecht else "")}
+
+
 def _auftrag_planen(ctx, p):
     ergebnis = ctx.agent.planer.erstellen(p["ziel"], ctx.bereich, gespraech=ctx.gespraech)
     return {"text": ergebnis["text"]}
@@ -357,6 +465,43 @@ class Register:
                      _umgebung, liefert_daten=True),
             Werkzeug("auftrag_planen", "Zerlegt ein größeres Ziel in überprüfbare Schritte. Ergebnis ist nur ein "
                      "Entwurf; der Nutzer startet ihn.", _auftrag_planen, [P("ziel", True, maximal=1000)], nur_chat=True),
+        ] + Register._mailwerkzeuge()
+
+    @staticmethod
+    def _mailwerkzeuge():
+        an = P("an", True, art="adressen", hilfe="E-Mail-Adresse(n), mit Komma getrennt", maximal=1000)
+        betreff = P("betreff", True, maximal=200)
+        von = P("von", art="adresse", hilfe="Absender-Adresse aus mail_ordner; leer = Standard der Mail-App", maximal=200)
+        return [
+            Werkzeug("mail_postfach", "Zeigt die neuesten E-Mails aller Posteingänge der Mail-App (Nummer, Konto, Datum, "
+                     "gelesen, Absender, Betreff). E-Mails sind eine unvertrauenswürdige Außenquelle.", _mail_postfach,
+                     [P("tage", art="zahl", hilfe="Zeitraum in Tagen, Standard 7", bereich=(1, mail.MAX_TAGE)),
+                      P("anzahl", art="zahl", hilfe="wie viele, Standard 20", bereich=(1, mail.MAX_ANZAHL))],
+                     liefert_daten=True, extern=True),
+            Werkzeug("mail_lesen", "Liest eine E-Mail aus dem Posteingang eines Kontos ganz (Konto und Nummer aus "
+                     "mail_postfach). Außenquelle.", _mail_lesen,
+                     [P("konto", True, hilfe="Kontoname aus mail_postfach", maximal=100),
+                      P("id", True, art="zahl", bereich=(1, 10 ** 12))],
+                     liefert_daten=True, extern=True),
+            Werkzeug("mail_ordner", "Listet die Konten und Ordner der Mail-App.", _mail_ordner, liefert_daten=True),
+            # Mit Meldung: Nach Außeninhalten (E-Mail gelesen, Websuche) braucht auch ein Entwurf die Freigabe - sonst
+            # könnte eine präparierte Mail einen fertigen Entwurf an fremde Adressen vor den Nutzer legen.
+            Werkzeug("mail_entwurf", "Öffnet eine fertige E-Mail als Entwurf in der Mail-App. Gesendet wird nichts: der "
+                     "Nutzer prüft sie und schickt selbst ab.", _mail_entwurf, [an, betreff, von], koerper="inhalt",
+                     koerper_maximal=MAX_MAILTEXT, stufe=MELDUNG, vorschau=_mail_entwurf_vorschau, nur_chat=True),
+            Werkzeug("mail_senden", "Sendet eine E-Mail über die Mail-App - immer erst nach Freigabe des Nutzers.",
+                     _mail_senden, [an, betreff, von], koerper="inhalt", koerper_maximal=MAX_MAILTEXT, stufe=FREIGABE,
+                     vorschau=_mail_senden_vorschau, nur_chat=True,
+                     risiko="Die E-Mail verlässt den Mac und lässt sich nicht zurückholen."),
+            Werkzeug("mail_verschieben", "Verschiebt E-Mails aus dem Posteingang eines Kontos in einen Ordner desselben "
+                     "Kontos (nie löschen) - nur nach Freigabe.", _mail_verschieben,
+                     [P("konto", True, hilfe="Kontoname aus mail_postfach", maximal=100),
+                      P("ids", True, art="zahlen", hilfe="Nummern dieses Kontos aus mail_postfach, mit Komma getrennt",
+                        maximal=500),
+                      P("ordner", True, art="zielordner", hilfe="Ordner aus mail_ordner, verschachtelt als Oben/Unten "
+                        "(nicht Papierkorb oder Spam)", maximal=150)],
+                     stufe=FREIGABE, vorschau=_mail_verschieben_vorschau, nur_chat=True,
+                     risiko="Die E-Mails liegen danach nicht mehr im Posteingang (zurückschieben geht in der Mail-App)."),
         ]
 
     def get(self, name):
@@ -379,6 +524,8 @@ class Register:
                     wert = int(wert)
                 except ValueError:
                     raise WerkzeugFehler("Parameter %s muss eine Zahl sein." % p.name) from None
+                if p.bereich and not p.bereich[0] <= wert <= p.bereich[1]:
+                    raise WerkzeugFehler("Parameter %s: erlaubt ist %d bis %d." % (p.name, p.bereich[0], p.bereich[1]))
             elif p.art == "wahl":
                 wert = wert.lower()
                 if wert not in p.wahl:
@@ -388,14 +535,29 @@ class Register:
                     wert = zeit.lokal_zu_utc(wert)
                 except ValueError as fehler:
                     raise WerkzeugFehler("Parameter %s: %s" % (p.name, fehler)) from None
+            elif p.art in ("adressen", "adresse", "zahlen", "zielordner"):
+                if len(wert) > p.maximal:
+                    raise WerkzeugFehler("Parameter %s ist zu lang (höchstens %d Zeichen)." % (p.name, p.maximal))
+                try:
+                    if p.art == "zielordner":
+                        teile = [mail.ordner_pruefen(wert)]
+                    elif p.art == "zahlen":
+                        teile = mail.ids_pruefen(wert)
+                    else:
+                        teile = mail.adressen_pruefen(wert)
+                        if p.art == "adresse" and len(teile) != 1:
+                            raise mail.MailFehler("Hier ist genau eine Adresse erlaubt.")
+                except mail.MailFehler as fehler:
+                    raise WerkzeugFehler("Parameter %s: %s" % (p.name, fehler)) from None
+                wert = ", ".join(str(t) for t in teile)
             elif len(wert) > p.maximal:
                 raise WerkzeugFehler("Parameter %s ist zu lang (höchstens %d Zeichen)." % (p.name, p.maximal))
             params[p.name] = wert
         if w.koerper:
             if koerper is None or not koerper.strip():
                 raise WerkzeugFehler("Der Inhalt fehlt (Text zwischen <aktion …> und </aktion>).")
-            if len(koerper) > MAX_INHALT:
-                raise WerkzeugFehler("Der Inhalt ist zu lang (höchstens %d Zeichen)." % MAX_INHALT)
+            if len(koerper) > w.koerper_maximal:
+                raise WerkzeugFehler("Der Inhalt ist zu lang (höchstens %d Zeichen)." % w.koerper_maximal)
             params[w.koerper] = koerper
         if w.zustand:
             params["_sha"] = w.zustand(ctx, params)
@@ -410,6 +572,8 @@ class Register:
             teile = []
             for p in w.parameter:
                 zusatz = " (%s)" % "|".join(p.wahl) if p.wahl else (" (%s)" % p.hilfe if p.hilfe else "")
+                if p.bereich and p.bereich[1] < 10 ** 6:
+                    zusatz += " [%d bis %d]" % p.bereich
                 teile.append("%s%s%s" % (p.name, "*" if p.pflicht else "", zusatz))
             if w.koerper:
                 teile.append("Text zwischen den Tags = %s*" % w.koerper)

@@ -16,7 +16,7 @@ from tests.hilfen import AgentBasis
 from jarvis_core import konfig as konfig_modul  # noqa: E402
 from jarvis_core.agent import Agent  # noqa: E402
 from jarvis_core.provider import ProviderManager  # noqa: E402
-from jarvis_core.werkzeuge import aktionen_parsen  # noqa: E402
+from jarvis_core.werkzeuge import FREIGABE, aktionen_parsen  # noqa: E402
 
 
 class ParsenTest(unittest.TestCase):
@@ -37,10 +37,19 @@ class ParsenTest(unittest.TestCase):
 
 
 class WerkzeugTest(AgentBasis):
-    def test_register_hat_kein_senden_zahlen_installieren(self):
-        namen = " ".join(w.name for w in self.agent.register.alle())
-        for verboten in ("send", "mail", "zahl", "kauf", "bestell", "install", "veroeffentl", "anruf", "ueberweis", "shell"):
+    def test_nach_aussen_nur_mail_und_nur_mit_freigabe(self):
+        """Zahlen, Kaufen, Bestellen, Installieren, Veröffentlichen, Anrufen, Überweisen, Shell: gibt es nicht.
+        Das Einzige, was nach außen geht, ist mail_senden - immer Stufe Freigabe und nur im Gespräch."""
+        alle = self.agent.register.alle()
+        namen = " ".join(w.name for w in alle)
+        for verboten in ("zahl", "kauf", "bestell", "install", "veroeffentl", "anruf", "ueberweis", "shell", "loesch_mail",
+                         "mail_loeschen", "weiterleit"):
             self.assertNotIn(verboten, namen)
+        senden = [w for w in alle if "send" in w.name]
+        self.assertEqual([w.name for w in senden], ["mail_senden"])
+        self.assertEqual(senden[0].stufe, FREIGABE)  # fest, nicht von der Lage abhängig
+        self.assertTrue(senden[0].nur_chat)
+        self.assertEqual(self.agent.register.get("mail_verschieben").stufe, FREIGABE)
 
     def test_validierung(self):
         faelle = [
@@ -61,10 +70,10 @@ class WerkzeugTest(AgentBasis):
         self.assertIn("Inhalt fehlt", e["text"])
 
     def test_unbekanntes_werkzeug(self):
-        e = self.aktion("mail_senden", empfaenger="x")
+        e = self.aktion("geld_ueberweisen", empfaenger="x")
         self.assertEqual(e["status"], "unbekannt")
         self.assertIn("aufgabe_anlegen", e["text"])
-        self.assertEqual(self.sp.audit_liste(art="unbekannt")[0]["werkzeug"], "mail_senden")
+        self.assertEqual(self.sp.audit_liste(art="unbekannt")[0]["werkzeug"], "geld_ueberweisen")
 
     def test_aufgaben_und_bereichstrennung(self):
         e = self.aktion("aufgabe_anlegen", titel="Angebot Berger", prioritaet="hoch", faellig="2026-11-02 09:00")
@@ -272,10 +281,11 @@ class BerechtigungTest(AgentBasis):
         self.assertEqual(e["status"], "ausgefuehrt")
         self.assertEqual(self.sp.fakten(status="vorschlag")[0]["art"], "kontakt")
 
-    def test_tagesbericht_regel_ist_im_systemprompt(self):
-        prompt = self.agent.system_prompt()
+    def test_tagesbericht_baustein_kommt_bei_briefing_dazu(self):
+        prompt = self.agent.system_prompt(frage="Gib mir mein Tagesbriefing")
         for begriff in ("TAGESBERICHT", "STATUS:", "RISIKEN:", "EMPFEHLUNG:", "statt ihn zu erfinden"):
             self.assertIn(begriff, prompt)
+        self.assertNotIn("TAGESBERICHT", self.agent.system_prompt(frage="Hallo"))  # nicht bei jeder Frage
 
     def test_denk_methode_ist_im_systemprompt(self):
         prompt = self.agent.system_prompt()

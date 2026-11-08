@@ -28,8 +28,12 @@ STANDARD = {
     "log_dateien": 5,
     # Denken: ein Modell je Aufgabenart. "opus" = klügstes, "sonnet" = schneller und schont das Abo-Limit.
     "provider_timeout": 300,
-    "modelle": {"chat": "opus", "plan": "opus", "arbeit": "opus", "pruefung": "sonnet", "recherche": "sonnet"},
+    "modelle": {"chat": "opus", "plan": "opus", "arbeit": "opus", "pruefung": "sonnet", "recherche": "sonnet",
+                "schnell": "sonnet"},
     "modell_ausweichen": True,
+    # Denkstufen: Einfaches im Gespräch (Gruß, Merken, kurze Frage) beantwortet das Modell "schnell",
+    # alles mit Entscheidung, Rechnung, Kundentext oder Prüfung das Modell "chat" (gründlich).
+    "denkstufen": True,
     # Welches Gehirn JARVIS nutzt: "claude" (stark, über das Abo) oder "lokal" (eigenes Modell über Ollama,
     # direkt auf dem Mac, offline und kostenlos, aber schwächer). Recherche mit Websuche läuft immer über Claude.
     "gehirn": "claude",
@@ -65,7 +69,7 @@ STANDARD = {
 
 ERLAUBTE_HOSTS = ("127.0.0.1", "localhost")
 LOGSTUFEN = ("DEBUG", "INFO", "WARNING", "ERROR")
-MODELL_ARTEN = ("chat", "plan", "arbeit", "pruefung", "recherche")
+MODELL_ARTEN = ("chat", "plan", "arbeit", "pruefung", "recherche", "schnell")
 RESERVIERTE_BEREICHE = ("allgemein", "technik", "alle")
 BEREICH_MUSTER = re.compile(r"^[a-z][a-z0-9_]{1,19}$")
 MODELL_MUSTER = re.compile(r"^[a-z0-9][a-z0-9.\-]*$")
@@ -219,7 +223,7 @@ def normalisieren(werte, daten_ordner):
     _ganzzahl(w, "anfragen_pro_minute", 1, 600)
     _ganzzahl(w, "backup_aufbewahren", 1, 60)
 
-    for name in ("lan", "modell_ausweichen", "vorlesen", "erinnerungen_sprechen", "auftraege_automatisch_fortsetzen"):
+    for name in ("lan", "modell_ausweichen", "denkstufen", "vorlesen", "erinnerungen_sprechen", "auftraege_automatisch_fortsetzen"):
         w[name] = bool(w[name])
 
     w["logstufe"] = str(w["logstufe"]).upper()

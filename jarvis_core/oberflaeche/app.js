@@ -380,6 +380,7 @@
   var SCHNELL = [
     { name: "Tagesbriefing", senden: true, text: "Gib mir mein Tagesbriefing: Was ist offen (Aufgaben, Erinnerungen, Freigaben, Aufträge)? Was sind die drei wichtigsten nächsten Schritte, um mehr Aufträge zu gewinnen? Nutze nur, was du wirklich weißt, und trenne Wissen von Annahmen." },
     { name: "Akquise starten", senden: true, text: "Suche über öffentlich zugängliche Quellen (Ausschreibungsportale, Firmenverzeichnisse, Kleinanzeigen) nach aktuellen Aufträgen oder möglichen Kunden für Bau- und Reinigungsarbeiten in meiner Region. Prüfe jeden Treffer kurz und schlage mir die besten als Kontakt vor, mit Quelle." },
+    { name: "E-Mails sortieren", senden: true, text: "Sieh in mein Postfach (letzte 7 Tage) und ordne es für mich: Was ist wichtig und muss heute beantwortet werden, was kann warten, was ist Werbung? Zu jeder wichtigen E-Mail ein Satz, was zu tun ist." },
     { name: "Firma prüfen", senden: false, text: "Prüfe diese Firma, bevor wir Zeit investieren (Handelsregister, Geschäftsführer, Impressum, E-Mail-Domain, Bewertungen, Insolvenzen): " },
     { name: "Preise kalkulieren", senden: true, text: "Hilf mir, eine feste Preiskalkulation aufzubauen (Stundensatz, Leistungswerte für Büro-, Treppenhaus- und Gebäudereinigung). Frag mich nacheinander nach dem, was dir fehlt." }
   ];
@@ -963,20 +964,23 @@
         einstellungSpeichern({ gehirn: wahl.value, lokales_modell: modellfeld.value.trim() });
       } }));
     }
-    if (neu("s-modelle", [sys.modelle, sys.modell_ausweichen])) {
+    if (neu("s-modelle", [sys.modelle, sys.modell_ausweichen, sys.denkstufen])) {
       var km = karte("s-modelle"), felder = {};
-      [["chat", "Gespräch"], ["plan", "Planung"], ["arbeit", "Arbeitsschritte"], ["pruefung", "Prüfschicht"], ["recherche", "Recherche"]].forEach(function (art) {
+      [["chat", "Gespräch (gründlich)"], ["schnell", "Schnelle Antworten"], ["plan", "Planung"], ["arbeit", "Arbeitsschritte"], ["pruefung", "Prüfschicht"], ["recherche", "Recherche"]].forEach(function (art) {
         felder[art[0]] = modellAuswahl(sys.modelle[art[0]]);
         km.appendChild(h("label", { class: "feld", style: "margin-bottom:8px" }, art[1], felder[art[0]]));
       });
       var ausweichen = h("input", { type: "checkbox", checked: !!sys.modell_ausweichen });
       km.appendChild(h("label", { class: "schalter", style: "margin:4px 0 12px" }, ausweichen, h("span", { class: "regler" }),
         h("span", { class: "text", text: "Bei Abo-Limit sichtbar auf Sonnet ausweichen" })));
-      km.appendChild(h("p", { class: "klein", style: "margin-bottom:10px", text: "opus = klügste Antworten, sonnet = schneller und schont dein Limit." }));
+      var stufen = h("input", { type: "checkbox", checked: !!sys.denkstufen });
+      km.appendChild(h("label", { class: "schalter", style: "margin:0 0 12px" }, stufen, h("span", { class: "regler" }),
+        h("span", { class: "text", text: "Denkstufen: Einfaches schnell, Wichtiges gründlich beantworten" })));
+      km.appendChild(h("p", { class: "klein", style: "margin-bottom:10px", text: "opus = klügste Antworten, sonnet = schneller und schont dein Limit. Mit Denkstufen gehen Gruß, Merken und kurze Fragen an „Schnelle Antworten“; Preise, Kundentexte, Prüfungen und Entscheidungen immer an „Gespräch (gründlich)“." }));
       km.appendChild(h("button", { type: "button", class: "knopf knopf-primaer knopf-klein", text: "Modelle speichern", onclick: function () {
         var m = {};
         Object.keys(felder).forEach(function (a) { m[a] = felder[a].value; });
-        einstellungSpeichern({ modelle: m, modell_ausweichen: ausweichen.checked });
+        einstellungSpeichern({ modelle: m, modell_ausweichen: ausweichen.checked, denkstufen: stufen.checked });
       } }));
     }
     var st = sys.stimme;

@@ -36,7 +36,8 @@ JEDEN TAG
 SO SPRICHST DU MIT IHM
 ----------------------
   Knöpfe im Leitstand:
-    Tagesbriefing · Akquise starten · Firma prüfen · Preise kalkulieren
+    Tagesbriefing · Akquise starten · E-Mails sortieren · Firma prüfen
+    · Preise kalkulieren
 
   Oder schreiben / sagen (Mikrofon im Leitstand antippen):
     „Wie ist die Lage heute?“
@@ -45,7 +46,8 @@ SO SPRICHST DU MIT IHM
     „Was kostet 500 m² Büroreinigung bei 35 Euro die Stunde?“
     „Merk dir: Meier will ab März Fensterreinigung.“
     „Erinnere mich Freitag um 9 an das Angebot für Berger.“
-    „Schreib ein Anschreiben an die Hausverwaltung Berger.“
+    „Sortier mein Postfach.“
+    „Schreib der Hausverwaltung Berger eine E-Mail, dass wir Montag kommen.“
 
   Kontakte haben einen Status (Neu → Kontaktiert → Interessiert
   → Angebot → Gewonnen/Verloren). Den stellst DU im Leitstand ein.
@@ -53,11 +55,22 @@ SO SPRICHST DU MIT IHM
 
 WAS JARVIS NICHT TUT – mit Absicht
 ----------------------------------
-  Er sendet keine E-Mails, ruft niemanden an, bezahlt nichts und sagt
-  keinem Kunden Preise oder Termine zu. Er bereitet vor – du entscheidest.
+  Er ruft niemanden an, bezahlt nichts und sagt keinem Kunden Preise oder
+  Termine zu. Eine E-Mail schickt er nur ab, wenn du sie vorher im Leitstand
+  gesehen und auf „Freigeben“ geklickt hast. Meist öffnet er sie nur als
+  Entwurf in der Mail-App – dann schickst du selbst ab. E-Mails löschen
+  kann er gar nicht.
 
   Was er sich merken will, schlägt er vor – du bestätigst.
   Eine Datei überschreiben oder löschen geht nur mit deiner Freigabe.
+
+
+E-MAIL
+------
+  JARVIS benutzt die Mail-App deines Macs. Dein Postfach muss dort
+  eingerichtet sein (Mail öffnen → Mail → Account hinzufügen).
+  Kein Passwort in JARVIS.
+  Beim ersten Mal fragt der Mac, ob JARVIS „Mail“ steuern darf → OK.
 
 
 EXTRAS.command

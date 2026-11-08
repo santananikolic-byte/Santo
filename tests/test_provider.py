@@ -59,9 +59,10 @@ class ProviderTest(Umgebung):
         self.assertEqual(aufruf["system"], "Regeln hier")
         self.assertEqual(aufruf["stdin"], "Frage")
         self.assertEqual(os.path.realpath(aufruf["cwd"]), os.path.realpath(self.konfig.daten_ordner))
-        for flag in ("--safe-mode", "--no-session-persistence", "-p"):
-            self.assertIn(flag, aufruf["args"])
+        for flag in ("--safe-mode", "--no-session-persistence", "-p", "--strict-mcp-config"):
+            self.assertIn(flag, aufruf["args"])  # keine fremden MCP-Dienste an den Freigaben vorbei
         self.assertNotIn("--resume", aufruf["args"])  # zustandslos
+        self.assertNotIn("--bare", aufruf["args"])  # --bare würde die Anmeldung mit dem Abo abschalten
 
     def test_modell_je_aufgabenart(self):
         self.pm.fragen("a", "s", art="chat")

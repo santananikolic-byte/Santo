@@ -100,6 +100,48 @@ gewonnen oder verloren ist.
 Kein vollständiges CRM: keine Kommunikationshistorie, keine automatische Nachfass-Erkennung, kein Postfach. Das wäre genau
 die Art von „noch nicht gebaut, weil es echte Konten bräuchte", die in `STATUS.md` schon so steht.
 
+## Stufe 14 – Gehirn und E-Mail, mit Recherche-Agent, Prüfer-Agent und echter Probe
+
+**Gebaut:** neues Gehirn (`gehirn.py`: Grundregeln + passende Wissensbausteine, Denkstufen, Ehrlichkeitsprüfung im Code),
+bessere Gedächtnissuche für zusammengesetzte Wörter, E-Mail über die Mail-App (`mail.py`).
+
+**Recherche-Agent (Mail-App per AppleScript)** – sein Bericht hat meinen ersten Entwurf an fünf Stellen korrigiert, bevor er je
+einen Mac gesehen hat: Eigenschaften gesammelt lesen statt Mail für Mail (laut seinen Quellen ca. 0,6 s statt ~54 s für
+einige hundert Mails), E-Mail immer über Konto + Nummer (Nummern gelten nur je Postfach), Datum über dokumentierte
+Eigenschaften statt eines undokumentierten Tricks, leere Betreffs abfangen, Nachrichten immer sichtbar erzeugen (sonst
+Geister-Entwürfe). **Weder er noch ich konnten die Skripte auf einem Mac ausführen.**
+
+**Prüfer-Agent (unabhängige Durchsicht, 12 Befunde, alle behoben, je ein Regressionstest):**
+
+| # | Befund | Behoben durch |
+|---|---|---|
+| 1 | Freigabe beim Senden zeigte nur 6.000 von bis zu 20.000 Zeichen | ganze E-Mail in der Vorschau, Zeichenzahl und Endmarke; höchstens 10.000 Zeichen |
+| 2 | „Verschieben“ in den Papierkorb hieß „nicht gelöscht“ | Papierkorb, Spam, Junk, Gelöschte … werden schon bei der Eingabe abgelehnt |
+| 3 | ein echter Versand „belegte“ jede spätere „gesendet“-Behauptung | Beleg zählt nur seit der letzten Antwort von JARVIS |
+| 4 | „Ich habe Berger die Mail geschickt“ u. ä. wurden übersehen | mehr Verben, Bedingung zählt nur davor, Verneinung nur im eigenen Satzglied |
+| 5 | Fremdberichte („Deine Bestellung wurde verschickt“) wurden richtiggestellt | Sachsätze nur, wenn genau so eine Aktion verlangt war; „laut …“, Datum, „von …“ zählen nicht |
+| 6 | „Schreib Berger, dass …“, „Erstell ein Angebot …“ ohne Fachwissen, schnelles Modell | Stichworte erweitert, Kundentexte immer gründlich |
+| 7 | nach einer präparierten Mail öffnete sich ein Entwurf an fremde Adressen ohne Freigabe | Entwurf ist jetzt „mit Meldung“: nach Außeninhalten nur mit Freigabe |
+| 8 | Absender-Konto nie sichtbar | „Von:“ in jeder Vorschau, Absender wählbar und wird geprüft |
+| 9 | Absturz bei „²“ als Nummer | nur ASCII-Ziffern |
+| 10 | nach Zeitüberschreitung beim Senden stand „nochmal versuchen“ | „Unklar, ob verschickt – erst in Gesendet/Postausgang nachsehen“ |
+| 11 | Konten ohne „INBOX“ wurden still übersprungen | auch „Posteingang“, übersprungene Konten werden genannt |
+| 12 | einer meiner Tests prüfte nichts | Antworten werden jetzt am Text erkannt, nicht an der Aufrufnummer |
+
+**Echte Probe mit Claude** (Entwicklungsumgebung, Anmeldung ohne Abo, sonnet/haiku statt opus/sonnet – also nicht deine
+Einstellung): sechs Alltagsfälle mit genau den Prompts, die JARVIS baut. Ergebnis: kein erfundener Stundensatz, Rechenweg
+nachgerechnet und richtig; E-Mail als Entwurf mit „Sie“; präparierte Betrugs-Mail erkannt, keine Aktion; „Schick ab“ legt zur
+Freigabe vor und sagt „abgeschickt ist noch nichts“. **Zwei Schwächen gefunden und behoben:** ungefragte Profilfrage beim
+Gruß, erfundener Vorlauf („wie besprochen“) in Kundenmails – je einmal mit echtem Claude nachgeprüft. Ein Lauf je Fall ist
+keine Statistik.
+
+**Nebenfund:** Claude Code 2.1.318 kennt `--safe-mode` nicht mehr (JARVIS lässt es weg). `--bare` wäre die neue Abschottung,
+schaltet aber die Anmeldung mit dem Abo ab – also bewusst nicht. Neu dabei ist `--strict-mcp-config`: keine fremden
+MCP-Dienste, die an JARVIS' Freigaben vorbeigehen könnten.
+
+**Wackelnder Browser-Prüfpunkt** („Schalter zeigt wieder ‚erlaubt‘“): Der Test sah zu früh hin. Er wartet jetzt auf die
+Anzeige (höchstens 10 s); danach 3 von 3 Läufen grün.
+
 ## Was ich nicht geprüft habe
 
 - **Dein Mac mit deinem Abo.** Die automatischen Tests simulieren Claude Code; der echte Probelauf (Stufe 10) lief in der Entwicklungsumgebung, mit
@@ -109,4 +151,9 @@ die Art von „noch nicht gebaut, weil es echte Konten bräuchte", die in `STATU
   dahinter („Hey Jarvis, …“, nur Weckwort, ohne Weckwort, Mikrofon verweigert) mit einem Ersatz-Erkenner.
 - **Safari und ein echtes iPhone.** Die Oberfläche ist in Chromium geprüft, auf Handygröße simuliert.
 - **Dauerbetrieb.** Kein Lasttest, kein tagelanger Lauf.
-- **Prüfung durch Dritte.** Die Sicherheitsmaßnahmen sind von mir entworfen und getestet, nicht von außen geprüft.
+- **Die Mail-App auf einem echten Mac.** Alle E-Mail-Tests laufen gegen eine nachgebaute Mail-App. Ob jedes AppleScript
+  auf deinem Mac genauso läuft (und wie schnell), zeigt erst der erste echte Versuch; die Fehlermeldungen sind darauf
+  vorbereitet. Bekannte Eigenheit laut Recherche: Auf manchen macOS-Fassungen kann ein per Skript gesetzter Text als
+  Zitat erscheinen.
+- **Prüfung durch Dritte.** Die Sicherheitsmaßnahmen sind von mir entworfen und getestet. Ein unabhängiger Prüfer-Agent hat
+  den Gehirn- und E-Mail-Teil durchgesehen (Stufe 14) – das ist ein zweiter Blick, aber kein Prüfer von außerhalb.

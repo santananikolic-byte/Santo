@@ -21,9 +21,26 @@ _WORT = re.compile(r"[a-zäöüß0-9]{3,}")
 _TEXT = re.compile(r"[a-zäöüß0-9]+")
 GRENZE_DUPLIKAT = 0.85
 
+# Häufige Wortteile aus Bau und Reinigung. Deutsche Wörter werden zusammengesetzt: "Treppenhausreinigung"
+# soll auch bei der Frage nach "Reinigung" oder "Treppenhaus" gefunden werden, "Hausverwaltung" bei "Verwaltung".
+TEILWOERTER = ("reinigung", "treppen", "haus", "büro", "buero", "fenster", "glas", "boden", "teppich", "grund",
+               "unterhalt", "sanierung", "renovierung", "angebot", "auftrag", "kunde", "rechnung", "preis", "vertrag",
+               "objekt", "verwaltung", "praxis", "schule", "hotel", "halle", "garten", "winterdienst", "baustelle",
+               "maler", "fliesen", "dach", "trockenbau", "abbruch", "entrümpel", "umzug", "gewerbe", "wohnung")
+LANGES_WORT = 9
+
 
 def woerter(text):
-    return [w[:6] for w in _WORT.findall((text or "").lower()) if w not in FUELLWOERTER]
+    """Wortstämme (erste sechs Buchstaben) ohne Füllwörter; lange Wörter zusätzlich mit ihren bekannten Teilen."""
+    ergebnis = []
+    for w in _WORT.findall((text or "").lower()):
+        if w in FUELLWOERTER:
+            continue
+        stamm = w[:6]
+        ergebnis.append(stamm)
+        if len(w) >= LANGES_WORT:
+            ergebnis += [t[:6] for t in TEILWOERTER if t in w and t[:6] != stamm]
+    return ergebnis
 
 
 def normalisiert(text):

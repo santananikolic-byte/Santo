@@ -115,6 +115,10 @@ const pause = (ms) => new Promise((r) => setTimeout(r, ms));
     await page.waitForSelector(".nachricht.nutzer .blase:has-text('Ausschreibungsportale')", { timeout: 15000 });
     await page.waitForFunction(() => !document.querySelector(".nachricht.denkt"), null, { timeout: 15000 });
     pruefe(true, "„Akquise starten“ sendet die Suche los und JARVIS antwortet");
+    await page.click(".schnell-knopf:text-is('E-Mails sortieren')");
+    await page.waitForSelector(".nachricht.nutzer .blase:has-text('Sieh in mein Postfach')", { timeout: 15000 });
+    await page.waitForFunction(() => !document.querySelector(".nachricht.denkt"), null, { timeout: 15000 });
+    pruefe(true, "„E-Mails sortieren“ schickt den Auftrag los und JARVIS antwortet");
 
     console.log("Verbindungsabbruch");
     await page.route("**/api/anfrage", (route) => route.abort());
@@ -220,7 +224,12 @@ const pause = (ms) => new Promise((r) => setTimeout(r, ms));
     await page.waitForFunction(async () => !(await (await fetch("/api/zustand")).json()).system.werkzeuge.find((w) => w.name === "datei_loeschen").gesperrt);
     await page.waitForSelector("#audit-liste :text('werkzeug_gesperrt')", { timeout: 10000 });
     pruefe(true, "Audit zeigt das Sperren des Werkzeugs");
-    pruefe((await page.locator("#s-werkzeuge .zeile:has-text('datei_loeschen')").textContent()).includes("erlaubt"), "Schalter zeigt nach dem Zurückstellen wieder „erlaubt“");
+    // Die Oberfläche zeigt den neuen Stand beim nächsten Abgleich - darauf warten statt sofort nachzusehen.
+    const zurueck = await page.waitForFunction(() => {
+      const z = [...document.querySelectorAll("#s-werkzeuge .zeile")].find((e) => e.textContent.includes("datei_loeschen"));
+      return z && z.textContent.includes("erlaubt");
+    }, null, { timeout: 10000 }).then(() => true, () => false);
+    pruefe(zurueck, "Schalter zeigt nach dem Zurückstellen wieder „erlaubt“");
     await pause(300);
     await foto(page, "06-system.png");
 

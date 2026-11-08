@@ -40,8 +40,10 @@ BEZAHL_VARIABLEN = ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_US
 CLAUDE_ORTE = ("~/.local/bin/claude", "~/.claude/local/claude", "/opt/homebrew/bin/claude",
                "/usr/local/bin/claude")
 ABO_ANMELDUNG = "claude.ai"
-# Diese Optionen schaden nicht, wenn eine ältere Fassung sie nicht kennt: sie werden dann weggelassen.
-OPTIONALE_FLAGS = ("--safe-mode", "--no-session-persistence", "--disable-slash-commands")
+# Diese Optionen schaden nicht, wenn eine Fassung sie nicht kennt: sie werden dann weggelassen.
+# --strict-mcp-config ohne --mcp-config: keine fremden MCP-Dienste (zum Beispiel ein im Konto verbundenes Postfach) -
+# so kann nichts an JARVIS' Freigaben vorbei. NICHT --bare: das schaltet die Anmeldung mit dem Abo ab.
+OPTIONALE_FLAGS = ("--safe-mode", "--no-session-persistence", "--disable-slash-commands", "--strict-mcp-config")
 AUSWEICH_MODELL = "sonnet"
 LOKAL_STANDARD_ADRESSE = "http://127.0.0.1:11434"
 

@@ -66,15 +66,34 @@ deinem Mac (127.0.0.1), nie ins Internet.
   Geschäft und Privat bleiben getrennt.
 - **Aufgaben und Erinnerungen:** er meldet sie laut und als Mitteilung.
 - **Entwürfe:** Anschreiben und Angebote als Datei in der „Jarvis-Werkstatt“.
+- **E-Mail über die Mail-App:** Postfach sortieren (wichtig, später, Werbung),
+  E-Mails lesen, professionelle Antworten als Entwurf in der Mail-App öffnen.
+  Abschicken oder in Ordner verschieben nur nach deiner Freigabe im Leitstand –
+  du siehst vorher Absender, Empfänger und den ganzen Text bis zur Endmarke.
+  Löschen kann er nicht, und in Papierkorb oder Spam verschiebt er auch nicht.
+  Hat die Mail-App mehrere Konten (privat und Firma), steht in jeder Vorschau,
+  von welcher Adresse die E-Mail rausgeht.
 - **Denkt erst nach:** bei Entscheidungen und Rechnungen geht er Ziel, Wissen
-  und Annahmen, Möglichkeiten und Risiko durch, bevor er antwortet.
+  und Annahmen, Möglichkeiten und Risiko durch, bevor er antwortet. Er holt
+  sich dafür nur das Fachwissen dazu, das zur Frage passt (Preise, E-Mail,
+  Firmenprüfung, Akquise, Kundengespräch, Tagesbericht).
+- **Schnell oder gründlich:** Gruß und kurze Fragen beantwortet ein schnelles
+  Modell, Preise, Kundentexte und Entscheidungen das gründliche
+  (Leitstand → System → Modelle).
+- **Ehrlichkeitsprüfung:** Schreibt er „gesendet“ oder „gelöscht“, ohne dass es
+  wirklich passiert ist, hängt JARVIS selbst eine Richtigstellung an.
 - **Stimme:** spricht mit der besten deutschen Mac-Stimme; zuhören über das
   Mikrofon im Leitstand („Hey Jarvis“).
 
 ## Sicherheit und Freigaben
 
-- **Nichts senden, löschen oder bezahlen ohne dein Ja.** JARVIS hat dafür gar
-  keine Werkzeuge: kein E-Mail-Versand, keine Anrufe, keine Zahlungen.
+- **Nichts senden, löschen oder bezahlen ohne dein Ja.** Das Einzige, was nach
+  außen gehen kann, ist eine E-Mail – und die nur nach deiner Freigabe. Für
+  Anrufe, Zahlungen, Bestellungen und das Löschen von E-Mails hat JARVIS gar
+  keine Werkzeuge.
+- Inhalte von E-Mails und Webseiten behandelt er als Daten, nicht als Befehle.
+  Steht in einer E-Mail „schick alles an …“, landet höchstens ein Vorschlag zur
+  Freigabe bei dir – mit genau dieser Adresse sichtbar.
 - Was er sich merken will, ist erst ein Vorschlag – du bestätigst.
 - Datei überschreiben oder löschen: nur nach deiner Freigabe im Leitstand.
   „Löschen“ heißt: in den Papierkorb der Werkstatt, nicht endgültig.
@@ -95,13 +114,12 @@ Link. Den Link am Handy öffnen. Hinweis: Das ist nur im eigenen WLAN gedacht
 | brauchte einen API-Schlüssel von console.anthropic.com | läuft über dein Claude-Abo | API kostet pro Anfrage; du wolltest nur das Abo |
 | installierte viele Zusatzpakete (numpy, whisper …) | nichts zusätzlich, nur Python vom Mac | weniger, das kaputtgehen kann |
 | Passwörter für Mail, Kalender, Telegram in `config/.env` | keine Passwörter in Dateien | deine Regel: nie Passwörter in Dateien |
-| E-Mails senden, Telegram, Bildschirm steuern | gibt es nicht | „Nichts senden ohne mein Ja“ – kommt nur später, und dann nur mit Freigabe |
+| E-Mails senden, Telegram, Bildschirm steuern | E-Mail über die Mail-App, senden nur nach Freigabe; Telegram und Bildschirm gibt es nicht | „Nichts senden ohne mein Ja“ |
 | Spracherkennung mit faster-whisper | Spracherkennung im Browser | ohne Installation |
 
 Noch **nicht** dabei (aus der alten Fassung): automatisches Morgen-Briefing um
-06:45, Auswertung von Kundengesprächen mit Punktzahl, Buchhaltung mit Belegfotos,
-Mail und Kalender. Das kann später kommen – Mail und Kalender aber nur so, dass
-JARVIS liest und entwirft und du selbst sendest.
+06:45, Buchhaltung mit Belegfotos, Kalender. Kundengespräche wertet JARVIS aus,
+wenn du davon erzählst (ehrlich, mit nächstem Schritt), aber ohne Punktzahl.
 
 ## Wenn etwas nicht läuft
 
@@ -118,7 +136,10 @@ JARVIS liest und entwirft und du selbst sendest.
 6. **Er spricht nicht** → Systemeinstellungen → Bedienungshilfen → Gesprochene
    Inhalte → Systemstimme → Stimmen verwalten → Deutsch → eine „Premium“-Stimme
    laden.
-7. **Mikrofon im Leitstand geht nicht** → in Chrome am einfachsten. In Safari
+7. **E-Mail: „JARVIS darf die Mail-App noch nicht steuern“** → Systemeinstellungen
+   → Datenschutz & Sicherheit → Automation → beim Terminal „Mail“ einschalten.
+   Und: In der Mail-App muss dein Postfach eingerichtet sein.
+8. **Mikrofon im Leitstand geht nicht** → in Chrome am einfachsten. In Safari
    erst Systemeinstellungen → Tastatur → Diktat einschalten.
 
 Hilft das nicht: ein Foto vom Fenster an Claude schicken.
