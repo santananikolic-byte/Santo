@@ -36,8 +36,9 @@ JEDEN TAG
 SO SPRICHST DU MIT IHM
 ----------------------
   Knöpfe im Leitstand:
-    Tagesbriefing · Akquise starten · E-Mails sortieren · Firma prüfen
-    · Preise kalkulieren
+    Tagesbriefing · Akquise starten · E-Mails sortieren · Downloads
+    aufräumen · Fotos sortieren · Präsentation · Firma prüfen
+    · Programm bauen · Preise kalkulieren
 
   Oder schreiben / sagen (Mikrofon im Leitstand antippen):
     „Wie ist die Lage heute?“
@@ -48,6 +49,12 @@ SO SPRICHST DU MIT IHM
     „Erinnere mich Freitag um 9 an das Angebot für Berger.“
     „Sortier mein Postfach.“
     „Schreib der Hausverwaltung Berger eine E-Mail, dass wir Montag kommen.“
+    „Räum meine Downloads auf.“
+    „Sortier die Baustellenfotos nach Tag.“
+    „Leg die Fotos vom 3. November in Baustellen/Berger/1 vorher.“
+    „Mach mir eine Präsentation für die Hausverwaltung mit den Berger-Fotos.“
+    „Bau mir ein kleines Programm, das aus qm und Leistungswert die
+     Stunden ausrechnet.“
 
   Kontakte haben einen Status (Neu → Kontaktiert → Interessiert
   → Angebot → Gewonnen/Verloren). Den stellst DU im Leitstand ein.
@@ -63,6 +70,44 @@ WAS JARVIS NICHT TUT – mit Absicht
 
   Was er sich merken will, schlägt er vor – du bestätigst.
   Eine Datei überschreiben oder löschen geht nur mit deiner Freigabe.
+
+
+FOTOS UND DOWNLOADS
+-------------------
+  JARVIS sortiert Downloads, Bilder, Schreibtisch und Dokumente:
+  nach Art, nach Monat oder Fotos und Videos nach Aufnahmetag.
+  Er VERSCHIEBT nur – er löscht nie und überschreibt nie.
+  Vorher zeigt er dir jede einzelne Datei und wohin sie kommt;
+  erst nach „Freigeben“ passiert etwas. „Mach das rückgängig“
+  bringt alles zurück.
+  Beim ersten Mal fragt der Mac, ob Terminal auf Downloads,
+  Schreibtisch oder Dokumente zugreifen darf → OK.
+  Die Fotos-App (Mediathek) fasst er nicht an. Fotos daraus erst
+  exportieren (Fotos → Ablage → Exportieren), dann sortieren.
+
+
+PRÄSENTATIONEN
+--------------
+  Landen in Jarvis-Werkstatt/praesentationen. Doppelklick = öffnen.
+  Pfeiltasten oder Wischen zum Blättern, F = Vollbild.
+  Als PDF verschicken: im Browser Drucken → „Als PDF sichern“.
+  Den Aufnahmeort (GPS) entfernt JARVIS aus den Fotos, damit eine
+  Präsentation für Kunden nicht verrät, wo andere Baustellen liegen.
+
+
+PROGRAMMIEREN
+-------------
+  JARVIS gibt den Auftrag an Claude Code – immer erst nach deiner
+  Freigabe. Gearbeitet wird nur im Ordner
+  Jarvis-Werkstatt/projekte/<name>, ohne Internet. Vorher sichert
+  JARVIS den alten Stand. Das dauert meist ein paar Minuten und
+  verbraucht Kontingent deines Abos. Fertig ist es erst, wenn die
+  Meldung „Programmier-Auftrag fertig“ kommt.
+  „Mit Tests“ darf Claude Code das Programm auch ausprobieren –
+  nur in der Sandbox des Macs. Klappt die Sandbox nicht, startet der
+  Auftrag gar nicht (dann ohne Tests).
+  Ein Chatbot, der Kunden rund um die Uhr antwortet, geht so nicht:
+  dafür braucht es einen bezahlten Zugang und einen Server.
 
 
 E-MAIL

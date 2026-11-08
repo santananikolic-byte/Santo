@@ -119,6 +119,18 @@ const pause = (ms) => new Promise((r) => setTimeout(r, ms));
     await page.waitForSelector(".nachricht.nutzer .blase:has-text('Sieh in mein Postfach')", { timeout: 15000 });
     await page.waitForFunction(() => !document.querySelector(".nachricht.denkt"), null, { timeout: 15000 });
     pruefe(true, "„E-Mails sortieren“ schickt den Auftrag los und JARVIS antwortet");
+    await page.click(".schnell-knopf:text-is('Downloads aufräumen')");
+    await page.waitForSelector(".nachricht.nutzer .blase:has-text('Downloads-Ordner')", { timeout: 15000 });
+    await page.waitForFunction(() => !document.querySelector(".nachricht.denkt"), null, { timeout: 15000 });
+    pruefe(true, "„Downloads aufräumen“ schickt den Auftrag los und JARVIS antwortet");
+    await page.click(".schnell-knopf:text-is('Fotos sortieren')");
+    await page.waitForSelector(".nachricht.nutzer .blase:has-text('nach Aufnahmetag')", { timeout: 15000 });
+    await page.waitForFunction(() => !document.querySelector(".nachricht.denkt"), null, { timeout: 15000 });
+    pruefe(true, "„Fotos sortieren“ schickt den Auftrag los und JARVIS antwortet");
+    await page.fill("#text", "");
+    await page.click(".schnell-knopf:text-is('Programm bauen')");
+    pruefe((await page.locator("#text").inputValue()).startsWith("Bau mir ein kleines Programm"), "„Programm bauen“ füllt nur das Eingabefeld vor (der Nutzer beschreibt, was es können soll)");
+    await page.fill("#text", "");
 
     console.log("Verbindungsabbruch");
     await page.route("**/api/anfrage", (route) => route.abort());

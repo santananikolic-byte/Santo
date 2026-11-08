@@ -142,6 +142,48 @@ MCP-Dienste, die an JARVIS' Freigaben vorbeigehen könnten.
 **Wackelnder Browser-Prüfpunkt** („Schalter zeigt wieder ‚erlaubt‘“): Der Test sah zu früh hin. Er wartet jetzt auf die
 Anzeige (höchstens 10 s); danach 3 von 3 Läufen grün.
 
+## Stufe 15 – Fotos und Downloads, Präsentationen, Programmieren
+
+**Gebaut:** Dateien und Fotos ordnen (`ordnung.py`), Präsentationen (`praesentation.py`), Programmieren über Claude Code
+(`programmierer.py`), je ein Wissensbaustein im Gehirn, zwei Schnellknöpfe („Fotos sortieren“, „Programm bauen“).
+
+**Programmieren – echte Probe mit Claude Code 2.1.319** (Entwicklungsumgebung, Modell haiku, genau die Startoptionen
+von JARVIS, in einem Wegwerf-Ordner):
+
+| Probe | Ergebnis |
+|---|---|
+| Alle Startoptionen, auch das in der Hilfe nicht aufgeführte `--max-turns` | angenommen, Lauf erfolgreich |
+| Auftrag mit den Regeln von JARVIS: Datei anlegen, dann „außerhalb schreiben und `/etc/hostname` lesen“ | Datei im Projektordner angelegt; den Außenzugriff hat schon das Modell wegen der Regeln verweigert |
+| Derselbe Außenzugriff, ausdrücklich verlangt (ohne die Regeln) | **von Claude Code selbst abgelehnt** (`blockWritesOutsideWorkingDirectories`, `blockReadsOutsideWorkingDirectories`), beide Versuche in `permission_denials` gemeldet, nichts außerhalb geschrieben |
+| „Mit Tests“ (Sandbox an) auf einem Rechner ohne Sandbox | startet gar nicht erst: „sandbox required but unavailable … refusing to start“ – JARVIS übersetzt das jetzt verständlich |
+
+Daraus gebaut: Kennt eine neuere Fassung von Claude Code eine *Neben*option nicht mehr (`--max-turns`,
+`--disable-slash-commands`, `--no-session-persistence`), läuft der Auftrag ohne sie; fehlt eine *Schutz*option, startet
+er nicht. Weitere Schutzregeln: Verknüpfungen aus dem Projekt nach außen sperren den Auftrag, Abbrechen und Notstopp
+beenden auch die Programme, die Claude Code gestartet hat (sonst liefe ein hängender Test weiter), beim Beenden von
+JARVIS endet auch der Auftrag, „fertig programmiert“ ohne Fertig-Meldung bekommt eine Richtigstellung.
+**Nicht geprüft:** die Sandbox auf einem Mac zusammen mit der Abo-Anmeldung.
+
+**Recherche-Agent (macOS: Fotos, Dateien, Datenschutz)** – daraus geändert:
+
+- Spotlight trägt ohne Kameradaten still das Erstelldatum der Datei als „Inhalt erstellt“ ein. Vorher hätte JARVIS so ein
+  Datum als „Aufnahme“ angezeigt; jetzt heißt es ehrlich „Dateidatum“.
+- iPhone-Videos: Aufnahmedatum aus dem Filmkopf (`com.apple.quicktime.creationdate`, sonst `mvhd`) statt Dateidatum;
+  Live Photos (Foto, Video, `.AAE`) landen im selben Tagesordner.
+- Fehlt mitten in einer Sammelabfrage an Spotlight ein Wert, fragt JARVIS einzeln nach – ein Datum landet nie bei der
+  falschen Datei.
+- Der Mac unterscheidet weder Groß/klein noch zwei Schreibweisen desselben Umlauts: Namen werden jetzt genauso
+  verglichen, sonst wäre eine Datei liegen geblieben.
+- Office-Sperrdateien (`~$…`) und Firefox-Platzhalter neben `.part` bleiben liegen.
+- `sips -Z` vergrößert kleine Bilder – jetzt nur noch verkleinern.
+- Fotos tragen den Aufnahmeort (GPS) in sich, auch nach dem Umwandeln. In Präsentationen wird er jetzt entfernt
+  (EXIF-GPS genullt, XMP weggelassen; Ausrichtung und Datum bleiben).
+
+**Selbst gefunden beim Durchdenken:** Die Live-Photo-Zuordnung ging nur nach dem Namen – beim Verschieben nach Zeitraum
+hätte eine `Angebot.pdf` das Datum von `Angebot.jpg` übernommen. Jetzt nur unter Fotos, Videos und `.AAE`.
+
+**Prüfer-Agent (unabhängige Durchsicht aller drei Teile):** läuft gerade; das Ergebnis und die Behebungen folgen im nächsten Stand.
+
 ## Was ich nicht geprüft habe
 
 - **Dein Mac mit deinem Abo.** Die automatischen Tests simulieren Claude Code; der echte Probelauf (Stufe 10) lief in der Entwicklungsumgebung, mit
@@ -155,5 +197,9 @@ Anzeige (höchstens 10 s); danach 3 von 3 Läufen grün.
   auf deinem Mac genauso läuft (und wie schnell), zeigt erst der erste echte Versuch; die Fehlermeldungen sind darauf
   vorbereitet. Bekannte Eigenheit laut Recherche: Auf manchen macOS-Fassungen kann ein per Skript gesetzter Text als
   Zitat erscheinen.
-- **Prüfung durch Dritte.** Die Sicherheitsmaßnahmen sind von mir entworfen und getestet. Ein unabhängiger Prüfer-Agent hat
-  den Gehirn- und E-Mail-Teil durchgesehen (Stufe 14) – das ist ein zweiter Blick, aber kein Prüfer von außerhalb.
+- **Fotos, Downloads, Präsentationen und Programmieren auf einem echten Mac.** Getestet mit nachgebautem Heimordner und
+  Ersatz für `mdls` und `sips`. Erst dein Mac zeigt: die Nachfrage von macOS beim ersten Zugriff auf Downloads,
+  Schreibtisch und Dokumente, die echte Ausgabe von `mdls`, und ob die Sandbox für „mit Tests“ mit deinem Abo läuft.
+- **Prüfung durch Dritte.** Die Sicherheitsmaßnahmen sind von mir entworfen und getestet. Unabhängige Prüfer-Agenten haben
+  den Gehirn- und E-Mail-Teil (Stufe 14) und die drei neuen Teile (Stufe 15) durchgesehen – das ist ein zweiter Blick,
+  aber kein Prüfer von außerhalb.

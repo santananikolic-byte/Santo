@@ -50,6 +50,8 @@ STANDARD = {
     # "ordner": {"angebote": {"pfad": "~/Documents/Angebote", "schreiben": false}}
     "werkstatt": "~/Jarvis-Werkstatt",
     "ordner": {},
+    # Mac-Ordner, die JARVIS ansehen und (nur nach Freigabe, nur verschieben) ordnen darf. Entfernen = nicht anfassen.
+    "verwaltete_ordner": ["downloads", "bilder", "schreibtisch", "dokumente"],
     # Internetadressen, die das Werkzeug http_abfrage ansprechen darf (leer = keine).
     "api_domains": [],
     # Einzeln abgeschaltete Werkzeuge ("Rechte widerrufen").
@@ -61,6 +63,7 @@ STANDARD = {
     "max_aufrufe_pro_auftrag": 30,
     "freigabe_minuten": 30,
     "skript_timeout": 60,
+    "programmier_minuten": 20,  # so lange darf ein Programmier-Auftrag an Claude Code höchstens laufen
     "auftraege_automatisch_fortsetzen": False,
     # Schutz
     "anfragen_pro_minute": 20,
@@ -76,6 +79,7 @@ MODELL_MUSTER = re.compile(r"^[a-z0-9][a-z0-9.\-]*$")
 NAME_MUSTER = re.compile(r"^[a-z][a-z0-9_]{1,40}$")
 DOMAIN_MUSTER = re.compile(r"^[a-z0-9]([a-z0-9.\-]*[a-z0-9])?$")
 GEHIRNE = ("claude", "lokal")
+VERWALTBARE_ORDNER = ("downloads", "bilder", "schreibtisch", "dokumente")
 LOKAL_MODELL_MUSTER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/\-]{0,60}$")
 OLLAMA_MUSTER = re.compile(r"^http://(127\.0\.0\.1|localhost)(:\d{1,5})?$")
 
@@ -220,6 +224,7 @@ def normalisieren(werte, daten_ordner):
     _ganzzahl(w, "max_aufrufe_pro_auftrag", 1, 200)
     _ganzzahl(w, "freigabe_minuten", 1, 1440)
     _ganzzahl(w, "skript_timeout", 5, 600)
+    _ganzzahl(w, "programmier_minuten", 2, 120)
     _ganzzahl(w, "anfragen_pro_minute", 1, 600)
     _ganzzahl(w, "backup_aufbewahren", 1, 60)
 
@@ -278,6 +283,16 @@ def normalisieren(werte, daten_ordner):
     if len(w["ordner"]) > 10:
         raise KonfigFehler("Höchstens 10 zusätzliche Ordner.")
     w["ordner"] = {name: _ordner_pruefen(name, angaben, daten_ordner) for name, angaben in w["ordner"].items()}
+
+    _liste(w, "verwaltete_ordner", len(VERWALTBARE_ORDNER))
+    verwaltet = []
+    for name in w["verwaltete_ordner"]:
+        name = str(name).strip().lower()
+        if name not in VERWALTBARE_ORDNER:
+            raise KonfigFehler("verwaltete_ordner: %r gibt es nicht. Möglich: %s." % (name, ", ".join(VERWALTBARE_ORDNER)))
+        if name not in verwaltet:
+            verwaltet.append(name)
+    w["verwaltete_ordner"] = verwaltet
 
     _liste(w, "api_domains", 50)
     domains = []

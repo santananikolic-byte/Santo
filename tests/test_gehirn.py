@@ -68,8 +68,28 @@ class BausteinTest(unittest.TestCase):
         ("Sag dem Kunden zu, dass wir am Montag um 8 Uhr anfangen", {"email"}, set()),
         ("Erstell mir ein Angebot für die Hausverwaltung Berger", {"preise"}, set()),
         ("Kannst du eine Rechnung für Meier schreiben?", {"preise"}, set()),
+        # Dateien, Fotos, Präsentationen
+        ("Räum meine Downloads auf", {"ordnung"}, {"email", "praesentation"}),
+        ("Sortier die Baustellenfotos nach vorher und nachher", {"ordnung"}, set()),
+        ("Mach das Verschieben rückgängig", {"ordnung"}, set()),
+        ("Erstell mir eine Präsentation für die Hausverwaltung", {"praesentation"}, {"ordnung"}),
+        ("Mach mir ein paar Folien für den Termin", {"praesentation"}, set()),
+        # Programmieren
+        ("Programmier mir einen Rechner für unsere Angebote", {"programmieren"}, set()),
+        ("Bau mir eine Webseite für die Firma", {"programmieren"}, set()),
+        ("Mach mir ein kleines Programm für die Stundenzettel", {"programmieren"}, set()),
+        ("Ich brauche einen Chatbot für Kundenanfragen", {"programmieren"}, set()),
+        ("Ich brauche eine App für die Zeiterfassung", {"programmieren"}, set()),
+        # ... aber nicht bei Wörtern, die im Betrieb etwas anderes heißen
+        ("Schau auf der Webseite von Berger ins Impressum", {"firmenpruefung"}, {"programmieren"}),
+        ("Prüf, ob Berger eine Webseite hat", set(), {"programmieren"}),
+        ("Was steht morgen auf dem Programm?", set(), {"programmieren"}),
+        ("Der Code für die Haustür ist 4711", set(), {"programmieren"}),
+        ("Schreib mir ein Skript für die Anrufe bei Hausverwaltungen", set(), {"programmieren"}),
+        ("Die Baustellenfotos von der Webseite", set(), {"programmieren"}),
         # keine Fehlgriffe durch Wortteile
         ("Wer trägt dafür die Verantwortung?", set(), {"email"}),
+        ("Wie viel Ordnungsgeld droht bei Verspätung?", set(), {"ordnung"}),
         ("Das ist die Grundlage für den Vertrag", set(), {"tagesbericht"}),
         ("Was muss ich bei der Steuer beachten?", set(), {"preise"}),
         ("Zeig mir den Kundenstatus", set(), {"tagesbericht"}),

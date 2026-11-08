@@ -206,6 +206,76 @@ BAUSTEINE = (
         "kein Zufall.",
         {}),
 )
+BAUSTEINE += (
+    Baustein(
+        "ordnung", "DATEIEN UND FOTOS ORDNEN (Downloads, Bilder, Schreibtisch, Dokumente, Werkstatt)",
+        _muster(r"aufr(ä|ae)um", r"\bsortier", r"\bordnung\b", r"\bdownloads?\b", r"\bfotos?\b", r"\bbilder\b",
+                r"schreibtisch", r"\bdokumente\b", r"\bordner\b", r"vorher.{0,30}nachher", r"\brückgängig|\brueckgaengig",
+                r"werkzeug:(ordner_ansehen|ordnen|dateien_verschieben|rueckgaengig)"),
+        (),
+        "- Erst ansehen (\"ordner_ansehen\"), dann einen kurzen Vorschlag machen. Verschoben wird nur mit \"ordnen\", "
+        "\"dateien_verschieben\" oder \"rueckgaengig\" - immer erst nach Freigabe; der Nutzer sieht dabei jede einzelne Datei.\n"
+        "- Nie löschen, nie überschreiben, nie in den Papierkorb. Unfertige Downloads und Dateien, die nur in iCloud liegen, "
+        "bleiben, wo sie sind. Vorhandene Unterordner fasst JARVIS nicht an.\n"
+        "- Downloads meist \"nach_art\" (Bilder, PDFs, Dokumente, Tabellen, Installationsdateien …). Fotos mit "
+        "\"fotos_nach_datum\" nach Aufnahmetag (Ordner JJJJ/JJJJ-MM-TT).\n"
+        "- Baustellenfotos nach Baustelle und Fortschritt: frag nach Baustelle und Zeitraum (oder nimm beides aus dem "
+        "Gedächtnis) und verschiebe mit \"dateien_verschieben\" (von/bis) in Ordner wie \"Baustellen/Berger/1 vorher\", "
+        "\"2 während\", \"3 nachher\". Was vorher oder nachher ist, weißt du nur über das Datum oder vom Nutzer - die "
+        "Bilder selbst siehst du nicht. Sag das ehrlich.\n"
+        "- Die Mediathek der Fotos-App fasst JARVIS nicht an, nur Bilddateien in Ordnern. Fotos vom iPhone: per AirDrop "
+        "oder Export aus der Fotos-App in einen Ordner (z. B. Bilder) legen.\n"
+        "- Sag nach jedem Verschieben, wie es rückgängig geht (\"rueckgaengig\").",
+        {}),
+)
+BAUSTEINE += (
+    Baustein(
+        "praesentation", "PRÄSENTATIONEN",
+        _muster(r"pr(ä|ae)sentation", r"\bfolien?\b", r"\bslides?\b", r"keynote", r"powerpoint", r"\bvortrag",
+                r"firmenvorstellung", r"referenz", r"werkzeug:praesentation_erstellen"),
+        (),
+        "- \"praesentation_erstellen\" baut eine Datei zum Doppelklicken (Werkstatt/praesentationen): Pfeiltasten "
+        "blättern, F = Vollbild; zum Verschicken im Browser drucken → „Als PDF sichern“. Danach mit \"datei_oeffnen\" zeigen.\n"
+        "- Aufbau für Kunden, kurz (je Folie höchstens 4 Punkte, je Punkt eine Zeile): 1. Titel mit Firmenname, 2. Ihr "
+        "Bedarf, 3. Unsere Leistung, 4. So arbeiten wir (Ablauf, Termine, feste Ansprechpartner), 5. Referenzen mit "
+        "Vorher-Nachher-Fotos, 6. Nächster Schritt und Kontakt.\n"
+        "- Nur echte Angaben: Firmendaten, Referenzen, Kundennamen, Zahlen und Preise nur aus dem Gedächtnis oder vom "
+        "Nutzer - sonst [Platzhalter]. Preise nur, wenn der Nutzer und sein Vater sie geprüft haben.\n"
+        "- Fotos nur aus den Ordnern des Nutzers (\"Bild: bilder:Baustellen/Berger/1 vorher/IMG_3.jpg | Vorher\"). "
+        "Welche Fotos passen, bestimmt er - du siehst die Bilder nicht. Die Dateinamen zeigt \"ordner_ansehen\".\n"
+        "- Text: erste Zeile \"# Titel\", dann optional ein Untertitel, jede Folie beginnt mit \"## Folientitel\".",
+        {}),
+)
+BAUSTEINE += (
+    Baustein(
+        "programmieren", "PROGRAMMIEREN (über Claude Code, im Projektordner)",
+        # Bewusst eng: "Programm" (Ablauf), "Code" (Türcode), "Skript" (Anrufleitfaden) und "Webseite" (Impressum
+        # prüfen) kommen im Betrieb ständig vor, ohne dass programmiert werden soll.
+        _muster(r"programmier", r"chatbot", r"claude code", r"quellcode|programmcode", r"\bpython\b", r"javascript",
+                r"\b(ein|eine|einen|kleines|kleine|kleinen|eigenes|eigene|eigenen|neues|neue|neuen)\s+"
+                r"(app|programm|tool|software)\b",
+                r"\bmach\w* (mir|uns) (eine?n? )?(neue |eigene )?(web ?(seite|site)|homepage|internetseite|app|programm|tool)\b",
+                r"\b(bau(e|en|t|st)?|erstell\w*|entwick\w*|gestalt\w*)\b[^.,;!?\n]{0,30}"
+                r"\b(web ?(seite|site)|homepage|internetseite|landing ?page)",
+                r"\b(web ?(seite|site)|homepage|internetseite|landing ?page)\b[^.,;!?\n]{0,30}"
+                r"\b(bauen|erstellen|entwickeln|programmieren|gestalten|machen)\b",
+                r"\b(neue|eigene|unsere|meine)n?\s+(web ?(seite|site)|homepage|internetseite)",
+                r"\bcode (schreiben|(ä|ae)ndern|anpassen|reparieren|verbessern)", r"fehler im (programm|code|skript|tool)",
+                r"werkzeug:(programmieren|programm_stand|programm_abbrechen)"),
+        (),
+        "- \"programmieren\" gibt einen Auftrag an Claude Code: eigener Ordner Werkstatt/projekte/<projekt>, nur dort lesen "
+        "und schreiben, kein Internet; mit_tests=ja erlaubt Ausführen und Testen in der Sandbox. Immer nur nach Freigabe; "
+        "der Auftrag läuft im Hintergrund und verbraucht Kontingent des Abos.\n"
+        "- Vorher klären, höchstens mit einer Frage: Was soll es können, für wen, wie wird es benutzt (Doppelklick, Browser)? "
+        "Dann einen klaren Auftrag schreiben: Ziel, Funktionen, Eingaben und Ausgaben, Bedienung, was getestet werden soll. "
+        "Am besten Python ohne Zusatzpakete oder eine einzelne HTML-Datei - beides läuft ohne Installation.\n"
+        "- Sag nie, das Programm sei fertig oder getestet, bevor die Meldung „Programmier-Auftrag fertig“ da ist. Den Stand "
+        "zeigt \"programm_stand\"; die Dateien liegen danach in der Werkstatt.\n"
+        "- Ehrlich bleiben: Ein Chatbot, der Kunden rund um die Uhr antwortet, braucht einen bezahlten API-Zugang und einen "
+        "Server - das Abo ist dafür nicht gedacht. Veröffentlichen, Hochladen oder auf fremden Rechnern installieren macht "
+        "JARVIS nicht.",
+        {}),
+)
 NAMEN = tuple(b.name for b in BAUSTEINE)
 _NACH_NAME = {b.name: b for b in BAUSTEINE}
 
@@ -234,7 +304,8 @@ def systemprompt(katalog, sichtbar=(), bausteine=(), rollen_auftrag=""):
 
 # ----------------------------------------------------------------- Denkstufe ---
 
-GRUENDLICH_BAUSTEINE = frozenset(("firmenpruefung", "akquise", "tagesbericht", "preise", "email", "kundengespraech"))
+GRUENDLICH_BAUSTEINE = frozenset(("firmenpruefung", "akquise", "tagesbericht", "preise", "email", "kundengespraech",
+                                  "ordnung", "praesentation", "programmieren"))
 _GRUENDLICH = re.compile(
     r"soll(en|te)? (ich|wir)|lohnt|entscheid|vergleich|vor- ?und nachteil|risiko|strategie|\bplan|warum|wieso|weshalb|"
     r"wie ?viel|rechne|berechne|vertrag|rechtlich|\brecht\b|steuer|investi|finanz|kredit|schulden|mitarbeiter|einstell|"
@@ -268,10 +339,14 @@ BEHAUPTUNGEN = (
                r"(ü|ue)bermittelt", r"geschickt|geantwortet", True,
                r"schick|send|verschick|\braus\b|weiterleit|antwort|beantwort|schreib|mail an|e-?mail an",
                ("mail_senden",), "Gesendet wurde nichts - dafür gibt es kein bestätigtes Werkzeugergebnis."),
-    Behauptung("verschieben", r"verschoben", "", True, r"verschieb|sortier|ablegen|ordner",
-               ("mail_verschieben", "datei_loeschen"), "Verschoben wurde nichts - dafür gibt es kein bestätigtes Werkzeugergebnis."),
+    Behauptung("verschieben", r"verschoben", r"aufger(ä|ae)umt", True, r"verschieb|sortier|ablegen|ordner|aufr(ä|ae)um",
+               ("mail_verschieben", "datei_loeschen", "ordnen", "dateien_verschieben", "rueckgaengig"),
+               "Verschoben wurde nichts - dafür gibt es kein bestätigtes Werkzeugergebnis."),
     Behauptung("loeschen", r"gel(ö|oe)scht", r"entfernt", True, r"l(ö|oe)sch|entfern|papierkorb|\bweg\b",
                ("datei_loeschen",), "Gelöscht wurde nichts - dafür gibt es kein bestätigtes Werkzeugergebnis."),
+    # Nur "ich habe …": "programmiert/getestet/entwickelt" ist erst nach der Fertig-Meldung eines Laufs belegt.
+    Behauptung("programmieren", r"(fertig )?programmiert", r"getestet|entwickelt", False, "", ("programm_fertig",),
+               "Fertig programmiert ist noch nichts - dafür fehlt die Meldung „Programmier-Auftrag fertig“."),
     Behauptung("anrufen", r"angerufen|telefoniert|zur(ü|ue)ckgerufen", "", False, "", (),
                "Angerufen hat JARVIS niemanden - das kann er nicht."),
     Behauptung("bezahlen", r"bezahlt|(ü|ue)berwiesen|gezahlt", "", False, "", (),

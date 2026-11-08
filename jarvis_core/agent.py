@@ -15,6 +15,7 @@ import subprocess
 
 from . import gedaechtnis, gehirn, rollen, umgebung
 from .mail import MacMail
+from .programmierer import Programmierer
 from .freigaben import Berechtigung
 from .provider import ProviderFehler
 from .werkzeuge import Kontext, Register, WerkzeugFehler, aktionen_parsen
@@ -48,6 +49,7 @@ class Agent:
         self.berechtigung = Berechtigung(self)
         self.planer = None  # vom Server gesetzt
         self.mail = MacMail()  # E-Mail über die Mail-App des Macs (osascript)
+        self.programmierer = Programmierer(self)  # Programmier-Aufträge an Claude Code, im Hintergrund
         provider.beobachter = self._anfrage_erfassen
         if speicher.meta("gesperrt") == "1":
             self.gesperrt.set()
@@ -280,11 +282,19 @@ class Agent:
         """Werkzeuge, die für DIESE Antwort wirklich ausgeführt wurden: in dieser Runde oder per Freigabe, die seit der
         letzten Antwort von JARVIS erteilt und ausgeführt wurde. Ein früherer Versand belegt keinen späteren."""
         namen = {e["werkzeug"] for e in ergebnisse if e["status"] == "ausgefuehrt"}
+        # "Fertig programmiert" belegt nur die Fertig-Meldung eines Laufs - nicht schon der Start ("programmieren").
+        if any(e["werkzeug"] == "programm_stand" and e["status"] == "ausgefuehrt"
+               and e["text"].startswith("Programmier-Auftrag fertig") for e in ergebnisse):
+            namen.add("programm_fertig")
         nachrichten = self.speicher.nachrichten(gespraech, 60)
         letzte = max([i for i, n in enumerate(nachrichten) if n["rolle"] == "jarvis"], default=-1)
         for n in nachrichten[letzte + 1:]:
-            freigabe_id = (n.get("meta") or {}).get("freigabe")
-            rec = self.speicher.freigabe(freigabe_id) if n["rolle"] == "ereignis" and freigabe_id else None
+            meta = n.get("meta") or {}
+            if n["rolle"] != "ereignis":
+                continue
+            if meta.get("programmieren") and meta.get("status") == "fertig":
+                namen.add("programm_fertig")
+            rec = self.speicher.freigabe(meta["freigabe"]) if meta.get("freigabe") else None
             if rec and rec["status"] == "ausgefuehrt":
                 namen.add(rec["werkzeug"])
         return namen
@@ -310,6 +320,7 @@ class Agent:
         self.gesperrt.set()
         self.speicher.meta_setzen("gesperrt", "1")
         self.provider.abbrechen()
+        self.programmierer.abbrechen()
         if self.stimme:
             self.stimme.stopp()
         self.berechtigung.alle_offenen_ablehnen("Notstopp")

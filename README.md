@@ -18,6 +18,10 @@ ausdrücklicher Freigabe.
 > Danach genügt ein Doppelklick auf `Jarvis-starten.command`. Anleitung: [`JARVIS-SERVER.md`](JARVIS-SERVER.md),
 > ehrlicher Stand: [`docs/STATUS.md`](docs/STATUS.md).
 >
+> Neu in 0.11: **Fotos und Downloads sortieren** (nur verschieben, nie löschen, alles rückgängig machbar),
+> **Präsentationen** zum Doppelklicken (ohne GPS-Standort der Fotos) und **Programmieren über Claude Code** –
+> abgeschottet im Projektordner, ohne Internet, immer erst nach Freigabe.
+>
 > **Ganz ohne Terminal: das Mac-Paket `jarvis-mac.zip`** – entpacken, `JARVIS.command` doppelklicken, fertig
 > (richtet Python, Claude Code und die Anmeldung mit dem Abo selbst ein, nur nach Ja). Gebaut wird es mit
 > `python3 mac-paket/bauen.py` (landet in `dist/`); Inhalt und Kurzanleitung stehen in [`mac-paket/`](mac-paket/).

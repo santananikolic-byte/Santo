@@ -24,10 +24,13 @@ import hashlib
 import os
 import re
 import shutil
+import subprocess
 import time
 from html import unescape
 
-from . import mail, umgebung, zeit
+from collections import Counter
+
+from . import mail, ordnung, praesentation, programmierer, umgebung, zeit
 from .provider import ProviderFehler
 
 FREI, MELDUNG, FREIGABE = 1, 2, 3
@@ -71,7 +74,7 @@ class P:
 class Werkzeug:
     def __init__(self, name, beschreibung, handler, parameter=(), stufe=FREI, koerper=None, liefert_daten=False,
                  extern=False, vorschau=None, risiko="", nur_chat=False, privat_freigabe=False, zustand=None,
-                 koerper_maximal=MAX_INHALT):
+                 koerper_maximal=MAX_INHALT, vorbereiten=None):
         self.name = name
         self.beschreibung = beschreibung
         self.handler = handler
@@ -86,6 +89,9 @@ class Werkzeug:
         self.privat_freigabe = privat_freigabe  # im Bereich "privat" immer Stufe 3
         self.zustand = zustand  # Funktion (ctx, params) -> Text: Stand beim Anfragen (Änderungsschutz)
         self.koerper_maximal = koerper_maximal
+        # Funktion (ctx, params) -> dict: wird beim Prüfen ergänzt, z. B. der fertige Verschiebeplan. So zeigt die
+        # Freigabe genau das, was danach passiert - nicht etwas, das erst beim Ausführen neu berechnet wird.
+        self.vorbereiten = vorbereiten
 
     def stufe_fuer(self, ctx, params):
         return self.stufe(ctx, params) if callable(self.stufe) else self.stufe
@@ -416,6 +422,217 @@ def _mail_verschieben(ctx, p):
                                                              "; nicht verschoben: " + "; ".join(schlecht[:5]) if schlecht else "")}
 
 
+# ------------------------------------------------------- Dateien und Fotos ordnen ---
+
+def _ordnung(funktion):
+    try:
+        return funktion()
+    except ordnung.OrdnungFehler as fehler:
+        raise WerkzeugFehler(str(fehler)) from None
+
+
+def _groesse(zahl):
+    for einheit in ("Bytes", "KB", "MB", "GB"):
+        if zahl < 1024 or einheit == "GB":
+            return ("%d %s" if einheit == "Bytes" else "%.1f %s") % (zahl, einheit)
+        zahl /= 1024.0
+    return ""
+
+
+def _protokolle(ctx):
+    return os.path.join(ctx.agent.konfig.daten_ordner, "ordnung")
+
+
+def _ordner_ansehen(ctx, p):
+    unter = p.get("unterordner", "")
+    _, pfad = _ordnung(lambda: ordnung.verzeichnis(ctx.agent.konfig, p["ordner"], unter))
+    liste, uebersprungen, unterordner = _ordnung(lambda: ordnung.dateien(pfad))
+    name = ordnung.ANZEIGE.get(p["ordner"], p["ordner"]) + ("/" + unter if unter else "")
+    zeilen = ["%s: %d Datei(en) in der obersten Ebene, %d Unterordner." % (name, len(liste), len(unterordner))]
+    arten = Counter(d.kategorie for d in liste)
+    if arten:
+        zeilen.append("Nach Art: " + ", ".join("%s %d" % a for a in arten.most_common()))
+    neueste = sorted(liste, key=lambda d: d.mtime, reverse=True)
+    if neueste:
+        zeilen.append("Neueste Dateien%s:" % (" (die %d neuesten)" % ordnung.MAX_ANSEHEN if len(neueste) > ordnung.MAX_ANSEHEN else ""))
+        zeilen += ["- %s · %s · %s · geändert %s" % (d.name, d.kategorie, _groesse(d.groesse),
+                                                    time.strftime("%d.%m.%Y", time.localtime(d.mtime)))
+                   for d in neueste[:ordnung.MAX_ANSEHEN]]
+    if unterordner:
+        zeilen.append("Unterordner: " + ", ".join(unterordner[:40]) + (" …" if len(unterordner) > 40 else ""))
+    if uebersprungen:
+        zeilen.append("Bleibt liegen: " + "; ".join("%s (%s)" % u for u in uebersprungen[:20]))
+    zeilen.append("Sortieren: ordnen (nach_art, nach_datum, fotos_nach_datum) oder dateien_verschieben (Zeitraum oder "
+                  "Muster in einen Unterordner) - beides nur nach Freigabe.")
+    return {"text": "\n".join(zeilen)}
+
+
+def _ordnen_vorbereiten(ctx, p):
+    return {"_plan": ordnung.ordnen_planen(ctx.agent.konfig, p["ordner"], p["art"], p.get("ziel", "Sortiert"),
+                                           p.get("unterordner", ""))}
+
+
+def _verschieben_vorbereiten(ctx, p):
+    von = ordnung.tag_pruefen(p["von"]) if p.get("von") else None
+    bis = ordnung.tag_pruefen(p["bis"]) if p.get("bis") else None
+    if von and bis and von > bis:
+        raise ordnung.OrdnungFehler("„von“ liegt nach „bis“.")
+    return {"_plan": ordnung.verschieben_planen(ctx.agent.konfig, p["ordner"], p["ziel"], von, bis, p.get("muster", ""),
+                                                p.get("unterordner", ""), nur_fotos=p.get("nur_fotos") == "ja")}
+
+
+def _rueckgaengig_vorbereiten(ctx, p):
+    return {"_plan": ordnung.rueckgaengig_planen(_protokolle(ctx), p.get("protokoll", "letzte"))}
+
+
+def _plan_vorschau(ctx, p):
+    return ordnung.vorschau(p["_plan"], "werden ZURÜCKGESCHOBEN" if p["_plan"].get("protokoll") else "werden VERSCHOBEN")
+
+
+def _plan_ausfuehren(ctx, p):
+    plan = p["_plan"]
+    kennung, ergebnis = ordnung.ausfuehren(plan, _protokolle(ctx), "rueckgaengig" if plan.get("protokoll") else "verschieben")
+    gut = [e for e in ergebnis if e["status"] == "ok"]
+    rest = ["%s (%s)" % (os.path.basename(e["von"]), e["status"]) for e in ergebnis if e["status"] != "ok"]
+    if not gut:
+        raise WerkzeugFehler("Nichts verschoben. %s" % "; ".join(rest[:10]))
+    return {"text": "%d von %d Datei(en) verschoben – %s. Protokoll %s; zurück mit rueckgaengig (protokoll=%s).%s" % (
+        len(gut), len(ergebnis), plan["beschreibung"], kennung, kennung,
+        " Nicht verschoben: " + "; ".join(rest[:10]) if rest else "")}
+
+
+# ------------------------------------------------------- Präsentationen, Öffnen ---
+
+def _praesentation_vorschau(ctx, p):
+    try:
+        daten = praesentation.lesen(p["inhalt"], p.get("titel", ""))
+    except praesentation.PraesentationFehler as fehler:
+        return "Präsentation (fehlerhaft: %s)" % fehler
+    return "Neue Präsentation „%s“ in der Werkstatt (praesentationen/), %d Folien:\n%s" % (
+        daten["titel"], len(daten["folien"]) + 1, "\n".join("- " + f["titel"] for f in daten["folien"]))
+
+
+def _praesentation(ctx, p):
+    k = ctx.agent.konfig
+    try:
+        seite, folien, bilder, hinweise = praesentation.bauen(k, p["inhalt"], p.get("titel", ""), p.get("untertitel", ""),
+                                                              p.get("fusszeile", ""), p.get("akzent") or "#c8561b")
+    except praesentation.PraesentationFehler as fehler:
+        raise WerkzeugFehler(str(fehler)) from None
+    ordner = os.path.join(k.werkstatt_pfad, "praesentationen")
+    os.makedirs(ordner, exist_ok=True)
+    name = praesentation.dateiname(p.get("dateiname") or praesentation.lesen(p["inhalt"], p.get("titel", ""))["titel"])
+    ziel = ordnung._eindeutig(ordner, name + ".html", set())  # nie überschreiben
+    zwischen = ziel + ".jarvis-neu"
+    with open(zwischen, "w", encoding="utf-8") as f:
+        f.write(seite)
+    os.replace(zwischen, ziel)
+    relativ = os.path.relpath(ziel, os.path.realpath(k.werkstatt_pfad))
+    return {"text": "Präsentation erstellt: Werkstatt/%s (%d Folien, %d Bilder). Öffnen: Doppelklick oder datei_oeffnen "
+                    "pfad=%s. Blättern mit den Pfeiltasten, F = Vollbild; zum Verschicken im Browser drucken → „Als PDF "
+                    "sichern“.%s" % (relativ, folien, bilder, relativ, " Hinweise: " + " ".join(hinweise) if hinweise else "")}
+
+
+# Was JARVIS öffnen darf: Dokumente, Bilder, Filme. Nie Programme, Skripte, Installer. HTML nur aus der eigenen Werkstatt.
+OEFFNEN_ERLAUBT = ("pdf", "jpg", "jpeg", "png", "heic", "heif", "gif", "webp", "txt", "md", "csv", "rtf", "doc", "docx",
+                   "xls", "xlsx", "ppt", "pptx", "key", "pages", "numbers", "odt", "ods", "odp", "mov", "mp4", "m4v")
+
+
+def _oeffnen_programm():
+    fest = os.environ.get("JARVIS_OPEN")  # nur für Tests
+    if fest:
+        return fest if os.path.isfile(fest) and os.access(fest, os.X_OK) else None
+    return shutil.which("open") if os.uname().sysname == "Darwin" else None
+
+
+def _datei_oeffnen(ctx, p):
+    ordner, pfad, endung = _ordnung(lambda: ordnung.datei_aufloesen(ctx.agent.konfig, p["pfad"]))
+    if not (endung in OEFFNEN_ERLAUBT or (endung in ("html", "htm") and ordner == "werkstatt")):
+        raise WerkzeugFehler("Diese Art Datei öffnet JARVIS nicht (.%s). Erlaubt sind Dokumente, Bilder und Filme; "
+                             "Webseiten nur aus der Werkstatt; nie Programme oder Skripte." % (endung or "ohne Endung"))
+    programm = _oeffnen_programm()
+    if not programm:
+        raise WerkzeugFehler("Öffnen geht nur auf dem Mac. Die Datei liegt hier: %s" % pfad)
+    try:
+        lauf = subprocess.run([programm, pfad], capture_output=True, timeout=20)  # noqa: S603 - fester Befehl, geprüfter Pfad
+    except (OSError, subprocess.SubprocessError) as fehler:
+        raise WerkzeugFehler("Öffnen ging nicht: %s" % fehler) from None
+    if lauf.returncode != 0:
+        raise WerkzeugFehler("Öffnen ging nicht: %s" % (lauf.stderr or b"").decode("utf-8", "replace")[:200])
+    return {"text": "Geöffnet: %s" % os.path.basename(pfad)}
+
+
+# ---------------------------------------------------------------- Programmieren ---
+
+def _programmier_vorbereiten(ctx, p):
+    """Vor der Freigabe prüfen, was sich prüfen lässt - damit der Nutzer nichts freigibt, was dann gar nicht startet."""
+    name, pfad = programmierer.projekt_pfad(ctx.agent.konfig, p["projekt"])
+    programmierer.ordner_pruefen(pfad)
+    ctx.agent.programmierer.frei_pruefen()
+    ctx.agent.programmierer.claude_pruefen()
+    return {"projekt": name}
+
+
+def _programmier_vorschau(ctx, p):
+    k = ctx.agent.konfig
+    name, pfad = programmierer.projekt_pfad(k, p["projekt"])
+    mit = p.get("mit_tests") == "ja"
+    vorhanden = programmierer.bestand(pfad) if os.path.isdir(pfad) else {}
+    if not vorhanden:
+        zustand = "neu"
+    elif sum(g for g, _ in vorhanden.values()) > programmierer.MAX_SICHERUNG:
+        zustand = "vorhanden, %d Dateien - ZU GROSS für eine Sicherung (über 100 MB): Änderungen lassen sich nicht " \
+                  "automatisch zurückholen" % len(vorhanden)
+    else:
+        zustand = "vorhanden, %d Dateien - wird vorher gesichert" % len(vorhanden)
+    zeilen = ["Programmier-Auftrag an Claude Code", "",
+              "Projekt: Werkstatt/projekte/%s (%s)" % (name, zustand),
+              "Darf: Dateien in diesem Ordner lesen, anlegen und ändern." + (
+                  " Programme ausführen und testen - nur in der Sandbox des Macs, ohne Internet." if mit
+                  else " Nichts ausführen (keine Kommandozeile)."),
+              "Darf nicht: außerhalb des Ordners lesen oder schreiben, ins Internet, Einstellungen für Claude Code anlegen.",
+              "Läuft im Hintergrund mit %s, höchstens %d Schritte und %d Minuten; verbraucht Kontingent deines Abos."
+              % (k.modell_fuer("arbeit") or "Standard", programmierer.MAX_SCHRITTE, k.programmier_minuten)]
+    steuer = programmierer.steuerdateien(pfad) if os.path.isdir(pfad) else []
+    if steuer:
+        zeilen.append("Achtung: Im Projekt liegen Steuerdateien für Claude Code (%s). Einstellungen daraus werden nicht "
+                      "geladen; eine CLAUDE.md wird aber mitgelesen - bitte prüfen, ob sie von dir ist." % ", ".join(steuer))
+    if mit:
+        zeilen.append("Hinweis: Dass die Sandbox mit der Abo-Anmeldung läuft, ist nicht dokumentiert. Ist sie nicht "
+                      "verfügbar, bricht der Auftrag ab, statt ungeschützt zu laufen.")
+    return "\n".join(zeilen + ["", "Auftrag:", p["auftrag"]])
+
+
+def _programmieren(ctx, p):
+    try:
+        info = ctx.agent.programmierer.starten(ctx, p["projekt"], p["auftrag"], p.get("mit_tests") == "ja")
+    except programmierer.ProgrammierFehler as fehler:
+        raise WerkzeugFehler(str(fehler)) from None
+    return {"text": "Programmier-Auftrag gestartet (Projekt %s, %s). Er läuft im Hintergrund, meist einige Minuten; "
+                    "fertig ist er erst mit der Meldung „Programmier-Auftrag fertig“.%s" % (
+                        info["projekt"], "mit Tests in der Sandbox" if info["mit_tests"] else "ohne Ausführen",
+                        " Sicherung vorher: %s." % info["sicherung"] if info["sicherung"] else "")}
+
+
+def _programm_stand(ctx, p):
+    try:
+        stand = ctx.agent.programmierer.stand(p.get("projekt", ""))
+    except programmierer.ProgrammierFehler as fehler:
+        raise WerkzeugFehler(str(fehler)) from None
+    if not stand:
+        return {"text": "Es gab noch keinen Programmier-Auftrag%s." % (" für dieses Projekt" if p.get("projekt") else "")}
+    if stand["laeuft"]:
+        return {"text": "Läuft gerade: Projekt %s, gestartet %s (%s)." % (
+            stand["projekt"], zeit.utc_zu_lokal_text(stand["start"]), "mit Tests" if stand["mit_tests"] else "ohne Ausführen")}
+    return {"text": programmierer.bericht(stand)}
+
+
+def _programm_abbrechen(ctx, p):
+    if not ctx.agent.programmierer.abbrechen():
+        return {"text": "Es läuft gerade kein Programmier-Auftrag."}
+    return {"text": "Der Programmier-Auftrag wird abgebrochen; die Meldung dazu kommt gleich."}
+
+
 def _auftrag_planen(ctx, p):
     ergebnis = ctx.agent.planer.erstellen(p["ziel"], ctx.bereich, gespraech=ctx.gespraech)
     return {"text": ergebnis["text"]}
@@ -465,7 +682,58 @@ class Register:
                      _umgebung, liefert_daten=True),
             Werkzeug("auftrag_planen", "Zerlegt ein größeres Ziel in überprüfbare Schritte. Ergebnis ist nur ein "
                      "Entwurf; der Nutzer startet ihn.", _auftrag_planen, [P("ziel", True, maximal=1000)], nur_chat=True),
-        ] + Register._mailwerkzeuge()
+        ] + Register._mailwerkzeuge() + Register._ordnungswerkzeuge() + [
+            Werkzeug("praesentation_erstellen", "Baut eine Präsentation als Datei zum Doppelklicken (Werkstatt/praesentationen; "
+                     "Pfeiltasten blättern, F = Vollbild, als PDF druckbar). Text: erste Zeile \"# Titel\", jede Folie "
+                     "\"## Folientitel\", Punkte mit \"- \", Bilder mit \"Bild: ordner:pfad | Beschriftung\" (höchstens 2 je "
+                     "Folie). Überschreibt nie.", _praesentation,
+                     [P("titel", hilfe="sonst aus der ersten Zeile", maximal=200), P("untertitel", maximal=300),
+                      P("fusszeile", hilfe="z. B. Firmenname · Telefon, nur echte Angaben", maximal=200),
+                      P("dateiname", maximal=80), P("akzent", hilfe="Farbe #RRGGBB", maximal=7)],
+                     koerper="inhalt", koerper_maximal=50000, stufe=MELDUNG, vorschau=_praesentation_vorschau, nur_chat=True),
+            Werkzeug("programmieren", "Gibt einen Programmier-Auftrag an Claude Code: eigener Ordner Werkstatt/projekte/<projekt>, "
+                     "nur dort lesen und schreiben, kein Internet; mit_tests=ja erlaubt Ausführen und Testen in der Sandbox. "
+                     "Immer nur nach Freigabe; läuft im Hintergrund.", _programmieren,
+                     [P("projekt", True, hilfe="kurzer Name, z. B. kunden-chatbot", maximal=60),
+                      P("mit_tests", art="wahl", wahl=("ja", "nein"))],
+                     koerper="auftrag", koerper_maximal=programmierer.MAX_AUFTRAG, stufe=FREIGABE,
+                     vorschau=_programmier_vorschau, vorbereiten=_programmier_vorbereiten, nur_chat=True,
+                     risiko="Claude Code ändert Dateien im Projektordner (vorher gesichert) und verbraucht Abo-Kontingent."),
+            Werkzeug("programm_stand", "Zeigt, ob ein Programmier-Auftrag läuft, oder das Ergebnis des letzten.",
+                     _programm_stand, [P("projekt", maximal=60)], liefert_daten=True),
+            Werkzeug("programm_abbrechen", "Bricht einen laufenden Programmier-Auftrag ab.", _programm_abbrechen, nur_chat=True),
+            Werkzeug("datei_oeffnen", "Öffnet eine Datei auf dem Mac in ihrer App (z. B. eine Präsentation aus der Werkstatt "
+                     "oder ein PDF aus Downloads). Nie Programme oder Skripte.", _datei_oeffnen,
+                     [P("pfad", True, hilfe="z. B. praesentationen/x.html oder downloads:Rechnung.pdf", maximal=300)],
+                     stufe=MELDUNG, nur_chat=True),
+        ]
+
+    @staticmethod
+    def _ordnungswerkzeuge():
+        ordner = P("ordner", True, art="wahl", wahl=("downloads", "bilder", "schreibtisch", "dokumente", "werkstatt"))
+        unter = P("unterordner", hilfe="optional: Unterordner, z. B. Baustellen", maximal=300)
+        risiko = "Dateien liegen danach an einem anderen Ort (nichts wird gelöscht; rückgängig machbar)."
+        return [
+            Werkzeug("ordner_ansehen", "Zeigt, was in Downloads, Bildern, Schreibtisch, Dokumenten oder der Werkstatt liegt "
+                     "(Anzahl nach Art, neueste Dateien, Unterordner). Dateinamen sind eine Außenquelle.", _ordner_ansehen,
+                     [ordner, unter], liefert_daten=True, extern=True),
+            Werkzeug("ordnen", "Sortiert die Dateien eines Ordners in Unterordner: nach_art (Bilder, PDFs, Dokumente …), "
+                     "nach_datum (Monat) oder fotos_nach_datum (Aufnahmetag). Nur verschieben, nur nach Freigabe.",
+                     _plan_ausfuehren, [ordner, P("art", True, art="wahl", wahl=("nach_art", "nach_datum", "fotos_nach_datum")),
+                                        P("ziel", hilfe="Unterordner für das Ergebnis, Standard Sortiert", maximal=200), unter],
+                     stufe=FREIGABE, vorschau=_plan_vorschau, vorbereiten=_ordnen_vorbereiten, nur_chat=True, risiko=risiko),
+            Werkzeug("dateien_verschieben", "Verschiebt ausgewählte Dateien (Zeitraum von/bis nach Aufnahme- bzw. Dateidatum, "
+                     "Namensmuster wie IMG_*) in einen Unterordner, z. B. Baustellen/Berger/1 vorher. Nur nach Freigabe.",
+                     _plan_ausfuehren, [ordner, P("ziel", True, hilfe="Unterordner, verschachtelt mit /", maximal=300),
+                                        P("von", art="tag", hilfe="JJJJ-MM-TT"), P("bis", art="tag", hilfe="JJJJ-MM-TT"),
+                                        P("muster", hilfe="z. B. IMG_*.HEIC", maximal=100),
+                                        P("nur_fotos", art="wahl", wahl=("ja", "nein")), unter],
+                     stufe=FREIGABE, vorschau=_plan_vorschau, vorbereiten=_verschieben_vorbereiten, nur_chat=True, risiko=risiko),
+            Werkzeug("rueckgaengig", "Macht ein Ordnen oder Verschieben rückgängig: jede Datei zurück an ihren alten Ort. "
+                     "Nur nach Freigabe.", _plan_ausfuehren,
+                     [P("protokoll", hilfe="Kennung aus der Meldung, Standard: die letzte", maximal=40)],
+                     stufe=FREIGABE, vorschau=_plan_vorschau, vorbereiten=_rueckgaengig_vorbereiten, nur_chat=True, risiko=risiko),
+        ]
 
     @staticmethod
     def _mailwerkzeuge():
@@ -535,6 +803,11 @@ class Register:
                     wert = zeit.lokal_zu_utc(wert)
                 except ValueError as fehler:
                     raise WerkzeugFehler("Parameter %s: %s" % (p.name, fehler)) from None
+            elif p.art == "tag":
+                try:
+                    wert = ordnung.tag_pruefen(wert).isoformat()
+                except ordnung.OrdnungFehler as fehler:
+                    raise WerkzeugFehler("Parameter %s: %s" % (p.name, fehler)) from None
             elif p.art in ("adressen", "adresse", "zahlen", "zielordner"):
                 if len(wert) > p.maximal:
                     raise WerkzeugFehler("Parameter %s ist zu lang (höchstens %d Zeichen)." % (p.name, p.maximal))
@@ -561,6 +834,11 @@ class Register:
             params[w.koerper] = koerper
         if w.zustand:
             params["_sha"] = w.zustand(ctx, params)
+        if w.vorbereiten:
+            try:
+                params.update(w.vorbereiten(ctx, params))
+            except (ordnung.OrdnungFehler, programmierer.ProgrammierFehler) as fehler:
+                raise WerkzeugFehler(str(fehler)) from None
         return params
 
     def katalog(self, rolle="allgemein"):

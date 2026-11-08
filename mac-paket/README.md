@@ -73,15 +73,29 @@ deinem Mac (127.0.0.1), nie ins Internet.
   Löschen kann er nicht, und in Papierkorb oder Spam verschiebt er auch nicht.
   Hat die Mail-App mehrere Konten (privat und Firma), steht in jeder Vorschau,
   von welcher Adresse die E-Mail rausgeht.
+- **Fotos und Downloads sortieren:** nach Art, nach Monat oder Fotos und Videos
+  nach Aufnahmetag (aus den Kameradaten, nicht nach Gefühl); ausgewählte Fotos
+  in einen Baustellenordner („Baustellen/Berger/1 vorher“). Er **verschiebt nur**,
+  löscht nie und überschreibt nie, zeigt vorher jede Datei und wartet auf dein
+  „Freigeben“. Alles lässt sich rückgängig machen.
+- **Präsentationen:** eine Datei zum Doppelklicken, mit deinen Fotos, läuft ohne
+  Internet und auf dem Handy; als PDF über Drucken. Den Aufnahmeort (GPS)
+  entfernt er aus den Fotos.
+- **Programmieren:** kleine Programme (Rechner, Listen, Webseiten zum
+  Doppelklicken) über Claude Code – nur nach deiner Freigabe, nur im Ordner
+  `Jarvis-Werkstatt/projekte`, ohne Internet, vorher gesichert. Verbraucht
+  Kontingent deines Abos.
 - **Denkt erst nach:** bei Entscheidungen und Rechnungen geht er Ziel, Wissen
   und Annahmen, Möglichkeiten und Risiko durch, bevor er antwortet. Er holt
   sich dafür nur das Fachwissen dazu, das zur Frage passt (Preise, E-Mail,
-  Firmenprüfung, Akquise, Kundengespräch, Tagesbericht).
+  Firmenprüfung, Akquise, Kundengespräch, Tagesbericht, Dateien und Fotos,
+  Präsentationen, Programmieren).
 - **Schnell oder gründlich:** Gruß und kurze Fragen beantwortet ein schnelles
   Modell, Preise, Kundentexte und Entscheidungen das gründliche
   (Leitstand → System → Modelle).
-- **Ehrlichkeitsprüfung:** Schreibt er „gesendet“ oder „gelöscht“, ohne dass es
-  wirklich passiert ist, hängt JARVIS selbst eine Richtigstellung an.
+- **Ehrlichkeitsprüfung:** Schreibt er „gesendet“, „gelöscht“ oder „fertig
+  programmiert“, ohne dass es wirklich passiert ist, hängt JARVIS selbst eine
+  Richtigstellung an.
 - **Stimme:** spricht mit der besten deutschen Mac-Stimme; zuhören über das
   Mikrofon im Leitstand („Hey Jarvis“).
 
@@ -97,6 +111,9 @@ deinem Mac (127.0.0.1), nie ins Internet.
 - Was er sich merken will, ist erst ein Vorschlag – du bestätigst.
 - Datei überschreiben oder löschen: nur nach deiner Freigabe im Leitstand.
   „Löschen“ heißt: in den Papierkorb der Werkstatt, nicht endgültig.
+  Beim Sortieren von Fotos und Downloads wird nur verschoben, nie gelöscht.
+- Programmier-Aufträge laufen abgeschottet: nur im Projektordner, kein Internet,
+  Tests nur in der Sandbox des Macs. Notstopp beendet einen laufenden Auftrag.
 - **Notstopp:** ein Klick (oder EXTRAS → 9), und alles steht.
 - Der Leitstand ist nur auf deinem Mac erreichbar. Das Handy kommt nur dazu,
   wenn du es erlaubst (EXTRAS → 5).
@@ -141,6 +158,11 @@ wenn du davon erzählst (ehrlich, mit nächstem Schritt), aber ohne Punktzahl.
    Und: In der Mail-App muss dein Postfach eingerichtet sein.
 8. **Mikrofon im Leitstand geht nicht** → in Chrome am einfachsten. In Safari
    erst Systemeinstellungen → Tastatur → Diktat einschalten.
+9. **Sortieren: „macOS erlaubt den Zugriff noch nicht“** → Systemeinstellungen
+   → Datenschutz & Sicherheit → Dateien und Ordner → beim Terminal Downloads,
+   Schreibtisch und Dokumente einschalten.
+10. **Programmieren: „Sandbox nicht verfügbar“** → den Auftrag ohne Tests geben.
+    JARVIS startet ihn mit Absicht nicht ungeschützt.
 
 Hilft das nicht: ein Foto vom Fenster an Claude schicken.
 

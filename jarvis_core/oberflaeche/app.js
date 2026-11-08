@@ -381,7 +381,11 @@
     { name: "Tagesbriefing", senden: true, text: "Gib mir mein Tagesbriefing: Was ist offen (Aufgaben, Erinnerungen, Freigaben, Aufträge)? Was sind die drei wichtigsten nächsten Schritte, um mehr Aufträge zu gewinnen? Nutze nur, was du wirklich weißt, und trenne Wissen von Annahmen." },
     { name: "Akquise starten", senden: true, text: "Suche über öffentlich zugängliche Quellen (Ausschreibungsportale, Firmenverzeichnisse, Kleinanzeigen) nach aktuellen Aufträgen oder möglichen Kunden für Bau- und Reinigungsarbeiten in meiner Region. Prüfe jeden Treffer kurz und schlage mir die besten als Kontakt vor, mit Quelle." },
     { name: "E-Mails sortieren", senden: true, text: "Sieh in mein Postfach (letzte 7 Tage) und ordne es für mich: Was ist wichtig und muss heute beantwortet werden, was kann warten, was ist Werbung? Zu jeder wichtigen E-Mail ein Satz, was zu tun ist." },
+    { name: "Downloads aufräumen", senden: true, text: "Sieh dir meinen Downloads-Ordner an und schlag mir vor, wie wir ihn nach Art sortieren. Zeig mir vorher genau, was wohin kommt." },
+    { name: "Fotos sortieren", senden: true, text: "Sieh dir meinen Bilder-Ordner an und schlag mir vor, wie wir die Fotos und Videos nach Aufnahmetag sortieren. Zeig mir vorher genau, was wohin kommt." },
+    { name: "Präsentation", senden: true, text: "Erstell mir eine kurze Firmenpräsentation für Hausverwaltungen (Reinigung und Bau). Frag mich vorher nach den Angaben und Fotos, die du nicht kennst." },
     { name: "Firma prüfen", senden: false, text: "Prüfe diese Firma, bevor wir Zeit investieren (Handelsregister, Geschäftsführer, Impressum, E-Mail-Domain, Bewertungen, Insolvenzen): " },
+    { name: "Programm bauen", senden: false, text: "Bau mir ein kleines Programm (läuft per Doppelklick, ohne Installation). Es soll: " },
     { name: "Preise kalkulieren", senden: true, text: "Hilf mir, eine feste Preiskalkulation aufzubauen (Stundensatz, Leistungswerte für Büro-, Treppenhaus- und Gebäudereinigung). Frag mich nacheinander nach dem, was dir fehlt." }
   ];
   function schnellBauen() {

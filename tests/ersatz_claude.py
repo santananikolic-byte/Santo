@@ -14,13 +14,17 @@ Eine Regel im Drehbuch:
 
     {"stdin": "Text in der Eingabe", "system": "Text im Systemprompt", "nicht_stdin": "...",
      "modell": "opus", "tools": "WebSearch", "nr": 3, "max": 1,
-     "antwort": "Text der Antwort", "modus": "limit|kaputt|langsam|fehler", "sekunden": 30}
+     "antwort": "Text der Antwort", "modus": "limit|kaputt|langsam|fehler", "sekunden": 30,
+     "dateien": {"pfad/im/arbeitsordner.py": "Inhalt"}, "verweigert": ["Bash"], "kind": "/pfad/kind.pid"}
+
+"kind" startet einen Kindprozess (wie ein Test, den Claude Code ausführt) und schreibt dessen Nummer in die Datei.
 
 Die erste passende Regel gewinnt. Ohne passende Regel antwortet der Ersatz mit "Antwort auf: <Eingabe>".
 """
 
 import json
 import os
+import subprocess
 import sys
 import time
 
@@ -69,7 +73,8 @@ def main():
                                 "tools": tools, "cwd": os.getcwd(), "apikey": os.environ.get("ANTHROPIC_API_KEY"),
                                 "bedrock": os.environ.get("CLAUDE_CODE_USE_BEDROCK")}, ensure_ascii=False) + "\n")
 
-    antwort, modus, sekunden = "Antwort auf: " + eingabe.strip()[-200:], None, 0
+    antwort, modus, sekunden, dateien, verweigert = "Antwort auf: " + eingabe.strip()[-200:], None, 0, {}, []
+    kind = None
     drehbuch = _laden(os.environ.get("FAKE_DREHBUCH"), [])
     genutzt = stand.setdefault("regeln", {})
     for i, regel in enumerate(drehbuch):
@@ -90,6 +95,7 @@ def main():
         genutzt[str(i)] = genutzt.get(str(i), 0) + 1
         antwort = regel.get("antwort", antwort)
         modus, sekunden = regel.get("modus"), regel.get("sekunden", 30)
+        dateien, verweigert, kind = regel.get("dateien") or {}, regel.get("verweigert") or [], regel.get("kind")
         break
     if stand_datei:
         with open(stand_datei, "w", encoding="utf-8") as f:
@@ -104,10 +110,22 @@ def main():
     if modus == "fehler":
         print(json.dumps({"type": "result", "is_error": True, "result": "Irgendetwas ist schiefgegangen"}))
         return 1
+    if kind:
+        prozess = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(120)"])  # noqa: S603
+        with open(kind, "w", encoding="utf-8") as f:
+            f.write(str(prozess.pid))
     if modus == "langsam":
         time.sleep(sekunden)
+    # Wie ein Programmier-Lauf: Dateien im Arbeitsordner anlegen (die echte Abschottung macht Claude Code selbst)
+    for name, inhalt in dateien.items():
+        ziel = os.path.join(os.getcwd(), name)
+        os.makedirs(os.path.dirname(ziel), exist_ok=True)
+        with open(ziel, "w", encoding="utf-8") as f:
+            f.write(inhalt)
     print(json.dumps({"type": "result", "subtype": "success", "is_error": False, "session_id": "ersatz",
-                      "result": antwort, "duration_ms": 10, "usage": {"input_tokens": 120, "output_tokens": 60}}))
+                      "result": antwort, "duration_ms": 10, "num_turns": 3,
+                      "permission_denials": [{"tool_name": v} for v in verweigert],
+                      "usage": {"input_tokens": 120, "output_tokens": 60}}))
     return 0
 
 
