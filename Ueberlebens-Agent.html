@@ -280,6 +280,12 @@ class Kolonie{
     if (art === "einnahme") this.verkaeufe += 1;
     if (this.journal) this.journal.push({ stunde: this.stunde, von, an, betrag, art, text });
   }
+  belasten(agent, an, betrag, art, text){ // nie mehr abbuchen, als da ist: kein Konto im Minus
+    const gedeckt = Math.min(Math.trunc(betrag), Math.max(agent.guthaben, 0));
+    this.buchen(agent.id, an, gedeckt, art, text);
+    if (gedeckt < betrag) this.log(agent.id, `konnte ${euro(betrag)} (${art}) nicht voll bezahlen, nur ${euro(gedeckt)}.`);
+    return gedeckt;
+  }
   todescheck(agent, ursache){
     if (agent.gestorben < 0 && agent.guthaben <= 0){
       agent.gestorben = this.stunde; agent.todesursache = ursache;
@@ -339,9 +345,7 @@ class Kolonie{
   }
   miete(){
     for (const a of this.lebende()){
-      const betrag = this.r.miete_pro_tag;
-      this.buchen(a.id, BESITZER, betrag, "miete", `Miete Tag ${fdiv(this.stunde, 24)}`);
-      a.an_besitzer += betrag;
+      a.an_besitzer += this.belasten(a, BESITZER, this.r.miete_pro_tag, "miete", `Miete Tag ${fdiv(this.stunde, 24)}`);
       this.todescheck(a, "Miete nicht bezahlbar");
     }
   }
@@ -363,18 +367,18 @@ class Kolonie{
     if (this.stunde % 24 === 0) this.miete();
   }
   ausfuehren(agent, e, welt){
-    if (e.aktion === "warten"){ this.log(agent.id, "wartet."); return; }
     agent.schritte += 1;
     try {
-      if (e.aktion === "kopieren") this.kopieren(agent);
+      if (e.aktion === "warten") this.log(agent.id, "wartet.");
+      else if (e.aktion === "kopieren") this.kopieren(agent);
       else if (e.aktion === "auszahlen") this.auszahlen(agent, (e.details || {}).betrag || 0);
       else welt.handeln(this, agent, e);
     } catch (f){
       if (!(f instanceof RegelVerstoss)) throw f;
       this.log(agent.id, `wollte '${e.aktion}', geht nicht: ${f.message}`);
     }
-    // Die Stunde Arbeit kostet in jedem Fall - auch wenn die Aktion nicht geklappt hat.
-    this.buchen(agent.id, BETRIEB, this.r.kosten_pro_schritt, "schritt", e.aktion);
+    // Jede Stunde kostet - auch Warten, auch wenn die Aktion nicht geklappt hat.
+    this.belasten(agent, BETRIEB, this.r.kosten_pro_schritt, "schritt", e.aktion);
     this.todescheck(agent, "Geld für den nächsten Schritt aufgebraucht");
   }
   pruefen(){ // wie Kolonie.pruefen: Buchhaltung stimmt?
@@ -386,6 +390,7 @@ class Kolonie{
     }
     for (const a of this.agenten.values()){
       if (a.guthaben !== (summe.get(a.id) || 0)) throw new Error(`${a.id}: Guthaben passt nicht zum Journal`);
+      if (a.guthaben < 0) throw new Error(`${a.id} steht im Minus`);
       if (a.gestorben >= 0 && this.journal.some(b => b.stunde > a.gestorben && (b.von === a.id || b.an === a.id)))
         throw new Error(`${a.id} hat nach dem Tod noch gebucht`);
     }

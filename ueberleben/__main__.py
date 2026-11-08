@@ -14,20 +14,52 @@
 """
 
 import argparse
+import contextlib
 import json
 import os
+import re
 import sys
 import tempfile
 
+try:
+    import fcntl  # Mac und Linux
+except ImportError:  # pragma: no cover - Windows
+    fcntl = None
+
 from .gehirne import ClaudeGehirn
-from .kolonie import Kolonie, RegelVerstoss
+from .kolonie import Kolonie, LadeFehler, RegelVerstoss
 from .regeln import AKTIONEN, cent_aus_text, euro
 from .simulation import bericht, ein_leben, viele_leben
 from .welt import EchteWelt, zusammenfassung
 
 
+# Fester Ort neben dem Programm - egal, aus welchem Ordner man es startet.
+STANDARD_ORDNER = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "ueberleben_daten")
+
+
 def datenordner():
-    return os.environ.get("UEBERLEBEN_DATEN") or os.path.join(os.getcwd(), "ueberleben_daten")
+    return os.environ.get("UEBERLEBEN_DATEN") or STANDARD_ORDNER
+
+
+class Belegt(Exception):
+    pass
+
+
+@contextlib.contextmanager
+def sperre():
+    """Nur ein Befehl zur Zeit darf den Echt-Modus ändern. Sonst könnte ein zweites Fenster ein Ja überschreiben."""
+    os.makedirs(datenordner(), exist_ok=True)
+    with open(os.path.join(datenordner(), "zustand.lock"), "a+") as f:
+        if fcntl is not None:
+            try:
+                fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except OSError:
+                raise Belegt("Der Echt-Modus ist gerade in einem anderen Fenster in Arbeit. Warte, bis das fertig ist.")
+        try:
+            yield
+        finally:
+            if fcntl is not None:
+                fcntl.flock(f, fcntl.LOCK_UN)
 
 
 def zustand_pfad():
@@ -38,17 +70,34 @@ def laden():
     pfad = zustand_pfad()
     if not os.path.exists(pfad):
         raise SystemExit("Noch kein Echt-Modus angelegt. Erst: python3 -m ueberleben echt start")
-    with open(pfad, "r", encoding="utf-8") as f:
-        return Kolonie.aus_dict(json.load(f))
+    try:
+        with open(pfad, "r", encoding="utf-8") as f:
+            daten = json.load(f)
+    except ValueError as fehler:
+        raise SystemExit(f"Die Datei {pfad} ist beschädigt ({fehler}). Nichts geändert.")
+    try:
+        k = Kolonie.aus_dict(daten)
+    except LadeFehler as fehler:
+        raise SystemExit(f"{fehler}\nDatei: {pfad}. Nichts geändert.")
+    if not k.echt:
+        raise SystemExit("Diese Datei ist nicht im Echt-Modus. Aus Sicherheit wird nichts ausgeführt.")
+    return k
 
 
 def speichern(k):
     k.pruefen()
     os.makedirs(datenordner(), exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=datenordner(), suffix=".tmp")
-    with os.fdopen(fd, "w", encoding="utf-8") as f:
-        json.dump(k.als_dict(), f, ensure_ascii=False, indent=1)
-    os.replace(tmp, zustand_pfad())
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(k.als_dict(), f, ensure_ascii=False, indent=1)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, zustand_pfad())
+    except BaseException:
+        with contextlib.suppress(OSError):
+            os.remove(tmp)
+        raise
 
 
 def bestaetigen(frage, eingabe=input):
@@ -58,6 +107,10 @@ def bestaetigen(frage, eingabe=input):
         return False
 
 
+WARNWOERTER = re.compile(r"(überweis|ueberweis|bezahl|zahl|kauf|iban|\bDE\d{2}|paypal|kreditkarte|passwort|"
+                         r"https?://|www\.|bitcoin|krypto|gutschein|vorkasse)", re.I)
+
+
 def freigabe_text(f):
     d = f.get("details") or {}
     teile = [f"#{f['id']} [{f['status']}] {f['agent']} will '{f['aktion']}' ({AKTIONEN[f['aktion']]['text']})",
@@ -65,7 +118,10 @@ def freigabe_text(f):
     if f["aktion"] == "auszahlen":
         teile.append(f"    Betrag: {euro(int(d.get('betrag', 0)))} an dich")
     if d.get("schritt"):
-        teile.append(f"    Was du tun sollst: {str(d['schritt'])[:600]}")
+        teile.append(f"    Vorschlag des Agenten (prüfen!): {str(d['schritt'])[:600]}")
+    if WARNWOERTER.search(" ".join(str(x) for x in (f.get("begruendung"), d.get("schritt"), d.get("plattform")))):
+        teile.append("    ACHTUNG: Hier geht es um Zahlungen, Links oder Zugangsdaten. Der Agent darf dich nie zum "
+                     "Bezahlen auffordern. Im Zweifel: nein.")
     return "\n".join(teile)
 
 
@@ -74,8 +130,8 @@ def was_passiert(k, f):
     if f["aktion"] == "kopieren":
         return f"{a.id} gibt {euro(k.regeln.startbudget)} an eine neue Kopie ab. Es wird kein echtes Geld bewegt."
     if f["aktion"] == "auszahlen":
-        return (f"Im Buch gehen bis zu {euro(int(f['details'].get('betrag', 0)))} von {a.id} an dich. Die echte Überweisung "
-                f"vom Agenten-Unterkonto auf dein Konto machst DU selbst - das Programm überweist nichts.")
+        return (f"Im Buch gehen bis zu {euro(int(f['details'].get('betrag', 0)))} von {a.id} an dich. Das ist eine Buchung, "
+                f"keine Überweisung - das Programm hat keinen Zugriff auf ein Konto.")
     return ("Nichts wird automatisch gesendet. Du führst den Schritt selbst aus (oder nicht). Kommt dadurch Geld rein, "
             "buchst du es mit 'echt einnahme'.")
 
@@ -107,7 +163,15 @@ def main(argv=None, eingabe=input, gehirn=None):
         print(zusammenfassung(k))
         return 0
 
-    # ----- Echt-Modus -----
+    try:
+        with sperre():
+            return echt(a, eingabe, gehirn)
+    except Belegt as fehler:
+        print(fehler)
+        return 1
+
+
+def echt(a, eingabe, gehirn):
     if a.was == "start":
         if os.path.exists(zustand_pfad()):
             print(f"Es gibt schon einen Echt-Modus in {zustand_pfad()}. Nichts geändert.")
@@ -116,13 +180,14 @@ def main(argv=None, eingabe=input, gehirn=None):
         k.gruenden()
         speichern(k)
         print(f"Angelegt in {datenordner()}.")
-        print(f"A1 hat {euro(k.regeln.startbudget)} - im Buch. Lege dafür echtes Geld auf ein eigenes Unterkonto,")
-        print("damit Agenten-Geld und dein Geld getrennt bleiben. Das Programm hat keinen Zugriff auf dein Konto.")
+        print(f"A1 hat {euro(k.regeln.startbudget)} - als Buchwert, nicht als echtes Geld. Das Programm hat keinen Zugriff")
+        print("auf ein Konto. Echtes Geld kommt nur ins Buch, wenn du eine wirklich eingegangene Einnahme buchst.")
         return 0
 
     k = laden()
     if a.was == "status":
         print(zusammenfassung(k))
+        print("(Alle Beträge sind Buchwerte. Was du wirklich bekommst, siehst du auf deinem Konto.)")
         print(f"Offene Freigaben: {len(k.offene_freigaben())}")
         return 0
     if a.was == "freigaben":
@@ -130,7 +195,7 @@ def main(argv=None, eingabe=input, gehirn=None):
         print("\n\n".join(freigabe_text(f) for f in offen) if offen else "Keine offenen Freigaben.")
         return 0
     if a.was in ("ja", "nein"):
-        if len(a.werte) != 1 or not a.werte[0].isdigit():
+        if len(a.werte) != 1 or not re.fullmatch(r"[0-9]{1,9}", a.werte[0]):
             print("Bitte genau eine Nummer angeben, z. B.: echt ja 3")
             return 2
         nr = int(a.werte[0])
@@ -138,7 +203,15 @@ def main(argv=None, eingabe=input, gehirn=None):
         if f is None:
             print(f"Freigabe #{nr} gibt es nicht.")
             return 1
+        if f["status"] != "offen":
+            print(f"Freigabe #{nr} ist schon entschieden ({f['status']}).")
+            return 1
         if a.was == "ja":
+            if not k.agenten[f["agent"]].lebt:
+                f["status"] = "verfallen"
+                speichern(k)
+                print(f"{f['agent']} ist inzwischen tot. Freigabe #{nr} verfällt.")
+                return 1
             print(freigabe_text(f))
             print("Was passiert: " + was_passiert(k, f))
             if not bestaetigen("Diese eine Aktion freigeben?", eingabe):
@@ -166,7 +239,10 @@ def main(argv=None, eingabe=input, gehirn=None):
         except ValueError as fehler:
             print(fehler)
             return 2
-        text = " ".join(a.werte[2:]) or "Einnahme"
+        text = (" ".join(a.werte[2:]) or "Einnahme")[:200]
+        if not agent.lebt:
+            print(f"{agent.id} ist tot und kann nichts mehr einnehmen. Nichts gebucht.")
+            return 1
         if not bestaetigen(f"Ist {euro(betrag)} für {agent.id} wirklich auf dem Konto eingegangen?", eingabe):
             print("Nicht bestätigt. Nichts gebucht.")
             return 1
@@ -179,11 +255,14 @@ def main(argv=None, eingabe=input, gehirn=None):
         print(f"Gebucht. {agent.id} hat jetzt {euro(agent.guthaben)}.")
         return 0
     if a.was == "runde":
+        if not 1 <= a.anzahl <= 24:
+            print("--anzahl muss zwischen 1 und 24 liegen (jede Runde fragt Claude und kostet Abo-Nutzung).")
+            return 2
         gehirn = gehirn or ClaudeGehirn()
         if isinstance(gehirn, ClaudeGehirn) and not gehirn.verfuegbar():
             print("Claude Code ist nicht installiert (Befehl 'claude' fehlt). Ohne Claude kann der Agent nicht denken.")
             return 1
-        for _ in range(max(1, a.anzahl)):
+        for _ in range(a.anzahl):
             if not k.lebende():
                 print("Alle Agenten sind tot.")
                 break

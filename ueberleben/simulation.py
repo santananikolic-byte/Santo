@@ -58,8 +58,10 @@ def bericht(z):
         "(Markt ausgedacht - Annahmen, keine echten Zahlen.)",
         f"  Kolonie lebt am Ende noch:     {z['ueberlebensquote'] * 100:.1f} %",
         f"  Ohne einen einzigen Verkauf:   {z['ohne_einen_verkauf'] * 100:.1f} %",
-        f"  Lebensdauer erster Agent:      Median {z['median_lebensdauer_stunden']} Stunden",
+        f"  Lebensdauer erster Agent:      Median {z['median_lebensdauer_stunden']} Stunden "
+        f"(wer bis zum Ende lebt, zählt mit {z['max_stunden']})",
         f"  Agenten pro Kolonie:           Schnitt {z['schnitt_agenten']:.1f}",
         f"  Was du als Besitzer bekommst:  Median {euro(z['median_besitzer_cent'])}, "
         f"Schnitt {euro(z['schnitt_besitzer_cent'])}, bester Lauf {euro(z['max_besitzer_cent'])}",
+        "  Hinweis: Der Schnitt kommt von wenigen Glückstreffern. Typisch ist der Median.",
     ])

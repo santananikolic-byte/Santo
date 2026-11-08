@@ -49,9 +49,21 @@ class RegelVerstoss(Exception):
     """Eine Aktion verstößt gegen die Regeln (z. B. Kopie ohne genug Geld). Nichts wurde gebucht."""
 
 
+class BuchFehler(AssertionError):
+    """Die Buchhaltung stimmt nicht. Wird ausdrücklich geworfen - wirkt also auch unter ``python3 -O``."""
+
+
+class LadeFehler(ValueError):
+    """Die gespeicherten Daten sind kaputt oder passen nicht zusammen."""
+
+
+ERLAUBTE_DETAILS = {"schritt": 600, "plattform": 100, "preis": 50, "betrag": 0, "neu": 0, "idee": 0}
+
+
 class Kolonie:
     def __init__(self, regeln: Regeln = STANDARD, echt=False):
         self.regeln = regeln.pruefen()
+        self._regeln_dict = self.regeln.als_dict()
         self.echt = bool(echt)
         self.stunde = 0
         self.agenten = {}             # id -> Agent
@@ -72,10 +84,14 @@ class Kolonie:
 
     @property
     def besitzer_bekommen(self):
-        return self.summe(BESITZER)
+        return self.salden().get(BESITZER, 0)
 
-    def _log(self, agent_id, text):
-        self.ereignisse.append({"stunde": self.stunde, "agent": agent_id, "text": text})
+    def _log(self, agent_id, text, eigen=False):
+        """``eigen=True``: der Text stammt vom Gehirn (Claude) und wird ihm nicht wieder vorgelegt."""
+        eintrag = {"stunde": self.stunde, "agent": agent_id, "text": text}
+        if eigen:
+            eintrag["eigen"] = True
+        self.ereignisse.append(eintrag)
 
     def _buchen(self, von, an, betrag, art, text=""):
         """Bucht ``betrag`` Cent von ``von`` nach ``an``. Konten: Agent-IDs, 'besitzer', 'betrieb', 'aussen'."""
@@ -87,11 +103,22 @@ class Kolonie:
                 self.agenten[konto].guthaben += vz * betrag
         self.journal.append({"stunde": self.stunde, "von": von, "an": an, "betrag": betrag, "art": art, "text": text})
 
+    def _belasten(self, agent, an, betrag, art, text=""):
+        """Kosten abbuchen - aber nie mehr, als da ist. Ein Konto geht nie ins Minus; fehlt Geld, stirbt der Agent."""
+        gedeckt = min(int(betrag), max(agent.guthaben, 0))
+        self._buchen(agent.id, an, gedeckt, art, text)
+        if gedeckt < betrag:
+            self._log(agent.id, f"konnte {euro(betrag)} ({art}) nicht voll bezahlen, nur {euro(gedeckt)}.")
+        return gedeckt
+
     def _todescheck(self, agent, ursache):
         if agent.lebt and agent.guthaben <= 0:
             agent.gestorben = self.stunde
             agent.todesursache = ursache
             self._log(agent.id, f"ist tot ({ursache}). Guthaben {euro(agent.guthaben)}.")
+            for f in self.freigaben:
+                if f["agent"] == agent.id and f["status"] == "offen":
+                    f["status"] = "verfallen"
             return True
         return False
 
@@ -160,9 +187,7 @@ class Kolonie:
 
     def _miete(self):
         for a in self.lebende():
-            betrag = self.regeln.miete_pro_tag
-            self._buchen(a.id, BESITZER, betrag, "miete", f"Miete Tag {self.stunde // 24}")
-            a.an_besitzer += betrag
+            a.an_besitzer += self._belasten(a, BESITZER, self.regeln.miete_pro_tag, "miete", f"Miete Tag {self.stunde // 24}")
             self._todescheck(a, "Miete nicht bezahlbar")
 
     # ------------------------------------------------------------------- Runden ---
@@ -179,18 +204,21 @@ class Kolonie:
             if not isinstance(e, Entscheidung) or e.aktion not in AKTIONEN:
                 e = Entscheidung("warten", "ungültige Entscheidung")
             ergebnisse.append((agent.id, e))
+            if e.ausfall:
+                self._log(agent.id, f"konnte nicht denken ({e.begruendung[:120]}). Die Stunde wird nicht berechnet.",
+                          eigen=True)
+                continue
             self._ausfuehren(agent, e, welt)
         if self.stunde % 24 == 0:
             self._miete()
         return ergebnisse
 
     def _ausfuehren(self, agent, e, welt):
-        if e.aktion == "warten":
-            self._log(agent.id, "wartet.")
-            return
         agent.schritte += 1
         try:
-            if self.echt and AKTIONEN[e.aktion]["nach_aussen"]:
+            if e.aktion == "warten":
+                self._log(agent.id, "wartet.")
+            elif self.echt and AKTIONEN[e.aktion]["nach_aussen"]:
                 self._freigabe_anlegen(agent, e)
             elif e.aktion == "kopieren":
                 self._kopieren(agent)
@@ -200,8 +228,8 @@ class Kolonie:
                 welt.handeln(self, agent, e)
         except RegelVerstoss as fehler:
             self._log(agent.id, f"wollte '{e.aktion}', geht nicht: {fehler}")
-        # Die Stunde Arbeit kostet in jedem Fall - auch wenn die Aktion nicht geklappt hat.
-        self._buchen(agent.id, BETRIEB, self.regeln.kosten_pro_schritt, "schritt", e.aktion)
+        # Jede Stunde kostet - auch Warten, auch wenn die Aktion nicht geklappt hat.
+        self._belasten(agent, BETRIEB, self.regeln.kosten_pro_schritt, "schritt", e.aktion)
         self._todescheck(agent, "Geld für den nächsten Schritt aufgebraucht")
 
     # --------------------------------------------------------- Echt-Modus: Freigaben ---
@@ -211,11 +239,15 @@ class Kolonie:
             grund = self.kopie_moeglich(agent)
             if grund:
                 raise RegelVerstoss(grund)
-        f = {"id": self._naechste_freigabe, "agent": agent.id, "aktion": e.aktion, "begruendung": e.begruendung,
-             "details": e.details, "status": "offen", "stunde": self.stunde}
+        offen = [x for x in self.offene_freigaben() if x["agent"] == agent.id]
+        if offen:
+            raise RegelVerstoss(f"Freigabe #{offen[0]['id']} ist noch offen. Erst wenn du entschieden hast, kommt die nächste.")
+        f = {"id": self._naechste_freigabe, "agent": agent.id, "aktion": e.aktion,
+             "begruendung": str(e.begruendung)[:500], "details": details_saeubern(e.details),
+             "status": "offen", "stunde": self.stunde}
         self._naechste_freigabe += 1
         self.freigaben.append(f)
-        self._log(agent.id, f"bittet um Freigabe #{f['id']}: {e.aktion} - {e.begruendung}")
+        self._log(agent.id, f"bittet um Freigabe #{f['id']} ({e.aktion}).")
 
     def offene_freigaben(self):
         return [f for f in self.freigaben if f["status"] == "offen"]
@@ -235,12 +267,16 @@ class Kolonie:
         if not agent.lebt:
             f["status"] = "verfallen"
             raise RegelVerstoss(f"{agent.id} ist inzwischen tot. Freigabe #{nr} verfällt.")
-        if f["aktion"] == "kopieren":
-            kind = self._kopieren(agent)
-            f["ergebnis"] = kind.id
-        elif f["aktion"] == "auszahlen":
-            f["ergebnis"] = self._auszahlen(agent, f["details"].get("betrag", 0))
-        else:  # verkaufen: der Besitzer führt es selbst aus; Einnahmen bucht er später mit "einnahme"
+        try:
+            if f["aktion"] == "kopieren":
+                f["ergebnis"] = self._kopieren(agent).id
+            elif f["aktion"] == "auszahlen":
+                f["ergebnis"] = self._auszahlen(agent, f["details"].get("betrag", 0))
+        except RegelVerstoss:
+            f["status"] = "verfallen"  # geht nach den Regeln nicht (mehr) - damit der Agent nicht ewig darauf wartet
+            self._log(agent.id, f"Freigabe #{nr} verfallen: nach den Regeln nicht mehr möglich.")
+            raise
+        if f["aktion"] not in ("kopieren", "auszahlen"):  # verkaufen: der Besitzer führt es selbst aus; Einnahmen bucht er später mit "einnahme"
             f["ergebnis"] = "vom Besitzer auszuführen"
         f["status"] = "freigegeben"
         self._log(agent.id, f"Freigabe #{nr} erteilt.")
@@ -259,20 +295,45 @@ class Kolonie:
             "eingenommen": agent.eingenommen, "lebende_agenten": len(self.lebende()),
             "kopie_moeglich": not self.kopie_moeglich(agent), "echt": self.echt,
             "offene_freigaben": len([f for f in self.offene_freigaben() if f["agent"] == agent.id]),
-            "regeln": r.als_dict(),
-            "letzte_ereignisse": [x["text"] for x in self.ereignisse if x["agent"] == agent.id][-8:],
+            "regeln": dict(self._regeln_dict),
+            "letzte_ereignisse": self._letzte_ereignisse(agent.id),
         }
 
+    def salden(self):
+        """Alle Kontostände aus dem Journal, in einem Durchgang."""
+        salden = {}
+        for b in self.journal:
+            salden[b["von"]] = salden.get(b["von"], 0) - b["betrag"]
+            salden[b["an"]] = salden.get(b["an"], 0) + b["betrag"]
+        return salden
+
+    def _letzte_ereignisse(self, agent_id, anzahl=8):
+        """Die letzten Ereignisse eines Agenten - von hinten gesucht, damit lange Leben nicht immer langsamer werden."""
+        gefunden = []
+        for x in reversed(self.ereignisse):
+            if x["agent"] == agent_id and not x.get("eigen"):
+                gefunden.append(x["text"])
+                if len(gefunden) == anzahl:
+                    break
+        return gefunden[::-1]
+
     def pruefen(self):
-        """Buchhaltung stimmt? Wirft AssertionError, wenn nicht."""
+        """Buchhaltung stimmt? Wirft BuchFehler, wenn nicht."""
+        salden = self.salden()
+        for b in self.journal:
+            if not isinstance(b.get("betrag"), int) or isinstance(b["betrag"], bool) or b["betrag"] <= 0:
+                raise BuchFehler(f"Ungültige Buchung: {b}")
+            for konto in (b["von"], b["an"]):
+                a = self.agenten.get(konto)
+                if a is not None and not a.lebt and b["stunde"] > a.gestorben:
+                    raise BuchFehler(f"{konto} hat nach dem Tod noch gebucht: {b}")
         for a in self.agenten.values():
-            assert a.guthaben == self.summe(a.id), f"{a.id}: Guthaben {a.guthaben} != Journal {self.summe(a.id)}"
-        gesamt = sum(self.summe(k) for k in {b["von"] for b in self.journal} | {b["an"] for b in self.journal})
-        assert gesamt == 0, f"Journal nicht ausgeglichen: {gesamt}"
-        for a in self.agenten.values():
-            if not a.lebt:
-                spaeter = [b for b in self.journal if b["stunde"] > a.gestorben and a.id in (b["von"], b["an"])]
-                assert not spaeter, f"{a.id} hat nach dem Tod noch gebucht: {spaeter[:1]}"
+            if not isinstance(a.guthaben, int) or a.guthaben != salden.get(a.id, 0):
+                raise BuchFehler(f"{a.id}: Guthaben {a.guthaben!r} passt nicht zum Journal ({salden.get(a.id, 0)})")
+            if a.guthaben < 0:
+                raise BuchFehler(f"{a.id} steht im Minus: {a.guthaben}")
+        if sum(salden.values()) != 0:
+            raise BuchFehler(f"Journal nicht ausgeglichen: {sum(salden.values())}")
         return True
 
     # ------------------------------------------------------------- Speichern/Laden ---
@@ -285,17 +346,60 @@ class Kolonie:
 
     @classmethod
     def aus_dict(cls, d):
-        k = cls(Regeln.aus_dict(d.get("regeln")), echt=d.get("echt", False))
-        k.stunde = int(d.get("stunde", 0))
-        for ad in d.get("agenten", []):
-            felder = {n: ad[n] for n in Agent.__dataclass_fields__ if n in ad}
-            a = Agent(**felder)
-            k.agenten[a.id] = a
-        k.journal = list(d.get("journal", []))
-        k.freigaben = list(d.get("freigaben", []))
-        k.ereignisse = list(d.get("ereignisse", []))
-        k._naechste_id = int(d.get("naechste_id", len(k.agenten) + 1))
-        k._naechste_freigabe = int(d.get("naechste_freigabe", len(k.freigaben) + 1))
-        k.pruefen()
-        return k
+        """Lädt und prüft alles. Kaputte Daten -> LadeFehler mit verständlicher Meldung."""
+        try:
+            if not isinstance(d, dict):
+                raise LadeFehler("Die Datei enthält keinen gültigen Zustand.")
+            if d.get("version") != 1:
+                raise LadeFehler(f"Unbekannte Version {d.get('version')!r} - diese Datei stammt nicht von diesem Programm.")
+            # Fehlt die Angabe, gilt sicherheitshalber der Echt-Modus (mit Freigaben).
+            k = cls(Regeln.aus_dict(d.get("regeln")), echt=d.get("echt", True) is not False)
+            k.stunde = int(d.get("stunde", 0))
+            for ad in d.get("agenten", []):
+                a = Agent(**{n: ad[n] for n in Agent.__dataclass_fields__ if n in ad})
+                if a.id in k.agenten:
+                    raise LadeFehler(f"Agent {a.id} steht doppelt in der Datei.")
+                k.agenten[a.id] = a
+            k.journal = list(d.get("journal", []))
+            k.freigaben = list(d.get("freigaben", []))
+            k.ereignisse = list(d.get("ereignisse", []))
+            ids = [f["id"] for f in k.freigaben]
+            if len(ids) != len(set(ids)):
+                raise LadeFehler("Freigabe-Nummern stehen doppelt in der Datei.")
+            for f in k.freigaben:
+                if f.get("aktion") not in AKTIONEN or f.get("agent") not in k.agenten or not isinstance(f["id"], int):
+                    raise LadeFehler(f"Freigabe {f.get('id')!r} ist ungültig.")
+                f["details"] = details_saeubern(f.get("details"))
+            nummern = [int(i[1:]) for i in k.agenten if i[:1] == "A" and i[1:].isdigit()]
+            k._naechste_id = max([int(d.get("naechste_id", 1))] + [n + 1 for n in nummern])
+            k._naechste_freigabe = max([int(d.get("naechste_freigabe", 1))] + [i + 1 for i in ids])
+            k.pruefen()
+            return k
+        except LadeFehler:
+            raise
+        except (BuchFehler, KeyError, TypeError, ValueError, AttributeError) as fehler:
+            raise LadeFehler(f"Gespeicherter Stand ist beschädigt: {fehler}") from fehler
 
+
+def details_saeubern(details):
+    """Nur bekannte Felder, Texte gekürzt - damit kein Riesentext oder Unsinn in Freigaben landet."""
+    if not isinstance(details, dict):
+        return {}
+    sauber = {}
+    for name, laenge in ERLAUBTE_DETAILS.items():
+        if name not in details:
+            continue
+        wert = details[name]
+        if name == "betrag":
+            try:
+                sauber[name] = max(0, int(wert))
+            except (TypeError, ValueError):
+                sauber[name] = 0
+        elif name == "neu":
+            sauber[name] = bool(wert)
+        elif name == "idee":
+            if isinstance(wert, dict):
+                sauber[name] = {k: str(v)[:300] for k, v in wert.items() if k in ("name", "zielgruppe", "angebot", "preis")}
+        else:
+            sauber[name] = str(wert)[:laenge]
+    return sauber

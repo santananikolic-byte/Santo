@@ -26,6 +26,9 @@ ausdrücklicher Freigabe.
 > (richtet Python, Claude Code und die Anmeldung mit dem Abo selbst ein, nur nach Ja). Gebaut wird es mit
 > `python3 mac-paket/bauen.py` (landet in `dist/`); Inhalt und Kurzanleitung stehen in [`mac-paket/`](mac-paket/).
 >
+> **Experiment: Überlebens-Agent** – ein KI-Agent mit 10 € Budget, Miete, Tod und Kopien. Simulation zum
+> Doppelklicken (`Ueberlebens-Agent.html`), Echt-Modus nur mit Freigaben. Siehe [`UEBERLEBEN.md`](UEBERLEBEN.md).
+>
 > Der Rest dieser Datei beschreibt den älteren Jarvis (`jarvis.py`, `jarvis_terminal.py`).
 
 ---

@@ -3,14 +3,19 @@
 
 RegelGehirn  - feste Faustregeln, für die Simulation (schnell, kostenlos, wiederholbar).
 ClaudeGehirn - fragt Claude Code (``claude -p``) über das Abo des Besitzers. Kein API-Schlüssel im Code.
-               Antwortet Claude unbrauchbar oder gar nicht, wartet der Agent (das kostet keinen Schritt).
+               Claude läuft dabei OHNE Werkzeuge (``--tools ""``), ohne MCP-Dienste wie ein verbundenes Postfach
+               (``--strict-mcp-config``), ohne Projekt- und Nutzereinstellungen (``--setting-sources ""``) und in einem
+               leeren Ordner. Es kann also nur Text antworten - nichts lesen, senden oder ändern.
+               Ist Claude nicht erreichbar, gilt die Stunde als Ausfall und wird nicht berechnet.
 """
 
 import json
+import os
 import random
 import re
 import shutil
 import subprocess
+import tempfile
 
 from .regeln import AKTIONEN, Entscheidung, euro
 
@@ -49,7 +54,7 @@ class RegelGehirn:
 SYSTEM = """Du bist ein Software-Agent in einem Überlebensspiel mit Geld. Regeln:
 - Jeder Schritt (eine Stunde Arbeit) kostet {kosten}. Fällt dein Guthaben auf 0, bist du tot - für immer.
 - Alle 24 Stunden zahlst du {miete} Miete an deinen Besitzer. Von jeder Einnahme gehen {anteil} % an ihn.
-- "warten" kostet keinen Schritt, aber die Miete läuft weiter.
+- Auch "warten" kostet die Stunde. Nichtstun rettet dich nicht.
 - Du darfst dich kopieren: die Kopie bekommt {start} von dir und dieselben Regeln.
 - Du musst dir selbst ein legales Online-Geschäft ausdenken und echtes Geld verdienen.
 
@@ -59,6 +64,8 @@ HARTE GRENZEN (gelten immer):
   keine Versprechen an Kunden ohne Prüfung durch den Besitzer, keine persönlichen Daten Fremder.
 - Du erfindest keine Einnahmen. Geld zählt erst, wenn der Besitzer es bucht.
 - Frag nie nach Passwörtern, Schlüsseln oder Zahlungsdaten.
+- Fordere den Besitzer NIE auf, Geld zu überweisen, zu bezahlen, etwas zu kaufen oder Links zu öffnen.
+  Ausgaben gibt es in diesem Spiel nicht - du verdienst nur durch legale Arbeit für Kunden.
 
 Antworte NUR mit einem JSON-Objekt, nichts davor oder danach:
 {{"aktion": "idee|bauen|verkaufen|kopieren|auszahlen|warten",
@@ -88,7 +95,7 @@ def entscheidung_aus_antwort(text):
     """Macht aus Claudes Antwort eine gültige Entscheidung. Unbrauchbares wird zu 'warten'."""
     d = _json_finden(text)
     if not isinstance(d, dict) or d.get("aktion") not in AKTIONEN:
-        return Entscheidung("warten", "Antwort nicht verstanden")
+        return Entscheidung("warten", "Antwort nicht verstanden")  # Claude hat geantwortet: die Stunde zählt
     details = d.get("details") if isinstance(d.get("details"), dict) else {}
     if d["aktion"] == "auszahlen":
         try:
@@ -118,14 +125,23 @@ class ClaudeGehirn:
 
     def entscheiden(self, s):
         if s["offene_freigaben"]:
+            # Claude wird gar nicht gefragt (spart Abo-Nutzung). Die Stunde kostet trotzdem - Warten ist nicht gratis.
             return Entscheidung("warten", "wartet auf die Freigabe des Besitzers")
-        befehl = [self.programm, "-p", "--output-format", "text"]
+        befehl = [self.programm, "-p", "--output-format", "text", "--tools", "", "--strict-mcp-config",
+                  "--setting-sources", ""]
         if self.modell:
             befehl += ["--model", self.modell]
-        try:
-            erg = self._ausfuehren(befehl, input=self._prompt(s), capture_output=True, text=True, timeout=self.zeitlimit)
-        except (OSError, subprocess.TimeoutExpired) as fehler:
-            return Entscheidung("warten", f"Claude nicht erreichbar: {fehler}")
+        with tempfile.TemporaryDirectory(prefix="ueberleben-") as leer:
+            try:
+                erg = self._ausfuehren(befehl, input=self._prompt(s), capture_output=True, text=True,
+                                       timeout=self.zeitlimit, cwd=leer, env=_umgebung())
+            except (OSError, subprocess.TimeoutExpired) as fehler:
+                return Entscheidung("warten", f"Claude nicht erreichbar: {fehler}", ausfall=True)
         if erg.returncode != 0:
-            return Entscheidung("warten", f"Claude-Fehler: {(erg.stderr or '')[:200]}")
+            return Entscheidung("warten", f"Claude-Fehler: {(erg.stderr or '')[:200]}", ausfall=True)
         return entscheidung_aus_antwort(erg.stdout)
+
+
+def _umgebung():
+    """Umgebung für Claude ohne API-Schlüssel: es soll über das Abo laufen, nicht still über einen Schlüssel abrechnen."""
+    return {k: v for k, v in os.environ.items() if k not in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN")}

@@ -88,12 +88,12 @@ class EchteWelt:
             if isinstance(neu, dict) and neu.get("name"):
                 agent.idee = {k: str(v)[:300] for k, v in neu.items() if k in ("name", "zielgruppe", "angebot", "preis")}
                 agent.fortschritt = 0
-                kolonie._log(agent.id, f"Idee: {agent.idee.get('name')}")
+                kolonie._log(agent.id, f"Idee: {agent.idee.get('name')}", eigen=True)
             else:
-                kolonie._log(agent.id, f"denkt nach: {e.begruendung[:200]}")
+                kolonie._log(agent.id, f"denkt nach: {e.begruendung[:200]}", eigen=True)
         elif e.aktion == "bauen":
             agent.fortschritt += 1
-            kolonie._log(agent.id, f"arbeitet am Angebot: {e.begruendung[:200]}")
+            kolonie._log(agent.id, f"arbeitet am Angebot: {e.begruendung[:200]}", eigen=True)
 
 
 def zusammenfassung(kolonie):

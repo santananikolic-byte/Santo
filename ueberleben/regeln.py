@@ -91,7 +91,7 @@ AKTIONEN = {
     "verkaufen": {"nach_aussen": True,  "text": "Kunden ansprechen, Angebot veröffentlichen"},
     "kopieren":  {"nach_aussen": True,  "text": "Sich kopieren (Kopie bekommt das Startbudget)"},
     "auszahlen": {"nach_aussen": True,  "text": "Zusätzlich Geld an den Besitzer überweisen"},
-    "warten":    {"nach_aussen": False, "text": "Nichts tun (kostet keinen Schritt, nur die Miete läuft)"},
+    "warten":    {"nach_aussen": False, "text": "Nichts tun (die Stunde kostet trotzdem)"},
 }
 
 
@@ -100,3 +100,4 @@ class Entscheidung:
     aktion: str
     begruendung: str = ""
     details: dict = field(default_factory=dict)
+    ausfall: bool = False   # das Gehirn konnte nicht denken (z. B. Claude nicht erreichbar): Stunde wird nicht berechnet
