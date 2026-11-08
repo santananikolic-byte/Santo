@@ -24,3 +24,6 @@ browser_aufnahme.png
 
 # Gebaute Pakete (python3 mac-paket/bauen.py)
 dist/
+
+# Überlebens-Agent: echter Zustand bleibt lokal
+ueberleben_daten/
