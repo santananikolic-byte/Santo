@@ -207,6 +207,33 @@ aus dem Projektordner gefunden; dafür 15 Befunde (7 mittel, 8 gering), alle beh
 nicht geladen (mit `project` schon), Projekt-Einstellungen ebenso nicht; mit allen neuen Optionen entsteht die Datei im
 Projekt, Schreiben und Lesen außerhalb lehnt Claude Code weiterhin selbst ab.
 
+## Stufe 16 – Termine über die Kalender-App
+
+**Gebaut:** `kalender.py` und `kalender.js` (Termine ansehen, freie Zeiten, Termin eintragen ohne Teilnehmer),
+Wissensbaustein „Termine“, Ehrlichkeitsprüfung für „eingetragen“, Schnellknopf „Termine“, Tagesbriefing mit Terminen.
+
+**Recherche-Agent (Kalender auf macOS 13 bis 26)** – hat die Wahl der Schnittstelle entschieden:
+
+- AppleScript an die Kalender-App liefert von einer Terminserie nur den ersten Termin – ein wöchentlicher Auftrag, der
+  vor dem Zeitraum begann, fehlt einfach. Dazu langsam. Also **nicht** AppleScript.
+- EventKit über JavaScript (`osascript -l JavaScript`) braucht nichts zu installieren, liefert jeden Termin einer Serie
+  einzeln und ist schnell. Ab macOS 14 braucht es den neuen Aufruf für „Vollzugriff“; „nur Hinzufügen“ kann nichts
+  lesen – JARVIS sagt dann, wo man es umstellt.
+- Die Nachfrage von macOS erscheint für das Terminal; Berichte aus 2025/26 bestätigen das für Werkzeuge aus dem
+  Terminal. Die Rückmeldung von macOS kommt nicht immer zuverlässig an – das Skript fragt deshalb zusätzlich den Status ab.
+- Längere Skripte über `osascript -e` wurden auf neuen macOS-Fassungen abgebrochen – das Skript liegt deshalb als Datei
+  bei. Datumsangaben unabhängig von der Spracheinstellung, Ausgabe als reines ASCII-JSON, zwei Kalender gleichen Namens
+  (iCloud/Google) werden erkannt statt geraten. Schreibweisen gegen ein Werkzeug geprüft, das in der Praxis so läuft.
+
+**Beim Testen selbst gefunden:** „Trag mir … ein“ galt der Ehrlichkeitsprüfung nicht als Auftrag zum Eintragen (nur das
+Wort „eintragen“); „Termin“ als Gegenstand hätte Fremdberichte („Der Termin mit Klein wurde verschoben“)
+richtiggestellt – jetzt nur für „eingetragen“; im Skript stand ein unsichtbares Sonderzeichen (jetzt reines ASCII,
+mit Test).
+
+**Nicht geprüft:** das Skript auf einem echten Mac. Erst dein iMac zeigt, ob die Nachfrage erscheint und ob die Termine
+(auch Serien) stimmen. Reihenfolge für den ersten Versuch: „Was steht diese Woche an?“ fragen, die Nachfrage mit
+„Vollzugriff“ beantworten, prüfen, ob ein bekannter Serientermin dabei ist – erst dann eintragen lassen.
+
 ## Was ich nicht geprüft habe
 
 - **Dein Mac mit deinem Abo.** Die automatischen Tests simulieren Claude Code; der echte Probelauf (Stufe 10) lief in der Entwicklungsumgebung, mit

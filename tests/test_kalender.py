@@ -14,7 +14,6 @@ import json
 import os
 import shutil
 import subprocess
-import tempfile
 import unittest
 
 from tests.hilfen import WURZEL, AgentBasis
@@ -94,25 +93,21 @@ class RechnenTest(unittest.TestCase):
 
 
 class SkriptTest(unittest.TestCase):
-    def test_skripte_sind_gueltiges_javascript_ohne_nutzertext(self):
-        """Ausführen lassen sich die Skripte nur auf dem Mac - aber Syntaxfehler findet Node schon hier."""
+    def test_skript_ist_gueltiges_javascript_ohne_gefaehrliches(self):
+        """Ausführen lässt sich das Skript nur auf dem Mac - Syntaxfehler findet Node aber schon hier."""
+        with open(kalender.SKRIPT, encoding="utf-8") as f:
+            skript = f.read()
+        self.assertIn('argv[0] !== "JARVIS"', skript)
+        for verboten in ("attendee", "removeEvent", "doShellScript", "eval(", "Function(", "saveEventSpanCommit"):
+            self.assertNotIn(verboten.lower(), skript.lower())  # nie Teilnehmer, nie löschen, keine Shell
+        self.assertIn("requestFullAccessToEventsWithCompletion", skript)  # macOS 14+
+        self.assertIn("requestAccessToEntityTypeCompletion", skript)  # macOS 13
+        self.assertEqual(skript, skript.encode("ascii", "ignore").decode("ascii") or skript)  # reines ASCII
         node = shutil.which("node")
-        for name in ("SKRIPT_TERMINE", "SKRIPT_EINTRAGEN"):
-            skript = getattr(kalender, name)
-            with self.subTest(skript=name):
-                self.assertTrue(skript.startswith("// JARVIS:"))
-                self.assertIn('argv[0] !== "JARVIS"', skript)
-                self.assertNotIn("%s", skript)  # nie Text in den Skripttext eingesetzt
-                self.assertNotIn("attendee", skript.lower())  # nie Teilnehmer
-                self.assertNotIn("removeEvent", skript)  # nie löschen
-                if node:
-                    with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False, encoding="utf-8") as f:
-                        f.write(skript)
-                    try:
-                        lauf = subprocess.run([node, "--check", f.name], capture_output=True, text=True, timeout=30)
-                    finally:
-                        os.remove(f.name)
-                    self.assertEqual(lauf.returncode, 0, lauf.stderr)
+        if not node:
+            self.skipTest("Node fehlt - Syntax nicht geprüft")
+        lauf = subprocess.run([node, "--check", kalender.SKRIPT], capture_output=True, text=True, timeout=30)
+        self.assertEqual(lauf.returncode, 0, lauf.stderr)
 
 
 class KalenderBasis(AgentBasis):
@@ -228,6 +223,22 @@ class WerkzeugTest(KalenderBasis):
         self.assertEqual(e["status"], "fehler")
         self.assertIn("Datenschutz & Sicherheit → Kalender", e["text"])
         self.assertEqual(self.eintragen(beginn="11:00")["status"], "ungueltig")
+
+    def test_erlaubnis_nur_hinzufuegen_verstaendlich(self):
+        z = self.zustand()
+        z["zugriff"] = "nur_hinzufuegen"
+        self.zustand(z)
+        e = self.aktion("termine")
+        self.assertIn("nur das Hinzufügen", e["text"])
+        self.assertIn("Vollzugriff", e["text"])
+
+    def test_zwei_kalender_gleichen_namens(self):
+        z = self.zustand()
+        z["kalender"].append({"name": "Arbeit", "schreibbar": True})  # z. B. iCloud und Google
+        self.zustand(z)
+        e = self.eintragen(beginn="15:00", kalender="Arbeit")
+        self.assertEqual(e["status"], "fehler")
+        self.assertIn("Mehrere Kalender heißen so", e["text"])
 
     def test_ohne_mac_ehrlich(self):
         os.environ["JARVIS_OSASCRIPT"] = os.path.join(self.ordner, "gibtsnicht")
