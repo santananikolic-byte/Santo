@@ -36,7 +36,7 @@ JEDEN TAG
 SO SPRICHST DU MIT IHM
 ----------------------
   Knöpfe im Leitstand:
-    Tagesbriefing · Akquise starten · E-Mails sortieren · Downloads
+    Tagesbriefing · Termine · Akquise starten · E-Mails sortieren · Downloads
     aufräumen · Fotos sortieren · Präsentation · Firma prüfen
     · Programm bauen · Preise kalkulieren
 
@@ -49,6 +49,9 @@ SO SPRICHST DU MIT IHM
     „Erinnere mich Freitag um 9 an das Angebot für Berger.“
     „Sortier mein Postfach.“
     „Schreib der Hausverwaltung Berger eine E-Mail, dass wir Montag kommen.“
+    „Was steht morgen an?“
+    „Wann habe ich nächste Woche Zeit für eine Besichtigung?“
+    „Trag mir Dienstag um 10 Uhr die Besichtigung bei Berger ein.“
     „Räum meine Downloads auf.“
     „Sortier die Baustellenfotos nach Tag.“
     „Leg die Fotos vom 3. November in Baustellen/Berger/1 vorher.“
@@ -70,6 +73,19 @@ WAS JARVIS NICHT TUT – mit Absicht
 
   Was er sich merken will, schlägt er vor – du bestätigst.
   Eine Datei überschreiben oder löschen geht nur mit deiner Freigabe.
+
+
+TERMINE
+-------
+  JARVIS liest die Kalender-App deines Macs – also alles, was dort
+  eingerichtet ist (iCloud vom iPhone ist automatisch dabei, Google:
+  Systemeinstellungen → Internetaccounts). Kein Passwort in JARVIS.
+  Er zeigt Termine, findet freie Zeiten (Arbeitszeit und Anfahrt
+  eingerechnet) und trägt Termine ein – ohne jemanden einzuladen.
+  Überschneidet sich ein Termin, fragt er dich vorher.
+  Ändern, verschieben und löschen machst du selbst in der Kalender-App.
+  Einem Kunden sagt er keinen Termin zu – das machst du.
+  Beim ersten Mal fragt der Mac, ob JARVIS den Kalender benutzen darf → OK.
 
 
 FOTOS UND DOWNLOADS

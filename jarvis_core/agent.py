@@ -14,6 +14,7 @@ import shutil
 import subprocess
 
 from . import gedaechtnis, gehirn, rollen, umgebung
+from .kalender import MacKalender
 from .mail import MacMail
 from .programmierer import Programmierer
 from .freigaben import Berechtigung
@@ -49,6 +50,7 @@ class Agent:
         self.berechtigung = Berechtigung(self)
         self.planer = None  # vom Server gesetzt
         self.mail = MacMail()  # E-Mail über die Mail-App des Macs (osascript)
+        self.kalender = MacKalender()  # Termine über die Kalender-App des Macs (osascript)
         self.programmierer = Programmierer(self)  # Programmier-Aufträge an Claude Code, im Hintergrund
         provider.beobachter = self._anfrage_erfassen
         if speicher.meta("gesperrt") == "1":

@@ -73,6 +73,10 @@ deinem Mac (127.0.0.1), nie ins Internet.
   Löschen kann er nicht, und in Papierkorb oder Spam verschiebt er auch nicht.
   Hat die Mail-App mehrere Konten (privat und Firma), steht in jeder Vorschau,
   von welcher Adresse die E-Mail rausgeht.
+- **Termine:** liest die Kalender-App des Macs (iCloud vom iPhone ist dabei), zeigt
+  den Tag und die Woche, findet freie Zeiten für Besichtigungen (Arbeitszeit und
+  Anfahrt eingerechnet) und trägt Termine ein – ohne jemanden einzuladen; bei
+  einer Überschneidung erst nach deiner Freigabe. Ändern und Löschen nicht.
 - **Fotos und Downloads sortieren:** nach Art, nach Monat oder Fotos und Videos
   nach Aufnahmetag (aus den Kameradaten, nicht nach Gefühl); ausgewählte Fotos
   in einen Baustellenordner („Baustellen/Berger/1 vorher“). Er **verschiebt nur**,

@@ -284,6 +284,8 @@ def pruefen():
     if mac:
         zeile("info", "E-Mail läuft über die Mail-App. Beim ersten Zugriff fragt macOS, ob JARVIS die Mail-App steuern "
                       "darf – dann „OK“ klicken (später: Systemeinstellungen → Datenschutz & Sicherheit → Automation).")
+        zeile("info", "Termine laufen über die Kalender-App. Beim ersten Zugriff fragt macOS nach dem Kalender – dann "
+                      "erlauben (später: Systemeinstellungen → Datenschutz & Sicherheit → Kalender → Terminal).")
     if mac and not shutil.which("open"):
         zeile("warn", "„open“ fehlt: den Link öffnest du selbst", "./jarvis.sh link")
     zeile("info", "Spracheingabe („Hey Jarvis“): in Safari erst Systemeinstellungen → Tastatur → Diktat einschalten; Chrome geht ohne. "

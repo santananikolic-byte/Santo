@@ -378,7 +378,8 @@
     if (r.code === 200) laden().then(pollenPlanen);
   }
   var SCHNELL = [
-    { name: "Tagesbriefing", senden: true, text: "Gib mir mein Tagesbriefing: Was ist offen (Aufgaben, Erinnerungen, Freigaben, Aufträge)? Was sind die drei wichtigsten nächsten Schritte, um mehr Aufträge zu gewinnen? Nutze nur, was du wirklich weißt, und trenne Wissen von Annahmen." },
+    { name: "Tagesbriefing", senden: true, text: "Gib mir mein Tagesbriefing: Welche Termine habe ich heute und morgen? Was ist offen (Aufgaben, Erinnerungen, Freigaben, Aufträge)? Was sind die drei wichtigsten nächsten Schritte, um mehr Aufträge zu gewinnen? Nutze nur, was du wirklich weißt, und trenne Wissen von Annahmen." },
+    { name: "Termine", senden: true, text: "Zeig mir meine Termine für diese Woche und sag mir, wo ich noch Zeit für Besichtigungen habe." },
     { name: "Akquise starten", senden: true, text: "Suche über öffentlich zugängliche Quellen (Ausschreibungsportale, Firmenverzeichnisse, Kleinanzeigen) nach aktuellen Aufträgen oder möglichen Kunden für Bau- und Reinigungsarbeiten in meiner Region. Prüfe jeden Treffer kurz und schlage mir die besten als Kontakt vor, mit Quelle." },
     { name: "E-Mails sortieren", senden: true, text: "Sieh in mein Postfach (letzte 7 Tage) und ordne es für mich: Was ist wichtig und muss heute beantwortet werden, was kann warten, was ist Werbung? Zu jeder wichtigen E-Mail ein Satz, was zu tun ist." },
     { name: "Downloads aufräumen", senden: true, text: "Sieh dir meinen Downloads-Ordner an und schlag mir vor, wie wir ihn nach Art sortieren. Zeig mir vorher genau, was wohin kommt." },

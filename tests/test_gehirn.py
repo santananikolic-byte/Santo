@@ -88,6 +88,12 @@ class BausteinTest(unittest.TestCase):
         ("Der Code für die Haustür ist 4711", set(), {"programmieren"}),
         ("Schreib mir ein Skript für die Anrufe bei Hausverwaltungen", set(), {"programmieren"}),
         ("Die Baustellenfotos von der Webseite", set(), {"programmieren"}),
+        # Termine
+        ("Wann habe ich nächste Woche Zeit?", {"termine"}, set()),
+        ("Trag mir Dienstag um 10 Uhr die Besichtigung bei Berger ein", {"termine"}, set()),
+        ("Wie sieht meine Woche aus?", {"termine"}, set()),
+        ("Was steht morgen im Kalender?", {"termine"}, set()),
+        ("Ich habe heute keine Zeit für Akquise", set(), {"termine"}),
         # aus der unabhängigen Prüfung (Befund 14): Alltagssätze ohne Datei-, Folien- oder Programmierauftrag
         ("Gibt es eine App für die Zeiterfassung?", set(), {"programmieren"}),
         ("Gibt es eine Software für die Buchhaltung?", set(), {"programmieren"}),

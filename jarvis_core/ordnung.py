@@ -515,8 +515,14 @@ def daten_bestimmen(liste, fotos=False):
     return ergebnis
 
 
+RELATIVE_TAGE = {"heute": 0, "morgen": 1, "übermorgen": 2, "uebermorgen": 2, "gestern": -1, "vorgestern": -2}
+
+
 def tag_pruefen(text):
-    """"2026-11-03" oder "3.11.2026" -> date. Wirft OrdnungFehler."""
+    """"2026-11-03", "3.11.2026" oder "heute"/"morgen"/"übermorgen"/"gestern" -> date. Wirft OrdnungFehler."""
+    wort = (text or "").strip().lower()
+    if wort in RELATIVE_TAGE:
+        return datetime.date.today() + datetime.timedelta(days=RELATIVE_TAGE[wort])
     t = _TAG.match((text or "").strip())
     if not t:
         raise OrdnungFehler("Datum bitte als JJJJ-MM-TT oder TT.MM.JJJJ, nicht %r." % text)

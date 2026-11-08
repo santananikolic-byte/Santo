@@ -52,6 +52,8 @@ STANDARD = {
     "ordner": {},
     # Mac-Ordner, die JARVIS ansehen und (nur nach Freigabe, nur verschieben) ordnen darf. Entfernen = nicht anfassen.
     "verwaltete_ordner": ["downloads", "bilder", "schreibtisch", "dokumente"],
+    "arbeitszeit": "07:00-18:00",  # für die Suche nach freien Zeiten
+    "anfahrt_minuten": 30,  # Abstand zwischen zwei Terminen (Anfahrt), bei der Suche nach freien Zeiten
     # Internetadressen, die das Werkzeug http_abfrage ansprechen darf (leer = keine).
     "api_domains": [],
     # Einzeln abgeschaltete Werkzeuge ("Rechte widerrufen").
@@ -225,6 +227,10 @@ def normalisieren(werte, daten_ordner):
     _ganzzahl(w, "freigabe_minuten", 1, 1440)
     _ganzzahl(w, "skript_timeout", 5, 600)
     _ganzzahl(w, "programmier_minuten", 2, 120)
+    _ganzzahl(w, "anfahrt_minuten", 0, 240)
+    if not re.match(r"^([01]\d|2[0-3]):[0-5]\d-([01]\d|2[0-3]):[0-5]\d$", str(w.get("arbeitszeit", ""))) \
+            or w["arbeitszeit"][:5] >= w["arbeitszeit"][6:]:
+        raise KonfigFehler("arbeitszeit bitte als HH:MM-HH:MM, Beginn vor Ende (z. B. 07:00-18:00).")
     _ganzzahl(w, "anfragen_pro_minute", 1, 600)
     _ganzzahl(w, "backup_aufbewahren", 1, 60)
 
