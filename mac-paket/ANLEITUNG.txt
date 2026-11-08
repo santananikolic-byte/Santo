@@ -52,6 +52,9 @@ SO SPRICHST DU MIT IHM
     „Was steht morgen an?“
     „Wann habe ich nächste Woche Zeit für eine Besichtigung?“
     „Trag mir Dienstag um 10 Uhr die Besichtigung bei Berger ein.“
+    „Trag jeden Montag um 8 Treppenhaus Wagner ein, bis Ende März.“
+    „Verschieb Berger auf Mittwoch 14 Uhr.“
+    „Wann ist der nächste Termin mit Meier?“
     „Räum meine Downloads auf.“
     „Sortier die Baustellenfotos nach Tag.“
     „Leg die Fotos vom 3. November in Baustellen/Berger/1 vorher.“
@@ -80,10 +83,15 @@ TERMINE
   JARVIS liest die Kalender-App deines Macs – also alles, was dort
   eingerichtet ist (iCloud vom iPhone ist automatisch dabei, Google:
   Systemeinstellungen → Internetaccounts). Kein Passwort in JARVIS.
-  Er zeigt Termine, findet freie Zeiten (Arbeitszeit und Anfahrt
-  eingerechnet) und trägt Termine ein – ohne jemanden einzuladen.
-  Überschneidet sich ein Termin, fragt er dich vorher.
-  Ändern, verschieben und löschen machst du selbst in der Kalender-App.
+  Er zeigt und sucht Termine, findet freie Zeiten (Arbeitszeit und
+  Anfahrt eingerechnet) und trägt Termine ein – auch als Serie (z. B.
+  jede Woche Treppenhaus) und mit Erinnerung.
+  Ändern, verschieben, löschen: JARVIS zeigt dir vorher genau, was
+  passiert – erst nach „Freigeben“. Bei einer Serie sagt er, ob nur
+  dieser Termin oder alle folgenden gemeint sind. Gelöschte Termine
+  sichert er vorher und kann sie zurückholen.
+  Einladen kann der Kalender niemanden. Dem Kunden schreibt JARVIS eine
+  Bestätigung als E-Mail – die geht erst nach deinem Ja raus.
   Einem Kunden sagt er keinen Termin zu – das machst du.
   Beim ersten Mal fragt der Mac, ob JARVIS den Kalender benutzen darf → OK.
 

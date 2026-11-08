@@ -230,6 +230,13 @@ Wort „eintragen“); „Termin“ als Gegenstand hätte Fremdberichte („Der 
 richtiggestellt – jetzt nur für „eingetragen“; im Skript stand ein unsichtbares Sonderzeichen (jetzt reines ASCII,
 mit Test).
 
+**Volle Funktionen (auf Wunsch):** Suchen, Serien und Erinnerungen beim Eintragen, Ändern/Verschieben, Löschen und
+Wiederherstellen. Ein Termin wird über eine kurze Nr. angesprochen (aus Kennung und Beginn – trifft auch einen einzelnen
+Termin einer Serie). Ändern und Löschen immer nur nach Freigabe mit Vorschau „vorher/nachher“; vor dem Löschen sichert
+JARVIS den Termin, scheitert das Löschen, verschwindet die Sicherung wieder. Ehrlichkeitsprüfung: „Ich habe den Termin
+verlegt/geändert/gelöscht“ ohne Freigabe-Ergebnis wird richtiggestellt, „Berger hat den Termin geändert“ (Bericht über
+den Kunden) nicht. Einladen kann EventKit niemanden – dafür die Bestätigungs-E-Mail.
+
 **Nicht geprüft:** das Skript auf einem echten Mac. Erst dein iMac zeigt, ob die Nachfrage erscheint und ob die Termine
 (auch Serien) stimmen. Reihenfolge für den ersten Versuch: „Was steht diese Woche an?“ fragen, die Nachfrage mit
 „Vollzugriff“ beantworten, prüfen, ob ein bekannter Serientermin dabei ist – erst dann eintragen lassen.
