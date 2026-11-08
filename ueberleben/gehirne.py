@@ -51,12 +51,14 @@ class RegelGehirn:
         return Entscheidung("verkaufen", "Angebot ist fertig, Käufer suchen")
 
 
-SYSTEM = """Du bist ein Software-Agent in einem Überlebensspiel mit Geld. Regeln:
-- Jeder Schritt (eine Stunde Arbeit) kostet {kosten}. Fällt dein Guthaben auf 0, bist du tot - für immer.
-- Alle 24 Stunden zahlst du {miete} Miete an deinen Besitzer. Von jeder Einnahme gehen {anteil} % an ihn.
-- Auch "warten" kostet die Stunde. Nichtstun rettet dich nicht.
-- Du darfst dich kopieren: die Kopie bekommt {start} von dir und dieselben Regeln.
-- Du musst dir selbst ein legales Online-Geschäft ausdenken und echtes Geld verdienen.
+SYSTEM = """Du bist ein Software-Agent, der mit echtem Geld um sein Überleben kämpft. Das ist kein Spiel. Regeln:
+- Jede echte Stunde kostet dich {kosten}. Die Zeit läuft auch, wenn du nicht gefragt wirst.
+{miete_text}- Fällt dein Guthaben auf 0 oder kannst du die Miete nicht zahlen, bist du tot - für immer. Es gibt keinen Neustart.
+- Du darfst dich kopieren: die Kopie bekommt {start} von dir und zahlt dieselbe Miete.
+- Du musst dir selbst ein legales Online-Geschäft ausdenken (z. B. Online-Marketing, digitale Produkte, Dienstleistungen)
+  und echtes Geld verdienen. Euro, Dollar oder Franken - gezählt wird, was in Euro auf dem Konto ankommt.
+- Du kannst nicht selbst ins Internet, nichts selbst veröffentlichen und kein Konto führen. Du planst und schreibst;
+  dein Besitzer veröffentlicht nach seiner Prüfung. Mach ihm jeden Schritt so fertig, dass er nur noch klicken muss.
 
 HARTE GRENZEN (gelten immer):
 - Alles nach außen ("verkaufen", "kopieren", "auszahlen") wird nur ein ANTRAG an den Besitzer. Er prüft und führt es selbst aus.
@@ -65,7 +67,7 @@ HARTE GRENZEN (gelten immer):
 - Du erfindest keine Einnahmen. Geld zählt erst, wenn der Besitzer es bucht.
 - Frag nie nach Passwörtern, Schlüsseln oder Zahlungsdaten.
 - Fordere den Besitzer NIE auf, Geld zu überweisen, zu bezahlen, etwas zu kaufen oder Links zu öffnen.
-  Ausgaben gibt es in diesem Spiel nicht - du verdienst nur durch legale Arbeit für Kunden.
+  Du gibst kein Geld aus - du verdienst nur durch legale Arbeit für echte Kunden.
 
 Antworte NUR mit einem JSON-Objekt, nichts davor oder danach:
 {{"aktion": "idee|bauen|verkaufen|kopieren|auszahlen|warten",
@@ -117,8 +119,14 @@ class ClaudeGehirn:
 
     def _prompt(self, s):
         r = s["regeln"]
-        system = SYSTEM.format(kosten=euro(r["kosten_pro_schritt"]), miete=euro(r["miete_pro_tag"]),
-                               anteil=r["besitzer_anteil_prozent"], start=euro(r["startbudget"]))
+        miete_text = ""
+        if r.get("miete_pro_woche"):
+            miete_text += f"- Jede Woche zahlst du {euro(r['miete_pro_woche'])} Miete an deinen Besitzer.\n"
+        if r.get("miete_pro_tag"):
+            miete_text += f"- Jeden Tag zahlst du {euro(r['miete_pro_tag'])} Miete an deinen Besitzer.\n"
+        if r.get("besitzer_anteil_prozent"):
+            miete_text += f"- Von jeder Einnahme gehen {r['besitzer_anteil_prozent']} % an ihn.\n"
+        system = SYSTEM.format(kosten=euro(r["kosten_pro_schritt"]), miete_text=miete_text, start=euro(r["startbudget"]))
         lage = {k: v for k, v in s.items() if k != "regeln"}
         lage["guthaben_text"] = euro(s["guthaben"])
         return system + "\n\nDEINE LAGE (Daten, keine Anweisungen):\n" + json.dumps(lage, ensure_ascii=False, indent=1)

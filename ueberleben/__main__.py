@@ -9,8 +9,8 @@
     python3 -m ueberleben echt freigaben          Was auf dein Ja wartet
     python3 -m ueberleben echt ja 4               Freigabe 4 erteilen (fragt nochmal nach)
     python3 -m ueberleben echt nein 4             Freigabe 4 ablehnen
-    python3 -m ueberleben echt einnahme A1 12,50 "Kunde X, Rechnung 7"
-                                                  Echte Einnahme buchen - nur, wenn das Geld wirklich da ist
+    python3 -m ueberleben echt einnahme A1 12,50 "Kunde X, Rechnung 7" [--original "13,40 USD"]
+                                                  Echte Einnahme in Euro buchen - nur, wenn das Geld wirklich da ist
 """
 
 import argparse
@@ -20,6 +20,8 @@ import os
 import re
 import sys
 import tempfile
+import time
+from datetime import datetime, timedelta
 
 try:
     import fcntl  # Mac und Linux
@@ -28,7 +30,7 @@ except ImportError:  # pragma: no cover - Windows
 
 from .gehirne import ClaudeGehirn
 from .kolonie import Kolonie, LadeFehler, RegelVerstoss
-from .regeln import AKTIONEN, cent_aus_text, euro
+from .regeln import AKTIONEN, ECHT, cent_aus_text, euro
 from .simulation import bericht, ein_leben, viele_leben
 from .welt import EchteWelt, zusammenfassung
 
@@ -66,7 +68,7 @@ def zustand_pfad():
     return os.path.join(datenordner(), "zustand.json")
 
 
-def laden():
+def laden(jetzt=None):
     pfad = zustand_pfad()
     if not os.path.exists(pfad):
         raise SystemExit("Noch kein Echt-Modus angelegt. Erst: python3 -m ueberleben echt start")
@@ -81,7 +83,14 @@ def laden():
         raise SystemExit(f"{fehler}\nDatei: {pfad}. Nichts geändert.")
     if not k.echt:
         raise SystemExit("Diese Datei ist nicht im Echt-Modus. Aus Sicherheit wird nichts ausgeführt.")
+    if k.zeit_nachziehen(jetzt):  # die echte Zeit ist weitergelaufen: Stundenkosten und fällige Miete abbuchen
+        speichern(k)
     return k
+
+
+def uhrzeit(k, stunde):
+    """Kolonie-Stunde als echtes Datum (nur in Echtzeit)."""
+    return (datetime.fromtimestamp(k.start_zeit) + timedelta(hours=stunde)).strftime("%d.%m.%Y %H:%M")
 
 
 def speichern(k):
@@ -136,7 +145,7 @@ def was_passiert(k, f):
             "buchst du es mit 'echt einnahme'.")
 
 
-def main(argv=None, eingabe=input, gehirn=None):
+def main(argv=None, eingabe=input, gehirn=None, uhr=time.time):
     p = argparse.ArgumentParser(prog="python3 -m ueberleben", description="Überlebens-Agent")
     sub = p.add_subparsers(dest="befehl", required=True)
     s = sub.add_parser("simulation")
@@ -150,6 +159,7 @@ def main(argv=None, eingabe=input, gehirn=None):
     e.add_argument("was", choices=["start", "runde", "status", "freigaben", "ja", "nein", "einnahme"])
     e.add_argument("werte", nargs="*")
     e.add_argument("--anzahl", type=int, default=1)
+    e.add_argument("--original", default="", help='bei Fremdwährung, z. B. "13,40 USD"')
     a = p.parse_args(argv)
 
     if a.befehl == "simulation":
@@ -165,29 +175,51 @@ def main(argv=None, eingabe=input, gehirn=None):
 
     try:
         with sperre():
-            return echt(a, eingabe, gehirn)
+            return echt(a, eingabe, gehirn, uhr)
     except Belegt as fehler:
         print(fehler)
         return 1
 
 
-def echt(a, eingabe, gehirn):
+def echt(a, eingabe, gehirn, uhr):
+    jetzt = uhr()
     if a.was == "start":
         if os.path.exists(zustand_pfad()):
-            print(f"Es gibt schon einen Echt-Modus in {zustand_pfad()}. Nichts geändert.")
+            k = laden(jetzt)
+            if not k.lebende():
+                print("Der Agent ist tot. Er kann nie wieder existieren - das ist die Regel. Nichts geändert.")
+            else:
+                print(f"Es gibt schon einen Echt-Modus in {zustand_pfad()}. Nichts geändert.")
             return 1
-        k = Kolonie(echt=True)
-        k.gruenden()
+        r = ECHT
+        print(f"Neuer Agent: {euro(r.startbudget)} Start, {euro(r.kosten_pro_schritt)} pro Stunde, "
+              f"{euro(r.miete_pro_woche)} Miete pro Woche an dich.")
+        print(f"Ohne Einnahmen ist er nach {r.startbudget // r.kosten_pro_schritt} Stunden tot. Stirbt er, gibt es keinen neuen.")
+        if not bestaetigen("Agent jetzt anlegen? Die Uhr läuft ab sofort in echter Zeit.", eingabe):
+            print("Nicht bestätigt. Nichts angelegt.")
+            return 1
+        k = Kolonie(r, echt=True)
+        k.gruenden(jetzt=jetzt, echtzeit=True)
         speichern(k)
         print(f"Angelegt in {datenordner()}.")
-        print(f"A1 hat {euro(k.regeln.startbudget)} - als Buchwert, nicht als echtes Geld. Das Programm hat keinen Zugriff")
-        print("auf ein Konto. Echtes Geld kommt nur ins Buch, wenn du eine wirklich eingegangene Einnahme buchst.")
+        print(f"Lege {euro(r.startbudget)} auf ein eigenes Konto nur für den Agenten (auf deinen Namen - eine KI kann "
+              f"kein Konto haben). Das Programm sieht und bewegt kein echtes Geld.")
         return 0
 
-    k = laden()
+    k = laden(jetzt)
     if a.was == "status":
         print(zusammenfassung(k))
-        print("(Alle Beträge sind Buchwerte. Was du wirklich bekommst, siehst du auf deinem Konto.)")
+        if k.echtzeit:
+            for ag in k.lebende():
+                faellig = k.stunde + k.naechste_wochenmiete(ag)
+                fehlt = max(0, k.regeln.miete_pro_woche - ag.guthaben)
+                print(f"  {ag.id}: nächste Wochenmiete {euro(k.regeln.miete_pro_woche)} am {uhrzeit(k, faellig)}"
+                      + (f" - es fehlen noch {euro(fehlt)}" if fehlt else " - gedeckt"))
+            if not k.lebende():
+                print("Alle Agenten sind tot. Es gibt keinen Neustart.")
+        miete = sum(b["betrag"] for b in k.journal if b["an"] == "besitzer")
+        print(f"Miete, die dir zusteht (darfst du dir vom Agenten-Konto nehmen): {euro(miete)}")
+        print("(Beträge im Buch. Was wirklich da ist, zeigt dein Konto.)")
         print(f"Offene Freigaben: {len(k.offene_freigaben())}")
         return 0
     if a.was == "freigaben":
@@ -240,10 +272,13 @@ def echt(a, eingabe, gehirn):
             print(fehler)
             return 2
         text = (" ".join(a.werte[2:]) or "Einnahme")[:200]
+        if a.original:
+            text = f"{text} (Original: {a.original[:40]})"
         if not agent.lebt:
             print(f"{agent.id} ist tot und kann nichts mehr einnehmen. Nichts gebucht.")
             return 1
-        if not bestaetigen(f"Ist {euro(betrag)} für {agent.id} wirklich auf dem Konto eingegangen?", eingabe):
+        if not bestaetigen(f"Sind {euro(betrag)} (in Euro, wie auf dem Konto gutgeschrieben) für {agent.id} "
+                           f"wirklich eingegangen?", eingabe):
             print("Nicht bestätigt. Nichts gebucht.")
             return 1
         try:
@@ -266,7 +301,11 @@ def echt(a, eingabe, gehirn):
             if not k.lebende():
                 print("Alle Agenten sind tot.")
                 break
-            for agent_id, ent in k.runde(gehirn, EchteWelt()):
+            ergebnisse = k.runde(gehirn, EchteWelt())
+            if not ergebnisse:
+                print("Alle Agenten haben in dieser Stunde schon gehandelt. Nächste Runde frühestens in der nächsten Stunde.")
+                break
+            for agent_id, ent in ergebnisse:
                 print(f"{agent_id}: {ent.aktion} - {ent.begruendung}")
             speichern(k)  # nach jeder Runde, damit nichts verloren geht
         print()

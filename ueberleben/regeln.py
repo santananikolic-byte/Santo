@@ -49,6 +49,7 @@ class Regeln:
     stunden_pro_schritt: int = 1           # ein Schritt = eine Stunde
     # --- Annahmen (änderbar) ---
     miete_pro_tag: int = 1 * EURO          # 1 € Miete pro Tag (24 Schritte) an den Besitzer
+    miete_pro_woche: int = 0               # Wochenmiete pro Agent, fällig alle 168 Stunden ab seiner Geburt
     besitzer_anteil_prozent: int = 20      # 20 % jeder Einnahme gehen sofort an den Besitzer
     kopie_reserve: int = 5 * EURO          # nach dem Kopieren müssen mindestens 5 € übrig bleiben
     max_agenten: int = 10                  # Notbremse: nie mehr als 10 lebende Agenten gleichzeitig
@@ -71,7 +72,7 @@ class Regeln:
             raise ValueError("Stunden pro Schritt müssen 24 teilen (1, 2, 3, 4, 6, 8, 12, 24).")
         if not 0 <= self.besitzer_anteil_prozent <= 100:
             raise ValueError("Besitzer-Anteil muss zwischen 0 und 100 % liegen.")
-        if self.miete_pro_tag < 0 or self.kopie_reserve < 0:
+        if self.miete_pro_tag < 0 or self.miete_pro_woche < 0 or self.kopie_reserve < 0:
             raise ValueError("Miete und Reserve dürfen nicht negativ sein.")
         if self.max_agenten < 1 or self.max_generation < 0:
             raise ValueError("Mindestens ein Agent, Generation ab 0.")
@@ -83,6 +84,13 @@ class Regeln:
 
 
 STANDARD = Regeln()
+
+# Die echten Regeln des Besitzers (Stand 8.11.2026): 20 € Start, 50 Cent pro echter Stunde,
+# 1.000 € Miete pro Woche und Agent. Wer nicht zahlen kann, stirbt - endgültig.
+ECHT = Regeln(startbudget=20 * EURO, kosten_pro_schritt=50, miete_pro_tag=0, miete_pro_woche=1000 * EURO,
+              besitzer_anteil_prozent=0)
+
+STUNDEN_PRO_WOCHE = 168
 
 # Was ein Agent tun kann. "nach_aussen": berührt echte Menschen, Plattformen oder echtes Geld.
 AKTIONEN = {

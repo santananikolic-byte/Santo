@@ -904,7 +904,7 @@ class TestClaudeGehirn(unittest.TestCase):
         lauf = FakeLauf(stdout='{"aktion": "bauen"}')
         ClaudeGehirn(ausfuehren=lauf).entscheiden(self.sicht)
         prompt = lauf.aufrufe[0][1]["input"]
-        self.assertIn("kostet 1,00 €", prompt)
+        self.assertIn("kostet dich 1,00 €", prompt)
         self.assertIn("1,00 € Miete", prompt)
         self.assertIn("20 %", prompt)
         self.assertIn("10,00 €", prompt)
@@ -979,15 +979,24 @@ class TerminalBasis(unittest.TestCase):
         self.addCleanup(patcher.stop)
         self.addCleanup(self._ordner.cleanup)
         self.pfad = os.path.join(self.ordner, "zustand.json")
+        self.jetzt = self.START
+
+    START = 1_800_000_000.0  # feste Startzeit; die Uhr der Tests steuert self.jetzt
 
     def lauf(self, *argv, eingabe=None, gehirn=None):
         puffer = io.StringIO()
         if eingabe is None:
-            def eingabe(_frage):
-                raise AssertionError("Es hätte nicht nachgefragt werden dürfen.")
+            if list(argv[:2]) == ["echt", "start"]:
+                eingabe = lambda _frage: "ja"  # noqa: E731 - Anlegen bestätigen
+            else:
+                def eingabe(_frage):
+                    raise AssertionError("Es hätte nicht nachgefragt werden dürfen.")
         with contextlib.redirect_stdout(puffer):
-            code = cli.main(list(argv), eingabe=eingabe, gehirn=gehirn)
+            code = cli.main(list(argv), eingabe=eingabe, gehirn=gehirn, uhr=lambda: self.jetzt)
         return code, puffer.getvalue()
+
+    def stunden_vergehen(self, stunden):
+        self.jetzt += stunden * 3600
 
     def zustand(self):
         with open(self.pfad, encoding="utf-8") as f:
@@ -1020,7 +1029,8 @@ class TestTerminal(TerminalBasis):
         self.assertIn("Angelegt", aus)
         k = self.zustand()
         self.assertTrue(k.echt)
-        self.assertEqual(k.agenten["A1"].guthaben, 1000)
+        self.assertTrue(k.echtzeit)
+        self.assertEqual(k.agenten["A1"].guthaben, 2000)  # 20 € Start
         # Zustand verändern, dann nochmal start: darf nichts überschreiben.
         self.lauf("echt", "einnahme", "A1", "5", "Test", eingabe=lambda _: "ja")
         with open(self.pfad, "rb") as f:
@@ -1039,31 +1049,85 @@ class TestTerminal(TerminalBasis):
         self.assertIn("A1: verkaufen", aus)
         self.assertIn("Freigabe(n) warten", aus)
         k = self.zustand()
-        self.assertEqual(k.stunde, 1)
-        self.assertEqual(k.agenten["A1"].guthaben, 900)
+        self.assertEqual(k.stunde, 0)  # die Uhr läuft in echter Zeit, nicht pro Runde
+        self.assertEqual(k.agenten["A1"].guthaben, 2000)  # die Aktion selbst kostet nichts, nur die Zeit
         self.assertEqual(len(k.offene_freigaben()), 1)
 
-    def test_runde_anzahl(self):
+    def test_nur_eine_runde_pro_stunde(self):
         self.lauf("echt", "start")
-        code, _ = self.lauf("echt", "runde", "--anzahl", "3", gehirn=PlanGehirn("bauen"))
+        g = PlanGehirn("bauen")
+        code, aus = self.lauf("echt", "runde", "--anzahl", "3", gehirn=g)
         self.assertEqual(code, 0)
+        self.assertEqual(len(g.gefragt), 1)
+        self.assertIn("schon gehandelt", aus)
+        self.stunden_vergehen(1)
+        self.lauf("echt", "runde", gehirn=g)
+        self.assertEqual(len(g.gefragt), 2)
+
+    def test_zeit_kostet_50_cent_pro_stunde(self):
+        self.lauf("echt", "start")
+        self.stunden_vergehen(3.5)  # angefangene Stunden zählen nicht
+        self.lauf("echt", "status")
         k = self.zustand()
         self.assertEqual(k.stunde, 3)
-        self.assertEqual(k.agenten["A1"].guthaben, 700)
+        self.assertEqual(k.agenten["A1"].guthaben, 2000 - 3 * 50)
 
-    def test_runde_bis_alle_tot(self):
+    def test_ohne_einnahmen_nach_40_stunden_tot_und_nie_wieder(self):
         self.lauf("echt", "start")
-        code, aus = self.lauf("echt", "runde", "--anzahl", "15", gehirn=PlanGehirn("bauen"))
-        self.assertEqual(code, 0)
-        self.assertIn("Alle Agenten sind tot", aus)
-        self.assertEqual(self.zustand().stunde, 10)
+        self.stunden_vergehen(39)
+        self.lauf("echt", "status")
+        self.assertTrue(self.zustand().agenten["A1"].lebt)
+        self.stunden_vergehen(1)
+        code, aus = self.lauf("echt", "status")
+        k = self.zustand()
+        self.assertFalse(k.agenten["A1"].lebt)
+        self.assertEqual(k.agenten["A1"].gestorben, 40)
+        self.assertIn("keinen Neustart", aus)
+        code, aus = self.lauf("echt", "start")
+        self.assertEqual(code, 1)
+        self.assertIn("nie wieder existieren", aus)
+
+    def test_wochenmiete_1000_euro(self):
+        """Nach 168 echten Stunden werden 1.000 € fällig. Reicht das Geld, lebt er weiter."""
+        self.lauf("echt", "start")
+        self.lauf("echt", "einnahme", "A1", "1200", "Kunde", eingabe=lambda _: "ja")
+        self.stunden_vergehen(168)
+        code, aus = self.lauf("echt", "status")
+        k = self.zustand()
+        a = k.agenten["A1"]
+        self.assertTrue(a.lebt)
+        self.assertEqual(a.guthaben, 2000 + 120000 - 168 * 50 - 100000)
+        self.assertEqual(k.besitzer_bekommen, 100000)
+        self.assertIn("1000,00 €", aus)
+
+    def test_wochenmiete_nicht_bezahlt_tot(self):
+        self.lauf("echt", "start")
+        self.lauf("echt", "einnahme", "A1", "500", "Kunde", eingabe=lambda _: "ja")
+        self.stunden_vergehen(168)
+        self.lauf("echt", "status")
+        a = self.zustand().agenten["A1"]
+        self.assertFalse(a.lebt)
+        self.assertIn("Wochenmiete", a.todesursache)
+        self.assertEqual(a.guthaben, 0)
+
+    def test_einnahme_fremdwaehrung(self):
+        self.lauf("echt", "start")
+        self.lauf("echt", "einnahme", "A1", "12,30", "Kunde USA", "--original", "13,40 USD", eingabe=lambda _: "ja")
+        k = self.zustand()
+        self.assertEqual(k.agenten["A1"].eingenommen, 1230)
+        self.assertIn("13,40 USD", [b["text"] for b in k.journal if b["art"] == "einnahme"][0])
+
+    def test_start_nur_nach_bestaetigung(self):
+        code, aus = self.lauf("echt", "start", eingabe=lambda _: "nein")
+        self.assertEqual(code, 1)
+        self.assertFalse(os.path.exists(self.pfad))
 
     def test_runde_ohne_claude(self):
         self.lauf("echt", "start")
         code, aus = self.lauf("echt", "runde", gehirn=ClaudeGehirn(programm="gibt-es-sicher-nicht-xyz-123"))
         self.assertEqual(code, 1)
         self.assertIn("nicht installiert", aus)
-        self.assertEqual(self.zustand().stunde, 0)
+        self.assertEqual(self.zustand().agenten["A1"].schritte, 0)
 
     def test_status(self):
         self.mit_freigabe()
@@ -1124,7 +1188,7 @@ class TestTerminal(TerminalBasis):
         self.assertIn("3,00 €", aus)
         k = self.zustand()
         self.assertEqual(k.besitzer_bekommen, 300)
-        self.assertEqual(k.agenten["A1"].guthaben, 600)
+        self.assertEqual(k.agenten["A1"].guthaben, 1700)
 
     def test_nein(self):
         self.mit_freigabe()
@@ -1144,7 +1208,8 @@ class TestTerminal(TerminalBasis):
 
     def test_ja_toter_agent_verfaellt_und_wird_gespeichert(self):
         self.mit_freigabe()
-        self.lauf("echt", "runde", "--anzahl", "9", gehirn=PlanGehirn("bauen"))
+        self.stunden_vergehen(40)
+        self.lauf("echt", "status")
         self.assertFalse(self.zustand().agenten["A1"].lebt)
         code, aus = self.lauf("echt", "ja", "1")  # keine Rückfrage mehr: verfällt schon beim Tod
         self.assertEqual(code, 1)
@@ -1161,8 +1226,8 @@ class TestTerminal(TerminalBasis):
         k = self.zustand()
         a = k.agenten["A1"]
         self.assertEqual(a.eingenommen, 1250)
-        self.assertEqual(a.guthaben, 1000 + 1250 - 250)
-        self.assertEqual(k.besitzer_bekommen, 250)
+        self.assertEqual(a.guthaben, 2000 + 1250)  # kein Anteil mehr, nur Wochenmiete
+        self.assertEqual(k.besitzer_bekommen, 0)
         self.assertEqual([b["text"] for b in k.journal if b["art"] == "einnahme"], ["Kunde X"])
 
     def test_einnahme_nicht_bestaetigt(self):
@@ -1170,7 +1235,7 @@ class TestTerminal(TerminalBasis):
         code, aus = self.lauf("echt", "einnahme", "A1", "12,50", "Text", eingabe=lambda _: "nein")
         self.assertEqual(code, 1)
         self.assertIn("Nichts gebucht", aus)
-        self.assertEqual(self.zustand().agenten["A1"].guthaben, 1000)
+        self.assertEqual(self.zustand().agenten["A1"].guthaben, 2000)
 
     def test_einnahme_ungueltiger_betrag(self):
         self.lauf("echt", "start")
@@ -1179,7 +1244,7 @@ class TestTerminal(TerminalBasis):
                 code, aus = self.lauf("echt", "einnahme", "A1", betrag, "Text")
                 self.assertEqual(code, 2)
                 self.assertIn("etrag", aus)
-        self.assertEqual(self.zustand().agenten["A1"].guthaben, 1000)
+        self.assertEqual(self.zustand().agenten["A1"].guthaben, 2000)
 
     def test_einnahme_unbekannter_agent(self):
         self.lauf("echt", "start")
@@ -1195,7 +1260,7 @@ class TestTerminal(TerminalBasis):
 
     def test_einnahme_fuer_toten(self):
         self.lauf("echt", "start")
-        self.lauf("echt", "runde", "--anzahl", "10", gehirn=PlanGehirn("bauen"))
+        self.stunden_vergehen(40)
         code, aus = self.lauf("echt", "einnahme", "A1", "5", "spät", eingabe=lambda _: "ja")
         self.assertEqual(code, 1)
         self.assertIn("tot", aus)
@@ -1274,7 +1339,8 @@ class TestSchutz(TerminalBasis):
 
     def test_freigabe_verfaellt_beim_tod(self):
         self.mit_freigabe()
-        self.lauf("echt", "runde", "--anzahl", "9", gehirn=PlanGehirn("bauen"))
+        self.stunden_vergehen(40)
+        self.lauf("echt", "status")
         k = self.zustand()
         self.assertFalse(k.agenten["A1"].lebt)
         self.assertEqual(k.offene_freigaben(), [])

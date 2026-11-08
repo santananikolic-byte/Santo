@@ -13,9 +13,10 @@ Welt und Gehirn sind austauschbar:
 - Das *Gehirn* entscheidet (Simulation: feste Regeln; echt: Claude).
 """
 
+import time
 from dataclasses import dataclass, field, asdict
 
-from .regeln import AKTIONEN, STANDARD, Entscheidung, Regeln, euro
+from .regeln import AKTIONEN, STANDARD, STUNDEN_PRO_WOCHE, Entscheidung, Regeln, euro
 
 BESITZER = "besitzer"
 BETRIEB = "betrieb"  # wohin die Schrittkosten gehen (Rechenzeit). Im Echt-Modus zahlt die der Besitzer über sein Abo.
@@ -36,6 +37,7 @@ class Agent:
     idee: dict = field(default_factory=dict)
     fortschritt: int = 0          # Schritte, die in die aktuelle Idee geflossen sind
     kinder: list = field(default_factory=list)
+    letzte_runde: int = -1        # Echtzeit: in welcher Stunde er zuletzt gehandelt hat (einmal pro Stunde)
 
     @property
     def lebt(self):
@@ -72,6 +74,11 @@ class Kolonie:
         self.ereignisse = []          # lesbares Protokoll
         self._naechste_id = 1
         self._naechste_freigabe = 1
+        self.start_zeit = None        # Echtzeit: Sekunden seit 1970 bei der Gründung. None = Rundenzeit.
+
+    @property
+    def echtzeit(self):
+        return self.start_zeit is not None
 
     # ------------------------------------------------------------------ Grundlagen ---
 
@@ -124,10 +131,15 @@ class Kolonie:
 
     # ---------------------------------------------------------------- Leben & Tod ---
 
-    def gruenden(self):
-        """Erster Agent. Das Startbudget kommt von außen (vom Besitzer gestellt)."""
+    def gruenden(self, jetzt=None, echtzeit=False):
+        """Erster Agent. Das Startbudget kommt von außen (vom Besitzer gestellt).
+
+        ``echtzeit=True``: die Uhr läuft in echten Stunden ab ``jetzt`` - Kosten und Miete laufen auch,
+        wenn niemand das Programm öffnet."""
         if self.agenten:
             raise RegelVerstoss("Die Kolonie hat schon einen Agenten.")
+        if echtzeit:
+            self.start_zeit = float(time.time() if jetzt is None else jetzt)
         a = self._neuer_agent(eltern="", generation=0)
         self._buchen("aussen", a.id, self.regeln.startbudget, "start", "Startbudget vom Besitzer")
         self._log(a.id, f"wurde gegründet mit {euro(self.regeln.startbudget)}.")
@@ -186,19 +198,58 @@ class Kolonie:
         return betrag
 
     def _miete(self):
+        """Tagesmiete (alle 24 Stunden der Kolonie-Uhr) und Wochenmiete (alle 168 Stunden ab Geburt des Agenten)."""
+        r = self.regeln
         for a in self.lebende():
-            a.an_besitzer += self._belasten(a, BESITZER, self.regeln.miete_pro_tag, "miete", f"Miete Tag {self.stunde // 24}")
-            self._todescheck(a, "Miete nicht bezahlbar")
+            if r.miete_pro_tag and self.stunde % 24 == 0:
+                a.an_besitzer += self._belasten(a, BESITZER, r.miete_pro_tag, "miete", f"Miete Tag {self.stunde // 24}")
+                self._todescheck(a, "Miete nicht bezahlbar")
+            alter = self.stunde - a.geboren
+            if a.lebt and r.miete_pro_woche and alter > 0 and alter % STUNDEN_PRO_WOCHE == 0:
+                woche = alter // STUNDEN_PRO_WOCHE
+                a.an_besitzer += self._belasten(a, BESITZER, r.miete_pro_woche, "miete", f"Wochenmiete Woche {woche}")
+                self._todescheck(a, f"Wochenmiete {euro(r.miete_pro_woche)} nicht bezahlt")
+
+    def zeit_nachziehen(self, jetzt=None):
+        """Echtzeit: für jede vergangene volle Stunde die Stundenkosten abbuchen und fällige Miete einziehen.
+
+        Läuft bei jedem Öffnen. Die Zeit vergeht also auch, wenn das Programm nicht läuft - wie im echten Leben."""
+        if not self.echtzeit:
+            return 0
+        jetzt = time.time() if jetzt is None else float(jetzt)
+        ziel = int((jetzt - self.start_zeit) // 3600)
+        vorher = self.stunde
+        while self.stunde < ziel and self.lebende():
+            self.stunde += 1
+            for a in self.lebende():
+                self._belasten(a, BETRIEB, self.regeln.kosten_pro_schritt, "stunde", "Lebenszeit")
+                self._todescheck(a, f"Geld aufgebraucht ({euro(self.regeln.kosten_pro_schritt)} pro Stunde)")
+            self._miete()
+        if not self.lebende():
+            self.stunde = max(self.stunde, ziel)
+        return self.stunde - vorher
+
+    def naechste_wochenmiete(self, agent):
+        """In wie vielen Stunden die nächste Wochenmiete dieses Agenten fällig ist."""
+        alter = self.stunde - agent.geboren
+        return STUNDEN_PRO_WOCHE - (alter % STUNDEN_PRO_WOCHE)
 
     # ------------------------------------------------------------------- Runden ---
 
     def runde(self, gehirn, welt):
-        """Eine Stunde (ein Schritt) für alle lebenden Agenten. Gibt die Liste der Entscheidungen zurück."""
+        """Eine Stunde (ein Schritt) für alle lebenden Agenten. Gibt die Liste der Entscheidungen zurück.
+
+        Echtzeit: die Uhr rückt hier NICHT vor (das macht ``zeit_nachziehen``), und jeder Agent handelt höchstens
+        einmal pro echter Stunde. Die Kosten laufen über die Zeit, nicht über die Aktion."""
         r = self.regeln
-        self.stunde += r.stunden_pro_schritt
+        if not self.echtzeit:
+            self.stunde += r.stunden_pro_schritt
         ergebnisse = []
         for agent in list(self.lebende()):
-            if agent.geboren == self.stunde:
+            if self.echtzeit:
+                if agent.letzte_runde == self.stunde:
+                    continue  # hat in dieser echten Stunde schon gehandelt
+            elif agent.geboren == self.stunde:
                 continue  # in dieser Stunde erst geboren: handelt ab der nächsten
             e = gehirn.entscheiden(self.sicht(agent))
             if not isinstance(e, Entscheidung) or e.aktion not in AKTIONEN:
@@ -208,8 +259,9 @@ class Kolonie:
                 self._log(agent.id, f"konnte nicht denken ({e.begruendung[:120]}). Die Stunde wird nicht berechnet.",
                           eigen=True)
                 continue
+            agent.letzte_runde = self.stunde
             self._ausfuehren(agent, e, welt)
-        if self.stunde % 24 == 0:
+        if not self.echtzeit:
             self._miete()
         return ergebnisse
 
@@ -228,6 +280,8 @@ class Kolonie:
                 welt.handeln(self, agent, e)
         except RegelVerstoss as fehler:
             self._log(agent.id, f"wollte '{e.aktion}', geht nicht: {fehler}")
+        if self.echtzeit:
+            return  # in Echtzeit kostet die Zeit, nicht die Aktion (siehe zeit_nachziehen)
         # Jede Stunde kostet - auch Warten, auch wenn die Aktion nicht geklappt hat.
         self._belasten(agent, BETRIEB, self.regeln.kosten_pro_schritt, "schritt", e.aktion)
         self._todescheck(agent, "Geld für den nächsten Schritt aufgebraucht")
@@ -291,7 +345,8 @@ class Kolonie:
         return {
             "id": agent.id, "generation": agent.generation, "stunde": self.stunde,
             "guthaben": agent.guthaben, "schritte_uebrig": max(0, (agent.guthaben - 1) // r.kosten_pro_schritt),
-            "stunden_bis_miete": bis_miete, "idee": dict(agent.idee), "fortschritt": agent.fortschritt,
+            "stunden_bis_miete": bis_miete, "stunden_bis_wochenmiete": self.naechste_wochenmiete(agent),
+            "echtzeit": self.echtzeit, "idee": dict(agent.idee), "fortschritt": agent.fortschritt,
             "eingenommen": agent.eingenommen, "lebende_agenten": len(self.lebende()),
             "kopie_moeglich": not self.kopie_moeglich(agent), "echt": self.echt,
             "offene_freigaben": len([f for f in self.offene_freigaben() if f["agent"] == agent.id]),
@@ -342,7 +397,8 @@ class Kolonie:
         return {"version": 1, "regeln": self.regeln.als_dict(), "echt": self.echt, "stunde": self.stunde,
                 "agenten": [a.als_dict() for a in self.agenten.values()], "journal": self.journal,
                 "freigaben": self.freigaben, "ereignisse": self.ereignisse[-500:],
-                "naechste_id": self._naechste_id, "naechste_freigabe": self._naechste_freigabe}
+                "naechste_id": self._naechste_id, "naechste_freigabe": self._naechste_freigabe,
+                "start_zeit": self.start_zeit}
 
     @classmethod
     def aus_dict(cls, d):
@@ -355,6 +411,8 @@ class Kolonie:
             # Fehlt die Angabe, gilt sicherheitshalber der Echt-Modus (mit Freigaben).
             k = cls(Regeln.aus_dict(d.get("regeln")), echt=d.get("echt", True) is not False)
             k.stunde = int(d.get("stunde", 0))
+            if d.get("start_zeit") is not None:
+                k.start_zeit = float(d["start_zeit"])
             for ad in d.get("agenten", []):
                 a = Agent(**{n: ad[n] for n in Agent.__dataclass_fields__ if n in ad})
                 if a.id in k.agenten:
