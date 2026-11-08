@@ -35,7 +35,24 @@ gerät leicht in Spam oder Betrug, und zwar unter deinem Namen. Deine beiden
 Bedingungen („keinem schaden“, „nicht außer Kontrolle“) sind nur sicher, wenn du
 auf „Veröffentlichen“ drückst.
 
-## So richtest du es ein
+## Auf dem Handy (empfohlen)
+
+Öffne diesen Link in der Claude-App auf dem Handy:
+**https://claude.ai/artifact/Uq8yMYXbkJNS7zxV3jgdkP**
+
+- **Alles auf der Seite:** Agent anlegen, arbeiten lassen, Anträge mit Ja/Nein,
+  seine fertigen Texte zum Kopieren, Einnahmen buchen und die genommene Miete
+  eintragen.
+- **Claude als Gehirn:** Beim ersten „Agent arbeiten lassen“ fragt die App, ob
+  die Seite Claude benutzen darf. Das kostet Nutzung deines Abos.
+- **Wo der Stand liegt:** in deinem Claude-Konto, privat. Nur du kannst etwas
+  ändern.
+- **Grenze:** Er denkt nur, wenn du die Seite öffnest und auf den Knopf drückst.
+  Die Uhr und die Kosten laufen trotzdem weiter.
+- **Quelltext:** `Ueberlebens-Agent-Handy.html`. Er läuft nur in der Claude-App
+  oder auf claude.ai, nicht per Doppelklick.
+
+## Auf dem Mac (Alternative)
 
 1. **Ein eigenes Konto nur für den Agenten** (auf deinen Namen), zum Beispiel ein
    Unterkonto oder ein eigenes PayPal. Leg 20 € drauf.
