@@ -31,7 +31,7 @@ from html import unescape
 
 from collections import Counter
 
-from . import kalender, mac_hand, mail, ordnung, praesentation, programmierer, routinen, umgebung, zeit
+from . import kalender, mac_hand, mail, ordnung, praesentation, programmierer, routinen, umgebung, wissen, zeit
 from .provider import ProviderFehler
 
 FREI, MELDUNG, FREIGABE = 1, 2, 3
@@ -915,6 +915,20 @@ def _termin_wiederherstellen(ctx, p):
     return {"text": "Wiederhergestellt im Kalender „%s“: %s.%s" % (name, e.get("zeile", e["titel"]), hinweis)}
 
 
+# ---------------------------------------------------------------- Wissen ---
+
+def _wissen_nachschlagen(ctx, p):
+    thema = " ".join((p.get("thema") or "").lower().split())
+    if not thema:
+        return {"text": "Wissen mit geprüften Quellen:\n" + "\n".join("- " + z for z in wissen.uebersicht())}
+    treffer = wissen.paket(thema) or next((x for x in wissen.pakete() if thema in x.titel.lower() or x.muster.search(thema)),
+                                          None)
+    if treffer is None:
+        raise WerkzeugFehler("Dazu gibt es kein Wissenspaket (vorhanden: %s). Für anderes: \"recherche\"."
+                             % ", ".join(x.name for x in wissen.pakete()))
+    return {"text": wissen.prompt_text(treffer)}
+
+
 # ---------------------------------------------------------------- Routinen ---
 
 def _routinen_anzeigen(ctx, p):
@@ -1176,6 +1190,11 @@ class Register:
                      [P("frage", True, maximal=500)], stufe=MELDUNG, liefert_daten=True, extern=True,
                      vorschau=_recherche_vorschau, privat_freigabe=True,
                      risiko="Die Frage geht an eine Websuche; im privaten Bereich nur nach Freigabe."),
+            Werkzeug("wissen_nachschlagen", "Geprüftes Wissen mit Quelle und Stand: Löhne und Steuern (kalkulation), "
+                     "öffentliche Aufträge in NRW (auftraege), Kunden gewinnen und was dabei erlaubt ist (akquise), "
+                     "Mitarbeiter einstellen (personal), Zusatzeinnahmen (ideen). Ohne thema: die Liste.",
+                     _wissen_nachschlagen, [P("thema", hilfe="kalkulation, auftraege, akquise, personal oder ideen",
+                                              maximal=60)], liefert_daten=True),
             Werkzeug("umgebung_pruefen", "Liest harmlose Angaben zum Mac (System, Speicher, Programme) und merkt sie sich.",
                      _umgebung, liefert_daten=True),
             Werkzeug("auftrag_planen", "Zerlegt ein größeres Ziel in überprüfbare Schritte. Ergebnis ist nur ein "

@@ -282,6 +282,31 @@ Freigabe.
 
 **Nicht geprüft:** die Mitteilung zur Uhrzeit auf einem echten Mac.
 
+## Stufe 19 – Business-Gehirn: Wissen mit Quellen
+
+**Auftrag:** JARVIS soll ein „zentrales Gehirn mit Wissen“ haben – für mehr Aufträge, feste Preise und neue Einnahmen.
+Regel: Zahlen nur mit Quelle.
+
+**Gebaut:** `wissen.py` und fünf Pakete in `wissenspakete/` (Löhne/Preise/Steuern, öffentliche Aufträge NRW, Kunden
+gewinnen, Personal, Ideen). Jedes Paket hat Stichworte, Stand und Prüfdatum; das passende steht im Systemprompt, mit
+Quellenliste. Werkzeug `wissen_nachschlagen`, Knopf „Ideen für mehr Umsatz“, Zeile im Selbsttest.
+
+**Geprüft gegen die Quellen:** Tariflohn Reinigung und Laufzeit der Verordnung (Volltext beim Bundesamt für Justiz),
+Mindestlohn und Minijob-Grenze 2026/2027 (Bundesregierung), Tarifrunde 2027 (Deutsche Handwerks Zeitung, 04.11.2026),
+§ 75a GO NRW (Stadt Köln, FAQ des NRW-Ministeriums), EU-Schwellenwerte (Vergabeblog), § 7 UWG, § 13b und § 14a UStG,
+§§ 48 und 48b EStG, § 28a SGB IV, § 2a SchwarzArbG (jeweils Wortlaut).
+
+**Beim Prüfen gefunden und behoben:** Der Baustein „Akquise“ empfahl „schriftliche Wege“, weil Telefonwerbung
+eingeschränkt ist. Werbung per E-Mail braucht aber auch gegenüber Firmen eine vorherige Einwilligung (§ 7 Abs. 2 Nr. 2
+UWG). Jetzt: Brief oder persönlicher Besuch; E-Mail nur, wenn die Firma um ein Angebot gebeten hat.
+
+**Bewusste Grenzen:** Keine Leistungswerte in Quadratmetern pro Stunde – es gibt keine frei zugängliche verbindliche
+Tabelle, und erfundene Werte wären schlimmer als keine; JARVIS rät zur eigenen Probereinigung. Mindestlöhne einzelner
+Bau-Gewerke nur aus einer Übersicht des DGB (mit Hinweis, beim Zoll zu prüfen). Die Ideen sind ausdrücklich
+Einschätzungen, keine Marktzahlen.
+
+**Nicht geprüft:** ob die Quellen-Links in einem Jahr noch erreichbar sind; der Tariflohn 2027 (noch nicht verhandelt).
+
 ## Was ich nicht geprüft habe
 
 - **Dein Mac mit deinem Abo.** Die automatischen Tests simulieren Claude Code; der echte Probelauf (Stufe 10) lief in der Entwicklungsumgebung, mit

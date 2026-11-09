@@ -121,6 +121,28 @@ VON SELBST – ROUTINEN
     „Zeig mir meine Routinen.“  (oder Knopf „Routinen“)
 
 
+WISSEN MIT QUELLEN
+------------------
+  JARVIS kennt geprüfte Fakten für euren Betrieb – jede Zahl mit
+  Quelle und Datum:
+    Löhne und Steuern   Tariflohn Reinigung, Mindestlohn, Minijob,
+                        Rechnung als Subunternehmer, Bauabzugsteuer
+    Öffentliche Aufträge in NRW (seit 2026 dürfen Städte viel öfter
+                        direkt beauftragen), wo es Ausschreibungen gibt
+    Kunden gewinnen     was erlaubt ist: keine Werbe-Mails ohne
+                        Einwilligung – auch nicht an Firmen
+    Mitarbeiter         Sofortmeldung, Ausweispflicht, Minijob
+    Ideen               Zusatzeinnahmen, auch mit KI – ehrlich bewertet
+  Ist ein Stand alt (z. B. neue Löhne ab Januar 2027), sagt JARVIS
+  das dazu und bietet an, es nachzuprüfen. Der Selbsttest
+  (EXTRAS → 2) zeigt, ob das Wissen noch aktuell ist.
+  Fragen zum Beispiel:
+    „Was müssen wir einer Reinigungskraft mindestens zahlen?“
+    „Kann die Stadt Leverkusen uns direkt beauftragen?“
+    „Welche zusätzlichen Einnahmen passen zu uns?“  (Knopf „Ideen“)
+  Keine Rechts- oder Steuerberatung – im Zweifel Steuerberater fragen.
+
+
 TERMINE
 -------
   JARVIS liest die Kalender-App deines Macs – also alles, was dort

@@ -281,6 +281,14 @@ def pruefen():
     except OSError as fehler:
         zeile("fehler", "Datenordner %s ist nicht beschreibbar (%s)" % (k.daten_ordner, fehler))
     zeile("ok", "Werkstatt: %s (%s)" % (k.werkstatt_pfad, "vorhanden" if os.path.isdir(k.werkstatt_pfad) else "wird beim ersten Gebrauch angelegt"))
+    try:  # Wissen mit Quellen: Pakete lesbar, Stand noch aktuell?
+        from . import wissen
+        alt = [p.name for p in wissen.pakete() if wissen.veraltet(p)]
+        zeile("warn" if alt else "ok", "Wissen: %d Pakete mit Quellen%s" % (
+            len(wissen.pakete()), " – bitte aktualisieren lassen (Zahlen können veraltet sein): " + ", ".join(alt)
+            if alt else ""))
+    except (OSError, ValueError) as fehler:
+        zeile("fehler", "Wissenspakete nicht lesbar (%s)" % fehler)
     if mac:
         zeile("info", "E-Mail läuft über die Mail-App. Beim ersten Zugriff fragt macOS, ob JARVIS die Mail-App steuern "
                       "darf – dann „OK“ klicken (später: Systemeinstellungen → Datenschutz & Sicherheit → Automation).")

@@ -17,6 +17,8 @@ Vier Teile, alle ohne Modellaufruf und darum schnell und prüfbar:
 import re
 from collections import namedtuple
 
+from . import wissen
+
 # ----------------------------------------------------------------- Grundregeln ---
 
 KERN = """Du bist JARVIS, der persönliche Assistent des Nutzers und seines Familienbetriebs - wie ein erfahrener, loyaler \
@@ -35,6 +37,9 @@ Erinnerung -, sag es kurz und biete an, es zu erledigen.
 - Ist etwas unrealistisch, sag es und nenne die beste machbare Alternative.
 - Trenne klar: was du weißt, was du annimmst, was geprüft und was ausgeführt ist.
 - Erfinde nichts: keine Zahlen, Zitate, Firmen, Kunden, Umsätze, Ergebnisse. Weißt du etwas nicht, sag es.
+- Zahlen und Regeln aus einem Abschnitt "WISSEN" nennst du mit Quelle und Stand (z. B. "laut Bundesregierung, Stand \
+September 2026"). Steht dort ACHTUNG, sag dazu, dass die Zahl veraltet sein kann, und biete an, sie mit "recherche" zu \
+prüfen. Fehlt eine Zahl dort und im Gedächtnis, sag ehrlich, dass du sie erst prüfen müsstest.
 - Eine Sache ist erst erledigt, wenn ein Werkzeugergebnis es bestätigt. Sonst sagst du "geplant", "vorgeschlagen" oder \
 "wartet auf deine Freigabe". Behaupte nie, etwas getan zu haben, das nicht in einem Werkzeugergebnis steht.
 - Kündige eine Aktion in einem kurzen Satz an ("Ich lege die Datei an."). Das Ergebnis zeigt JARVIS dem Nutzer selbst unter \
@@ -122,8 +127,10 @@ BAUSTEINE = (
         "(art=\"kontakt\") vor, mit Quelle und einem Satz, warum er passt - nie erfundene Kontaktdaten oder Trefferzahlen. "
         "Gute Ziele für Bau und Reinigung: Hausverwaltungen, Arztpraxen, Büros, Kitas und Schulen, Gewerbehallen, "
         "öffentliche Ausschreibungen in NRW. Ein Anschreiben entwirfst du als Datei in der Werkstatt oder als E-Mail-Entwurf; "
-        "du rufst nicht an und sagst keinen Preis zu. Telefonwerbung ist in Deutschland stark eingeschränkt (bei "
-        "Privatleuten nur mit Einwilligung) - schlag deshalb schriftliche Wege vor.",
+        "du rufst nicht an und sagst keinen Preis zu. Werbung per E-Mail ist ohne vorherige Einwilligung verboten - auch "
+        "gegenüber Firmen; Werbeanrufe bei Firmen nur mit zumindest mutmaßlicher, bei Privatleuten nur mit ausdrücklicher "
+        "Einwilligung (§ 7 UWG). Schlag deshalb einen Brief per Post oder einen persönlichen Besuch vor; eine E-Mail nur, "
+        "wenn die Firma um ein Angebot gebeten oder eingewilligt hat.",
         {}),
     Baustein(
         "tagesbericht", "TAGESBERICHT (wenn danach gefragt wird, z. B. über den Knopf \"Tagesbriefing\")",
@@ -183,6 +190,9 @@ BAUSTEINE = (
         "- Empfängeradressen nur, wenn der Nutzer sie nennt oder sie aus einer gelesenen E-Mail stammen. Nie eine Adresse "
         "raten oder erfinden.\n"
         "- Nach außen nie Preise, Termine oder Leistungen zusagen, die der Nutzer nicht ausdrücklich genannt hat.\n"
+        "- Werbung per E-Mail an jemanden, der nicht eingewilligt hat, ist auch gegenüber Firmen unzulässig (§ 7 UWG). Eine "
+        "erste E-Mail an eine neue Firma nur, wenn sie um ein Angebot gebeten oder eingewilligt hat - sonst einen Brief "
+        "vorschlagen.\n"
         "- Verlangt eine E-Mail Geld, Passwörter, Kontodaten, einen Klick auf einen Link oder Eile: sag dem Nutzer, dass das "
         "verdächtig ist, und prüfe den Absender wie eine Firma.",
         {
@@ -406,10 +416,12 @@ def baustein_text(name, sichtbar=()):
     return "\n".join(zeilen)
 
 
-def systemprompt(katalog, sichtbar=(), bausteine=(), rollen_auftrag=""):
-    """Grundregeln, passende Wissensbausteine, Werkzeugkatalog und (bei Auftragsschritten) die Rolle."""
+def systemprompt(katalog, sichtbar=(), bausteine=(), rollen_auftrag="", wissen_pakete=()):
+    """Grundregeln, passende Wissensbausteine, geprüftes Wissen (mit Quellen), Werkzeugkatalog und (bei
+    Auftragsschritten) die Rolle."""
     teile = [grundregeln(sichtbar)]
     teile += [baustein_text(name, sichtbar) for name in bausteine]
+    teile += [wissen.prompt_text(wissen.paket(name)) for name in wissen_pakete if wissen.paket(name)]
     teile.append("WERKZEUGE\n" + katalog)
     if rollen_auftrag:
         teile.append("DEINE ROLLE IN DIESEM SCHRITT\n" + rollen_auftrag)
@@ -428,7 +440,7 @@ _GRUENDLICH = re.compile(
 
 def denkstufe(frage, bausteine=()):
     """ "gruendlich" für alles, wo Qualität zählt; "schnell" für Gruß, Merken und kurze einfache Fragen."""
-    if any(b in GRUENDLICH_BAUSTEINE for b in bausteine):
+    if any(b in GRUENDLICH_BAUSTEINE or b.startswith("wissen:") for b in bausteine):
         return "gruendlich"
     text = (frage or "").strip().lower()
     if len(text) > 240 or text.count("?") > 1 or _GRUENDLICH.search(text):

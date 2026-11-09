@@ -20,14 +20,14 @@ ROLLEN = {
     },
     "recherche": {
         "name": "Recherche",
-        "werkzeuge": ("recherche", "dateien_auflisten", "datei_lesen", "datei_schreiben", "merken"),
+        "werkzeuge": ("recherche", "wissen_nachschlagen", "dateien_auflisten", "datei_lesen", "datei_schreiben", "merken"),
         "modell": "arbeit",
         "auftrag": "Du bist der Rechercheur. Du findest öffentlich zugängliche Informationen, belegst sie mit Quellen "
                    "und trennst klar zwischen belegt, vermutet und nicht gefunden. Du änderst nichts außer Notizen in der Werkstatt.",
     },
     "vertrieb": {
         "name": "Vertrieb/Akquise",
-        "werkzeuge": ("recherche", "dateien_auflisten", "datei_lesen", "datei_schreiben", "merken"),
+        "werkzeuge": ("recherche", "wissen_nachschlagen", "dateien_auflisten", "datei_lesen", "datei_schreiben", "merken"),
         "modell": "arbeit",
         "auftrag": "Du bist Vertrieb/Akquise. Du suchst über öffentlich zugängliche Quellen (Ausschreibungsportale, "
                    "Firmenverzeichnisse, Kleinanzeigen) mögliche Kunden und Aufträge, prüfst eine Firma wie bei der "

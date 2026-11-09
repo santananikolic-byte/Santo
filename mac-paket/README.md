@@ -109,6 +109,14 @@ deinem Mac (127.0.0.1), nie ins Internet.
   sich dafür nur das Fachwissen dazu, das zur Frage passt (Preise, E-Mail,
   Firmenprüfung, Akquise, Kundengespräch, Tagesbericht, Dateien und Fotos,
   Präsentationen, Programmieren, Termine, Mac bedienen, Routinen).
+- **Business-Wissen mit Quellen:** Löhne und Steuern (Tariflohn Reinigung, Mindestlohn,
+  Minijob, § 13b, Bauabzugsteuer), öffentliche Aufträge in NRW (seit 2026 dürfen
+  Städte viel öfter direkt beauftragen; wo man Ausschreibungen findet; Präqualifikation),
+  Kunden gewinnen und was dabei erlaubt ist (keine Werbe-Mails ohne Einwilligung, auch
+  nicht an Firmen), Mitarbeiter einstellen (Sofortmeldung, Ausweispflicht) und Ideen für
+  Zusatzeinnahmen, auch mit KI – ehrlich bewertet. Jede Zahl mit Quelle und Stand;
+  ist der Stand alt (z. B. neue Löhne ab 2027), sagt JARVIS das dazu. Neuer Knopf
+  „Ideen für mehr Umsatz“.
 - **Denkt mit:** Am Ende einer Antwort schlägt er EINEN konkreten nächsten Schritt
   vor, den er selbst übernehmen kann („Soll ich …?“) – ein „Ja“ genügt.
 - **Schnell oder gründlich:** Gruß und kurze Fragen beantwortet ein schnelles

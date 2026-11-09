@@ -14,7 +14,7 @@ import re
 import shutil
 import subprocess
 
-from . import gedaechtnis, gehirn, rollen, umgebung
+from . import gedaechtnis, gehirn, rollen, umgebung, wissen
 from .kalender import MacKalender
 from .mac_hand import MacHand
 from .mail import MacMail
@@ -70,11 +70,12 @@ class Agent:
     def denkrahmen(self, rolle="allgemein", frage="", verlauf=""):
         """Systemprompt aus Grundregeln, passenden Wissensbausteinen, Werkzeugen und Rolle (siehe gehirn.py).
 
-        Gibt (Systemprompt, gewählte Bausteine) zurück."""
+        Gibt (Systemprompt, gewählte Bausteine) zurück; Wissenspakete stehen dort als "wissen:<name>"."""
         bausteine = gehirn.bausteine_waehlen(frage, verlauf, rolle)
+        pakete = wissen.waehlen(frage, verlauf, rolle)
         prompt = gehirn.systemprompt(self.register.katalog(rolle), self.sichtbare_werkzeuge(rolle), bausteine,
-                                     rollen.ROLLEN.get(rolle, {}).get("auftrag", ""))
-        return prompt, bausteine
+                                     rollen.ROLLEN.get(rolle, {}).get("auftrag", ""), wissen_pakete=pakete)
+        return prompt, bausteine + ["wissen:" + name for name in pakete]
 
     def system_prompt(self, rolle="allgemein", frage="", verlauf=""):
         return self.denkrahmen(rolle, frage, verlauf)[0]

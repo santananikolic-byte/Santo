@@ -93,7 +93,7 @@
     termin_loeschen: "Termin löschen", termin_wiederherstellen: "Termin wiederherstellen",
     bildschirm_ansehen: "Bildschirm ansehen", mac_klicken: "Klicken", mac_tippen: "Tippen", mac_tasten: "Tasten drücken",
     app_oeffnen: "App öffnen", mac_befehl: "Befehl im Terminal", routinen_anzeigen: "Routinen anzeigen",
-    routine_einstellen: "Routine einstellen" };
+    routine_einstellen: "Routine einstellen", wissen_nachschlagen: "Wissen nachschlagen" };
   var ICONS = {
     jarvis: "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18z M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8z",
     leitstand: "M4 20V11 M10 20V4 M16 20v-6 M21 20H3",
@@ -396,6 +396,7 @@
     { name: "Präsentation", senden: true, text: "Erstell mir eine kurze Firmenpräsentation für Hausverwaltungen (Reinigung und Bau). Frag mich vorher nach den Angaben und Fotos, die du nicht kennst." },
     { name: "Firma prüfen", senden: false, text: "Prüfe diese Firma, bevor wir Zeit investieren (Handelsregister, Geschäftsführer, Impressum, E-Mail-Domain, Bewertungen, Insolvenzen): " },
     { name: "Programm bauen", senden: false, text: "Bau mir ein kleines Programm (läuft per Doppelklick, ohne Installation). Es soll: " },
+    { name: "Ideen für mehr Umsatz", senden: true, text: "Welche zusätzlichen Einnahmen passen zu unserem Betrieb (Bau und Reinigung, auch mit KI)? Nenne die drei realistischsten mit Aufwand, Risiko und erstem Schritt – und ehrlich, was eher nicht passt." },
     { name: "Preise kalkulieren", senden: true, text: "Hilf mir, eine feste Preiskalkulation aufzubauen (Stundensatz, Leistungswerte für Büro-, Treppenhaus- und Gebäudereinigung). Frag mich nacheinander nach dem, was dir fehlt." }
   ];
   function schnellBauen() {
