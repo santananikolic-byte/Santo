@@ -15,6 +15,7 @@ import subprocess
 
 from . import gedaechtnis, gehirn, rollen, umgebung
 from .kalender import MacKalender
+from .mac_hand import MacHand
 from .mail import MacMail
 from .programmierer import Programmierer
 from .freigaben import Berechtigung
@@ -51,6 +52,7 @@ class Agent:
         self.planer = None  # vom Server gesetzt
         self.mail = MacMail()  # E-Mail über die Mail-App des Macs (osascript)
         self.kalender = MacKalender()  # Termine über die Kalender-App des Macs (osascript)
+        self.hand = MacHand(self)  # den Mac bedienen: ansehen, klicken, tippen - jede Aktion nur nach Freigabe
         self.programmierer = Programmierer(self)  # Programmier-Aufträge an Claude Code, im Hintergrund
         provider.beobachter = self._anfrage_erfassen
         if speicher.meta("gesperrt") == "1":
@@ -240,6 +242,12 @@ class Agent:
             bereich = gedaechtnis.bereich_pruefen(self.konfig, bereich or "")
             gespraech = sp.gespraech_anlegen(bereich, titel=text[:60])
         sp.nachricht_hinzufuegen(gespraech, "nutzer", text)
+        entschieden = None
+        kurz = gehirn.kurze_entscheidung(text) if vorhanden else None
+        if kurz:
+            fertig, entschieden = self._kurz_entscheiden(gespraech, bereich, *kurz)
+            if fertig is not None:
+                return fertig
         ctx = Kontext(self, bereich, gespraech=gespraech)
         transkript = self._transkript(gespraech)
         texte, ergebnisse, runden, dauer = [], [], 0, 0
@@ -277,6 +285,7 @@ class Agent:
             "dauer_ms": dauer, "bausteine": bausteine, "denkstufe": denkstufe, "richtigstellung": richtigstellung})
         return 200, {"ok": True, "gespraech": gespraech, "bereich": bereich, "antwort": antwort, "aktionen": kompakt,
                      "freigaben": [e["freigabe_id"] for e in ergebnisse if e["status"] == "freigabe_offen"],
+                     "freigabe_entschieden": entschieden,
                      "modell": letzte_roh.get("modell"), "ausgewichen": letzte_roh.get("ausgewichen"), "dauer_ms": dauer,
                      "bausteine": bausteine, "denkstufe": denkstufe, "richtigstellung": richtigstellung}
 
@@ -302,6 +311,39 @@ class Agent:
         return namen
 
     # ----------------------------------------------------- Freigaben (UI) ---
+
+    def _kurz_entscheiden(self, gespraech, bereich, art, nummer):
+        """Ein kurzes Ja/Nein gilt den Freigaben, die JARVIS in seiner LETZTEN Antwort vorgeschlagen hat - nicht einer
+        älteren (sonst würde ein "Ja" auf eine Rückfrage still etwas Altes freigeben). Genau eine: entscheiden, dann
+        denkt JARVIS weiter (nächster Schritt). Mehrere: nachfragen. Keine: ein ganz normaler Satz an JARVIS.
+        Gibt (fertige Antwort oder None, entschiedene Nummer oder None) zurück."""
+        sp = self.speicher
+        letzte = next((n for n in reversed(sp.nachrichten(gespraech, 30)) if n["rolle"] == "jarvis"), None)
+        vorgeschlagen = [a.get("freigabe_id") for a in ((letzte or {}).get("meta") or {}).get("aktionen") or []
+                         if a.get("status") == "freigabe_offen" and a.get("freigabe_id")]
+        offen = [i for i in vorgeschlagen if (sp.freigabe(i) or {}).get("status") == "offen"]
+        if nummer is not None:
+            offen = [i for i in offen if i == nummer]
+        if not offen:
+            return None, None
+        if len(offen) > 1:
+            liste = "; ".join("#%d %s" % (i, (sp.freigabe(i) or {}).get("werkzeug", "")) for i in offen)
+            text = "Es warten %d Freigaben: %s. Sag zum Beispiel „Ja %d“ für die, die du meinst." % (len(offen), liste, offen[0])
+            # Die Nachfrage trägt die offenen Freigaben weiter - sonst fände das folgende "Ja 12" nichts mehr
+            weiter = [{"werkzeug": (sp.freigabe(i) or {}).get("werkzeug", ""), "kurz": "", "status": "freigabe_offen",
+                       "text": "", "stufe": None, "freigabe_id": i} for i in offen]
+            sp.nachricht_hinzufuegen(gespraech, "jarvis", text, meta={"aktionen": weiter})
+            return (200, {"ok": True, "gespraech": gespraech, "bereich": bereich, "antwort": text, "aktionen": [],
+                          "freigaben": offen, "freigabe_entschieden": None, "bausteine": [], "denkstufe": "",
+                          "richtigstellung": []}), None
+        code, antwort = self.freigabe_beantworten(offen[0], art == "ja")
+        if code != 200:
+            text = "Freigabe #%d: %s" % (offen[0], antwort.get("fehler", "ließ sich nicht entscheiden."))
+            sp.nachricht_hinzufuegen(gespraech, "jarvis", text, meta={"aktionen": []})
+            return (code, {"ok": False, "gespraech": gespraech, "bereich": bereich, "antwort": text, "fehler": text,
+                           "art": "freigabe"}), None
+        self.log.ereignis("freigabe_im_chat", freigabe=offen[0], ja=art == "ja")
+        return None, offen[0]  # JARVIS sieht das Ergebnis als Ereignis und macht weiter
 
     def freigabe_beantworten(self, freigabe_id, ja):
         """Der Nutzer entscheidet. Das Ergebnis wird dem Gespräch als Ereignis hinzugefügt, damit JARVIS es beim nächsten Mal weiß."""

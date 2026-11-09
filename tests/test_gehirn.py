@@ -88,6 +88,17 @@ class BausteinTest(unittest.TestCase):
         ("Der Code für die Haustür ist 4711", set(), {"programmieren"}),
         ("Schreib mir ein Skript für die Anrufe bei Hausverwaltungen", set(), {"programmieren"}),
         ("Die Baustellenfotos von der Webseite", set(), {"programmieren"}),
+        # Den Mac bedienen
+        ("Öffne Safari und such nach Ausschreibungen", {"mac", "akquise"}, set()),
+        ("Was ist auf meinem Bildschirm?", {"mac"}, set()),
+        ("Mach das am Mac für mich", {"mac"}, set()),
+        ("Klick auf Senden", {"mac"}, set()),
+        ("Kannst du da mal auf Speichern klicken?", {"mac"}, set()),
+        ("Bedien die Mail-App für mich", {"mac"}, set()),
+        ("Angebot für die Reinigung der Bildschirme im Büro", set(), {"mac"}),
+        ("Die Bedienung im Restaurant war unfreundlich", set(), {"mac"}),
+        ("Die Kunden klicken nicht auf unsere Anzeige", set(), {"mac"}),
+        ("Öffne die Präsentation", set(), {"mac"}),
         # Termine
         ("Wann habe ich nächste Woche Zeit?", {"termine"}, set()),
         ("Trag mir Dienstag um 10 Uhr die Besichtigung bei Berger ein", {"termine"}, set()),

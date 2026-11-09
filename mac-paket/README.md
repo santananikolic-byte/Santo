@@ -73,6 +73,11 @@ deinem Mac (127.0.0.1), nie ins Internet.
   Löschen kann er nicht, und in Papierkorb oder Spam verschiebt er auch nicht.
   Hat die Mail-App mehrere Konten (privat und Firma), steht in jeder Vorschau,
   von welcher Adresse die E-Mail rausgeht.
+- **Den Mac bedienen:** auf den Bildschirm schauen, Apps öffnen, klicken, tippen,
+  Tasten drücken, Befehle im Terminal – vor **jedem** Schritt erklärt er, was und
+  warum, und wartet auf dein Ja. Ein kurzes „Ja“ im Chat oder per Stimme genügt und
+  gilt genau diesem einen Schritt. Passwörter und Zahlungsdaten tippt er nie.
+  Einmalig nötig: Bedienungshilfen und Bildschirmaufnahme für das Terminal erlauben.
 - **Termine:** liest die Kalender-App des Macs (iCloud vom iPhone ist dabei), zeigt
   den Tag und die Woche, sucht Termine („Wann ist Meier dran?“), findet freie Zeiten
   für Besichtigungen (Arbeitszeit und Anfahrt eingerechnet), trägt Termine ein –

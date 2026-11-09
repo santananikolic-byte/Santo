@@ -241,6 +241,25 @@ den Kunden) nicht. Einladen kann EventKit niemanden – dafür die Bestätigungs
 (auch Serien) stimmen. Reihenfolge für den ersten Versuch: „Was steht diese Woche an?“ fragen, die Nachfrage mit
 „Vollzugriff“ beantworten, prüfen, ob ein bekannter Serientermin dabei ist – erst dann eintragen lassen.
 
+## Stufe 17 – Hände am Mac und das kurze Ja
+
+**Auftrag:** JARVIS soll den Mac bedienen können – voller Zugriff, aber jede Aktion erklärt und erst nach einem
+kurzen Ja.
+
+**Gebaut:** `mac_hand.py` (Bildschirmfoto über `screencapture`, verkleinert mit `sips`; Claude sieht es in einem
+abgeschotteten Lauf nur mit Lesen; Klicken und Tippen über CoreGraphics per `ctypes`, Tastenkürzel über System Events
+mit fester Liste der Zusatztasten; App öffnen; Befehl im Terminal), sechs Werkzeuge mit Pflichtfeld „warum“, das
+kurze Ja im Gespräch, Erlaubnis-Prüfung im Selbsttest.
+
+**Beim Testen gefunden und behoben:** Nach der Nachfrage „Welche der zwei Freigaben?“ fand ein „Ja 12“ nichts mehr –
+die Nachfrage war selbst die letzte Antwort. Sie trägt die offenen Freigaben jetzt weiter.
+
+**Bewusste Grenzen:** Ein Ja gilt nur dem Vorschlag der letzten Antwort (sonst würde ein Ja auf eine Rückfrage still
+etwas Altes freigeben). Positionen nur aus dem letzten Bildschirmfoto, nach jedem Klick neu ansehen. Das iPhone kann
+kein Programm fernsteuern – das lässt Apple nicht zu.
+
+**Nicht geprüft:** alles davon auf einem echten Mac – die Handgriffe, das Foto, die Treffsicherheit der Positionen.
+
 ## Was ich nicht geprüft habe
 
 - **Dein Mac mit deinem Abo.** Die automatischen Tests simulieren Claude Code; der echte Probelauf (Stufe 10) lief in der Entwicklungsumgebung, mit

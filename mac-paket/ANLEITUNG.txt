@@ -36,7 +36,7 @@ JEDEN TAG
 SO SPRICHST DU MIT IHM
 ----------------------
   Knöpfe im Leitstand:
-    Tagesbriefing · Termine · Akquise starten · E-Mails sortieren · Downloads
+    Tagesbriefing · Termine · Akquise starten · E-Mails sortieren · Bildschirm · Downloads
     aufräumen · Fotos sortieren · Präsentation · Firma prüfen
     · Programm bauen · Preise kalkulieren
 
@@ -76,6 +76,28 @@ WAS JARVIS NICHT TUT – mit Absicht
 
   Was er sich merken will, schlägt er vor – du bestätigst.
   Eine Datei überschreiben oder löschen geht nur mit deiner Freigabe.
+
+
+DEN MAC BEDIENEN – MIT DEINEM JA
+-------------------------------
+  JARVIS kann auf deinen Bildschirm schauen, Apps öffnen, klicken,
+  tippen, Tasten drücken und Befehle im Terminal ausführen.
+  Vor JEDEM Schritt sagt er dir, was er machen will und warum.
+  Du antwortest einfach mit „Ja“ oder „Nein“ – im Chat oder per
+  Stimme („Hey Jarvis, ja“). Ein Ja gilt genau für diesen einen Schritt.
+  Passwörter, PINs und Zahlungsdaten tippt er nie – die gibst du selbst ein.
+
+  Einmalig zwei Erlaubnisse für das Terminal geben:
+    Systemeinstellungen → Datenschutz & Sicherheit →
+      „Bedienungshilfen“  → Terminal einschalten   (klicken, tippen)
+      „Bildschirm- und Systemaudioaufnahme“ → Terminal einschalten (ansehen)
+  Danach JARVIS einmal neu starten. Der Selbsttest (EXTRAS → 2)
+  zeigt, ob beides erlaubt ist.
+
+  Beispiele:
+    „Schau dir meinen Bildschirm an.“
+    „Öffne Safari und such Ausschreibungen für Treppenhausreinigung.“
+    „Füll das Formular für mich aus.“  (Schritt für Schritt, jeweils Ja)
 
 
 TERMINE

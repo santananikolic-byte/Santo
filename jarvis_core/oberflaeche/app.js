@@ -86,7 +86,13 @@
   var WERKZEUG_NAMEN = { datei_schreiben: "Datei schreiben", datei_loeschen: "Datei löschen", datei_lesen: "Datei lesen",
     dateien_auflisten: "Dateien auflisten", aufgabe_anlegen: "Aufgabe anlegen", aufgabe_status: "Aufgabe ändern",
     erinnerung_setzen: "Erinnerung setzen", merken: "Merken", recherche: "Internet-Recherche", umgebung_pruefen: "Mac-Umgebung prüfen",
-    auftrag_planen: "Auftrag planen" };
+    auftrag_planen: "Auftrag planen", mail_senden: "E-Mail senden", mail_entwurf: "E-Mail-Entwurf",
+    mail_verschieben: "E-Mails verschieben", ordnen: "Ordner sortieren", dateien_verschieben: "Dateien verschieben",
+    rueckgaengig: "Rückgängig machen", praesentation_erstellen: "Präsentation erstellen", datei_oeffnen: "Datei öffnen",
+    programmieren: "Programmieren", termin_eintragen: "Termin eintragen", termin_aendern: "Termin ändern",
+    termin_loeschen: "Termin löschen", termin_wiederherstellen: "Termin wiederherstellen",
+    bildschirm_ansehen: "Bildschirm ansehen", mac_klicken: "Klicken", mac_tippen: "Tippen", mac_tasten: "Tasten drücken",
+    app_oeffnen: "App öffnen", mac_befehl: "Befehl im Terminal" };
   var ICONS = {
     jarvis: "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18z M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8z",
     leitstand: "M4 20V11 M10 20V4 M16 20v-6 M21 20H3",
@@ -383,6 +389,7 @@
     { name: "Akquise starten", senden: true, text: "Suche über öffentlich zugängliche Quellen (Ausschreibungsportale, Firmenverzeichnisse, Kleinanzeigen) nach aktuellen Aufträgen oder möglichen Kunden für Bau- und Reinigungsarbeiten in meiner Region. Prüfe jeden Treffer kurz und schlage mir die besten als Kontakt vor, mit Quelle." },
     { name: "E-Mails sortieren", senden: true, text: "Sieh in mein Postfach (letzte 7 Tage) und ordne es für mich: Was ist wichtig und muss heute beantwortet werden, was kann warten, was ist Werbung? Zu jeder wichtigen E-Mail ein Satz, was zu tun ist." },
     { name: "Downloads aufräumen", senden: true, text: "Sieh dir meinen Downloads-Ordner an und schlag mir vor, wie wir ihn nach Art sortieren. Zeig mir vorher genau, was wohin kommt." },
+    { name: "Bildschirm", senden: true, text: "Schau dir meinen Bildschirm an und sag mir kurz, was du siehst und wobei du mir helfen könntest." },
     { name: "Fotos sortieren", senden: true, text: "Sieh dir meinen Bilder-Ordner an und schlag mir vor, wie wir die Fotos und Videos nach Aufnahmetag sortieren. Zeig mir vorher genau, was wohin kommt." },
     { name: "Präsentation", senden: true, text: "Erstell mir eine kurze Firmenpräsentation für Hausverwaltungen (Reinigung und Bau). Frag mich vorher nach den Angaben und Fotos, die du nicht kennst." },
     { name: "Firma prüfen", senden: false, text: "Prüfe diese Firma, bevor wir Zeit investieren (Handelsregister, Geschäftsführer, Impressum, E-Mail-Domain, Bewertungen, Insolvenzen): " },
@@ -437,6 +444,7 @@
         h("span", { class: "klein", text: rest > 0 ? "gültig noch " + rest + " Min." : "läuft gleich ab" })),
       f.risiko ? h("p", { class: "risiko", text: f.risiko }) : null,
       h("pre", { class: "vorschau", text: f.vorschau }),
+      h("p", { class: "klein", text: "Oder im Gespräch einfach „Ja“ oder „Nein“ schreiben oder sagen." }),
       h("div", { class: "knopfreihe" }, ja, nein));
   }
   async function entscheiden(id, wert, knoepfe) {

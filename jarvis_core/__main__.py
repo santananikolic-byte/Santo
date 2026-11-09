@@ -286,6 +286,19 @@ def pruefen():
                       "darf – dann „OK“ klicken (später: Systemeinstellungen → Datenschutz & Sicherheit → Automation).")
         zeile("info", "Termine laufen über die Kalender-App. Beim ersten Zugriff fragt macOS nach dem Kalender – dann "
                       "erlauben (später: Systemeinstellungen → Datenschutz & Sicherheit → Kalender → Terminal).")
+        try:  # Mac bedienen: zwei Erlaubnisse für das Terminal
+            from .mac_hand import MacSystem
+            mac_system = MacSystem()
+            bedienen, sehen = mac_system.darf_bedienen(), mac_system.darf_sehen(fragen=False)
+        except (OSError, AttributeError, ValueError):
+            bedienen = sehen = None
+        if bedienen is not None:
+            zeile("ok" if bedienen else "warn", "Mac bedienen (klicken, tippen): %s" % (
+                "erlaubt" if bedienen else "noch nicht erlaubt – Systemeinstellungen → Datenschutz & Sicherheit → "
+                                           "Bedienungshilfen → Terminal einschalten"))
+            zeile("ok" if sehen else "warn", "Bildschirm ansehen: %s" % (
+                "erlaubt" if sehen else "noch nicht erlaubt – Systemeinstellungen → Datenschutz & Sicherheit → "
+                                        "Bildschirm- und Systemaudioaufnahme → Terminal einschalten"))
     if mac and not shutil.which("open"):
         zeile("warn", "„open“ fehlt: den Link öffnest du selbst", "./jarvis.sh link")
     zeile("info", "Spracheingabe („Hey Jarvis“): in Safari erst Systemeinstellungen → Tastatur → Diktat einschalten; Chrome geht ohne. "
