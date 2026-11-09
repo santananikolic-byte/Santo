@@ -30,6 +30,7 @@ if [ -z "${JARVIS_ZIEL:-}" ] && [ -n "$HIER" ] && [ -f "$HIER/jarvis.sh" ] && [ 
 fi
 PYTHON="${JARVIS_PYTHON:-python3}"
 NUR_PRUEFEN="${JARVIS_NUR_PRUEFEN:-0}"
+NEU_GEHOLT=0
 TESTLAUF="${JARVIS_TESTLAUF:-0}"
 
 sage()    { printf "  %s\n" "$1"; }
@@ -105,8 +106,12 @@ if [ "$NUR_PRUEFEN" = "1" ]; then
 fi
 if [ -d "$ZIEL/.git" ]; then
     sage "Ordner gefunden, hole die neueste Fassung …"
+    VORHER="$(git -C "$ZIEL" rev-parse HEAD 2>/dev/null)"
     if git -C "$ZIEL" pull --ff-only --quiet origin "$ZWEIG"; then
         gut "auf dem neuesten Stand"
+        if [ "$VORHER" != "$(git -C "$ZIEL" rev-parse HEAD 2>/dev/null)" ]; then
+            NEU_GEHOLT=1
+        fi
     else
         hinweis "Aktualisieren ging nicht (kein Internet oder eigene Änderungen). Ich nehme die vorhandene Fassung."
     fi
@@ -158,6 +163,10 @@ schritt "6. Alles prüfen und JARVIS starten"
 cd "$ZIEL" || exit 1
 ./jarvis.sh pruefen
 PRUEFUNG=$?
+if [ "$NEU_GEHOLT" = "1" ]; then
+    sage "Neue Fassung geholt - JARVIS startet neu, damit sie gilt."
+    ./jarvis.sh stop >/dev/null 2>&1
+fi
 if ! ./jarvis.sh start; then
     schlimm "JARVIS ist nicht gestartet (Grund siehe oben)."
     sage "Schick mir ein Foto vom Terminal. Dann behebe ich es."
