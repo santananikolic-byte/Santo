@@ -8,6 +8,7 @@ oder als Freigabe vorlegen -> Ergebnisse zurück ins Modell (höchstens
 eine erledigte Sache.
 """
 
+import datetime
 import os
 import re
 import shutil
@@ -311,6 +312,27 @@ class Agent:
         return namen
 
     # ----------------------------------------------------- Freigaben (UI) ---
+
+    def routine_ausfuehren(self, routine, jetzt=None):
+        """Eine Routine abarbeiten: eigenes Gespräch, JARVIS denkt wie sonst (Freigaben warten dort), dann Mitteilung."""
+        sp = self.speicher
+        titel = "%s %s" % (routine["name"], (jetzt or datetime.datetime.now()).strftime("%d.%m."))
+        gespraech = sp.gespraech_anlegen(self.konfig.bereiche[0], titel=titel)
+        try:
+            code, antwort = self.chat(routine["auftrag"], gespraech=gespraech)
+        except Exception as fehler:  # noqa: BLE001 - eine Routine darf JARVIS nie stören
+            self.log.ereignis("routine_fehler", "ERROR", routine=routine["name"], grund=repr(fehler)[:300])
+            return 500, {"ok": False, "fehler": "Interner Fehler"}
+        text = " ".join(str(antwort.get("antwort") or antwort.get("fehler") or "").split())
+        offen = len(antwort.get("freigaben") or [])
+        if offen:
+            text = "%s wartet auf dein Ja. %s" % ("Eine Freigabe" if offen == 1 else "%d Freigaben" % offen, text)
+        sp.audit_schreiben("routine", bereich=self.konfig.bereiche[0],
+                           details={"name": routine["name"], "code": code, "gespraech": gespraech})
+        self.log.ereignis("routine", routine=routine["name"], code=code)
+        self.benachrichtigen("JARVIS - %s" % routine["name"], text[:180],
+                             sprechen=code == 200 and self.konfig.erinnerungen_sprechen)
+        return code, antwort
 
     def _kurz_entscheiden(self, gespraech, bereich, art, nummer):
         """Ein kurzes Ja/Nein gilt den Freigaben, die JARVIS in seiner LETZTEN Antwort vorgeschlagen hat - nicht einer

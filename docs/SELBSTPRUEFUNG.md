@@ -260,6 +260,28 @@ kein Programm fernsteuern – das lässt Apple nicht zu.
 
 **Nicht geprüft:** alles davon auf einem echten Mac – die Handgriffe, das Foto, die Treffsicherheit der Positionen.
 
+## Stufe 18 – Eigeninitiative: Routinen und ein wärmerer Ton
+
+**Auftrag:** JARVIS soll nicht nur „kühl und trocken“ antworten, sondern mitdenken und Dinge von selbst erledigen.
+
+**Gebaut:** Grundregeln mit Persönlichkeit (am Ende ein konkreter nächster Schritt, den JARVIS selbst übernehmen
+kann). `routinen.py` mit zwei Standard-Routinen (Morgenbriefing werktags 7:30, Akquise-Wochenstart montags 8:15), der
+Zeitplan startet sie in einem eigenen Gespräch; zwei Werkzeuge (`routinen_anzeigen`, `routine_einstellen`), ein
+Wissensbaustein „Routinen“, ein Knopf im Leitstand.
+
+**Beim Testen gefunden und behoben:**
+- Die Protokollzeile einer Routine stürzte ab (das Feld `name` war im Protokoll schon belegt). Sie wäre auf dem Mac
+  bei jeder Routine im Hintergrund gescheitert – jetzt `routine`.
+- Die Oberflächenprüfung schlug am Montagvormittag fehl: Der Test-JARVIS hat sein Morgenbriefing gestartet. Alle Tests
+  laufen jetzt ohne Routinen; die Routinen-Tests stellen die Uhrzeit selbst ein.
+
+**Bewusste Grenzen:** Eine Routine läuft je Tag höchstens einmal, auch wenn sie fehlschlägt (kein Dauerfeuer auf dein
+Abo). Startet JARVIS erst mehr als 4 Stunden nach der Uhrzeit, entfällt sie für diesen Tag. Sie läuft nur, solange
+JARVIS läuft. Steht in einem Gespräch Fremdes (E-Mail, Internet), braucht auch das Einstellen einer Routine deine
+Freigabe.
+
+**Nicht geprüft:** die Mitteilung zur Uhrzeit auf einem echten Mac.
+
 ## Was ich nicht geprüft habe
 
 - **Dein Mac mit deinem Abo.** Die automatischen Tests simulieren Claude Code; der echte Probelauf (Stufe 10) lief in der Entwicklungsumgebung, mit

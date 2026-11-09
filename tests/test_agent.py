@@ -38,8 +38,9 @@ class ParsenTest(unittest.TestCase):
 
 class WerkzeugTest(AgentBasis):
     def test_nach_aussen_nur_mail_und_nur_mit_freigabe(self):
-        """Zahlen, Kaufen, Bestellen, Installieren, Veröffentlichen, Anrufen, Überweisen, Shell: gibt es nicht.
-        Das Einzige, was nach außen geht, ist mail_senden - immer Stufe Freigabe und nur im Gespräch."""
+        """Zahlen, Kaufen, Bestellen, Veröffentlichen, Anrufen, Überweisen: gibt es nicht als Werkzeug. Das Einzige,
+        was als Werkzeug nach außen geht, ist mail_senden - immer Stufe Freigabe und nur im Gespräch. Die Hände am
+        Mac (inklusive Terminal) handeln ebenfalls nur nach Freigabe und nur im Gespräch."""
         alle = self.agent.register.alle()
         namen = " ".join(w.name for w in alle)
         for verboten in ("zahl", "kauf", "bestell", "install", "veroeffentl", "anruf", "ueberweis", "shell", "loesch_mail",
@@ -50,6 +51,9 @@ class WerkzeugTest(AgentBasis):
         self.assertEqual(senden[0].stufe, FREIGABE)  # fest, nicht von der Lage abhängig
         self.assertTrue(senden[0].nur_chat)
         self.assertEqual(self.agent.register.get("mail_verschieben").stufe, FREIGABE)
+        for name in ("mac_klicken", "mac_tippen", "mac_tasten", "app_oeffnen", "mac_befehl"):
+            w = self.agent.register.get(name)
+            self.assertEqual((w.stufe, w.nur_chat), (FREIGABE, True), name)
 
     def test_validierung(self):
         faelle = [

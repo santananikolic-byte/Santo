@@ -78,6 +78,13 @@ deinem Mac (127.0.0.1), nie ins Internet.
   warum, und wartet auf dein Ja. Ein kurzes „Ja“ im Chat oder per Stimme genügt und
   gilt genau diesem einen Schritt. Passwörter und Zahlungsdaten tippt er nie.
   Einmalig nötig: Bedienungshilfen und Bildschirmaufnahme für das Terminal erlauben.
+- **Von selbst (Routinen):** werktags um 7:30 ein Morgenbriefing (Termine, neue
+  E-Mails, Offenes und ein bis drei Vorschläge für mehr Aufträge), montags um 8:15
+  ein Akquise-Wochenstart (neue Ausschreibungen in NRW, mit Quelle). JARVIS meldet
+  sich dann mit einer Mitteilung; das Gespräch liegt im Leitstand bereit. Umstellen
+  per Satz: „Stell das Morgenbriefing auf 6:45“, „Prüf jeden Freitag um 14 Uhr die
+  offenen Rechnungen“, „Schalte den Akquise-Wochenstart aus“. Was etwas verändert
+  oder nach außen geht, wartet auch hier auf dein Ja. Läuft nur, solange JARVIS läuft.
 - **Termine:** liest die Kalender-App des Macs (iCloud vom iPhone ist dabei), zeigt
   den Tag und die Woche, sucht Termine („Wann ist Meier dran?“), findet freie Zeiten
   für Besichtigungen (Arbeitszeit und Anfahrt eingerechnet), trägt Termine ein –
@@ -101,7 +108,9 @@ deinem Mac (127.0.0.1), nie ins Internet.
   und Annahmen, Möglichkeiten und Risiko durch, bevor er antwortet. Er holt
   sich dafür nur das Fachwissen dazu, das zur Frage passt (Preise, E-Mail,
   Firmenprüfung, Akquise, Kundengespräch, Tagesbericht, Dateien und Fotos,
-  Präsentationen, Programmieren).
+  Präsentationen, Programmieren, Termine, Mac bedienen, Routinen).
+- **Denkt mit:** Am Ende einer Antwort schlägt er EINEN konkreten nächsten Schritt
+  vor, den er selbst übernehmen kann („Soll ich …?“) – ein „Ja“ genügt.
 - **Schnell oder gründlich:** Gruß und kurze Fragen beantwortet ein schnelles
   Modell, Preise, Kundentexte und Entscheidungen das gründliche
   (Leitstand → System → Modelle).

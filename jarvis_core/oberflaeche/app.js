@@ -92,7 +92,8 @@
     programmieren: "Programmieren", termin_eintragen: "Termin eintragen", termin_aendern: "Termin ändern",
     termin_loeschen: "Termin löschen", termin_wiederherstellen: "Termin wiederherstellen",
     bildschirm_ansehen: "Bildschirm ansehen", mac_klicken: "Klicken", mac_tippen: "Tippen", mac_tasten: "Tasten drücken",
-    app_oeffnen: "App öffnen", mac_befehl: "Befehl im Terminal" };
+    app_oeffnen: "App öffnen", mac_befehl: "Befehl im Terminal", routinen_anzeigen: "Routinen anzeigen",
+    routine_einstellen: "Routine einstellen" };
   var ICONS = {
     jarvis: "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18z M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8z",
     leitstand: "M4 20V11 M10 20V4 M16 20v-6 M21 20H3",
@@ -386,6 +387,7 @@
   var SCHNELL = [
     { name: "Tagesbriefing", senden: true, text: "Gib mir mein Tagesbriefing: Welche Termine habe ich heute und morgen? Was ist offen (Aufgaben, Erinnerungen, Freigaben, Aufträge)? Was sind die drei wichtigsten nächsten Schritte, um mehr Aufträge zu gewinnen? Nutze nur, was du wirklich weißt, und trenne Wissen von Annahmen." },
     { name: "Termine", senden: true, text: "Zeig mir meine Termine für diese Woche und sag mir, wo ich noch Zeit für Besichtigungen habe." },
+    { name: "Routinen", senden: true, text: "Zeig mir meine Routinen (was du von selbst erledigst) und schlag mir eine vor, die mir jede Woche Zeit spart." },
     { name: "Akquise starten", senden: true, text: "Suche über öffentlich zugängliche Quellen (Ausschreibungsportale, Firmenverzeichnisse, Kleinanzeigen) nach aktuellen Aufträgen oder möglichen Kunden für Bau- und Reinigungsarbeiten in meiner Region. Prüfe jeden Treffer kurz und schlage mir die besten als Kontakt vor, mit Quelle." },
     { name: "E-Mails sortieren", senden: true, text: "Sieh in mein Postfach (letzte 7 Tage) und ordne es für mich: Was ist wichtig und muss heute beantwortet werden, was kann warten, was ist Werbung? Zu jeder wichtigen E-Mail ein Satz, was zu tun ist." },
     { name: "Downloads aufräumen", senden: true, text: "Sieh dir meinen Downloads-Ordner an und schlag mir vor, wie wir ihn nach Art sortieren. Zeig mir vorher genau, was wohin kommt." },

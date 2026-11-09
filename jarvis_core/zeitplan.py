@@ -10,7 +10,7 @@ import datetime
 import os
 import threading
 
-from . import zeit
+from . import routinen, zeit
 
 
 class Zeitplan(threading.Thread):
@@ -44,7 +44,27 @@ class Zeitplan(threading.Thread):
                 a.benachrichtigen("Erinnerung", erinnerung["text"], sprechen=a.konfig.erinnerungen_sprechen)
             if sp.geplante_auftraege_faellig(jetzt):
                 self.laeufer.wecken()
+            self.routinen_pruefen()
         self.sicherung_falls_faellig()
+
+    def routinen_pruefen(self, jetzt=None, warten=False):
+        """Startet fällige Routinen (je höchstens einmal am Tag) - jede in einem eigenen Faden, damit der Zeitplan nicht
+        auf das Denken wartet. Gibt die gestarteten Routinen zurück."""
+        a = self.agent
+        if a.gesperrt.is_set():
+            return []
+        jetzt = jetzt or datetime.datetime.now()
+        gestartet = list(routinen.faellige(a.konfig.routinen, jetzt, lambda name: a.speicher.meta("routine:" + name)))
+        faeden = []
+        for r in gestartet:
+            a.speicher.meta_setzen("routine:" + r["name"], jetzt.date().isoformat())  # zuerst merken: nie doppelt
+            faden = threading.Thread(target=a.routine_ausfuehren, args=(r, jetzt), daemon=True, name="jarvis-routine")
+            faden.start()
+            faeden.append(faden)
+        if warten:
+            for faden in faeden:
+                faden.join(120)
+        return gestartet
 
     def sicherung_falls_faellig(self):
         a = self.agent

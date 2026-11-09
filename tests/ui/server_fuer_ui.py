@@ -12,7 +12,7 @@ import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from tests.hilfen import ERSATZ_CLAUDE, ERSATZ_SAY, ausfuehrbar, freier_port  # noqa: E402
+from tests.hilfen import ERSATZ_CLAUDE, ERSATZ_SAY, ausfuehrbar, freier_port, ohne_routinen  # noqa: E402
 
 PLAN = {"titel": "Prüfliste für neue Firmen", "schritte": [
     {"rolle": "dokumentation", "titel": "Prüfliste schreiben", "anweisung": "Schreibe eine kurze Checkliste zur Firmenprüfung.",
@@ -44,6 +44,7 @@ def main():
         "FAKE_STAND": os.path.join(ordner, "stand.json"), "FAKE_PROTOKOLL": os.path.join(ordner, "aufrufe.jsonl"),
     })
     os.chmod(ERSATZ_CLAUDE, 0o755)  # noqa: S103 - Ersatzprogramm muss ausführbar sein
+    ohne_routinen(os.environ["JARVIS_DATEN"])
     os.makedirs(os.path.join(ordner, "werkstatt"), exist_ok=True)
     with open(os.path.join(ordner, "werkstatt", "a.md"), "w", encoding="utf-8") as f:
         f.write("alter Inhalt")

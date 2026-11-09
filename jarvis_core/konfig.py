@@ -53,6 +53,7 @@ STANDARD = {
     # Mac-Ordner, die JARVIS ansehen und (nur nach Freigabe, nur verschieben) ordnen darf. Entfernen = nicht anfassen.
     "verwaltete_ordner": ["downloads", "bilder", "schreibtisch", "dokumente"],
     "arbeitszeit": "07:00-18:00",  # für die Suche nach freien Zeiten
+    "routinen": None,  # None = die Standard-Routinen (Morgenbriefing, Akquise-Wochenstart), siehe routinen.py
     "anfahrt_minuten": 30,  # Abstand zwischen zwei Terminen (Anfahrt), bei der Suche nach freien Zeiten
     # Internetadressen, die das Werkzeug http_abfrage ansprechen darf (leer = keine).
     "api_domains": [],
@@ -228,6 +229,12 @@ def normalisieren(werte, daten_ordner):
     _ganzzahl(w, "skript_timeout", 5, 600)
     _ganzzahl(w, "programmier_minuten", 2, 120)
     _ganzzahl(w, "anfahrt_minuten", 0, 240)
+    from . import routinen  # spät: routinen braucht konfig nicht, aber so bleibt die Reihenfolge der Module frei
+    try:
+        w["routinen"] = routinen.liste_pruefen(copy.deepcopy(routinen.STANDARD) if w.get("routinen") is None
+                                               else w["routinen"])
+    except routinen.RoutinenFehler as fehler:
+        raise KonfigFehler(str(fehler)) from None
     if not re.match(r"^([01]\d|2[0-3]):[0-5]\d-([01]\d|2[0-3]):[0-5]\d$", str(w.get("arbeitszeit", ""))) \
             or w["arbeitszeit"][:5] >= w["arbeitszeit"][6:]:
         raise KonfigFehler("arbeitszeit bitte als HH:MM-HH:MM, Beginn vor Ende (z. B. 07:00-18:00).")

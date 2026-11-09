@@ -100,6 +100,27 @@ DEN MAC BEDIENEN – MIT DEINEM JA
     „Füll das Formular für mich aus.“  (Schritt für Schritt, jeweils Ja)
 
 
+VON SELBST – ROUTINEN
+---------------------
+  JARVIS erledigt manches von allein, solange er läuft:
+    Morgenbriefing      montags bis freitags 7:30
+                        (Termine, neue E-Mails, Offenes, Vorschläge
+                         für mehr Aufträge)
+    Akquise-Wochenstart montags 8:15
+                        (neue Ausschreibungen in NRW, mit Quelle)
+  Er meldet sich mit einer Mitteilung. Im Leitstand liegt das
+  Gespräch bereit – einfach weiterreden, z. B. mit „Ja“.
+  Was etwas verändert oder nach außen geht, wartet auf dein Ja.
+  War der Mac zur Uhrzeit aus, holt er es bis zu 4 Stunden
+  später nach, sonst erst am nächsten Tag.
+
+  Umstellen per Satz:
+    „Stell das Morgenbriefing auf 6:45.“
+    „Prüf jeden Freitag um 14 Uhr die offenen Rechnungen.“
+    „Schalte den Akquise-Wochenstart aus.“
+    „Zeig mir meine Routinen.“  (oder Knopf „Routinen“)
+
+
 TERMINE
 -------
   JARVIS liest die Kalender-App deines Macs – also alles, was dort

@@ -31,7 +31,8 @@ class GrundregelnTest(unittest.TestCase):
 
     def test_senden_nur_erwaehnt_wenn_das_werkzeug_da_ist(self):
         ohne = gehirn.grundregeln(set())
-        self.assertIn("Gesendet, bezahlt, bestellt", ohne)
+        self.assertIn("Gesendet wird nichts", ohne)
+        self.assertIn("auch nicht über den Bildschirm", ohne)  # die Mac-Hände kaufen und unterschreiben nichts
         self.assertNotIn("mail_senden", ohne)
         mit = gehirn.grundregeln({"mail_senden"})
         self.assertIn("mail_senden", mit)
@@ -88,6 +89,11 @@ class BausteinTest(unittest.TestCase):
         ("Der Code für die Haustür ist 4711", set(), {"programmieren"}),
         ("Schreib mir ein Skript für die Anrufe bei Hausverwaltungen", set(), {"programmieren"}),
         ("Die Baustellenfotos von der Webseite", set(), {"programmieren"}),
+        # Routinen
+        ("Stell das Morgenbriefing auf 6:45", {"routinen"}, set()),
+        ("Prüf jeden Freitag die offenen Rechnungen", {"routinen"}, set()),
+        ("Mach das ab jetzt automatisch", {"routinen"}, set()),
+        ("Wir reinigen das Treppenhaus jede Woche montags", {"routinen"}, set()),
         # Den Mac bedienen
         ("Öffne Safari und such nach Ausschreibungen", {"mac", "akquise"}, set()),
         ("Was ist auf meinem Bildschirm?", {"mac"}, set()),

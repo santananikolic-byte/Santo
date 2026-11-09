@@ -31,7 +31,7 @@ from html import unescape
 
 from collections import Counter
 
-from . import kalender, mac_hand, mail, ordnung, praesentation, programmierer, umgebung, zeit
+from . import kalender, mac_hand, mail, ordnung, praesentation, programmierer, routinen, umgebung, zeit
 from .provider import ProviderFehler
 
 FREI, MELDUNG, FREIGABE = 1, 2, 3
@@ -915,6 +915,53 @@ def _termin_wiederherstellen(ctx, p):
     return {"text": "Wiederhergestellt im Kalender „%s“: %s.%s" % (name, e.get("zeile", e["titel"]), hinweis)}
 
 
+# ---------------------------------------------------------------- Routinen ---
+
+def _routinen_anzeigen(ctx, p):
+    liste = ctx.agent.konfig.routinen
+    if not liste:
+        return {"text": "Es gibt keine Routinen."}
+    return {"text": "Routinen (JARVIS meldet sich von selbst; Freigaben warten wie sonst auf dich):\n" +
+                    "\n".join("- " + routinen.beschreibung(r) for r in liste)}
+
+
+def _routine_einstellen(ctx, p):
+    k = ctx.agent.konfig
+    liste = [dict(r) for r in k.routinen]
+    name = " ".join((p.get("routine") or "").split())
+    alt = next((r for r in liste if r["name"].lower() == name.lower()), None)
+    if p.get("loeschen") == "ja":
+        if alt is None:
+            raise WerkzeugFehler("Eine Routine %r gibt es nicht." % name)
+        liste.remove(alt)
+        neu, was = None, "entfernt"
+    else:
+        neu = dict(alt or {"name": name, "aktiv": True, "tage": "mo-fr"})
+        for feld in ("zeit", "tage", "auftrag"):
+            if p.get(feld):
+                neu[feld] = p[feld]
+        if p.get("aktiv"):
+            neu["aktiv"] = p["aktiv"] == "ja"
+        if alt is None and not (p.get("zeit") and p.get("auftrag")):
+            raise WerkzeugFehler("Für eine neue Routine braucht es zeit und auftrag.")
+        try:
+            neu = routinen.pruefen(neu)
+        except routinen.RoutinenFehler as fehler:
+            raise WerkzeugFehler(str(fehler)) from None
+        if alt is None:
+            liste.append(neu)
+            was = "angelegt"
+        else:
+            liste[liste.index(alt)] = neu
+            was = "geändert"
+    try:
+        k.aktualisieren({"routinen": liste})
+    except Exception as fehler:  # noqa: BLE001 - KonfigFehler: der Text sagt, was nicht passt
+        raise WerkzeugFehler(str(fehler)) from None
+    ctx.agent.speicher.audit_schreiben("routine_" + was, bereich=ctx.bereich, details={"name": name})
+    return {"text": "Routine %s: %s" % (was, routinen.beschreibung(neu) if neu else name)}
+
+
 # ---------------------------------------------------------------- Hände am Mac ---
 
 def _hand(aufruf):
@@ -1134,7 +1181,7 @@ class Register:
             Werkzeug("auftrag_planen", "Zerlegt ein größeres Ziel in überprüfbare Schritte. Ergebnis ist nur ein "
                      "Entwurf; der Nutzer startet ihn.", _auftrag_planen, [P("ziel", True, maximal=1000)], nur_chat=True),
         ] + Register._mailwerkzeuge() + Register._ordnungswerkzeuge() + Register._kalenderwerkzeuge() + \
-            Register._handwerkzeuge() + [
+            Register._handwerkzeuge() + Register._routinenwerkzeuge() + [
             Werkzeug("praesentation_erstellen", "Baut eine Präsentation als Datei zum Doppelklicken (Werkstatt/praesentationen; "
                      "Pfeiltasten blättern, F = Vollbild, als PDF druckbar). Text: erste Zeile \"# Titel\", jede Folie "
                      "\"## Folientitel\", Punkte mit \"- \", Bilder mit \"Bild: ordner:pfad | Beschriftung\" (höchstens 2 je "
@@ -1157,6 +1204,21 @@ class Register:
             Werkzeug("datei_oeffnen", "Öffnet eine Datei auf dem Mac in ihrer App (z. B. eine Präsentation aus der Werkstatt "
                      "oder ein PDF aus Downloads). Nie Programme oder Skripte.", _datei_oeffnen,
                      [P("pfad", True, hilfe="z. B. praesentationen/x.html oder downloads:Rechnung.pdf", maximal=300)],
+                     stufe=MELDUNG, nur_chat=True),
+        ]
+
+    @staticmethod
+    def _routinenwerkzeuge():
+        return [
+            Werkzeug("routinen_anzeigen", "Zeigt die Routinen - was JARVIS von selbst erledigt (z. B. Morgenbriefing).",
+                     _routinen_anzeigen, liefert_daten=True),
+            Werkzeug("routine_einstellen", "Legt eine Routine an, ändert sie (Uhrzeit, Tage, an/aus, Auftrag) oder "
+                     "entfernt sie (loeschen=ja). Eine Routine arbeitet wie ein Gespräch: Verändernde Schritte warten auf "
+                     "Freigabe.", _routine_einstellen,
+                     [P("routine", True, hilfe="Name der Routine", maximal=40), P("zeit", hilfe="HH:MM", maximal=5),
+                      P("tage", art="wahl", wahl=tuple(routinen.TAGE)), P("aktiv", art="wahl", wahl=("ja", "nein")),
+                      P("auftrag", hilfe="was JARVIS dann tun soll, in Worten", maximal=1000),
+                      P("loeschen", art="wahl", wahl=("ja", "nein"))],
                      stufe=MELDUNG, nur_chat=True),
         ]
 

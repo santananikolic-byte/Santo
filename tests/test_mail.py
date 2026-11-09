@@ -259,7 +259,7 @@ class MailWerkzeugTest(MailBasis):
         self.konfig.aktualisieren({"deaktivierte_werkzeuge": ["mail_senden"]})
         prompt = self.agent.system_prompt(frage="Schick die E-Mail an Berger ab")
         self.assertNotIn("mail_senden", prompt)
-        self.assertIn("Gesendet, bezahlt, bestellt", prompt)  # Grundregel ohne Mail-Ausnahme
+        self.assertIn("Gesendet wird nichts", prompt)  # Grundregel ohne Mail-Ausnahme
         self.assertIn("mail_entwurf", prompt)
 
 

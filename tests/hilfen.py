@@ -44,6 +44,13 @@ def freier_port():
         return s.getsockname()[1]
 
 
+def ohne_routinen(daten_ordner):
+    """Tests laufen ohne Routinen - sonst startet je nach Uhrzeit (werktags morgens) ein Morgenbriefing mitten im Test."""
+    os.makedirs(daten_ordner, mode=0o700, exist_ok=True)
+    with open(os.path.join(daten_ordner, "config.json"), "w", encoding="utf-8") as f:
+        json.dump({"routinen": []}, f)
+
+
 def ausfuehrbar(pfad, inhalt):
     with open(pfad, "w", encoding="utf-8") as f:
         f.write(inhalt)
@@ -77,6 +84,7 @@ class Umgebung(unittest.TestCase):
             "FAKE_PROTOKOLL": self.aufrufe_datei,
         })
         os.chmod(ERSATZ_CLAUDE, 0o755)  # noqa: S103 - Ersatzprogramm muss ausführbar sein
+        ohne_routinen(os.environ["JARVIS_DATEN"])
         self.drehbuch([])
 
     def tearDown(self):

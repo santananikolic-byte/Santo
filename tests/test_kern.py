@@ -679,7 +679,7 @@ class SkriptTest(Umgebung):
         def einstellen(adresse):
             os.makedirs(os.environ["JARVIS_DATEN"], exist_ok=True)
             with open(os.path.join(os.environ["JARVIS_DATEN"], "config.json"), "w", encoding="utf-8") as f:
-                json.dump({"gehirn": "lokal", "lokales_modell": "testmodell", "ollama_adresse": adresse}, f)
+                json.dump({"gehirn": "lokal", "lokales_modell": "testmodell", "ollama_adresse": adresse, "routinen": []}, f)
 
         einstellen("http://127.0.0.1:%d" % freier_port())  # dort läuft kein Ollama
         ohne = self.skript("pruefen")
