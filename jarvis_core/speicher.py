@@ -162,10 +162,21 @@ CREATE TABLE IF NOT EXISTS audit (
   auftrag_id INTEGER,
   freigabe_id INTEGER
 );
+
+CREATE TABLE IF NOT EXISTS erfahrungen (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  zeit TEXT NOT NULL,
+  agent TEXT NOT NULL,
+  text TEXT NOT NULL,
+  quelle TEXT,
+  auftrag_id INTEGER,
+  aktiv INTEGER NOT NULL DEFAULT 1
+);
+CREATE INDEX IF NOT EXISTS erfahrungen_agent ON erfahrungen (agent, aktiv);
 """
 
 TABELLEN = ("fakten", "aufgaben", "erinnerungen", "gespraeche", "nachrichten", "anfragen",
-            "auftraege", "schritte", "freigaben", "audit")
+            "auftraege", "schritte", "freigaben", "audit", "erfahrungen")
 
 JSON_FELDER = {
     "nachrichten": ("meta",),
@@ -189,6 +200,7 @@ ERLAUBT = {
 MIT_GEAENDERT = ("fakten", "aufgaben", "gespraeche")
 
 MAX_FAKT = 700
+MAX_ERFAHRUNGEN = 30  # je Agent aktiv; ältere werden still abgelegt
 
 
 class Speicher:
@@ -275,6 +287,40 @@ class Speicher:
 
     def meta_loeschen(self, schluessel):
         self._schreiben("DELETE FROM meta WHERE schluessel=?", (schluessel,))
+
+    def meta_alle(self, praefix):
+        """Alle Einträge, deren Schlüssel mit ``praefix`` beginnt: {Rest des Schlüssels: Wert}."""
+        zeilen = self._lesen("SELECT schluessel, wert FROM meta WHERE substr(schluessel, 1, ?) = ?", (len(praefix), praefix))
+        return {z["schluessel"][len(praefix):]: z["wert"] for z in zeilen}
+
+    # ---------------------------------------------------------- Erfahrungen ---
+
+    def erfahrung_anlegen(self, agent, text, quelle="pruefung", auftrag_id=None):
+        """Eine Lehre für einen Agenten. Gleiche Lehre nur einmal; je Agent bleiben die neuesten MAX_ERFAHRUNGEN aktiv."""
+        text = " ".join((text or "").split())[:400]
+        if not text or not agent:
+            return None
+        vorhanden = self._eins("SELECT id FROM erfahrungen WHERE agent=? AND text=? AND aktiv=1", (agent, text))
+        if vorhanden:
+            return vorhanden["id"]
+        neu = self._schreiben("INSERT INTO erfahrungen (zeit, agent, text, quelle, auftrag_id) VALUES (?, ?, ?, ?, ?)",
+                              (zeit.jetzt(), agent, text, quelle, auftrag_id)).lastrowid
+        self._schreiben("UPDATE erfahrungen SET aktiv=0 WHERE agent=? AND aktiv=1 AND id NOT IN "
+                        "(SELECT id FROM erfahrungen WHERE agent=? AND aktiv=1 ORDER BY id DESC LIMIT ?)",
+                        (agent, agent, MAX_ERFAHRUNGEN))
+        return neu
+
+    def erfahrungen(self, agent=None, limit=20):
+        if agent:
+            return self._lesen("SELECT * FROM erfahrungen WHERE agent=? AND aktiv=1 ORDER BY id DESC LIMIT ?", (agent, limit))
+        return self._lesen("SELECT * FROM erfahrungen WHERE aktiv=1 ORDER BY id DESC LIMIT ?", (limit,))
+
+    def erfahrungen_zaehlen(self):
+        return {z["agent"]: z["n"] for z in
+                self._lesen("SELECT agent, COUNT(*) AS n FROM erfahrungen WHERE aktiv=1 GROUP BY agent")}
+
+    def erfahrung_vergessen(self, erfahrung_id):
+        return self._schreiben("UPDATE erfahrungen SET aktiv=0 WHERE id=? AND aktiv=1", (erfahrung_id,)).rowcount > 0
 
     # -------------------------------------------------------------- Fakten ---
 

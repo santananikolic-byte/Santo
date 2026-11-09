@@ -31,7 +31,7 @@ from html import unescape
 
 from collections import Counter
 
-from . import kalender, mac_hand, mail, ordnung, praesentation, programmierer, routinen, umgebung, wissen, zeit
+from . import agenten, kalender, mac_hand, mail, ordnung, praesentation, programmierer, rollen, routinen, umgebung, wissen, zeit
 from .provider import ProviderFehler
 
 FREI, MELDUNG, FREIGABE = 1, 2, 3
@@ -1150,6 +1150,142 @@ def _auftrag_planen(ctx, p):
     return {"text": ergebnis["text"]}
 
 
+# ------------------------------------------------------------ das Team ---
+
+def _auftrag_holen(ctx, nummer):
+    auftrag = ctx.agent.speicher.auftrag(nummer)
+    if not auftrag or auftrag["bereich"] != ctx.bereich:
+        raise WerkzeugFehler("Einen Auftrag #%d gibt es in diesem Bereich nicht." % nummer)
+    return auftrag
+
+
+def _auftrag_starten_vorbereiten(ctx, p):
+    auftrag = _auftrag_holen(ctx, p["nummer"])
+    if auftrag["status"] not in ("entwurf", "unterbrochen", "pausiert"):
+        raise WerkzeugFehler("Auftrag #%d lässt sich im Zustand %r nicht starten." % (p["nummer"], auftrag["status"]))
+    return {}
+
+
+def _auftrag_starten_vorschau(ctx, p):
+    auftrag = _auftrag_holen(ctx, p["nummer"])
+    schritte = ctx.agent.speicher.schritte(auftrag["id"])
+    zeilen = ["%d. %s: %s" % (s["nr"], rollen.ROLLEN.get(s["rolle"], {}).get("name", s["rolle"]), s["titel"])
+              for s in schritte]
+    return ("Auftrag #%d starten: %s\n%s\nDas Team arbeitet die Schritte im Hintergrund nacheinander ab; jeder Schritt "
+            "wird unabhängig geprüft. Verbraucht etwa %d Modellaufrufe aus deinem Abo-Limit. Was nach außen ginge oder "
+            "etwas verändert, wartet wie immer auf deine eigene Freigabe."
+            % (auftrag["id"], auftrag["titel"], "\n".join(zeilen), min(2 * len(schritte), ctx.agent.konfig.max_aufrufe_pro_auftrag)))
+
+
+def _auftrag_starten(ctx, p):
+    laeufer = getattr(ctx.agent, "laeufer", None)
+    if laeufer is None:
+        raise WerkzeugFehler("Der Auftragsläufer läuft nicht - bitte JARVIS neu starten.")
+    _auftrag_holen(ctx, p["nummer"])
+    ok, meldung = laeufer.steuern("starten", p["nummer"])
+    if not ok:
+        raise WerkzeugFehler(meldung)
+    return {"text": "Auftrag #%d gestartet: %s Das Team arbeitet im Hintergrund; ich melde mich, wenn er fertig ist."
+                    % (p["nummer"], meldung)}
+
+
+def _agent_finden(text):
+    text = " ".join((text or "").lower().split())
+    return agenten.agent(text) or next((a for a in agenten.alle() if a.name.lower() == text), None) or \
+        next((a for a in agenten.alle() if text and text in a.name.lower()), None)
+
+
+def _agenten_anzeigen(ctx, p):
+    sp = ctx.agent.speicher
+    if p.get("agent"):
+        a = _agent_finden(p["agent"])
+        if a is None:
+            raise WerkzeugFehler("Einen Fachmann %r gibt es nicht. Die Abteilungen zeigt agenten_anzeigen ohne Angaben."
+                                 % p["agent"])
+        teil = agenten.abteilung(a.abteilung)
+        lehren = sp.erfahrungen(agent=a.id, limit=10)
+        return {"text": "%s (%s, Abteilung %s%s): %s\nAuftrag: %s\nPrüft: %s\nWerkzeuge: %s\nWissen: %s\nErfahrungen: %s" % (
+            a.name, a.id, teil.titel if teil else a.abteilung, ", eigener Agent" if a.eigen else "", a.zweck, a.auftrag,
+            "; ".join(a.pruefen), ", ".join(a.werkzeuge) or "keine", ", ".join(a.wissen) or "keins",
+            "; ".join("[%d] %s" % (e["id"], e["text"]) for e in lehren) or "noch keine")}
+    if p.get("abteilung"):
+        teil = agenten.abteilung(p["abteilung"])
+        mitglieder = [a for a in agenten.alle() if a.abteilung == teil.id]
+        return {"text": "%s – %s\n%s" % (teil.titel, teil.kurz, "\n".join(
+            "- %s (%s)%s: %s" % (a.name, a.id, " – Leitung" if a.id == teil.leitung else "", a.zweck) for a in mitglieder))}
+    return {"text": "Deine Organisation: %d Fachleute in %d Abteilungen (davon %d eigene).\n%s" % (
+        len(agenten.alle()), len(agenten.abteilungen()), len(agenten.eigene()), "\n".join(agenten.uebersicht()))}
+
+
+def _agent_daten(p):
+    return {"name": p["name"], "abteilung": p["abteilung"], "zweck": p["zweck"], "stichworte": p["stichworte"],
+            "werkzeuge": p.get("werkzeuge") or "lesen, schreiben, wissen", "wissen": p.get("wissen") or "",
+            "auftrag": p["auftrag"], "pruefen": p["pruefen"]}
+
+
+def _neuer_agent(p):
+    try:
+        return agenten.eigen_pruefen(_agent_daten(p))
+    except agenten.AgentenFehler as fehler:
+        raise WerkzeugFehler(str(fehler)) from None
+
+
+def _agent_anlegen_vorbereiten(ctx, p):
+    if len(agenten.eigene()) >= agenten.MAX_EIGENE:
+        raise WerkzeugFehler("Es gibt schon %d eigene Agenten - mehr sind nicht vorgesehen." % agenten.MAX_EIGENE)
+    neu = _neuer_agent(p)
+    return {"_kennung": neu.id}
+
+
+def _agent_anlegen_vorschau(ctx, p):
+    neu = _neuer_agent(p)
+    teil = agenten.abteilung(neu.abteilung)
+    return ("Neuer Fachmann für die Abteilung %s: %s (%s)\nZweck: %s\nAuftrag: %s\nPrüft: %s\nWerkzeuge: %s\n"
+            "Wird gefragt bei: %s\nEr bekommt keine neuen Rechte: nichts senden, nichts löschen, nichts bezahlen."
+            % (teil.titel, neu.name, neu.id, neu.zweck, neu.auftrag, "; ".join(neu.pruefen), ", ".join(neu.werkzeuge),
+               ", ".join(neu.stichworte)))
+
+
+def _agent_anlegen(ctx, p):
+    neu = _neuer_agent(p)
+    liste = agenten.eigene() + [neu]
+    agenten.eigene_speichern(ctx.agent.konfig.daten_ordner, liste)
+    rollen.eigene_setzen(liste)
+    ctx.agent.speicher.audit_schreiben("agent_angelegt", bereich=ctx.bereich, details={"id": neu.id, "name": neu.name})
+    return {"text": "Neuer Fachmann im Team: %s (%s), Abteilung %s. Jetzt %d Fachleute."
+                    % (neu.name, neu.id, neu.abteilung, len(agenten.alle()))}
+
+
+def _agent_entfernen_vorbereiten(ctx, p):
+    a = _agent_finden(p["agent"])
+    if a is None or not a.eigen:
+        raise WerkzeugFehler("Entfernen lassen sich nur eigene Agenten, die JARVIS angelegt hat.")
+    return {"_kennung": a.id}
+
+
+def _agent_entfernen_vorschau(ctx, p):
+    a = agenten.agent(p["_kennung"])
+    return "Eigenen Fachmann entfernen: %s (%s). Seine Erfahrungen bleiben gespeichert." % (a.name, a.id) if a else p["_kennung"]
+
+
+def _agent_entfernen(ctx, p):
+    liste = [a for a in agenten.eigene() if a.id != p["_kennung"]]
+    if len(liste) == len(agenten.eigene()):
+        raise WerkzeugFehler("Diesen eigenen Agenten gibt es nicht mehr.")
+    agenten.eigene_speichern(ctx.agent.konfig.daten_ordner, liste)
+    rollen.eigene_setzen(liste)
+    ctx.agent.speicher.audit_schreiben("agent_entfernt", bereich=ctx.bereich, details={"id": p["_kennung"]})
+    return {"text": "Entfernt: %s. Jetzt %d Fachleute." % (p["_kennung"], len(agenten.alle()))}
+
+
+def _erfahrung_merken(ctx, p):
+    a = _agent_finden(p["agent"])
+    if a is None:
+        raise WerkzeugFehler("Einen Fachmann %r gibt es nicht." % p["agent"])
+    nr = ctx.agent.speicher.erfahrung_anlegen(a.id, p["text"], "gespraech")
+    return {"text": "Erfahrung für %s gespeichert (#%d): %s" % (a.name, nr, p["text"])}
+
+
 # ------------------------------------------------------------ Register ---
 
 class Register:
@@ -1197,8 +1333,37 @@ class Register:
                                               maximal=60)], liefert_daten=True),
             Werkzeug("umgebung_pruefen", "Liest harmlose Angaben zum Mac (System, Speicher, Programme) und merkt sie sich.",
                      _umgebung, liefert_daten=True),
-            Werkzeug("auftrag_planen", "Zerlegt ein größeres Ziel in überprüfbare Schritte. Ergebnis ist nur ein "
-                     "Entwurf; der Nutzer startet ihn.", _auftrag_planen, [P("ziel", True, maximal=1000)], nur_chat=True),
+            Werkzeug("auftrag_planen", "Gibt ein größeres Ziel an dein Team: der Planer zerlegt es in überprüfbare Schritte "
+                     "und wählt für jeden den passenden Fachmann. Ergebnis ist ein Entwurf mit Nummer; starten lässt er "
+                     "sich mit auftrag_starten (Freigabe).", _auftrag_planen, [P("ziel", True, maximal=1000)],
+                     nur_chat=True, liefert_daten=True),
+            Werkzeug("auftrag_starten", "Startet einen geplanten Auftrag (Nummer aus auftrag_planen): das Team arbeitet die "
+                     "Schritte im Hintergrund ab, jeder Schritt wird unabhängig geprüft.", _auftrag_starten,
+                     [P("nummer", True, art="zahl", bereich=(1, 10 ** 9))], stufe=FREIGABE, nur_chat=True,
+                     vorbereiten=_auftrag_starten_vorbereiten, vorschau=_auftrag_starten_vorschau,
+                     risiko="Verbraucht Modellaufrufe aus dem Abo-Limit; Aktionen in den Schritten brauchen eigene Freigaben."),
+            Werkzeug("agenten_anzeigen", "Zeigt deine Organisation: ohne Angaben die Abteilungen; mit abteilung deren "
+                     "Fachleute; mit agent (Kennung oder Name) Auftrag, Prüfregeln, Werkzeuge und Erfahrungen.",
+                     _agenten_anzeigen, [P("abteilung", art="wahl", wahl=tuple(a.id for a in agenten.abteilungen())),
+                                         P("agent", maximal=60)], liefert_daten=True),
+            Werkzeug("agent_anlegen", "Stellt einen neuen Fachmann ein, wenn eine wiederkehrende Art Aufgabe von keinem "
+                     "vorhandenen abgedeckt wird (nach Freigabe). Er bekommt nie mehr Rechte als lesen, schreiben in der "
+                     "Werkstatt, Wissen, Recherche, merken, E-Mails und Termine lesen, Aufgaben.", _agent_anlegen,
+                     [P("name", True, maximal=40), P("abteilung", True, art="wahl", wahl=tuple(a.id for a in agenten.abteilungen())),
+                      P("zweck", True, maximal=200), P("stichworte", True, hilfe="Wörter, bei denen er gefragt wird, mit Komma",
+                                                       maximal=400),
+                      P("werkzeuge", hilfe=", ".join(agenten.EIGENE_GRUPPEN), maximal=200),
+                      P("wissen", hilfe=", ".join(p.name for p in wissen.pakete()), maximal=100),
+                      P("pruefen", True, hilfe="Prüfpunkte, mit ; getrennt", maximal=600)],
+                     koerper="auftrag", koerper_maximal=1200, stufe=FREIGABE, nur_chat=True,
+                     vorbereiten=_agent_anlegen_vorbereiten, vorschau=_agent_anlegen_vorschau,
+                     risiko="Ein neuer Fachmann wird bei passenden Fragen gefragt und kann in Aufträgen eingesetzt werden."),
+            Werkzeug("agent_entfernen", "Entfernt einen eigenen Fachmann wieder (nach Freigabe).", _agent_entfernen,
+                     [P("agent", True, maximal=60)], stufe=FREIGABE, nur_chat=True, vorbereiten=_agent_entfernen_vorbereiten,
+                     vorschau=_agent_entfernen_vorschau),
+            Werkzeug("erfahrung_merken", "Hält eine Lehre für einen Fachmann fest (z. B. nach einer Korrektur des Nutzers: "
+                     "\"Treppenhäuser rechnen wir pro Etage\"). Er bekommt sie bei seinen nächsten Einsätzen.",
+                     _erfahrung_merken, [P("agent", True, maximal=60), P("text", True, maximal=400)], stufe=MELDUNG),
         ] + Register._mailwerkzeuge() + Register._ordnungswerkzeuge() + Register._kalenderwerkzeuge() + \
             Register._handwerkzeuge() + Register._routinenwerkzeuge() + [
             Werkzeug("praesentation_erstellen", "Baut eine Präsentation als Datei zum Doppelklicken (Werkstatt/praesentationen; "
@@ -1459,8 +1624,10 @@ class Register:
         if w.vorbereiten:
             try:
                 params.update(w.vorbereiten(ctx, params))
+            except WerkzeugFehler:
+                raise
             except (ordnung.OrdnungFehler, programmierer.ProgrammierFehler, kalender.KalenderFehler,
-                    mac_hand.HandFehler) as fehler:
+                    mac_hand.HandFehler, agenten.AgentenFehler) as fehler:
                 raise WerkzeugFehler(str(fehler)) from None
             except Exception as fehler:  # noqa: BLE001 - nie ein Absturz (HTTP 500) statt einer verständlichen Meldung
                 ctx.agent.log.ereignis("vorbereiten_fehler", "ERROR", werkzeug=w.name, grund=repr(fehler)[:300])

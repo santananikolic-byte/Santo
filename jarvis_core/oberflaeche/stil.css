@@ -264,6 +264,16 @@ svg.diagramm { display: block; width: 100%; max-width: 100%; height: auto; overf
 .agent .name { font-weight: 600; min-width: 108px; }
 .agent .info { color: var(--leise); font-size: 12.5px; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .agent.lang .info { white-space: normal; overflow: visible; word-break: break-word; }
+details.abteilung { border-top: 1px solid rgba(255, 255, 255, 0.06); padding: 6px 0; }
+details.abteilung > summary { display: flex; align-items: center; gap: 10px; cursor: pointer; list-style: none; padding: 4px 0; }
+details.abteilung > summary::-webkit-details-marker { display: none; }
+details.abteilung > summary::before { content: "▸"; color: var(--leise); width: 12px; }
+details.abteilung[open] > summary::before { content: "▾"; }
+details.abteilung > summary .name { font-weight: 600; flex: 1; min-width: 0; }
+details.abteilung > summary .info { color: var(--leise); font-size: 12.5px; }
+details.abteilung .agent { padding-left: 22px; }
+details.abteilung .agent .name { min-width: 150px; max-width: 46%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.meta .berater { color: var(--leise); }
 .agent.lang .name { min-width: 96px; align-self: flex-start; }
 .log { font: 12px/1.7 var(--mono); max-height: 330px; overflow: auto; }
 .log div { display: flex; gap: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

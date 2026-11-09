@@ -266,7 +266,8 @@ class Laeufer(threading.Thread):
     def _schritt(self, auftrag, s, ergebnisse, extern, gesamt):
         a = self.agent
         sp = a.speicher
-        kritik = ""
+        kritik, erste_kritik = "", ""
+        a.einsatz_merken(s["rolle"], "auftrag")
         for versuch in range(1, a.konfig.max_versuche + 1):
             self._kontrollpunkt(auftrag["id"], pausieren=False)
             start = time.time()
@@ -284,10 +285,21 @@ class Laeufer(threading.Thread):
             sp.schritt_setzen(s["id"], ergebnis=text[:20000], pruefung=pruefung, extern=int(extern or extern_neu))
             if pruefung["ok"]:
                 sp.schritt_setzen(s["id"], status="fertig", beendet=zeit.jetzt(), dauer_ms=int((time.time() - start) * 1000))
+                if erste_kritik:  # der Prüfer hat etwas bemängelt, der nächste Versuch hat es behoben: daraus lernen
+                    self._lernen(auftrag, s, "Bei „%s“ bemängelte der Prüfer: %s Im nächsten Versuch behoben - künftig "
+                                             "von Anfang an beachten." % (s["titel"], erste_kritik))
                 return True, text, extern_neu
             kritik = pruefung["begruendung"]
+            erste_kritik = erste_kritik or kritik
         sp.schritt_setzen(s["id"], status="fehlgeschlagen", beendet=zeit.jetzt())
+        if erste_kritik:
+            self._lernen(auftrag, s, "Gescheitert bei „%s“: %s" % (s["titel"], erste_kritik))
         return False, "", False
+
+    def _lernen(self, auftrag, s, text):
+        """Kritik des Prüfers wird zur Erfahrung des Fachmanns - er bekommt sie bei seinen nächsten Einsätzen."""
+        nr = self.agent.speicher.erfahrung_anlegen(s["rolle"], text, "pruefung", auftrag["id"])
+        self.agent.log.ereignis("erfahrung", agent=s["rolle"], auftrag=auftrag["id"], nummer=nr)
 
     def _schritt_lauf(self, auftrag, s, ergebnisse, extern, kritik, gesamt):
         a = self.agent

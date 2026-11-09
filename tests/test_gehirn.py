@@ -89,6 +89,10 @@ class BausteinTest(unittest.TestCase):
         ("Der Code für die Haustür ist 4711", set(), {"programmieren"}),
         ("Schreib mir ein Skript für die Anrufe bei Hausverwaltungen", set(), {"programmieren"}),
         ("Die Baustellenfotos von der Webseite", set(), {"programmieren"}),
+        # Das Team
+        ("Setz dein Team auf die Akquise an", {"team"}, set()),
+        ("Welche Agenten hast du?", {"team"}, set()),
+        ("Kümmer dich um alles, ich brauche drei Angebote bis Freitag", {"team"}, set()),
         # Routinen
         ("Stell das Morgenbriefing auf 6:45", {"routinen"}, set()),
         ("Prüf jeden Freitag die offenen Rechnungen", {"routinen"}, set()),
@@ -357,7 +361,11 @@ class GehirnImAgentTest(AgentBasis):
         self.assertEqual((code, antwort["denkstufe"]), (200, "chat"))
         self.assertEqual(self.aufrufe()[-1]["modell"], "opus")
         self.assertIn("PREISE UND ANGEBOTE RECHNEN", self.aufrufe()[-1]["system"])
-        self.assertEqual(antwort["bausteine"], ["preise"])
+        # Bausteine, dann das Wissen mit Quellen, dann die beratenden Fachleute
+        self.assertEqual(antwort["bausteine"], ["preise", "wissen:kalkulation", "agent:kalk_unterhalt",
+                                                "agent:kalkulationsleiter"])
+        self.assertIn("FACHLEUTE FÜR DIESE FRAGE", self.aufrufe()[-1]["system"])
+        self.assertIn("Kalkulator Unterhaltsreinigung (Abteilung Angebote und Kalkulation)", self.aufrufe()[-1]["system"])
 
     def test_denkstufen_abschaltbar(self):
         self.konfig.aktualisieren({"denkstufen": False})

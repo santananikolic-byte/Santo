@@ -12,7 +12,7 @@ Ergebnis ist immer nur ein **Entwurf**: Er läuft erst, wenn der Nutzer ihn
 startet.
 """
 
-from . import gedaechtnis, rollen
+from . import agenten, gedaechtnis, rollen
 from .jsonhilfe import json_finden
 from .provider import ProviderFehler
 from .werkzeuge import WerkzeugFehler, pfad_aufloesen
@@ -67,20 +67,25 @@ class Planer:
     def __init__(self, agent):
         self.agent = agent
 
-    def _rollen_text(self):
-        zeilen = []
-        for name in rollen.auftragsrollen():
-            zeilen.append("- %s: %s" % (name, ", ".join(rollen.ROLLEN[name]["werkzeuge"])))
-        return "\n".join(zeilen)
+    @staticmethod
+    def _rollen_text(ziel=""):
+        """Die Fachleute, die zum Ziel passen (bis zu 12), dazu die Leitung jeder Abteilung - nicht alle 100+,
+        damit der Planer den passenden findet statt im Verzeichnis zu ertrinken."""
+        passend = agenten.waehlen(ziel, anzahl=12)
+        leitungen = [t.leitung for t in agenten.abteilungen()]
+        ids = [i for i in dict.fromkeys(passend + leitungen) if i in rollen.ROLLEN]
+        return agenten.verzeichnis(ids)
 
     def _prompt(self, ziel, bereich, antworten, fehler):
         a = self.agent
         teile = [gedaechtnis.kontext_text(a.speicher, a.konfig, bereich, ziel), "", "[ZIEL]", ziel]
         if antworten:
             teile += ["[ANTWORTEN DES NUTZERS AUF DEINE RÜCKFRAGEN]", antworten]
-        teile += ["", "[VERFÜGBARE ROLLEN UND IHRE WERKZEUGE]", self._rollen_text(), "",
+        teile += ["", "[DEINE FACHLEUTE (Kennung, Name, Abteilung): Zweck. Werkzeuge]", self._rollen_text(ziel), "",
                   "[REGELN]",
                   "- 1 bis %d Schritte. Jeder Schritt wird von GENAU EINER Rolle mit deren Werkzeugen allein erledigt." % a.konfig.max_schritte,
+                  "- \"rolle\" ist die Kennung des passendsten Fachmanns (vor der Klammer). Passt keiner genau, nimm die "
+                  "Leitung der Abteilung. Ein Schritt braucht die Werkzeuge, die er nutzen soll.",
                   "- Es gibt keine Werkzeuge zum Senden, Bezahlen, Bestellen, Installieren oder Ausführen von Programmen. Plane das "
                   "nicht als Schritt; bereite höchstens Entwürfe als Dateien in der Werkstatt vor.",
                   "- \"kriterium\": konkret und prüfbar. \"datei\": optional, Pfad einer Datei in der Werkstatt, die danach existieren "

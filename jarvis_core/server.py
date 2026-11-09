@@ -95,6 +95,7 @@ class JarvisServer:
         self.agent = Agent(konfig, protokoll, self.speicher, self.provider, stimme=self.stimme)
         self.agent.planer = Planer(self.agent)
         self.laeufer = Laeufer(self.agent)
+        self.agent.laeufer = self.laeufer  # damit JARVIS einen geplanten Auftrag nach dem Ja des Nutzers starten kann
         self.zeitplan = Zeitplan(self.agent, self.laeufer)
         self.zugang = Zugang(konfig)
         self.raten = Ratenbegrenzer()

@@ -59,6 +59,8 @@ def lesen(pfad):
     for feld in ("stichworte", "stand", "pruefen_ab"):
         if not kopf.get(feld):
             raise WissenFehler("%s: Angabe %r fehlt." % (name, feld))
+    if "{" in kopf["stichworte"] or "}" in kopf["stichworte"]:
+        raise WissenFehler("%s: Stichworte ohne geschweifte Klammern - das Komma trennt die Stichworte." % name)
     teile = [t.strip() for t in kopf["stichworte"].split(",") if t.strip()]
     try:
         muster = re.compile("|".join(teile))

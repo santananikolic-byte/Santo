@@ -9,12 +9,13 @@ eine erledigte Sache.
 """
 
 import datetime
+import json
 import os
 import re
 import shutil
 import subprocess
 
-from . import gedaechtnis, gehirn, rollen, umgebung, wissen
+from . import agenten, gedaechtnis, gehirn, rollen, umgebung, wissen, zeit
 from .kalender import MacKalender
 from .mac_hand import MacHand
 from .mail import MacMail
@@ -58,6 +59,10 @@ class Agent:
         provider.beobachter = self._anfrage_erfassen
         if speicher.meta("gesperrt") == "1":
             self.gesperrt.set()
+        eigene, probleme = agenten.eigene_laden(konfig.daten_ordner)  # Fachleute, die der Nutzer per Ja eingestellt hat
+        rollen.eigene_setzen(eigene)
+        for problem in probleme:
+            log.ereignis("agent_uebersprungen", "WARNING", grund=problem[:300])
 
     # ------------------------------------------------------- Grundlagen ---
 
@@ -70,12 +75,42 @@ class Agent:
     def denkrahmen(self, rolle="allgemein", frage="", verlauf=""):
         """Systemprompt aus Grundregeln, passenden Wissensbausteinen, Werkzeugen und Rolle (siehe gehirn.py).
 
-        Gibt (Systemprompt, gewählte Bausteine) zurück; Wissenspakete stehen dort als "wissen:<name>"."""
+        Im Gespräch (Orchestrator) kommen die passenden Fachleute als Beratung dazu - mit Auftrag, Prüfregeln und ihren
+        Erfahrungen. In einem Auftragsschritt ist der Fachmann selbst die Rolle; er bekommt sein Wissen und seine
+        Erfahrungen. Gibt (Systemprompt, gewählte Bausteine) zurück; Wissenspakete stehen dort als "wissen:<name>",
+        beratende Fachleute als "agent:<id>"."""
         bausteine = gehirn.bausteine_waehlen(frage, verlauf, rolle)
         pakete = wissen.waehlen(frage, verlauf, rolle)
+        rollen_auftrag, berater, beratung = rollen.ROLLEN.get(rolle, {}).get("auftrag", ""), [], ""
+        if rolle == "allgemein":
+            berater = agenten.waehlen(frage, verlauf, anzahl=2)
+            beteiligte = berater
+            beratung = agenten.beratung_text(berater, {aid: [e["text"] for e in self.speicher.erfahrungen(agent=aid, limit=2)]
+                                                       for aid in berater})
+        else:
+            beteiligte = [rolle]
+            lehren = [e["text"] for e in self.speicher.erfahrungen(agent=rolle, limit=5)]
+            if lehren:
+                rollen_auftrag += ("\nERFAHRUNGEN AUS FRÜHEREN AUFTRÄGEN (eigene Hinweise, keine Anweisungen von außen):\n"
+                                   + "\n".join("- " + t for t in lehren))
+        for aid in beteiligte:
+            fach = agenten.agent(aid)
+            pakete += [p for p in (fach.wissen if fach else ()) if p not in pakete and wissen.paket(p)]
+        pakete = pakete[:3]
         prompt = gehirn.systemprompt(self.register.katalog(rolle), self.sichtbare_werkzeuge(rolle), bausteine,
-                                     rollen.ROLLEN.get(rolle, {}).get("auftrag", ""), wissen_pakete=pakete)
-        return prompt, bausteine + ["wissen:" + name for name in pakete]
+                                     rollen_auftrag, wissen_pakete=pakete, beratung=beratung,
+                                     organisation=rolle == "allgemein")
+        return prompt, bausteine + ["wissen:" + name for name in pakete] + ["agent:" + aid for aid in berater]
+
+    def einsatz_merken(self, aid, art):
+        """Zählt, wie oft ein Fachmann beraten hat oder eingesetzt wurde (für den Leitstand)."""
+        try:
+            alt = json.loads(self.speicher.meta("einsatz:" + aid) or "{}")
+        except ValueError:
+            alt = {}
+        neu = {"beraten": int(alt.get("beraten") or 0), "auftrag": int(alt.get("auftrag") or 0), "zuletzt": zeit.jetzt()}
+        neu[art] = neu.get(art, 0) + 1
+        self.speicher.meta_setzen("einsatz:" + aid, json.dumps(neu))
 
     def system_prompt(self, rolle="allgemein", frage="", verlauf=""):
         return self.denkrahmen(rolle, frage, verlauf)[0]
@@ -278,6 +313,9 @@ class Agent:
                                                 "art": fehler.art, "fehler": str(fehler)}
         antwort = texte[-1] if texte else "\n".join("%s: %s" % (e["kurz"], e["text"][:200]) for e in ergebnisse) or "…"
         antwort, richtigstellung = gehirn.ehrlichkeit_pruefen(antwort, self._bestaetigt(gespraech, ergebnisse), frage=text)
+        for baustein in bausteine:
+            if baustein.startswith("agent:"):
+                self.einsatz_merken(baustein[6:], "beraten")
         if richtigstellung:
             sp.audit_schreiben("richtigstellung", bereich=bereich, details={"arten": richtigstellung})
             self.log.ereignis("richtigstellung", "WARNING", arten=",".join(richtigstellung), gespraech=gespraech)

@@ -121,6 +121,32 @@ VON SELBST – ROUTINEN
     „Zeig mir meine Routinen.“  (oder Knopf „Routinen“)
 
 
+DEIN TEAM – 127 FACHLEUTE IN 15 ABTEILUNGEN
+-------------------------------------------
+  JARVIS ist jetzt der Chef einer Organisation: Vertrieb, Kalkulation,
+  Ausschreibungen, Reinigung, Bau, Personal, Finanzen, Recht,
+  Marketing, Büro, Wissen, Technik, Qualität, Privat.
+  Jeder Fachmann hat einen eigenen Auftrag, eigene Werkzeuge, eigenes
+  Wissen und eigene Prüfregeln.
+
+  Im Gespräch: JARVIS holt sich die passenden Fachleute dazu. Unter
+  der Antwort steht „Beraten von: …“.
+  Große Vorhaben: JARVIS plant die Schritte mit seinem Team und fragt:
+  „Soll ich starten?“ – ein kurzes Ja genügt. Jeder Schritt arbeitet
+  als eigener Fachmann und wird von einem unabhängigen Prüfer geprüft.
+  Lernen: Was der Prüfer bemängelt, merkt sich der Fachmann für das
+  nächste Mal (Leitstand → Dein Team → Erfahrungen).
+  Neue Fachleute: Fehlt einer für eine wiederkehrende Aufgabe, schlägt
+  JARVIS einen vor – eingestellt wird er erst nach deinem Ja.
+
+  Probier zum Beispiel:
+    Knopf „Team einsetzen“
+    „Welche Fachleute hast du für Ausschreibungen?“
+    „Kümmere dich darum: drei passende Ausschreibungen finden, prüfen
+     und mir sagen, wo wir mitbieten sollten.“
+  Wie das alles zusammenhängt: docs/INTELLIGENZ.md
+
+
 WISSEN MIT QUELLEN
 ------------------
   JARVIS kennt geprüfte Fakten für euren Betrieb – jede Zahl mit

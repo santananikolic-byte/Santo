@@ -61,7 +61,8 @@ class PlanerTest(AgentBasis):
         self.assertEqual(aufruf["modell"], "opus")
         self.assertIn("Stundensatz", aufruf["stdin"])  # relevantes Gedächtnis wird vor dem Planen geholt
         self.assertNotIn("Haus bauen", aufruf["stdin"])  # und nur aus dem aktiven Bereich
-        self.assertIn("recherche:", aufruf["stdin"])
+        self.assertIn("- recherche (Recherche, wissen):", aufruf["stdin"])  # Fachleute mit Zweck und Werkzeugen
+        self.assertIn("- kalkulationsleiter (Kalkulationsleiter, kalkulation):", aufruf["stdin"])  # passend zum Ziel
         self.assertEqual(self.sp.audit_liste(art="auftrag_geplant")[0]["auftrag_id"], auftrag["id"])
 
     def test_ungueltiger_plan_wird_einmal_korrigiert(self):

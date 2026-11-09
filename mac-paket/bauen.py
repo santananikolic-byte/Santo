@@ -35,6 +35,7 @@ DATEIEN = [
     ("Preisrechner.html", "Preisrechner.html"),
     ("BRAIN.md", "BRAIN.md"),
     ("docs/STATUS.md", "docs/STATUS.md"),
+    ("docs/INTELLIGENZ.md", "docs/INTELLIGENZ.md"),
 ]
 PROGRAMM = "jarvis_core"
 AUSFUEHRBAR = (".command", ".sh")

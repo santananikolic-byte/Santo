@@ -93,7 +93,9 @@
     termin_loeschen: "Termin löschen", termin_wiederherstellen: "Termin wiederherstellen",
     bildschirm_ansehen: "Bildschirm ansehen", mac_klicken: "Klicken", mac_tippen: "Tippen", mac_tasten: "Tasten drücken",
     app_oeffnen: "App öffnen", mac_befehl: "Befehl im Terminal", routinen_anzeigen: "Routinen anzeigen",
-    routine_einstellen: "Routine einstellen", wissen_nachschlagen: "Wissen nachschlagen" };
+    routine_einstellen: "Routine einstellen", wissen_nachschlagen: "Wissen nachschlagen", auftrag_starten: "Auftrag starten",
+    agenten_anzeigen: "Team anzeigen", agent_anlegen: "Fachmann einstellen", agent_entfernen: "Fachmann entfernen",
+    erfahrung_merken: "Erfahrung merken" };
   var ICONS = {
     jarvis: "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18z M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8z",
     leitstand: "M4 20V11 M10 20V4 M16 20v-6 M21 20H3",
@@ -307,6 +309,10 @@
     if (n.zeit) info.push(h("span", { text: uhr(n.zeit) }));
     if (n.rolle === "jarvis" && meta.modell) info.push(h("span", { text: meta.modell }));
     if (n.rolle === "jarvis" && meta.dauer_ms) info.push(h("span", { text: dauer(meta.dauer_ms) }));
+    var berater = (meta.bausteine || []).filter(function (b) { return b.indexOf("agent:") === 0; }).map(function (b) {
+      var id = b.slice(6); return (S.rollenNamen && S.rollenNamen[id]) || id;
+    });
+    if (n.rolle === "jarvis" && berater.length) info.push(h("span", { class: "berater", text: "Beraten von: " + berater.join(", ") }));
     if (meta.ausgewichen) info.push(h("span", { class: "warn", text: "Hinweis: " + meta.ausgewichen }));
     if (info.length) teile.push(h("div", { class: "meta" }, info));
     return h("div", { class: "nachricht " + n.rolle }, teile);
@@ -385,6 +391,7 @@
     if (r.code === 200) laden().then(pollenPlanen);
   }
   var SCHNELL = [
+    { name: "Team einsetzen", senden: true, text: "Setz dein Team auf mein wichtigstes Ziel an: mehr Aufträge in den nächsten vier Wochen. Plane die Schritte mit den passenden Fachleuten und sag mir, was du starten willst." },
     { name: "Tagesbriefing", senden: true, text: "Gib mir mein Tagesbriefing: Welche Termine habe ich heute und morgen? Was ist offen (Aufgaben, Erinnerungen, Freigaben, Aufträge)? Was sind die drei wichtigsten nächsten Schritte, um mehr Aufträge zu gewinnen? Nutze nur, was du wirklich weißt, und trenne Wissen von Annahmen." },
     { name: "Termine", senden: true, text: "Zeig mir meine Termine für diese Woche und sag mir, wo ich noch Zeit für Besichtigungen habe." },
     { name: "Routinen", senden: true, text: "Zeig mir meine Routinen (was du von selbst erledigst) und schlag mir eine vor, die mir jede Woche Zeit spart." },
@@ -618,15 +625,42 @@
       var orchZustand = d.system.gesperrt ? "gesperrt" : (d.system.beschaeftigt ? "arbeitet" : "bereit");
       k7.appendChild(h("div", { class: "agent" }, h("span", { class: "punkt " + (orchZustand === "arbeitet" ? "warn" : (orchZustand === "bereit" ? "ok" : "fehler")) }),
         h("span", { class: "name", text: "Orchestrator" }), h("span", { class: "info", text: "Modell " + ag.orchestrator.modell + " · " + orchZustand })));
-      ag.rollen.forEach(function (r) {
-        var aktiv = ag.aktiv.filter(function (x) { return x.rolle === r.id; })[0];
-        var zuletzt = ag.zuletzt.filter(function (x) { return x.rolle === r.id; })[0];
-        var info = aktiv ? "arbeitet: " + aktiv.titel + " (Auftrag #" + aktiv.auftrag_id + ")"
-          : (zuletzt ? "zuletzt: " + zuletzt.titel + " – " + (SCHRITT_NAMEN[zuletzt.status] || zuletzt.status) + ", " + vor(zuletzt.beendet) : "bisher nicht gebraucht");
-        k7.appendChild(h("div", { class: "agent" }, h("span", { class: "punkt " + (aktiv ? "warn" : "") }), h("span", { class: "name", text: r.name }),
-          h("span", { class: "info", title: info, text: info })));
+      var eigene = ag.rollen.filter(function (r) { return r.eigen; }).length;
+      k7.appendChild(h("p", { class: "klein organisation", text: ag.rollen.length + " Fachleute in " + ag.abteilungen.length + " Abteilungen" +
+        (eigene ? " (davon " + eigene + " eigene)" : "") + " · " + ag.erfahrungen.length + " Erfahrung(en)" }));
+      var namen = {};
+      ag.rollen.forEach(function (r) { namen[r.id] = r.name; });
+      ag.abteilungen.forEach(function (t) {
+        var mitglieder = ag.rollen.filter(function (r) { return r.abteilung === t.id; });
+        var arbeiten = mitglieder.filter(function (r) { return ag.aktiv.some(function (x) { return x.rolle === r.id; }); }).length;
+        var box = h("details", { class: "abteilung" }, h("summary", {}, h("span", { class: "name", text: t.titel }),
+          h("span", { class: "info", text: mitglieder.length + " Fachleute" + (arbeiten ? " · " + arbeiten + " arbeitet" : "") })));
+        box.appendChild(h("p", { class: "klein", text: t.kurz }));
+        mitglieder.forEach(function (r) {
+          var aktiv = ag.aktiv.filter(function (x) { return x.rolle === r.id; })[0];
+          var zuletzt = ag.zuletzt.filter(function (x) { return x.rolle === r.id; })[0];
+          var e = r.einsatz || {};
+          var info = aktiv ? "arbeitet: " + aktiv.titel + " (Auftrag #" + aktiv.auftrag_id + ")"
+            : (zuletzt ? "zuletzt: " + zuletzt.titel + " – " + (SCHRITT_NAMEN[zuletzt.status] || zuletzt.status) + ", " + vor(zuletzt.beendet)
+              : ((e.beraten || e.auftrag) ? "beraten " + (e.beraten || 0) + "×, in Aufträgen " + (e.auftrag || 0) + "× · " + vor(e.zuletzt) : "bisher nicht gebraucht"));
+          if (r.erfahrungen) info += " · " + r.erfahrungen + " Erfahrung(en)";
+          box.appendChild(h("div", { class: "agent" }, h("span", { class: "punkt " + (aktiv ? "warn" : ((e.beraten || e.auftrag) ? "ok" : "")) }),
+            h("span", { class: "name", title: r.zweck, text: r.name + (r.id === t.leitung ? " · Leitung" : "") + (r.eigen ? " · eigen" : "") }),
+            h("span", { class: "info", title: r.zweck + " – " + info, text: info })));
+        });
+        k7.appendChild(box);
       });
-      k7.appendChild(h("p", { class: "klein", style: "margin-top:8px", text: "Rollen sind keine erfundenen Mitarbeiter: Jeder Schritt eines Auftrags läuft als echter Modellaufruf mit genau einer Rolle und deren Werkzeugen." }));
+      if (ag.erfahrungen.length) {
+        var lern = h("details", { class: "abteilung" }, h("summary", {}, h("span", { class: "name", text: "Erfahrungen – daraus lernt das Team" }),
+          h("span", { class: "info", text: String(ag.erfahrungen.length) })));
+        ag.erfahrungen.forEach(function (e) {
+          lern.appendChild(h("div", { class: "agent lang" }, h("span", { class: "name", text: namen[e.agent] || e.agent }), h("span", { class: "info", text: e.text }),
+            h("button", { type: "button", class: "knopf knopf-klein", text: "vergessen", title: "Diese Erfahrung nicht mehr verwenden",
+              onclick: function () { tun("POST", "/api/erfahrung", { aktion: "vergessen", id: e.id }, "Erfahrung vergessen."); } })));
+        });
+        k7.appendChild(lern);
+      }
+      k7.appendChild(h("p", { class: "klein", style: "margin-top:8px", text: "Im Gespräch beraten die passenden Fachleute JARVIS mit ihrem Wissen und ihren Prüfregeln. In einem Auftrag arbeitet jeder Schritt als eigener Fachmann – eigener Modellaufruf, nur seine Werkzeuge –, danach prüft ein unabhängiger Prüfer. Aus dessen Kritik entstehen Erfahrungen." }));
     }
     zeichnenFreigaben($("#k-freigaben .inhalt"), "l-freigaben", "Keine offenen Freigaben. Alles, was etwas verändern würde, erscheint hier und läuft erst nach deinem Ja.");
     if (neu("l-log", d.log)) {
@@ -738,8 +772,6 @@
   }
   function zeichnenAuftraege() {
     var d = S.daten, box = $("#auftraege-liste");
-    S.rollenNamen = {};
-    d.agenten.rollen.forEach(function (r) { S.rollenNamen[r.id] = r.name; });
     if (tippt(box)) return; // nicht stören, während jemand tippt
     if (!neu("auftraege", [d.auftraege, d.system.max_aufrufe_pro_auftrag, Math.floor(Date.now() / 60000)])) return;
     leeren(box);
@@ -1259,6 +1291,8 @@
     var d = S.daten;
     zeichnenKopf();
     if (!d) { kernSetzen(); return; }
+    S.rollenNamen = {};
+    d.agenten.rollen.forEach(function (r) { S.rollenNamen[r.id] = r.name; });
     zeichnenReiterZeichen();
     var st = d.system.stimme;
     $("#vorlesen").checked = !!st.vorlesen;

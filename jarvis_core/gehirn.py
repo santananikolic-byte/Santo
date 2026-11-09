@@ -17,7 +17,7 @@ Vier Teile, alle ohne Modellaufruf und darum schnell und prüfbar:
 import re
 from collections import namedtuple
 
-from . import wissen
+from . import agenten, wissen
 
 # ----------------------------------------------------------------- Grundregeln ---
 
@@ -273,6 +273,23 @@ BAUSTEINE += (
 )
 BAUSTEINE += (
     Baustein(
+        "team", "DEIN TEAM EINSETZEN (Aufträge, Fachleute, Erfahrungen)",
+        _muster(r"\bteam\b", r"\bagent", r"fachleute", r"fachmann", r"\babteilung", r"auftrag (planen|starten)",
+                r"(ü|ue)bernimm (das|alles)", r"k(ü|ue)mmer dich (um alles|komplett|darum)",
+                r"(komplett|vollst(ä|ae)ndig) (erledigen|(ü|ue)bernehmen)", r"setz .{0,30}(an|ein)\b",
+                r"werkzeug:(auftrag_planen|auftrag_starten|agent_anlegen|agent_entfernen|agenten_anzeigen|erfahrung_merken)"),
+        (),
+        "- Kleine Fragen beantwortest du selbst, mit dem Fachwissen der beratenden Fachleute. Ein Vorhaben mit mehreren "
+        "Schritten (z. B. Ausschreibungen suchen, die besten prüfen, kalkulieren, Angebot entwerfen) gibst du an dein "
+        "Team: \"auftrag_planen\" mit einem klaren Ziel. Zeig dem Nutzer danach kurz, welcher Fachmann was macht und "
+        "wie viele Modellaufrufe es etwa kostet, und schlag den Start mit \"auftrag_starten\" vor.\n"
+        "- Korrigiert der Nutzer, wie etwas gemacht wird (\"Treppenhäuser rechnen wir pro Etage\"), halte es mit "
+        "\"erfahrung_merken\" für den zuständigen Fachmann fest - und dauerhafte Fakten mit \"merken\".\n"
+        "- Einen neuen Fachmann (\"agent_anlegen\") schlägst du nur vor, wenn eine wiederkehrende Art Aufgabe von "
+        "keinem vorhandenen abgedeckt wird - nie, um eine Zahl zu erreichen. Erst \"agenten_anzeigen\", dann "
+        "entscheiden.",
+        {}),
+    Baustein(
         "routinen", "ROUTINEN (was JARVIS von selbst erledigt)",
         _muster(r"routine", r"morgenbriefing", r"briefing (um|jeden|automatisch|morgens)", r"\bjeden (morgen|montag|"
                 r"dienstag|mittwoch|donnerstag|freitag|samstag|sonntag|tag|abend)\b", r"\bvon selbst\b",
@@ -416,12 +433,31 @@ def baustein_text(name, sichtbar=()):
     return "\n".join(zeilen)
 
 
-def systemprompt(katalog, sichtbar=(), bausteine=(), rollen_auftrag="", wissen_pakete=()):
-    """Grundregeln, passende Wissensbausteine, geprüftes Wissen (mit Quellen), Werkzeugkatalog und (bei
-    Auftragsschritten) die Rolle."""
+def organisation_text(sichtbar=()):
+    """Wer JARVIS im Gespräch ist: der Orchestrator einer Organisation von Fachleuten."""
+    abteilungen = agenten.abteilungen()
+    zeilen = ["DEINE ORGANISATION",
+              "- Du bist der Orchestrator einer Organisation mit %d Fachleuten in %d Abteilungen (%s). Stehen unten "
+              "FACHLEUTE, arbeite mit ihrem Fachwissen und prüfe deine Antwort vor dem Absenden gegen ihre Prüfregeln."
+              % (len(agenten.alle()), len(abteilungen), ", ".join(a.titel for a in abteilungen))]
+    if "auftrag_planen" in sichtbar and "auftrag_starten" in sichtbar:
+        zeilen.append("- Größere Vorhaben mit mehreren Schritten (suchen, prüfen, rechnen, schreiben) gibst du an dein Team: "
+                      "erst \"auftrag_planen\", dann schlägst du den Start mit \"auftrag_starten\" vor - ein kurzes Ja "
+                      "genügt. Jeder Schritt läuft als eigener Fachmann mit eigenen Werkzeugen und wird unabhängig geprüft; "
+                      "aus der Kritik des Prüfers lernt der Fachmann.")
+    return "\n".join(zeilen)
+
+
+def systemprompt(katalog, sichtbar=(), bausteine=(), rollen_auftrag="", wissen_pakete=(), beratung="", organisation=False):
+    """Grundregeln, (im Gespräch) die Organisation, passende Wissensbausteine, geprüftes Wissen (mit Quellen), beratende
+    Fachleute, Werkzeugkatalog und (bei Auftragsschritten) die Rolle."""
     teile = [grundregeln(sichtbar)]
+    if organisation:
+        teile.append(organisation_text(sichtbar))
     teile += [baustein_text(name, sichtbar) for name in bausteine]
     teile += [wissen.prompt_text(wissen.paket(name)) for name in wissen_pakete if wissen.paket(name)]
+    if beratung:
+        teile.append(beratung)
     teile.append("WERKZEUGE\n" + katalog)
     if rollen_auftrag:
         teile.append("DEINE ROLLE IN DIESEM SCHRITT\n" + rollen_auftrag)
@@ -431,7 +467,7 @@ def systemprompt(katalog, sichtbar=(), bausteine=(), rollen_auftrag="", wissen_p
 # ----------------------------------------------------------------- Denkstufe ---
 
 GRUENDLICH_BAUSTEINE = frozenset(("firmenpruefung", "akquise", "tagesbericht", "preise", "email", "kundengespraech",
-                                  "ordnung", "praesentation", "programmieren", "termine", "mac", "routinen"))
+                                  "ordnung", "praesentation", "programmieren", "termine", "mac", "routinen", "team"))
 _GRUENDLICH = re.compile(
     r"soll(en|te)? (ich|wir)|lohnt|entscheid|vergleich|vor- ?und nachteil|risiko|strategie|\bplan|warum|wieso|weshalb|"
     r"wie ?viel|rechne|berechne|vertrag|rechtlich|\brecht\b|steuer|investi|finanz|kredit|schulden|mitarbeiter|einstell|"

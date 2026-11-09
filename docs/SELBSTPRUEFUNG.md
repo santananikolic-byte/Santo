@@ -307,6 +307,33 @@ Einschätzungen, keine Marktzahlen.
 
 **Nicht geprüft:** ob die Quellen-Links in einem Jahr noch erreichbar sind; der Tariflohn 2027 (noch nicht verhandelt).
 
+## Stufe 20 – Agenten-Organisation, Denkkreislauf, Lernen
+
+**Auftrag:** JARVIS soll Agenten haben („mindestens 500 Subagenten für alle Belange“) und wie eine überlegte,
+strukturierte Intelligenz arbeiten statt „wie ein Kind“. Vorher gründlich überlegen, was Intelligenz braucht.
+
+**Überlegt (docs/INTELLIGENZ.md):** Das Modell bringt Sprache und Schlussfolgern; es fehlen Gedächtnis, Ziele,
+Arbeitsteilung, Planung, Prüfung, Lernen und das Kennen der eigenen Grenzen. Die Zahl der Agenten macht nicht klüger -
+die Organisation drumherum schon.
+
+**Gebaut:** 127 Fachleute in 15 Abteilungen (`agenten/*.md`), geladen und geprüft von `agenten.py`, eingebunden als
+Rollen. Beratung im Gespräch (Auftrag, Prüfregeln, Erfahrungen der passenden Fachleute im Systemprompt), Planer mit den
+passenden Fachleuten statt einer festen Liste, Start eines Auftrags per Freigabe, Erfahrungsgedächtnis aus der Kritik
+des Prüfers, Einstellen und Entfernen eigener Fachleute nach Ja, Organigramm und „Beraten von“ in der Oberfläche.
+
+**Beim Testen gefunden und behoben:**
+- Ein Komma in einem Muster wie `.{0,25}` zerschnitt die Stichwortliste - der Vergabe-Leiter wurde bei „mitbieten“ nicht
+  gefragt. Geschweifte Klammern sind in Stichworten jetzt verboten (auch in den Wissenspaketen) und werden geprüft.
+- Nomen wie „Hausverwaltung“ oder „Treppenhaus“ zogen Scouts und Kalkulatoren zu jeder Erwähnung hinzu (etwa bei einer
+  Beschwerde). Scouts reagieren jetzt nur auf Such-Sätze, der Treppenhaus-Kalkulator auf Preis-Sätze.
+
+**Bewusste Grenzen:** Keine 500 Kopien - neue Fachleute kommen nach Bedarf und Ja (bis 400 eigene). Höchstens zwei
+Fachleute beraten je Frage, höchstens drei Wissenspakete stehen im Prompt. Aufträge laufen nacheinander (schont das Abo).
+Erfahrungen sind Hinweise, keine Rechte; nach fremdem Inhalt braucht `erfahrung_merken` eine Freigabe.
+
+**Nicht geprüft:** echte Gespräche mit Claude über die Fachleute; ob die Auswahl per Stichwort im Alltag immer den
+Richtigen trifft (sie ist getestet, aber Sprache ist vielfältig).
+
 ## Was ich nicht geprüft habe
 
 - **Dein Mac mit deinem Abo.** Die automatischen Tests simulieren Claude Code; der echte Probelauf (Stufe 10) lief in der Entwicklungsumgebung, mit

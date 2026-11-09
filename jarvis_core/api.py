@@ -9,7 +9,9 @@ Daten löschen - das Modell erreicht sie nicht. Die Handlungen des Nutzers in de
 Oberfläche sind seine ausdrückliche Entscheidung.
 """
 
-from . import gedaechtnis, rollen, werkzeuge, zeit
+import json
+
+from . import agenten, gedaechtnis, rollen, werkzeuge, zeit
 from .konfig import KonfigFehler
 from .protokoll import letzte_eintraege
 from .werkzeuge import WerkzeugFehler
@@ -50,7 +52,7 @@ class Api:
             "/api/fakt": self.fakt, "/api/todo": self.todo, "/api/erinnerung": self.erinnerung, "/api/auftrag": self.auftrag,
             "/api/freigabe": self.freigabe, "/api/werkzeug": self.werkzeug, "/api/notstopp": self.notstopp,
             "/api/entsperren": self.entsperren, "/api/profil/einlesen": self.profil_einlesen, "/api/umgebung": self.umgebung,
-            "/api/sicherung": self.sicherung, "/api/alles-loeschen": self.alles_loeschen,
+            "/api/sicherung": self.sicherung, "/api/alles-loeschen": self.alles_loeschen, "/api/erfahrung": self.erfahrung,
         }.get(pfad)
         return route(daten) if route else None
 
@@ -103,13 +105,42 @@ class Api:
             "agenten": {"orchestrator": {"name": "Orchestrator", "modell": k.modell_fuer("chat"),
                                          "zustand": "gesperrt" if s.agent.gesperrt.is_set()
                                          else ("arbeitet" if s.provider.beschaeftigt() else "bereit")},
-                        "rollen": [{"id": rolle_id, "name": rolle["name"], "modell": k.modell_fuer(rolle["modell"]),
-                                    "werkzeuge": list(rolle["werkzeuge"]) if rolle["werkzeuge"] else []}
-                                   for rolle_id, rolle in rollen.ROLLEN.items() if rolle_id != "allgemein"],
+                        "rollen": self._agentenliste(),
+                        "abteilungen": [{"id": t.id, "titel": t.titel, "kurz": t.kurz, "leitung": t.leitung}
+                                        for t in agenten.abteilungen()],
+                        "erfahrungen": sp.erfahrungen(limit=40),
                         "aktiv": aktiv, "zuletzt": zuletzt},
             "diagramme": {"stunden": sp.anfragen_stunden(24), "antwortzeiten": sp.antwortzeiten(30)},
             "log": letzte_eintraege(s.log.datei, 14),
         }
+
+    def _agentenliste(self):
+        """Alle Fachleute mit Abteilung, Zweck, Modell, Werkzeugen, Einsätzen und Zahl der Erfahrungen."""
+        k, sp = self.s.konfig, self.s.speicher
+        einsaetze, lehren = sp.meta_alle("einsatz:"), sp.erfahrungen_zaehlen()
+        liste = []
+        for rolle_id, rolle in rollen.ROLLEN.items():
+            if rolle_id == "allgemein":
+                continue
+            try:
+                einsatz = json.loads(einsaetze.get(rolle_id) or "{}")
+            except ValueError:
+                einsatz = {}
+            liste.append({"id": rolle_id, "name": rolle["name"], "modell": k.modell_fuer(rolle["modell"]),
+                          "werkzeuge": list(rolle["werkzeuge"]) if rolle["werkzeuge"] else [],
+                          "abteilung": rolle.get("abteilung", ""), "zweck": rolle.get("zweck", ""),
+                          "eigen": bool(rolle.get("eigen")), "einsatz": einsatz, "erfahrungen": lehren.get(rolle_id, 0)})
+        return liste
+
+    def erfahrung(self, daten):
+        """Eine Erfahrung vergessen (sie bleibt im Verlauf, wird aber nicht mehr verwendet)."""
+        erfahrung_id = _int(daten.get("id"))
+        if daten.get("aktion") != "vergessen" or not erfahrung_id:
+            return 400, {"ok": False, "fehler": "aktion=vergessen und id angeben."}
+        if not self.s.speicher.erfahrung_vergessen(erfahrung_id):
+            return 404, {"ok": False, "fehler": "Diese Erfahrung gibt es nicht (mehr)."}
+        self.s.speicher.audit_schreiben("erfahrung_vergessen", details={"id": erfahrung_id})
+        return 200, {"ok": True}
 
     def logs(self, query):
         anzahl = _int(query.get("anzahl", "50"))

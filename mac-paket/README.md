@@ -109,6 +109,15 @@ deinem Mac (127.0.0.1), nie ins Internet.
   sich dafür nur das Fachwissen dazu, das zur Frage passt (Preise, E-Mail,
   Firmenprüfung, Akquise, Kundengespräch, Tagesbericht, Dateien und Fotos,
   Präsentationen, Programmieren, Termine, Mac bedienen, Routinen).
+- **Ein Team von 127 Fachleuten in 15 Abteilungen:** Vertrieb, Kalkulation,
+  Ausschreibungen, Reinigung, Bau, Personal, Finanzen, Recht, Marketing, Büro,
+  Wissen, Technik, Qualität, Privat – jeder mit eigenem Auftrag, eigenen
+  Werkzeugen, eigenem Wissen und eigenen Prüfregeln. Im Gespräch beraten die
+  passenden Fachleute JARVIS („Beraten von: …“ unter der Antwort). Große Vorhaben
+  plant er mit dem Team und startet sie nach deinem kurzen Ja; jeder Schritt läuft
+  als eigener Agent und wird unabhängig geprüft. Aus der Kritik des Prüfers lernt
+  der Fachmann (Erfahrungsgedächtnis, im Leitstand einsehbar und löschbar). Neue
+  Fachleute stellt JARVIS nur nach deinem Ja ein. Erklärung: `docs/INTELLIGENZ.md`.
 - **Business-Wissen mit Quellen:** Löhne und Steuern (Tariflohn Reinigung, Mindestlohn,
   Minijob, § 13b, Bauabzugsteuer), öffentliche Aufträge in NRW (seit 2026 dürfen
   Städte viel öfter direkt beauftragen; wo man Ausschreibungen findet; Präqualifikation),

@@ -434,7 +434,12 @@ class GespraechTest(ServerBasis):
         self.assertEqual(z["system"]["freigabe_minuten"], self.konfig.freigabe_minuten)
         self.assertEqual((z["system"]["lan"], z["system"]["erinnerungen_sprechen"]), (False, True))
         rollen_ids = [r["id"] for r in z["agenten"]["rollen"]]
-        self.assertEqual(rollen_ids, ["recherche", "vertrieb", "architektur", "entwicklung", "sicherheit", "dokumentation"])
+        for alt in ["recherche", "vertrieb", "architektur", "entwicklung", "sicherheit", "dokumentation"]:
+            self.assertIn(alt, rollen_ids)  # die bisherigen Rollen gibt es weiter, jetzt in Abteilungen
+        self.assertGreaterEqual(len(rollen_ids), 120)
+        self.assertEqual(len(z["agenten"]["abteilungen"]), 15)
+        abteilungen = {t["id"] for t in z["agenten"]["abteilungen"]}
+        self.assertTrue(all(r["abteilung"] in abteilungen and r["zweck"] for r in z["agenten"]["rollen"]))
         self.assertTrue(all(r["modell"] for r in z["agenten"]["rollen"]))  # echtes Modell, nicht leer
         self.assertEqual(z["agenten"]["aktiv"], [])  # ohne laufenden Auftrag arbeitet kein Schritt
 
