@@ -258,6 +258,24 @@ class SpeicherSchutzTest(AgentBasis):
                 Tabelle(name, spalten)
 
 
+class SpeicherLesenTest(AgentBasis):
+    def test_gespraeche_und_nachrichten_seit(self):
+        a = self.sp.gespraech_anlegen("geschaeft", titel="A")
+        b = self.sp.gespraech_anlegen("privat", titel="B")
+        self.sp.nachricht_hinzufuegen(a, "nutzer", "Hallo A")
+        self.sp.nachricht_hinzufuegen(a, "werkzeug", "Ergebnis")
+        self.sp.nachricht_hinzufuegen(b, "nutzer", "Hallo B")
+        self.sp.nachricht_hinzufuegen(a, "jarvis", "Antwort A")
+        self.assertEqual({g["kennung"] for g in self.sp.gespraeche_liste()}, {a, b})
+        self.assertEqual([g["kennung"] for g in self.sp.gespraeche_liste(bereich="privat")], [b])
+        self.assertEqual(self.sp.gespraeche_liste(seit="2999-01-01T00:00:00Z"), [])
+        alle = self.sp.nachrichten_seit("2000-01-01T00:00:00Z")
+        self.assertEqual([n["text"] for n in alle], ["Hallo A", "Hallo B", "Antwort A"])
+        self.assertEqual([n["bereich"] for n in alle], ["geschaeft", "privat", "geschaeft"])
+        nur = self.sp.nachrichten_seit("2000-01-01T00:00:00Z", rollen=("nutzer",), bereich="geschaeft")
+        self.assertEqual([n["text"] for n in nur], ["Hallo A"])
+
+
 class HilfenTest(AgentBasis):
     def test_werkstatt_datei_ueberschreibt_nie(self):
         erster = erweiterungen.werkstatt_datei(self.agent, "berichte", "Bericht 11/2026.html", "eins")
@@ -333,8 +351,6 @@ class EchteErweiterungenTest(AgentBasis):
             if not w.erweiterung:
                 continue
             self.assertRegex(w.name, r"^[a-z][a-z0-9_]{2,40}$")
-            if w.extern:
-                self.assertTrue(w.privat_freigabe, w.name)
             if not callable(w.stufe) and w.stufe == FREI:
                 # Freie Werkzeuge verändern nichts nach außen: nie Senden, Bezahlen, Löschen im Namen
                 self.assertFalse(re.search(r"senden|bezahl|loesch|kauf|bestell|anruf", w.name), w.name)

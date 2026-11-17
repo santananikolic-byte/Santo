@@ -563,6 +563,30 @@ class Speicher:
         return self._liste("nachrichten", "SELECT * FROM (SELECT * FROM nachrichten WHERE gespraech=? "
                            "ORDER BY id DESC LIMIT ?) ORDER BY id", (kennung, limit))
 
+    def gespraeche_liste(self, seit=None, bereich=None, limit=50):
+        """Gespräche, zuletzt geänderte zuerst - optional nur die seit ``seit`` (UTC-Text) geänderten und/oder eines
+        Bereichs. Für Erweiterungen (z. B. Episoden), die Gespräche nur lesen."""
+        bedingungen, werte = [], []
+        if seit:
+            bedingungen.append("geaendert >= ?")
+            werte.append(seit)
+        if bereich:
+            bedingungen.append("bereich = ?")
+            werte.append(bereich)
+        wo = " WHERE " + " AND ".join(bedingungen) if bedingungen else ""
+        return self._lesen("SELECT * FROM gespraeche%s ORDER BY geaendert DESC, rowid DESC LIMIT ?" % wo,  # noqa: S608
+                           tuple(werte) + (int(limit),))
+
+    def nachrichten_seit(self, seit, rollen=("nutzer", "jarvis"), bereich=None, limit=500):
+        """Nachrichten aller Gespräche seit ``seit`` (UTC-Text), älteste zuerst, mit dem Bereich ihres Gesprächs.
+        Nur lesen - z. B. für offene Fäden oder die Stimmung im laufenden Gespräch."""
+        rollen = tuple(rollen) or ("nutzer",)
+        sql = ("SELECT n.*, g.bereich AS bereich FROM nachrichten n JOIN gespraeche g ON g.kennung = n.gespraech "  # noqa: S608
+               "WHERE n.zeit >= ? AND n.rolle IN (%s)%s ORDER BY n.id DESC LIMIT ?"
+               % (",".join("?" * len(rollen)), " AND g.bereich = ?" if bereich else ""))  # nur Platzhalter
+        werte = (seit,) + rollen + ((bereich,) if bereich else ()) + (int(limit),)
+        return list(reversed(self._liste("nachrichten", sql, werte)))
+
     # ------------------------------------------------------------- Anfragen ---
 
     def anfrage_erfassen(self, art, modell, dauer_ms, ok, fehler_art=None, tokens_ein=None, tokens_aus=None,

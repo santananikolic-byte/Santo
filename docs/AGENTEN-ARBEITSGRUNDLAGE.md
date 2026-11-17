@@ -126,9 +126,10 @@ def _handler(ctx, p):          # ctx.agent, ctx.bereich, ctx.gespraech, ctx.quel
 | `FREIGABE` | alles nach außen (senden, anrufen, Nachricht, veröffentlichen); Löschen wichtiger Daten; eine **Entscheidung des Nutzers** festhalten (z. B. „Angebot geprüft“, „Rechnung gestellt“, „bezahlt“); Änderungen am Mac außerhalb der Werkstatt |
 
 - `liefert_daten=True`, wenn das Modell das Ergebnis lesen soll (Listen, Suchergebnisse).
-- `extern=True` (+ `privat_freigabe=True`, Stufe ab `MELDUNG`), wenn das Ergebnis **fremden Text** enthält (Web,
-  E-Mail, Dateien von außen). Danach braucht im Gespräch jede weitere Aktion eine Freigabe – so kann fremder Text
-  nichts auslösen.
+- `extern=True`, wenn das Ergebnis **fremden Text** enthält (Web, E-Mail-Betreffe, Dateinamen, Ausschreibungen) –
+  auch wenn er schon in deiner Tabelle liegt. Danach braucht im Gespräch jede weitere Aktion eine Freigabe; so kann
+  fremder Text nichts auslösen. Werkzeuge, die **ins Internet** gehen, zusätzlich `stufe=MELDUNG` und
+  `privat_freigabe=True`.
 - `vorschau=lambda ctx, p: "…"` bei `FREIGABE`: genau zeigen, was passiert.
 - `nur_chat=True`, wenn der Nutzer dabei sein muss (nie in Team-Aufträgen).
 - **Werkzeugnamen** eindeutig und sprechend, mit dem Thema vorn (`rechnung_entwerfen`, nicht `entwerfen`). Kunden-
@@ -185,7 +186,10 @@ Alle Betriebs-Erweiterungen nutzen **dieselben Tabellen** – sonst passt nichts
 
 - **SQL** nur über `Tabelle`-Methoden oder `agent.speicher.sql_lesen/sql_schreiben` mit Platzhaltern `?`. Der
   Speicher lässt nur `erw_*`/`betrieb_*` zu. Kern-Daten (Gedächtnis, Aufgaben, Audit, Nachrichten) nur über die
-  Methoden von `agent.speicher` (`fakten()`, `todos()`, `audit_seit()`, `nachrichten()`, `todo_anlegen()` …).
+  Methoden von `agent.speicher`: `fakten()`, `fakt_hinzufuegen()`, `todos()`, `todo_anlegen()`, `erinnerungen()`,
+  `erinnerung_anlegen()`, `freigaben("offen")`, `auftraege()`, `audit_seit()`, `gespraech()`, `nachrichten(kennung)`,
+  `gespraeche_liste(seit, bereich)`, `nachrichten_seit(seit, rollen, bereich)`, `erfahrungen()`, `tagebuch()`,
+  `meta()`/`meta_setzen()` (eigene Schlüssel nur mit Vorsilbe `erw:<name>:`).
 - **Dateien** nur über `werkstatt_datei()` oder `werkzeuge.pfad_aufloesen(konfig, pfad, schreiben=True)`.
 - **Internet** nur über `jarvis_core.netz` (`holen`, `seite_lesen`, `suchen`; prüft Adressen, keine privaten Netze,
   Größen- und Zeitlimits). Ehrlicher Abruf, kein Umgehen von 401/403/429, sparsam (höchstens alle paar Minuten).

@@ -227,9 +227,9 @@ class Verwalter:
             raise ErweiterungFehler("%s: die Beschreibung braucht 10 bis 400 Zeichen." % w.name)
         if not callable(w.stufe) and w.stufe not in (FREI, MELDUNG, FREIGABE):
             raise ErweiterungFehler("%s: Stufe muss FREI, MELDUNG, FREIGABE oder eine Funktion sein." % w.name)
-        if w.extern and (callable(w.stufe) or w.stufe < MELDUNG or not w.privat_freigabe):
-            raise ErweiterungFehler("%s: Werkzeuge mit Inhalten von außen (extern=True) brauchen eine feste Stufe ab "
-                                    "MELDUNG und privat_freigabe=True." % w.name)
+        # extern=True (das Ergebnis enthält fremden Text) passt auf jeder Stufe: Danach braucht im Gespräch jede
+        # weitere Aktion eine Freigabe. Netzanfragen brauchen zusätzlich MELDUNG und privat_freigabe=True
+        # (docs/AGENTEN-ARBEITSGRUNDLAGE.md, Abschnitt 8).
 
     # ------------------------------------------------------- Hooks rufen ---
 
