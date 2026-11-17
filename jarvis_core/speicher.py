@@ -173,10 +173,18 @@ CREATE TABLE IF NOT EXISTS erfahrungen (
   aktiv INTEGER NOT NULL DEFAULT 1
 );
 CREATE INDEX IF NOT EXISTS erfahrungen_agent ON erfahrungen (agent, aktiv);
+
+CREATE TABLE IF NOT EXISTS tagebuch (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  zeit TEXT NOT NULL,
+  tag TEXT NOT NULL,
+  art TEXT NOT NULL,
+  text TEXT NOT NULL
+);
 """
 
 TABELLEN = ("fakten", "aufgaben", "erinnerungen", "gespraeche", "nachrichten", "anfragen",
-            "auftraege", "schritte", "freigaben", "audit", "erfahrungen")
+            "auftraege", "schritte", "freigaben", "audit", "erfahrungen", "tagebuch")
 
 JSON_FELDER = {
     "nachrichten": ("meta",),
@@ -321,6 +329,35 @@ class Speicher:
 
     def erfahrung_vergessen(self, erfahrung_id):
         return self._schreiben("UPDATE erfahrungen SET aktiv=0 WHERE id=? AND aktiv=1", (erfahrung_id,)).rowcount > 0
+
+    # ------------------------------------------------------------- Tagebuch ---
+
+    def tagebuch_schreiben(self, text, art="gedanke", tag=None):
+        """Ein Eintrag in JARVIS' eigenem Tagebuch. ``art``: "fakten" (vom Code gezählt) oder "gedanke" (von JARVIS)."""
+        text = " ".join((text or "").split())[:600]
+        if not text:
+            return None
+        tag = tag or datetime.date.today().isoformat()
+        return self._schreiben("INSERT INTO tagebuch (zeit, tag, art, text) VALUES (?, ?, ?, ?)",
+                               (zeit.jetzt(), tag, art, text)).lastrowid
+
+    def tagebuch(self, limit=10, art=None):
+        if art:
+            return self._lesen("SELECT * FROM tagebuch WHERE art=? ORDER BY id DESC LIMIT ?", (art, limit))
+        return self._lesen("SELECT * FROM tagebuch ORDER BY id DESC LIMIT ?", (limit,))
+
+    def tagebuch_loeschen(self, eintrag_id):
+        return self._schreiben("DELETE FROM tagebuch WHERE id=?", (eintrag_id,)).rowcount > 0
+
+    def audit_seit(self, seit, limit=500):
+        """Audit-Einträge ab einem Zeitpunkt (UTC-Text), älteste zuerst."""
+        return self._liste("audit", "SELECT * FROM audit WHERE zeit >= ? ORDER BY id LIMIT ?", (seit, limit))
+
+    def nachrichten_zaehlen(self, seit, rolle="nutzer"):
+        return self._eins("SELECT COUNT(*) AS n FROM nachrichten WHERE zeit >= ? AND rolle=?", (seit, rolle))["n"]
+
+    def gespraeche_zaehlen(self):
+        return self._eins("SELECT COUNT(*) AS n FROM gespraeche")["n"]
 
     # -------------------------------------------------------------- Fakten ---
 

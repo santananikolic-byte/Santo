@@ -24,6 +24,40 @@ ERSTER START (einmalig, etwa 10 Minuten)
   5. Der orange Leitstand öffnet sich im Browser. Fertig.
 
 
+UNABHÄNGIG – JARVIS MIT EIGENEM GEHIRN (OHNE CLAUDE)
+---------------------------------------------------
+  JARVIS kann mit einem eigenen Modell direkt auf deinem Mac denken:
+  ohne Claude, ohne Abo, ohne Kosten, ohne Limit. Nichts geht dann
+  an eine fremde Firma.
+
+  Eine Zeile im Terminal (kopieren, mit Cmd+V einfügen, Enter):
+
+    curl -fsSL https://raw.githubusercontent.com/santananikolic-byte/Santo/HEAD/jarvis-einrichten.sh | JARVIS_GEHIRN=eigen bash
+
+  Sie lädt das freie Programm Ollama und das Modell, das zu deinem
+  Mac passt (bis 8 GB Arbeitsspeicher: gemma3:4b mit 3,4 GB; ab
+  16 GB: gemma3:12b mit 8,2 GB). Sie fragt vor jedem Laden.
+
+  Ehrlich dazu:
+    - Ein Modell, das auf einen iMac passt, ist deutlich schwächer und
+      langsamer als Claude. Für Briefing, Termine, E-Mails vorsortieren,
+      Notizen und einfache Fragen reicht es; bei langen Rechnungen und
+      großen Aufträgen macht es mehr Fehler.
+    - Im Internet sucht und liest JARVIS dann selbst.
+    - Programme bauen (über Claude Code) geht dann nicht.
+    - Alle Freigaben gelten genauso: nichts senden, löschen, bezahlen
+      ohne dein Ja.
+
+  Umschalten:  ./jarvis.sh gehirn eigen    oder    ./jarvis.sh gehirn claude
+  (im Ordner Santo; oder Leitstand → System → Gehirn)
+
+  JARVIS ÜBER SICH: Im Leitstand zeigt die Karte „JARVIS über sich“,
+  womit er denkt, was er kann, was er heute getan hat – und sein
+  Tagebuch. Frag ihn: „Wer bist du?“, „Bist du unabhängig?“, „Was hast
+  du heute gemacht?“ Ein Bewusstsein hat er nicht, und er behauptet
+  es auch nicht.
+
+
 JEDEN TAG
 ---------
   Starten:   Doppelklick auf JARVIS.command

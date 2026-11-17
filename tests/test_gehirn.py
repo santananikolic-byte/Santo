@@ -89,6 +89,11 @@ class BausteinTest(unittest.TestCase):
         ("Der Code für die Haustür ist 4711", set(), {"programmieren"}),
         ("Schreib mir ein Skript für die Anrufe bei Hausverwaltungen", set(), {"programmieren"}),
         ("Die Baustellenfotos von der Webseite", set(), {"programmieren"}),
+        # Über sich selbst
+        ("Wer bist du eigentlich?", {"selbst"}, {"preise", "email"}),
+        ("Bist du unabhängig von Claude?", {"selbst"}, set()),
+        ("Hast du ein Bewusstsein?", {"selbst"}, set()),
+        ("Was hast du heute gemacht?", {"selbst"}, set()),
         # Das Team
         ("Setz dein Team auf die Akquise an", {"team"}, set()),
         ("Welche Agenten hast du?", {"team"}, set()),

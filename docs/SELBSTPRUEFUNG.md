@@ -334,6 +334,32 @@ Erfahrungen sind Hinweise, keine Rechte; nach fremdem Inhalt braucht `erfahrung_
 **Nicht geprüft:** echte Gespräche mit Claude über die Fachleute; ob die Auswahl per Stichwort im Alltag immer den
 Richtigen trifft (sie ist getestet, aber Sprache ist vielfältig).
 
+## Stufe 21 – Unabhängig: eigenes Gehirn, eigener Internetzugang, Selbstbild
+
+**Auftrag:** „Ich will eine eigene unabhängige KI“ – eigener Server, eigenes Bewusstsein, nicht an Claude gebunden.
+
+**Ehrlich vorab:** Ein Bewusstsein lässt sich nicht programmieren. Gebaut ist, was sich bauen lässt: ein eigenes Gehirn
+auf dem Mac, ein eigener Internetzugang und ein Selbstbild aus echten Daten.
+
+**Gebaut:** `gehirn = lokal` heißt jetzt wirklich unabhängig (Recherche über `netz.py` statt Claude, Bildschirm über das
+eigene Modell, Programmieren gesperrt). Kontextfenster ausdrücklich gesetzt, kurzer Denkrahmen für kleine Modelle.
+`eigenes_gehirn.py` richtet alles mit einer Zeile ein. `selbst.py`: Selbstbild, Tagebuch, täglicher Rückblick.
+
+**Beim Bauen gefunden und behoben:**
+- Ollama liest ohne ausdrückliche Angabe nur 4096 Tokens und schneidet den Anfang ab – bei JARVIS wären das die Regeln
+  gewesen (der Denkrahmen hatte 6.400 bis 10.800 Tokens). Jetzt wird das Fenster gesetzt und der Denkrahmen passt hinein.
+- Bisher lief die Recherche auch mit eigenem Gehirn über Claude – „unabhängig“ war das nicht.
+- Der Vorgabewert `Host: name:443` der Standardbibliothek bei eigener Verbindung; jetzt der reine Rechnername.
+- Der Selbsttest und `./jarvis.sh provider` verlangten Claude auch bei eigenem Gehirn.
+
+**Bewusste Grenzen:** Nur zwei Modellstufen (8 GB und 16 GB), beide gemma3 mit fester, nachgeprüfter Größe; neuere Modelle
+(gemma4, qwen3.5) haben je nach Rechner andere Größen und sind nicht gewählt. Im Selbstbild stehen nur Werkzeugnamen und
+Zahlen, nie fremde Texte. Die Websuche meldet sich ehrlich als JARVIS und umgeht keine Sperre.
+
+**Nicht geprüft:** ein echtes Modell. In der Entwicklungsumgebung ließ sich keines starten (eine Sicherheitsprüfung hat
+den Start des Modellservers abgelehnt), also laufen alle Tests gegen ein Ersatz-Ollama. Wie gut und wie schnell gemma3
+auf dem iMac arbeitet, zeigt erst der erste Start – die Einrichtung stellt dafür eine Probefrage und zeigt die Sekunden.
+
 ## Was ich nicht geprüft habe
 
 - **Dein Mac mit deinem Abo.** Die automatischen Tests simulieren Claude Code; der echte Probelauf (Stufe 10) lief in der Entwicklungsumgebung, mit

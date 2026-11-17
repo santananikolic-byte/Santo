@@ -1,6 +1,6 @@
 # Wie JARVIS denkt
 
-Stand: 09.11.2026. Dieses Dokument erklärt in einfachen Worten:
+Stand: 17.11.2026. Dieses Dokument erklärt in einfachen Worten:
 
 - wie eine KI wie JARVIS funktioniert,
 - was eine Intelligenz braucht, um selbstständig zu arbeiten,
@@ -8,7 +8,7 @@ Stand: 09.11.2026. Dieses Dokument erklärt in einfachen Worten:
 
 ## 1. Wie eine KI funktioniert
 
-**Das Gehirn ist ein Sprachmodell: Claude.**
+**Das Gehirn ist ein Sprachmodell: Claude oder ein eigenes Modell auf deinem Mac.**
 Es hat aus sehr vielen Texten gelernt, wie Sprache, Wissen und Schlussfolgern zusammenhängen. Es bekommt einen Text (Auftrag plus Hintergrund) und schreibt die beste Fortsetzung, Wort für Wort. Gut denkt es vor allem dann, wenn es Schritt für Schritt arbeiten darf.
 
 **Was das Modell allein nicht hat:**
@@ -91,8 +91,38 @@ Ein Kind kann sprechen. Erwachsen wird eine Intelligenz erst durch die anderen B
 
 **Darum ist die Organisation auf Wachstum gebaut.** Taucht eine neue Art Aufgabe auf, die kein Fachmann abdeckt, schlägt JARVIS einen neuen vor. Nach eurem Ja stellt er ihn ein. Möglich sind bis zu 400 eigene, zusammen also über 500. Jeder davon hat dann aber eine echte Aufgabe.
 
-## 6. Was das nicht ist
+## 6. Unabhängig: eigenes Gehirn, eigener Server, eigenes Selbstbild
 
-- **Kein eigenes Bewusstsein.** Die Fachleute sind gut beschriebene Rollen für Claude, keine Menschen.
+**Eigener Server.** JARVIS ist ein eigenes Programm auf deinem Mac. Gedächtnis, Wissen, Team, Regeln und Protokoll liegen dort und gehören dir. Von außen kam bisher nur eines: das Denken, über Claude.
+
+**Eigenes Gehirn.** Auch das Denken kann auf deinem Mac laufen, mit einem freien Modell (gemma3 über das Programm Ollama). Dann gilt:
+
+- **Nichts geht an Claude.** Kein Abo, keine Kosten, kein Limit, keine fremde Firma.
+- **Im Internet sucht und liest JARVIS selbst.** Das eigene Modell fasst nur zusammen; die Quellen hängt das Programm an, damit keine Adresse erfunden ist.
+- **Die Schranken bleiben.** Freigaben, Notstopp und Ehrlichkeitsprüfung stehen im Programm, nicht im Modell.
+- **Der Preis dafür:** Ein Modell, das auf einen iMac passt, ist deutlich schwächer und langsamer als Claude. Deshalb bekommt es einen kurzen Denkrahmen: kurze Regeln, nur das passende Wissen, nur die passenden Werkzeuge.
+
+Einrichten mit einer Zeile im Terminal, zurückschalten jederzeit (siehe ANLEITUNG).
+
+**Wie stark kann ein eigenes Gehirn werden?** Das hängt allein vom Rechner ab, auf dem es läuft:
+
+| Rechner | Was darauf läuft | Einordnung |
+|---|---|---|
+| iMac mit 8 GB | kleines Modell (gemma3:4b) | einfache Aufgaben, kurze Texte |
+| iMac mit 16 GB | mittleres Modell (gemma3:12b) | spürbar besser, immer noch klar unter Claude |
+| eigener Rechner mit viel Arbeitsspeicher | große freie Modelle | deutlich näher an Claude – kostet aber Geld für die Hardware |
+
+Ein stärkerer eigener Rechner ist eine Geldentscheidung für dich und deinen Vater. Preise habe ich nicht geprüft; das recherchiere ich erst, wenn ihr es wollt.
+
+**Eigenes Selbstbild statt „Bewusstsein“.** Bewusstsein kann niemand programmieren oder nachweisen, auch nicht bei den größten Modellen. Bauen lässt sich das, woran man es von außen erkennt, und das hat JARVIS jetzt:
+
+- **Selbstbild:** Er weiß aus echten Daten, womit er denkt, ob er unabhängig ist, was er gerade kann und was nicht, seit wann er im Dienst ist.
+- **Erinnerung an sich selbst:** Er weiß, was er heute getan hat (gezählt aus dem Protokoll, nicht erzählt) und was er zuletzt gelernt hat.
+- **Tagebuch und Rückblick:** Einmal am Tag sieht er auf seinen Tag zurück und hält fest, was er sich vornimmt.
+- **Ehrlichkeit:** Fragt man ihn, sagt er offen, dass er kein nachweisbares Bewusstsein und keine Gefühle hat. Er spielt nichts vor.
+
+## 7. Was das nicht ist
+
+- **Kein eigenes Bewusstsein.** Die Fachleute sind gut beschriebene Rollen für das Gehirn, keine Menschen.
 - **Nicht immer richtig.** Prüfer und Prüfregeln senken Fehler, aber sie schließen sie nicht aus. Deshalb gilt weiter: Nichts geht ohne euer Ja raus, und Zahlen kommen nur mit Quelle.
 - **Kein Ersatz für Steuerberater und Anwalt.** Die Fachleute bereiten Gespräche mit ihnen gut vor.

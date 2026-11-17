@@ -10,7 +10,7 @@ import datetime
 import os
 import threading
 
-from . import routinen, zeit
+from . import routinen, selbst, zeit
 
 
 class Zeitplan(threading.Thread):
@@ -45,6 +45,7 @@ class Zeitplan(threading.Thread):
             if sp.geplante_auftraege_faellig(jetzt):
                 self.laeufer.wecken()
             self.routinen_pruefen()
+            self.rueckblick_pruefen()
         self.sicherung_falls_faellig()
 
     def routinen_pruefen(self, jetzt=None, warten=False):
@@ -65,6 +66,25 @@ class Zeitplan(threading.Thread):
             for faden in faeden:
                 faden.join(120)
         return gestartet
+
+    def rueckblick_pruefen(self, jetzt=None, warten=False):
+        """Einmal am Tag (nur wenn etwas los war): Die Fakten des Tages kommen gezählt ins Tagebuch, danach sieht
+        JARVIS in einem eigenen Gespräch auf seinen Tag zurück. Gibt True zurück, wenn der Rückblick gestartet ist."""
+        a = self.agent
+        if a.gesperrt.is_set():
+            return False
+        jetzt = jetzt or datetime.datetime.now()
+        if not selbst.rueckblick_faellig(a.konfig, a.speicher, jetzt):
+            return False
+        a.speicher.meta_setzen("rueckblick", jetzt.date().isoformat())  # zuerst merken: nie doppelt
+        fakten = selbst.tagesfakten(a.speicher)
+        a.speicher.tagebuch_schreiben(selbst.fakten_eintrag(fakten, jetzt), art="fakten", tag=jetzt.date().isoformat())
+        faden = threading.Thread(target=a.routine_ausfuehren, daemon=True, name="jarvis-rueckblick",
+                                 args=({"name": "Tagesrückblick", "auftrag": selbst.rueckblick_auftrag(fakten)}, jetzt))
+        faden.start()
+        if warten:
+            faden.join(120)
+        return True
 
     def sicherung_falls_faellig(self):
         a = self.agent

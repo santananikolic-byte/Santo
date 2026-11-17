@@ -7,7 +7,8 @@
     link                  Link zur Oberfläche mit Zugangsschlüssel
     logs [anzahl]         die letzten Log-Einträge
     pruefen               Systemcheck: ist alles da, was JARVIS braucht? (verbraucht kein Kontingent)
-    provider              ist Claude Code bereit? (verbraucht kein Kontingent)
+    provider              ist das Gehirn bereit? (verbraucht kein Kontingent)
+    gehirn [eigen|claude] womit JARVIS denkt: eigenes Modell auf dem Mac (unabhängig) oder Claude
     frage "<text>"        eine Frage stellen (der Server muss laufen)
     notstopp / entsperren Notstopp auslösen oder aufheben
     backup                Sicherung der Datenbank jetzt
@@ -182,12 +183,14 @@ def provider():
         def ereignis(self, *args, **kwargs):
             pass
 
-    ergebnis = ProviderManager(_konfig(), _StillesLog()).pruefen()
+    k = _konfig()
+    ergebnis = ProviderManager(k, _StillesLog()).pruefen()
     for p in ergebnis.values():
         print("%-12s %s %s" % (p["anzeige"], "●" if p["nutzbar"] else "○", p["hinweis"]))
         if p.get("version"):
             print("             Version %s" % p["version"])
-    return 0 if ergebnis["claude_code"]["nutzbar"] else 1
+    # Bereit ist JARVIS, wenn das GEWÄHLTE Gehirn bereit ist: das eigene Modell oder Claude.
+    return 0 if ergebnis["lokal" if k.gehirn == "lokal" else "claude_code"]["nutzbar"] else 1
 
 
 def _hinweis(befehl, im_paket):
@@ -232,17 +235,15 @@ def pruefen():
     anbieter = ProviderManager(k, _StillesLog()).pruefen()
     claude, lokal = anbieter["claude_code"], anbieter["lokal"]
     if k.gehirn == "lokal":
-        # Eigenes Gehirn gewählt: ohne das lokale Modell kann JARVIS nicht denken, ohne Claude nur nicht recherchieren.
+        # Eigenes Gehirn gewählt: JARVIS ist unabhängig - nichts geht an Claude, auch die Recherche nicht.
         if lokal["nutzbar"]:
-            zeile("ok", "Gehirn: eigenes lokales Modell – %s" % lokal["hinweis"])
+            zeile("ok", "Gehirn: eigenes Modell auf diesem Mac – %s" % lokal["hinweis"])
+            zeile("ok", "Unabhängig: Nichts geht an Claude. Im Internet sucht und liest JARVIS selbst.")
         else:
             zeile("fehler", "Gehirn: das eigene lokale Modell ist nicht bereit",
-                  lokal["hinweis"] + " – oder im Leitstand → System → Gehirn wieder auf Claude stellen")
-        if claude["nutzbar"]:
-            zeile("ok", "Claude Code %s (nur für Recherche im Internet): %s" % (claude.get("version") or "", claude["hinweis"]))
-        else:
-            zeile("warn", "Claude Code nicht bereit – JARVIS denkt lokal, nur die Recherche im Internet geht so nicht",
-                  claude["hinweis"])
+                  lokal["hinweis"] + " – einrichten mit: " + _hinweis("gehirn eigen", "EXTRAS.command")
+                  + " (oder zurück zu Claude: " + _hinweis("gehirn claude", "Leitstand → System → Gehirn") + ")")
+        zeile("info", "Programmieren über Claude Code gibt es im unabhängigen Betrieb nicht.")
     else:
         if claude["nutzbar"]:
             zeile("ok", "Claude Code %s: %s" % (claude.get("version") or "", claude["hinweis"]))
@@ -495,6 +496,9 @@ def main(argumente):
         return export(os.path.expanduser(argumente[1]) if len(argumente) > 1 else None)
     if befehl == "lan":
         return lan(argumente[1] if len(argumente) > 1 else "")
+    if befehl == "gehirn":
+        from . import eigenes_gehirn
+        return eigenes_gehirn.main(argumente[1:], _konfig())
     if befehl == "umgebung":
         return umgebung_zeigen()
     print(__doc__, file=sys.stderr)

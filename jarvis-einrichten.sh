@@ -11,8 +11,12 @@
 #   ./jarvis-einrichten.sh
 #
 # Das Skript holt den Code nach ~/Santo (oder aktualisiert ihn), prüft Python und
-# Claude Code, bietet an, Fehlendes zu installieren, startet JARVIS und öffnet ihn
+# das Gehirn, bietet an, Fehlendes zu installieren, startet JARVIS und öffnet ihn
 # im Browser. Es löscht nichts und fragt vor jeder Installation.
+#
+# UNABHÄNGIG von Claude (eigenes Modell auf diesem Mac, ohne Abo):
+#
+#   curl -fsSL https://raw.githubusercontent.com/santananikolic-byte/Santo/HEAD/jarvis-einrichten.sh | JARVIS_GEHIRN=eigen bash
 #
 # Zum Ausprobieren ohne Mac: JARVIS_NUR_PRUEFEN=1 bash jarvis-einrichten.sh   (ändert nichts)
 #                            JARVIS_TESTLAUF=1 bash jarvis-einrichten.sh      (läuft komplett, ohne Mac-Prüfung)
@@ -30,6 +34,7 @@ if [ -z "${JARVIS_ZIEL:-}" ] && [ -n "$HIER" ] && [ -f "$HIER/jarvis.sh" ] && [ 
 fi
 PYTHON="${JARVIS_PYTHON:-python3}"
 NUR_PRUEFEN="${JARVIS_NUR_PRUEFEN:-0}"
+GEHIRN="${JARVIS_GEHIRN:-}"   # "eigen" = unabhängig (eigenes Modell auf dem Mac), "claude" = über das Abo, leer = wie eingestellt
 NEU_GEHOLT=0
 TESTLAUF="${JARVIS_TESTLAUF:-0}"
 
@@ -130,7 +135,32 @@ else
 fi
 chmod +x "$ZIEL/jarvis.sh" "$ZIEL"/*.command 2>/dev/null
 
-# --- 5. Claude Code (das Denken von JARVIS, über dein Claude-Abo) ---------------
+# --- 5. Das Gehirn: eigenes Modell auf diesem Mac (unabhängig) oder Claude -------
+EIGEN=0
+if [ "$GEHIRN" = "eigen" ]; then
+    EIGEN=1
+elif [ "$GEHIRN" = "claude" ]; then
+    (cd "$ZIEL" && ./jarvis.sh gehirn claude >/dev/null 2>&1)
+elif (cd "$ZIEL" && ./jarvis.sh gehirn 2>/dev/null | grep -q "eigenen Modell"); then
+    EIGEN=1   # war schon auf das eigene Gehirn gestellt: dabei bleibt es
+fi
+if [ "$EIGEN" = "1" ]; then
+    schritt "5. Eigenes Gehirn einrichten (unabhängig von Claude)"
+    # Rückfragen kommen direkt vom Terminal, auch wenn das Skript durch eine Pipe läuft.
+    if [ -r /dev/tty ] && [ "${JARVIS_JA:-0}" != "1" ]; then
+        (cd "$ZIEL" && ./jarvis.sh gehirn eigen < /dev/tty)
+    else
+        (cd "$ZIEL" && ./jarvis.sh gehirn eigen)
+    fi
+    if [ $? -ne 0 ]; then
+        schlimm "Das eigene Gehirn ist noch nicht bereit (Grund siehe oben)."
+        sage "Dieselbe Zeile einfach noch einmal ausführen. Bleibt es dabei: Schick mir ein Foto vom Terminal."
+    fi
+    NEU_GEHOLT=1   # Einstellung geändert: JARVIS startet unten neu
+fi
+
+# --- 5b. Claude Code (nur wenn JARVIS über dein Claude-Abo denken soll) ---------
+if [ "$EIGEN" != "1" ]; then
 schritt "5. Claude Code prüfen"
 CLAUDE="$(claude_finden)"
 if [ -z "$CLAUDE" ]; then
@@ -154,8 +184,12 @@ else
                 sage "Claude Code startet: Anmeldung mit dem Claude-Konto (Abo) wählen, danach /exit tippen."
                 "$CLAUDE" < /dev/tty
             fi
+        else
+            sage "Ohne Claude geht es auch - unabhängig, mit einem eigenen Modell auf diesem Mac:"
+            sage "curl -fsSL https://raw.githubusercontent.com/santananikolic-byte/Santo/HEAD/jarvis-einrichten.sh | JARVIS_GEHIRN=eigen bash"
         fi
     fi
+fi
 fi
 
 # --- 6. Checkliste, Start ------------------------------------------------------

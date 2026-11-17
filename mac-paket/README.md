@@ -10,12 +10,15 @@ Die Kurzfassung zum Loslegen steht in **ANLEITUNG.txt**.
 ## Was du brauchst
 
 - einen Mac
-- dein **Claude-Abo** (Pro oder Max)
+- ein Gehirn für JARVIS – du wählst:
+  - **eigenes Modell auf diesem Mac** (unabhängig: ohne Claude, ohne Abo, ohne
+    Kosten – dafür schwächer und langsamer), oder
+  - dein **Claude-Abo** (Pro oder Max – stark, aber über Anthropic).
 
 **Keinen API-Schlüssel, kein Passwort in einer Datei, keine Zusatzkosten.**
-JARVIS denkt über *Claude Code*, das mit deinem Abo angemeldet ist. Ist es mit
-einem API-Schlüssel angemeldet (das würde pro Anfrage kosten), weigert sich
-JARVIS, es zu benutzen.
+Mit Claude denkt JARVIS über *Claude Code*, das mit deinem Abo angemeldet ist.
+Ist es mit einem API-Schlüssel angemeldet (das würde pro Anfrage kosten),
+weigert sich JARVIS, es zu benutzen.
 
 ## Einrichten
 
@@ -33,21 +36,38 @@ Doppelklick auf `JARVIS.command`. Beim ersten Mal prüft er selbst:
 Ab dann: Doppelklick auf `JARVIS.command` = starten, `JARVIS-BEENDEN.command` =
 beenden.
 
-## Das Gehirn: Claude oder ein eigenes lokales Modell
+## Das Gehirn: unabhängig (eigenes Modell) oder Claude
 
-Im Leitstand unter **System → Gehirn** stellst du ein, womit JARVIS denkt:
-
-| | Claude (Standard) | Eigenes lokales Modell (Ollama) |
+| | Eigenes Modell auf diesem Mac | Claude |
 |---|---|---|
-| Läuft über | dein Claude-Abo | nur deinen Mac, offline |
-| Kosten / Limit | im Abo enthalten, Abo-Limit | kostenlos, kein Limit |
-| Qualität | stark | deutlich schwächer, mehr Fehler bei Deutsch und Rechnen |
-| Websuche | ja | nein – Recherche läuft immer über Claude |
+| Läuft über | nur deinen Mac (Programm „Ollama“) | dein Claude-Abo bei Anthropic |
+| Unabhängig | **ja – nichts geht an Claude** | nein |
+| Kosten / Limit | kostenlos, kein Limit | im Abo enthalten, Abo-Limit |
+| Qualität | deutlich schwächer und langsamer, mehr Fehler bei Rechnen und langen Aufgaben | stark |
+| Internet | JARVIS sucht und liest selbst (eigener Zugang) | Recherche über Claude |
+| Bildschirm ansehen | das eigene Modell (Positionen ungenau) | Claude |
+| Programme bauen | nein (nur einzelne Dateien schreiben) | ja, über Claude Code |
 
-Für das lokale Modell: Ollama von ollama.com installieren, im Terminal ein
-Modell laden (zum Beispiel `ollama pull llama3.1`), dann im Leitstand
-umschalten und den Modellnamen eintragen. Das lokale Gehirn spricht nur mit
-deinem Mac (127.0.0.1), nie ins Internet.
+**Unabhängig einrichten – eine Zeile im Terminal:**
+
+```
+curl -fsSL https://raw.githubusercontent.com/santananikolic-byte/Santo/HEAD/jarvis-einrichten.sh | JARVIS_GEHIRN=eigen bash
+```
+
+Sie lädt JARVIS, das freie Programm Ollama (etwa 230 MB) und das Modell passend
+zum Arbeitsspeicher deines Macs: `gemma3:4b` (3,4 GB) bis 8 GB, `gemma3:12b`
+(8,2 GB) ab 16 GB. Vor jedem Laden fragt sie. Am Ende stellt sie dem Modell eine
+Probefrage und zeigt die Antwort.
+
+Umschalten jederzeit: `./jarvis.sh gehirn eigen` oder `./jarvis.sh gehirn claude`
+(oder im Leitstand unter **System → Gehirn**). Alles andere bleibt gleich:
+Gedächtnis, Wissen, Team, Routinen, E-Mail, Termine – und jede Freigabe. Die
+Schranken stehen im Programm, nicht im Modell.
+
+**JARVIS über sich:** Er hat ein Selbstbild aus echten Daten (womit er denkt, was er
+kann, was er heute getan und zuletzt gelernt hat) und führt ein Tagebuch
+(Leitstand → „JARVIS über sich“). Ein Bewusstsein ist das nicht – das kann niemand
+programmieren, und JARVIS behauptet es auch nicht. Mehr: `docs/INTELLIGENZ.md`.
 
 ## Was JARVIS kann
 

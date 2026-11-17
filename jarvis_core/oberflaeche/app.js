@@ -94,6 +94,7 @@
     bildschirm_ansehen: "Bildschirm ansehen", mac_klicken: "Klicken", mac_tippen: "Tippen", mac_tasten: "Tasten drücken",
     app_oeffnen: "App öffnen", mac_befehl: "Befehl im Terminal", routinen_anzeigen: "Routinen anzeigen",
     routine_einstellen: "Routine einstellen", wissen_nachschlagen: "Wissen nachschlagen", auftrag_starten: "Auftrag starten",
+    webseite_lesen: "Webseite lesen", tagebuch_schreiben: "Tagebuch schreiben", tagebuch_lesen: "Tagebuch lesen",
     agenten_anzeigen: "Team anzeigen", agent_anlegen: "Fachmann einstellen", agent_entfernen: "Fachmann entfernen",
     erfahrung_merken: "Erfahrung merken" };
   var ICONS = {
@@ -239,10 +240,13 @@
     if (S.offline) {
       chips.push(h("span", { class: "chip" }, h("span", { class: "punkt fehler" }), "Keine Verbindung"));
     } else if (d) {
-      var p = d.system.provider.claude_code || {};
+      var eigenesGehirn = d.system.gehirn === "lokal";
+      var p = (eigenesGehirn ? d.system.provider.lokal : d.system.provider.claude_code) || {};
       chips.push(h("span", { class: "chip", title: p.hinweis || "" }, h("span", { class: "punkt " + (p.nutzbar ? "ok" : "fehler") }),
-        "Claude Code ", h("b", { text: p.nutzbar ? "bereit" : "nicht bereit" })));
-      chips.push(h("span", { class: "chip", title: "Modell für Gespräche (unter System änderbar)" }, "Modell ", h("b", { text: d.system.modelle.chat || "Standard" })));
+        eigenesGehirn ? "Eigenes Gehirn " : "Claude Code ", h("b", { text: p.nutzbar ? "bereit" : "nicht bereit" })));
+      chips.push(h("span", { class: "chip", title: eigenesGehirn ? "Läuft auf diesem Mac – unabhängig von Claude (unter System änderbar)" : "Modell für Gespräche (unter System änderbar)" },
+        "Modell ", h("b", { text: eigenesGehirn ? (d.system.lokales_modell || "nicht gewählt") : (d.system.modelle.chat || "Standard") })));
+      if (eigenesGehirn) chips.push(h("span", { class: "chip", title: "Nichts geht an Claude" }, h("span", { class: "punkt ok" }), "unabhängig"));
       if (d.system.lan) chips.push(h("span", { class: "chip", title: "Erreichbar aus dem WLAN" }, h("span", { class: "punkt warn" }), "WLAN offen"));
     }
     var minute = Math.floor(Date.now() / 60000);
@@ -602,7 +606,9 @@
         quote === null ? null : ring(quote, Math.round(quote * 100) + " %"),
         h("div", { class: "zahlen", style: "flex:1" }, zahl(v.anfragen, "Modellaufrufe"), zahl(v.fehler, "Fehler", v.fehler ? "fehler" : ""),
           zahl(fZahl.format(v.tokens_ein), "Token rein"), zahl(fZahl.format(v.tokens_aus), "Token raus"))));
-      k4.appendChild(h("p", { class: "klein", style: "margin-top:10px", text: "Die Token-Zahlen meldet Claude Code. Ein festes Limit deines Abos kennt JARVIS nicht – bei Erreichen weicht er sichtbar auf Sonnet aus." }));
+      k4.appendChild(h("p", { class: "klein", style: "margin-top:10px", text: d.system.gehirn === "lokal"
+        ? "JARVIS denkt mit dem eigenen Modell auf diesem Mac: kein Abo, kein Limit, keine Kosten. Die Token-Zahlen meldet das Modell."
+        : "Die Token-Zahlen meldet Claude Code. Ein festes Limit deines Abos kennt JARVIS nicht – bei Erreichen weicht er sichtbar auf Sonnet aus." }));
     }
     if (neu("l-wissen", [d.zaehler, d.system.letzte_sicherung])) {
       var k5 = karte("k-wissen"), zz = d.zaehler;
@@ -610,10 +616,10 @@
         zahl(zz.todos_offen, "Aufgaben offen"), zahl(zz.erinnerungen_faellig, "Erinnerungen fällig", zz.erinnerungen_faellig ? "warn" : "")));
       k5.appendChild(h("p", { class: "klein", style: "margin-top:10px", text: d.system.letzte_sicherung ? "Letzte Sicherung: " + datum(d.system.letzte_sicherung) + " (" + vor(d.system.letzte_sicherung) + ")" : "Noch keine Sicherung gemacht (läuft täglich automatisch)." }));
     }
-    var s = d.status, p = d.system.provider.claude_code || {};
-    if (neu("l-server", [s.laufzeit_sekunden > 60 ? Math.floor(s.laufzeit_sekunden / 60) : 0, s.anfragen, s.gesperrt, p, d.system.stimme.stimme, d.system.lan])) {
+    var s = d.status, p = (d.system.gehirn === "lokal" ? d.system.provider.lokal : d.system.provider.claude_code) || {};
+    if (neu("l-server", [s.laufzeit_sekunden > 60 ? Math.floor(s.laufzeit_sekunden / 60) : 0, s.anfragen, s.gesperrt, p, d.system.stimme.stimme, d.system.lan, d.system.gehirn])) {
       var k6 = karte("k-server");
-      k6.appendChild(stat("Claude Code", p.nutzbar ? (p.hinweis || "bereit") : "nicht bereit – " + (p.hinweis || "")));
+      k6.appendChild(stat(d.system.gehirn === "lokal" ? "Eigenes Gehirn" : "Claude Code", p.nutzbar ? (p.hinweis || "bereit") : "nicht bereit – " + (p.hinweis || "")));
       k6.appendChild(stat("Läuft seit", datum(s.seit) + " (" + vor(s.seit) + ")"));
       k6.appendChild(stat("Adresse", s.adresse + (s.lan ? " und im WLAN" : " (nur dieser Mac)")));
       k6.appendChild(stat("Version", "JARVIS " + s.version + " · Python " + s.python + " · Prozess " + s.pid));
@@ -663,6 +669,22 @@
       k7.appendChild(h("p", { class: "klein", style: "margin-top:8px", text: "Im Gespräch beraten die passenden Fachleute JARVIS mit ihrem Wissen und ihren Prüfregeln. In einem Auftrag arbeitet jeder Schritt als eigener Fachmann – eigener Modellaufruf, nur seine Werkzeuge –, danach prüft ein unabhängiger Prüfer. Aus dessen Kritik entstehen Erfahrungen." }));
     }
     zeichnenFreigaben($("#k-freigaben .inhalt"), "l-freigaben", "Keine offenen Freigaben. Alles, was etwas verändern würde, erscheint hier und läuft erst nach deinem Ja.");
+    if (neu("l-selbst", d.selbst)) {
+      var k9 = karte("k-selbst"), ich = d.selbst;
+      k9.appendChild(stat("Gehirn", ich.gehirn + (ich.unabhaengig ? " – unabhängig von Claude" : " – über dein Abo")));
+      k9.appendChild(stat("Im Dienst", "seit " + datum(ich.seit) + " (" + ich.tage + " Tage)"));
+      k9.appendChild(stat("Heute getan", ich.heute));
+      k9.appendChild(stat("Kann gerade", ich.kann.join("; ")));
+      k9.appendChild(stat("Kann nicht", ich.nicht.join("; ")));
+      if (ich.tagebuch.length) {
+        var buch = h("details", { class: "abteilung" }, h("summary", {}, h("span", { class: "name", text: "Tagebuch" }), h("span", { class: "info", text: String(ich.tagebuch.length) })));
+        ich.tagebuch.forEach(function (e) {
+          buch.appendChild(h("div", { class: "agent lang" }, h("span", { class: "name", text: e.tag }), h("span", { class: "info", text: e.text })));
+        });
+        k9.appendChild(buch);
+      }
+      k9.appendChild(h("p", { class: "klein", style: "margin-top:8px", text: "Das Selbstbild stammt aus echten Daten von diesem Mac. JARVIS weiß, wer er ist, was er kann und was er getan hat – ein Bewusstsein oder Gefühle hat er nicht, und er behauptet es auch nicht." }));
+    }
     if (neu("l-log", d.log)) {
       var k8 = karte("k-log");
       if (!d.log.length) k8.appendChild(h("p", { class: "leer", text: "Noch keine Ereignisse." }));
@@ -1002,12 +1024,12 @@
         h("span", { class: "name", text: sys.gehirn === "lokal" ? "Eigenes Gehirn aktiv" : "Claude aktiv" }),
         h("span", { class: "info", title: lp.hinweis || "", text: lp.hinweis || "" })));
       var wahl = h("select", {}, [h("option", { value: "claude", text: "Claude (stark, über dein Abo)" }),
-        h("option", { value: "lokal", text: "Eigenes lokales Modell (Ollama)" })]);
+        h("option", { value: "lokal", text: "Eigenes Modell auf diesem Mac (unabhängig)" })]);
       wahl.value = sys.gehirn || "claude";
       kg.appendChild(h("label", { class: "feld", style: "margin-bottom:8px" }, "Womit JARVIS denkt", wahl));
-      var modellfeld = h("input", { type: "text", value: sys.lokales_modell || "", placeholder: "z. B. llama3.1" });
+      var modellfeld = h("input", { type: "text", value: sys.lokales_modell || "", placeholder: "z. B. gemma3:4b" });
       kg.appendChild(h("label", { class: "feld", style: "margin-bottom:8px" }, "Lokales Modell (Ollama)", modellfeld));
-      kg.appendChild(h("p", { class: "klein", style: "margin-bottom:10px", text: "Lokal läuft offline auf dem Mac, ohne Abo, aber schwächer als Claude. Recherche nutzt immer Claude. Dafür muss Ollama laufen (ollama.com)." }));
+      kg.appendChild(h("p", { class: "klein", style: "margin-bottom:10px", text: "Das eigene Modell läuft auf dem Mac: unabhängig, ohne Abo und ohne Limit, aber schwächer und langsamer als Claude. Dann geht nichts an Claude – im Internet sucht und liest JARVIS selbst; Programmieren über Claude Code gibt es dann nicht. Einrichten im Terminal: ./jarvis.sh gehirn eigen" }));
       kg.appendChild(h("button", { type: "button", class: "knopf knopf-primaer knopf-klein", text: "Gehirn speichern", onclick: function () {
         einstellungSpeichern({ gehirn: wahl.value, lokales_modell: modellfeld.value.trim() });
       } }));

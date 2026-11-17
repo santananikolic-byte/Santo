@@ -11,7 +11,9 @@
 #   ./jarvis.sh entsperren          Notstopp aufheben
 #   ./jarvis.sh logs [N]            die letzten N Log-Einträge (Standard 20)
 #   ./jarvis.sh pruefen             Systemcheck: ist alles da, was JARVIS braucht?
-#   ./jarvis.sh provider            ist Claude Code bereit? (verbraucht kein Kontingent)
+#   ./jarvis.sh provider            ist das Gehirn bereit? (verbraucht kein Kontingent)
+#   ./jarvis.sh gehirn eigen        unabhängig machen: eigenes Modell auf diesem Mac einrichten (ohne Claude)
+#   ./jarvis.sh gehirn claude       zurück zu Claude (über das Abo); ohne Zusatz: zeigen, womit er denkt
 #   ./jarvis.sh backup              Sicherung der Datenbank jetzt
 #   ./jarvis.sh wiederherstellen D  Datenbank aus Sicherung D zurückholen (erst stoppen)
 #   ./jarvis.sh export [Datei]      alle gespeicherten Daten als JSON
@@ -82,12 +84,13 @@ case "${1:-status}" in
     logs)
         "$PYTHON" -m jarvis_core logs "${2:-20}"
         ;;
-    frage|wiederherstellen|lan)
+    frage|wiederherstellen|lan|gehirn)
         "$PYTHON" -m jarvis_core "$@"
         ;;
     *)
         echo "So: ./jarvis.sh start | stopp | status | oeffnen | link | frage \"…\" | notstopp | entsperren | logs [N]"
-        echo "    | pruefen | provider | backup | wiederherstellen DATEI | export [DATEI] | lan an|aus | umgebung"
+        echo "    | pruefen | provider | gehirn [eigen|claude] | backup | wiederherstellen DATEI | export [DATEI]"
+        echo "    | lan an|aus | umgebung"
         exit 2
         ;;
 esac

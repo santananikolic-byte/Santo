@@ -11,7 +11,7 @@ Oberfläche sind seine ausdrückliche Entscheidung.
 
 import json
 
-from . import agenten, gedaechtnis, rollen, werkzeuge, zeit
+from . import agenten, gedaechtnis, rollen, selbst, werkzeuge, zeit
 from .konfig import KonfigFehler
 from .protokoll import letzte_eintraege
 from .werkzeuge import WerkzeugFehler
@@ -21,7 +21,7 @@ FAKT_ARTEN = ("fakt", "profil", "projekt", "entscheidung", "regel", "praeferenz"
 PIPELINE_STUFEN = ("neu", "kontaktiert", "interessiert", "angebot", "gewonnen", "verloren")
 BESTAETIGUNG_LOESCHEN = "ALLES LÖSCHEN"
 EINSTELLUNGEN = ("stimme", "tempo", "vorlesen", "erinnerungen_sprechen", "modelle", "modell_ausweichen", "denkstufen",
-                 "gehirn", "lokales_modell", "ollama_adresse")
+                 "gehirn", "lokales_modell", "ollama_adresse", "lokal_kontext", "tagebuch_zeit")
 MAX_TEXT = 10000
 
 
@@ -82,6 +82,7 @@ class Api:
             "system": {
                 "provider": s.provider.status(), "stimme": s.stimme.status(), "modelle": k.modelle,
                 "gehirn": k.gehirn, "lokales_modell": k.lokales_modell, "denkstufen": bool(k.denkstufen),
+                "lokal_kontext": k.lokal_kontext, "tagebuch_zeit": k.tagebuch_zeit,
                 "modell_ausweichen": k.modell_ausweichen, "bereiche": k.bereiche, "werkstatt": k.werkstatt_pfad,
                 "ordner": sorted(n for n in k.wurzeln() if n != "werkstatt"), "daten_ordner": k.daten_ordner,
                 "verbrauch": sp.verbrauch_heute(), "letzte_sicherung": sp.meta("letzte_sicherung"),
@@ -110,6 +111,7 @@ class Api:
                                         for t in agenten.abteilungen()],
                         "erfahrungen": sp.erfahrungen(limit=40),
                         "aktiv": aktiv, "zuletzt": zuletzt},
+            "selbst": selbst.uebersicht(s.agent),
             "diagramme": {"stunden": sp.anfragen_stunden(24), "antwortzeiten": sp.antwortzeiten(30)},
             "log": letzte_eintraege(s.log.datei, 14),
         }

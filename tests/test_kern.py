@@ -675,7 +675,7 @@ class SkriptTest(Umgebung):
         self.assertIn("claude.ai/install.sh", keins.stdout)  # die Lösung steht dabei
 
     def test_systemcheck_mit_eigenem_gehirn(self):
-        """Mit gehirn=lokal blockiert nur ein fehlendes lokales Modell; fehlt Claude, geht nur die Recherche nicht."""
+        """Mit gehirn=lokal ist JARVIS unabhängig: Nur ein fehlendes eigenes Modell blockiert; Claude wird nicht gebraucht."""
         from http.server import ThreadingHTTPServer
 
         from tests.hilfen import freier_port
@@ -704,9 +704,13 @@ class SkriptTest(Umgebung):
             ollama.shutdown()
             ollama.server_close()
         self.assertEqual(mit.returncode, 0, mit.stdout)  # denkt lokal: bereit, obwohl Claude fehlt
-        self.assertIn("Gehirn: eigenes lokales Modell", mit.stdout)
-        self.assertIn("nur die Recherche im Internet geht so nicht", mit.stdout)
+        self.assertIn("Gehirn: eigenes Modell auf diesem Mac", mit.stdout)
+        self.assertIn("Unabhängig: Nichts geht an Claude", mit.stdout)
+        self.assertNotIn("Claude Code ist nicht bereit", mit.stdout)  # Claude wird im unabhängigen Betrieb nicht gebraucht
         self.assertIn("Alles bereit", mit.stdout)
+        os.environ["JARVIS_CLAUDE"] = os.path.join(self.ordner, "gibtsnicht")
+        self.assertEqual(self.skript("provider").returncode, 1)  # das eigene Modell läuft nicht mehr: nicht bereit
+        self.assertIn("eigenen Modell testmodell", self.skript("gehirn").stdout)
 
     def test_befehle_ohne_server(self):
         self.assertEqual(self.skript("notstopp").returncode, 1)

@@ -81,11 +81,12 @@ class LokalTest(Umgebung):
         self.assertEqual(self.pm._anbieter_fuer("chat").name, "claude_code")
         self.assertEqual(self.konfig.gehirn, "claude")
 
-    def test_lokales_gehirn_umschalten_recherche_bleibt_claude(self):
+    def test_lokales_gehirn_heisst_unabhaengig(self):
         self.konfig.aktualisieren({"gehirn": "lokal", "lokales_modell": "testmodell"})
         self.assertEqual(self.pm._anbieter_fuer("chat").name, "lokal")
         self.assertEqual(self.pm._anbieter_fuer("arbeit").name, "lokal")
-        self.assertEqual(self.pm._anbieter_fuer("recherche").name, "claude_code")  # Websuche braucht Claude
+        self.assertEqual(self.pm._anbieter_fuer("recherche").name, "lokal")  # nichts geht an Claude, auch die Recherche nicht
+        self.assertTrue(self.pm.unabhaengig)
 
     # ------------------------------------------------------------- Anfragen ---
 
@@ -128,12 +129,12 @@ class LokalTest(Umgebung):
             self.pm.fragen("Hallo", "s")
         self.assertEqual(ctx.exception.art, "kein_provider")
 
-    def test_recherche_laeuft_auch_mit_lokalem_gehirn_ueber_claude(self):
-        self.konfig.aktualisieren({"gehirn": "lokal", "lokales_modell": "testmodell"})
+    def test_recherche_mit_claude_als_gehirn_laeuft_ueber_claude(self):
         self.drehbuch([{"tools": "WebSearch", "antwort": "Treffer: https://example.com"}])
         erg = self.pm.recherchieren("Handelsregister Muster GmbH")
         self.assertEqual(erg["provider"], "claude_code")
         self.assertIn("example.com", erg["antwort"])
+        self.assertFalse(self.pm.unabhaengig)
 
     # ---------------------------------------------------------- Sicherheit ---
 

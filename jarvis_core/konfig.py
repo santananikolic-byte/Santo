@@ -35,10 +35,16 @@ STANDARD = {
     # alles mit Entscheidung, Rechnung, Kundentext oder Prüfung das Modell "chat" (gründlich).
     "denkstufen": True,
     # Welches Gehirn JARVIS nutzt: "claude" (stark, über das Abo) oder "lokal" (eigenes Modell über Ollama,
-    # direkt auf dem Mac, offline und kostenlos, aber schwächer). Recherche mit Websuche läuft immer über Claude.
+    # direkt auf dem Mac, kostenlos, ohne Abo und ohne fremde Firma, aber schwächer). Mit "lokal" ist JARVIS
+    # unabhängig: Nichts geht an Claude - auch die Recherche läuft dann über den eigenen Internetzugang (netz.py).
     "gehirn": "claude",
     "lokales_modell": "",
     "ollama_adresse": "http://127.0.0.1:11434",
+    # Wie viel das eigene Modell auf einmal lesen kann (Kontextfenster in Tokens). 8192 passt auf einen Mac mit
+    # 8 GB Arbeitsspeicher; mit 16 GB und mehr darf es 16384 sein. JARVIS kürzt seinen Denkrahmen passend dazu.
+    "lokal_kontext": 8192,
+    # Täglicher Rückblick: JARVIS schreibt abends in sein Tagebuch, was er getan und gelernt hat ("" = aus).
+    "tagebuch_zeit": "18:30",
     # Sprache
     "stimme": "",
     "tempo": 185,
@@ -274,6 +280,10 @@ def normalisieren(werte, daten_ordner):
     w["lokales_modell"] = str(w["lokales_modell"] or "").strip()
     if w["lokales_modell"] and not LOKAL_MODELL_MUSTER.match(w["lokales_modell"]):
         raise KonfigFehler("Ungültiger Name für das lokale Modell %r (z. B. \"llama3.1\")." % w["lokales_modell"])
+    _ganzzahl(w, "lokal_kontext", 2048, 262144)
+    w["tagebuch_zeit"] = str(w.get("tagebuch_zeit") or "").strip()
+    if w["tagebuch_zeit"] and not re.match(r"^([01]\d|2[0-3]):[0-5]\d$", w["tagebuch_zeit"]):
+        raise KonfigFehler("tagebuch_zeit bitte als HH:MM (z. B. 18:30) oder leer für aus.")
     w["ollama_adresse"] = str(w["ollama_adresse"] or STANDARD["ollama_adresse"]).strip().rstrip("/")
     if not OLLAMA_MUSTER.match(w["ollama_adresse"]):
         raise KonfigFehler("ollama_adresse muss lokal sein (http://127.0.0.1:PORT oder http://localhost:PORT), "

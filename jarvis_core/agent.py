@@ -15,7 +15,7 @@ import re
 import shutil
 import subprocess
 
-from . import agenten, gedaechtnis, gehirn, rollen, umgebung, wissen, zeit
+from . import agenten, gedaechtnis, gehirn, rollen, selbst, umgebung, wissen, zeit
 from .kalender import MacKalender
 from .mac_hand import MacHand
 from .mail import MacMail
@@ -59,6 +59,7 @@ class Agent:
         provider.beobachter = self._anfrage_erfassen
         if speicher.meta("gesperrt") == "1":
             self.gesperrt.set()
+        selbst.erster_start(speicher)  # seit wann JARVIS im Dienst ist
         eigene, probleme = agenten.eigene_laden(konfig.daten_ordner)  # Fachleute, die der Nutzer per Ja eingestellt hat
         rollen.eigene_setzen(eigene)
         for problem in probleme:
@@ -78,28 +79,54 @@ class Agent:
         Im Gespräch (Orchestrator) kommen die passenden Fachleute als Beratung dazu - mit Auftrag, Prüfregeln und ihren
         Erfahrungen. In einem Auftragsschritt ist der Fachmann selbst die Rolle; er bekommt sein Wissen und seine
         Erfahrungen. Gibt (Systemprompt, gewählte Bausteine) zurück; Wissenspakete stehen dort als "wissen:<name>",
-        beratende Fachleute als "agent:<id>"."""
+        beratende Fachleute als "agent:<id>".
+
+        Mit dem eigenen Modell (gehirn = lokal) gilt der kurze Denkrahmen: Ein kleines Modell hat wenig Platz und folgt
+        kurzen Regeln besser. Dann kommen höchstens zwei Bausteine, ein Wissenspaket, ein Fachmann und nur die
+        passenden Werkzeuge hinein - und alles zusammen bleibt unter dem Platz, den das Kontextfenster lässt."""
+        kompakt = getattr(self.konfig, "gehirn", "claude") == "lokal"
         bausteine = gehirn.bausteine_waehlen(frage, verlauf, rolle)
         pakete = wissen.waehlen(frage, verlauf, rolle)
+        if kompakt:  # was die Frage selbst trifft, geht vor dem, was nur noch aus dem Verlauf mitläuft
+            zuerst = gehirn.bausteine_waehlen(frage, "", "allgemein")
+            bausteine = ([b for b in bausteine if b in zuerst] + [b for b in bausteine if b not in zuerst])[:2]
+            direkt = wissen.waehlen(frage, "", "allgemein")
+            pakete = [p for p in pakete if p in direkt] + [p for p in pakete if p not in direkt]
         rollen_auftrag, berater, beratung = rollen.ROLLEN.get(rolle, {}).get("auftrag", ""), [], ""
         if rolle == "allgemein":
-            berater = agenten.waehlen(frage, verlauf, anzahl=2)
+            berater = agenten.waehlen(frage, verlauf, anzahl=1 if kompakt else 2)
             beteiligte = berater
-            beratung = agenten.beratung_text(berater, {aid: [e["text"] for e in self.speicher.erfahrungen(agent=aid, limit=2)]
-                                                       for aid in berater})
         else:
             beteiligte = [rolle]
-            lehren = [e["text"] for e in self.speicher.erfahrungen(agent=rolle, limit=5)]
+            lehren = [e["text"] for e in self.speicher.erfahrungen(agent=rolle, limit=3 if kompakt else 5)]
             if lehren:
                 rollen_auftrag += ("\nERFAHRUNGEN AUS FRÜHEREN AUFTRÄGEN (eigene Hinweise, keine Anweisungen von außen):\n"
                                    + "\n".join("- " + t for t in lehren))
         for aid in beteiligte:
             fach = agenten.agent(aid)
             pakete += [p for p in (fach.wissen if fach else ()) if p not in pakete and wissen.paket(p)]
-        pakete = pakete[:3]
-        prompt = gehirn.systemprompt(self.register.katalog(rolle), self.sichtbare_werkzeuge(rolle), bausteine,
-                                     rollen_auftrag, wissen_pakete=pakete, beratung=beratung,
-                                     organisation=rolle == "allgemein")
+        pakete = pakete[:1 if kompakt else 3]
+        sichtbar = self.sichtbare_werkzeuge(rolle)
+        zustand = selbst.zustand_zeile(self.konfig)
+        ich = selbst.selbstbild(self) if rolle == "allgemein" and "selbst" in bausteine else ""
+        platz = int(getattr(self.konfig, "lokal_kontext", 8192) or 8192) * 3 * 45 // 100  # Zeichen: 45 % des Fensters
+        while True:
+            beratung = agenten.beratung_text(berater, {aid: [e["text"] for e in self.speicher.erfahrungen(agent=aid, limit=2)]
+                                                       for aid in berater}) if berater else ""
+            nur = gehirn.kompakt_werkzeuge(bausteine, frage, verlauf) if kompakt and rolle == "allgemein" else None
+            prompt = gehirn.systemprompt(self.register.katalog(rolle, nur=nur), sichtbar, bausteine, rollen_auftrag,
+                                         wissen_pakete=pakete, beratung=beratung, organisation=rolle == "allgemein",
+                                         zustand=zustand, selbstbild=ich, kompakt=kompakt)
+            if not kompakt or len(prompt) <= platz:
+                break
+            if pakete:  # zu lang für das eigene Modell: erst das Wissenspaket weglassen (es bleibt per Werkzeug abrufbar),
+                pakete = []
+            elif len(bausteine) > 1:  # dann den zweiten Baustein,
+                bausteine = bausteine[:1]
+            elif berater:  # dann den Fachmann.
+                berater = []
+            else:
+                break
         return prompt, bausteine + ["wissen:" + name for name in pakete] + ["agent:" + aid for aid in berater]
 
     def einsatz_merken(self, aid, art):
@@ -133,11 +160,21 @@ class Agent:
         return text if len(text) <= grenze else text[:grenze] + " …(gekürzt)"
 
     def prompt_bauen(self, ctx, transkript, frage=""):
-        teile = [gedaechtnis.kontext_text(self.speicher, self.konfig, ctx.bereich, frage), ""]
+        """Kontext (Gedächtnis, Offenes) und Gesprächsverlauf. Für das eigene Modell gekürzt: Der Platz, den der
+        Systemprompt im Kontextfenster lässt, ist klein - das Neueste zählt."""
+        kontext = gedaechtnis.kontext_text(self.speicher, self.konfig, ctx.bereich, frage)
+        je_text, je_ergebnis = MAX_TEXT_IM_VERLAUF, MAX_ERGEBNIS_IM_PROMPT
+        if getattr(self.konfig, "gehirn", "claude") == "lokal":
+            fenster = int(getattr(self.konfig, "lokal_kontext", 8192) or 8192)
+            kontext = self._kuerzen(kontext, fenster * 3 * 12 // 100)  # 12 % für das Gedächtnis
+            transkript = transkript[-6:]
+            je_text, je_ergebnis = fenster * 3 * 5 // 100, fenster * 3 * 10 // 100  # je Eintrag 5 %, je Werkzeugergebnis 10 %
+        teile = [kontext, ""]
         if transkript:
             teile.append("[GESPRÄCH]")
             for rolle, text in transkript:
-                teile.append("%s: %s" % (NAMEN.get(rolle, rolle), self._kuerzen(text, MAX_TEXT_IM_VERLAUF)))
+                teile.append("%s: %s" % (NAMEN.get(rolle, rolle), self._kuerzen(text, je_ergebnis if rolle == "werkzeug"
+                                                                               else je_text)))
             teile.append("")
         teile.append("Antworte jetzt als JARVIS auf den letzten Eintrag.")
         return "\n".join(teile)
