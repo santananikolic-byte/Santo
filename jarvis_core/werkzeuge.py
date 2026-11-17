@@ -75,6 +75,8 @@ class P:
 
 
 class Werkzeug:
+    erweiterung = None  # Name der Erweiterung, die das Werkzeug mitbringt (None = Kern)
+
     def __init__(self, name, beschreibung, handler, parameter=(), stufe=FREI, koerper=None, liefert_daten=False,
                  extern=False, vorschau=None, risiko="", nur_chat=False, privat_freigabe=False, zustand=None,
                  koerper_maximal=MAX_INHALT, vorbereiten=None):
@@ -1383,10 +1385,9 @@ class Register:
                      _tagebuch_schreiben, [P("text", True, maximal=600)], stufe=MELDUNG),
             Werkzeug("tagebuch_lesen", "Liest die letzten Einträge deines Tagebuchs.", _tagebuch_lesen,
                      [P("anzahl", art="zahl", bereich=(1, 30))], liefert_daten=True),
-            Werkzeug("wissen_nachschlagen", "Geprüftes Wissen mit Quelle und Stand: Löhne und Steuern (kalkulation), "
-                     "öffentliche Aufträge in NRW (auftraege), Kunden gewinnen und was dabei erlaubt ist (akquise), "
-                     "Mitarbeiter einstellen (personal), Zusatzeinnahmen (ideen). Ohne thema: die Liste.",
-                     _wissen_nachschlagen, [P("thema", hilfe="kalkulation, auftraege, akquise, personal oder ideen",
+            Werkzeug("wissen_nachschlagen", "Geprüftes Wissen mit Quelle und Stand: %s. Ohne thema: die Liste."
+                     % "; ".join("%s (%s)" % (p.titel, p.name) for p in wissen.pakete()),
+                     _wissen_nachschlagen, [P("thema", hilfe=", ".join(p.name for p in wissen.pakete()),
                                               maximal=60)], liefert_daten=True),
             Werkzeug("umgebung_pruefen", "Liest harmlose Angaben zum Mac (System, Speicher, Programme) und merkt sie sich.",
                      _umgebung, liefert_daten=True),
@@ -1622,6 +1623,12 @@ class Register:
     def alle(self):
         return list(self._werkzeuge.values())
 
+    def hinzufuegen(self, w):
+        """Ein Werkzeug einer Erweiterung anmelden. Vorhandene Namen bleiben unangetastet (ValueError)."""
+        if w.name in self._werkzeuge:
+            raise ValueError("Das Werkzeug %r gibt es schon." % w.name)
+        self._werkzeuge[w.name] = w
+
     def validieren(self, w, roh, koerper, ctx):
         """Prüft Typ, Länge und Auswahl. Wirft WerkzeugFehler. Gibt die bereinigten Parameter zurück."""
         params = {}
@@ -1692,12 +1699,15 @@ class Register:
                                      % (w.name, type(fehler).__name__)) from None
         return params
 
-    def katalog(self, rolle="allgemein", nur=None):
+    def katalog(self, rolle="allgemein", nur=None, erweitert=None):
         """Beschreibung der erlaubten Werkzeuge für den Systemprompt. ``nur``: nur diese Namen zeigen (für kleine
-        Modelle mit wenig Platz) - erlaubt bleibt trotzdem alles, was die Rolle darf."""
+        Modelle mit wenig Platz) - erlaubt bleibt trotzdem alles, was die Rolle darf. ``erweitert``: von den Werkzeugen
+        der Erweiterungen nur diese zeigen (die zum Thema passen), damit der Denkrahmen nicht überläuft."""
         zeilen = []
         for w in self._werkzeuge.values():
             if not self.agent.berechtigung.sichtbar(w, rolle) or (nur is not None and w.name not in nur):
+                continue
+            if w.erweiterung and erweitert is not None and w.name not in erweitert:
                 continue
             teile = []
             for p in w.parameter:

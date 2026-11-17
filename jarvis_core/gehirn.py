@@ -161,6 +161,7 @@ def kompakt_werkzeuge(bausteine, frage="", verlauf=""):
     namen = set(KOMPAKT_IMMER)
     for baustein in bausteine:
         namen.update(KOMPAKT_WERKZEUGE.get(baustein, ()))
+        namen.update(ZUSATZ_WERKZEUGE.get(baustein, ())[:4])  # aus Erweiterungen höchstens vier je Baustein
     text = (frage or "").lower()
     for muster, werkzeuge in KOMPAKT_MUSTER:
         if muster.search(text):
@@ -490,6 +491,34 @@ BAUSTEINE += (
 NAMEN = tuple(b.name for b in BAUSTEINE)
 _NACH_NAME = {b.name: b for b in BAUSTEINE}
 
+# Bausteine aus Erweiterungen (jarvis_core/erweiterungen/) - sie kommen zum Kern dazu und ersetzen ihn nie.
+ZUSATZ = {}  # Name -> Baustein, in der Reihenfolge der Anmeldung
+ZUSATZ_HERKUNFT = {}  # Name -> Erweiterung
+ZUSATZ_WERKZEUGE = {}  # Name -> Werkzeuge der Erweiterung: erscheinen im Katalog, wenn der Baustein gewählt ist
+ZUSATZ_GRUENDLICH = set()  # diese Bausteine verlangen das gründliche Modell
+MAX_ZUSATZ = 3  # höchstens so viele Bausteine aus Erweiterungen je Frage
+_BAUSTEIN_NAME = re.compile(r"^[a-z][a-z0-9_]{1,40}$")
+
+
+def zusatz_registrieren(b, herkunft, werkzeuge=(), gruendlich=False):
+    """Meldet einen Baustein einer Erweiterung an. Mehrfach mit derselben Herkunft ist erlaubt (jeder neue Agent
+    meldet neu an); ein Name aus dem Kern oder einer anderen Erweiterung wird abgelehnt (ValueError)."""
+    if not isinstance(b, Baustein) or not _BAUSTEIN_NAME.match(b.name or ""):
+        raise ValueError("Ein Baustein braucht einen Namen aus Kleinbuchstaben (z. B. \"rechnungen\").")
+    if b.name in _NACH_NAME:
+        raise ValueError("Den Baustein %r gibt es schon im Kern." % b.name)
+    if ZUSATZ_HERKUNFT.get(b.name, herkunft) != herkunft:
+        raise ValueError("Den Baustein %r hat schon die Erweiterung %s." % (b.name, ZUSATZ_HERKUNFT[b.name]))
+    if not hasattr(b.muster, "search") or not isinstance(b.werkzeug_zeilen, dict):
+        raise ValueError("Baustein %r: muster muss ein regulärer Ausdruck sein, werkzeug_zeilen ein dict." % b.name)
+    ZUSATZ[b.name] = b
+    ZUSATZ_HERKUNFT[b.name] = herkunft
+    ZUSATZ_WERKZEUGE[b.name] = tuple(werkzeuge)
+    if gruendlich:
+        ZUSATZ_GRUENDLICH.add(b.name)
+    else:
+        ZUSATZ_GRUENDLICH.discard(b.name)
+
 
 # Kurzes Ja/Nein auf eine Freigabe - im Chat oder per Stimme ("Hey Jarvis, ja"). Nur ganz kurze, eindeutige Antworten:
 # "Ja, aber an die andere Adresse" ist kein Ja, sondern ein neuer Auftrag an JARVIS.
@@ -517,14 +546,21 @@ def kurze_entscheidung(text):
     return None
 
 
-def bausteine_waehlen(frage="", verlauf="", rolle="allgemein"):
-    """Welche Wissensbausteine passen? Feste Bausteine der Rolle plus Stichworte in Frage und jüngstem Verlauf."""
+def bausteine_waehlen(frage="", verlauf="", rolle="allgemein", ohne=()):
+    """Welche Wissensbausteine passen? Feste Bausteine der Rolle plus Stichworte in Frage und jüngstem Verlauf.
+    Dazu höchstens MAX_ZUSATZ aus Erweiterungen (nicht aus abgeschalteten: ``ohne``) - was die Frage selbst trifft,
+    zuerst."""
     text = ("%s\n%s" % (frage or "", verlauf or "")).lower()
-    return [b.name for b in BAUSTEINE if rolle in b.rollen or b.muster.search(text)]
+    gewaehlt = [b.name for b in BAUSTEINE if rolle in b.rollen or b.muster.search(text)]
+    frage_klein = (frage or "").lower()
+    zusatz = [b for b in ZUSATZ.values() if ZUSATZ_HERKUNFT.get(b.name) not in ohne
+              and (rolle in b.rollen or b.muster.search(text))]
+    zusatz.sort(key=lambda b: 0 if (rolle in b.rollen or b.muster.search(frage_klein)) else 1)
+    return gewaehlt + [b.name for b in zusatz[:MAX_ZUSATZ]]
 
 
 def baustein_text(name, sichtbar=()):
-    b = _NACH_NAME[name]
+    b = _NACH_NAME.get(name) or ZUSATZ[name]
     zeilen = [b.titel, b.text] + [zeile for werkzeug, zeile in b.werkzeug_zeilen.items() if werkzeug in sichtbar]
     return "\n".join(zeilen)
 
@@ -545,16 +581,19 @@ def organisation_text(sichtbar=()):
 
 
 def systemprompt(katalog, sichtbar=(), bausteine=(), rollen_auftrag="", wissen_pakete=(), beratung="", organisation=False,
-                 zustand="", selbstbild="", kompakt=False):
+                 zustand="", selbstbild="", kompakt=False, faehigkeiten=""):
     """Grundregeln, (im Gespräch) die Organisation, passende Wissensbausteine, geprüftes Wissen (mit Quellen), beratende
     Fachleute, das Selbstbild (wenn nach JARVIS selbst gefragt wird), Werkzeugkatalog und (bei Auftragsschritten) die
-    Rolle. ``kompakt``: die Kurzfassung für das eigene Modell - was hineinkommt, hat der Aufrufer schon begrenzt."""
+    Rolle. ``kompakt``: die Kurzfassung für das eigene Modell - was hineinkommt, hat der Aufrufer schon begrenzt.
+    ``faehigkeiten``: eine Zeile mit den Erweiterungen (nur im Gespräch)."""
     teile = [grundregeln(sichtbar, zustand, kompakt)]
     if organisation and kompakt:
         teile.append("DEIN TEAM: Du leitest %d Fachleute in %d Abteilungen. Stehen unten FACHLEUTE, nutze ihr Fachwissen "
                      "und prüfe deine Antwort gegen ihre Regeln." % (len(agenten.alle()), len(agenten.abteilungen())))
     elif organisation:
         teile.append(organisation_text(sichtbar))
+    if organisation and faehigkeiten:
+        teile.append(faehigkeiten)
     teile += [baustein_text(name, sichtbar) for name in bausteine]
     teile += [wissen.prompt_text(wissen.paket(name)) for name in wissen_pakete if wissen.paket(name)]
     if beratung:
@@ -579,7 +618,7 @@ _GRUENDLICH = re.compile(
 
 def denkstufe(frage, bausteine=()):
     """ "gruendlich" für alles, wo Qualität zählt; "schnell" für Gruß, Merken und kurze einfache Fragen."""
-    if any(b in GRUENDLICH_BAUSTEINE or b.startswith("wissen:") for b in bausteine):
+    if any(b in GRUENDLICH_BAUSTEINE or b in ZUSATZ_GRUENDLICH or b.startswith("wissen:") for b in bausteine):
         return "gruendlich"
     text = (frage or "").strip().lower()
     if len(text) > 240 or text.count("?") > 1 or _GRUENDLICH.search(text):

@@ -165,7 +165,7 @@ class BausteinTest(unittest.TestCase):
         erreicht = set()
         for frage, _muss, _verboten in self.FAELLE:
             erreicht |= set(gehirn.bausteine_waehlen(frage))
-        self.assertEqual(erreicht, set(gehirn.NAMEN))
+        self.assertEqual(erreicht - set(gehirn.ZUSATZ), set(gehirn.NAMEN))  # Bausteine der Erweiterungen prüfen deren Tests
         self.assertEqual(len(gehirn.NAMEN), len(set(gehirn.NAMEN)))
         for b in gehirn.BAUSTEINE:
             with self.subTest(baustein=b.name):
@@ -367,8 +367,8 @@ class GehirnImAgentTest(AgentBasis):
         self.assertEqual(self.aufrufe()[-1]["modell"], "opus")
         self.assertIn("PREISE UND ANGEBOTE RECHNEN", self.aufrufe()[-1]["system"])
         # Bausteine, dann das Wissen mit Quellen, dann die beratenden Fachleute
-        self.assertEqual(antwort["bausteine"], ["preise", "wissen:kalkulation", "agent:kalk_unterhalt",
-                                                "agent:kalkulationsleiter"])
+        self.assertEqual(antwort["bausteine"], ["preise", "rechner", "wissen:kalkulation", "agent:kalk_unterhalt",
+                                                "agent:kalkulationsleiter"])  # "rechner": Erweiterung, exakt rechnen
         self.assertIn("FACHLEUTE FÜR DIESE FRAGE", self.aufrufe()[-1]["system"])
         self.assertIn("Kalkulator Unterhaltsreinigung (Abteilung Angebote und Kalkulation)", self.aufrufe()[-1]["system"])
 

@@ -80,7 +80,7 @@ const pause = (ms) => new Promise((r) => setTimeout(r, ms));
     console.log("Start und Jarvis-Ansicht");
     await page.goto(basis + "/");
     await page.waitForSelector("#reiter button");
-    pruefe((await page.locator("#reiter button").count()) === 5, "fünf Reiter");
+    pruefe((await page.locator("#reiter button").count()) === 6, "sechs Reiter");
     pruefe((await page.title()) === "JARVIS", "Titel JARVIS");
     await page.waitForFunction(() => document.querySelector("#chips").textContent.includes("bereit"), null, { timeout: 20000 });
     pruefe(true, "Claude Code wird als bereit angezeigt");
@@ -171,8 +171,24 @@ const pause = (ms) => new Promise((r) => setTimeout(r, ms));
     pruefe((await page.locator("#k-agenten").textContent()).includes("Leitung"), "Jede Abteilung zeigt ihre Leitung");
     pruefe((await page.locator("#k-heute").textContent()).includes("Modellaufrufe"), "Verbrauchskarte zeigt Modellaufrufe");
     pruefe((await page.locator("#k-log .log div").count()) > 3, "Ereignisse stammen aus dem echten Log");
+    await page.waitForSelector("#k-faehigkeiten details.abteilung", { timeout: 15000 });
+    pruefe((await page.locator("#k-faehigkeiten").textContent()).includes("Rechner"), "Fähigkeiten: Erweiterungen stehen im Leitstand");
+    pruefe(/\d+ von \d+ Erweiterungen aktiv/.test(await page.locator("#k-faehigkeiten .organisation").textContent()), "Fähigkeiten: Zahl der aktiven Erweiterungen");
+    await page.locator("#k-faehigkeiten details.abteilung summary").first().click();
+    await page.locator("#k-faehigkeiten button:has-text('abschalten')").first().click();
+    await page.waitForFunction(() => document.querySelector("#k-faehigkeiten").textContent.includes("einschalten"), null, { timeout: 15000 });
+    pruefe(true, "Fähigkeiten: eine Erweiterung lässt sich abschalten");
+    await page.locator("#k-faehigkeiten button:has-text('einschalten')").first().click();
+    await page.waitForFunction(() => !document.querySelector("#k-faehigkeiten").textContent.includes("abgeschaltet"), null, { timeout: 15000 });
+    pruefe(true, "Fähigkeiten: und wieder einschalten");
     await pause(300);
     await foto(page, "03-leitstand.png");
+
+    console.log("Betrieb");
+    await page.click("#reiter-betrieb");
+    await page.waitForFunction(() => !document.querySelector("#betrieb-inhalt").textContent.includes("Wird geladen"), null, { timeout: 15000 });
+    pruefe((await page.locator("#ansicht-betrieb").textContent()).includes("nur echte Einträge"), "Betrieb: Ansicht ist da und ehrlich beschriftet");
+    await foto(page, "03b-betrieb.png");
 
     console.log("Aufträge");
     await page.click("#reiter-auftraege");
@@ -324,7 +340,7 @@ const pause = (ms) => new Promise((r) => setTimeout(r, ms));
     hp.on("pageerror", (e) => meldungen.push("handy pageerror: " + e.message));
     await hp.goto(basis + "/");
     await hp.waitForSelector("#chat .nachricht");
-    for (const id of ["jarvis", "leitstand", "auftraege", "wissen", "system"]) {
+    for (const id of ["jarvis", "leitstand", "auftraege", "betrieb", "wissen", "system"]) {
       await hp.click("#reiter-" + id);
       await pause(350);
       const breit = await hp.evaluate(() => ({ s: document.documentElement.scrollWidth, w: window.innerWidth }));

@@ -103,6 +103,7 @@
     auftraege: "M9 6h11 M9 12h11 M9 18h11 M4.5 6h.01 M4.5 12h.01 M4.5 18h.01",
     wissen: "M5 4h11a3 3 0 0 1 3 3v13H8a3 3 0 0 1-3-3z M5 17a3 3 0 0 1 3-3h11",
     system: "M4 7h9 M17 7h3 M4 17h3 M11 17h9 M15 4v6 M9 14v6",
+    betrieb: "M4 8h16v11H4z M9 8V5h6v3 M4 13h16",
     mikro: "M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3z M5 11a7 7 0 0 0 14 0 M12 18v3"
   };
   function icon(name) { return sv("svg", { viewBox: "0 0 24 24", "aria-hidden": "true" }, sv("path", { d: ICONS[name] })); }
@@ -113,7 +114,8 @@
     daten: null, bereich: lesen("jv_bereich"), gespraech: null, alle: false,
     ansicht: lesen("jv_ansicht") || "jarvis", wartet: false, ausstehend: null,
     offline: false, cache: {}, ladeNr: 0, angewandt: 0,
-    offeneSchritte: {}, antworten: {}, bearbeiteFakt: null, planLaeuft: false
+    offeneSchritte: {}, antworten: {}, bearbeiteFakt: null, planLaeuft: false,
+    erw: null, erwZeit: 0, erwLaedt: false, erwOffen: {}
   };
   function neu(schluessel, wert) {
     var j = JSON.stringify(wert);
@@ -186,6 +188,14 @@
     zeichnen();
     return true;
   }
+  async function erweiterungenLaden(sofort) {
+    if (S.erwLaedt || (!sofort && Date.now() - S.erwZeit < 8000)) return;
+    S.erwLaedt = true;
+    try {
+      var r = await api("GET", "/api/erweiterungen" + (S.bereich ? "?bereich=" + encodeURIComponent(S.bereich) : ""));
+      if (r.code === 200) { S.erw = r.daten; S.erwZeit = Date.now(); if (S.ansicht === "leitstand") zeichnenFaehigkeiten(); if (S.ansicht === "betrieb") zeichnenBetrieb(); }
+    } finally { S.erwLaedt = false; }
+  }
   var pollTimer = null;
   function pollenPlanen() {
     window.clearTimeout(pollTimer);
@@ -195,7 +205,7 @@
   }
 
   /* ========================================================= Reiter, Kopf === */
-  var ANSICHTEN = [["jarvis", "Jarvis"], ["leitstand", "Leitstand"], ["auftraege", "Aufträge"], ["wissen", "Wissen"], ["system", "System"]];
+  var ANSICHTEN = [["jarvis", "Jarvis"], ["leitstand", "Leitstand"], ["auftraege", "Aufträge"], ["betrieb", "Betrieb"], ["wissen", "Wissen"], ["system", "System"]];
   function reiterBauen() {
     var nav = leeren($("#reiter"));
     ANSICHTEN.forEach(function (a) {
@@ -697,6 +707,58 @@
     }
   }
 
+  /* ===================================================== Fähigkeiten, Betrieb === */
+  function zeichnenFaehigkeiten() {
+    var e = S.erw, box = $("#k-faehigkeiten .inhalt");
+    if (!box) return;
+    if (!e) { if (neu("l-faehig", null)) { leeren(box).appendChild(h("p", { class: "leer", text: "Wird geladen …" })); } return; }
+    if (!neu("l-faehig", [e.erweiterungen, e.bereiche])) return;
+    leeren(box);
+    var aktiv = e.erweiterungen.filter(function (x) { return x.aktiv; }).length;
+    box.appendChild(h("p", { class: "klein organisation", text: aktiv + " von " + e.erweiterungen.length + " Erweiterungen aktiv. Jede läuft abgesichert: Fällt eine aus, arbeiten die anderen weiter." }));
+    Object.keys(e.bereiche).forEach(function (b) {
+      var liste = e.erweiterungen.filter(function (x) { return x.bereich === b; });
+      if (!liste.length) return;
+      var fehler = liste.filter(function (x) { return x.fehler; }).length;
+      var gruppe = h("details", { class: "abteilung" }, h("summary", {}, h("span", { class: "name", text: e.bereiche[b] }),
+        h("span", { class: "info", text: liste.length + (liste.length === 1 ? " Fähigkeit" : " Fähigkeiten") + (fehler ? " · " + fehler + " mit Fehler" : "") })));
+      gruppe.open = !!S.erwOffen[b]; /* aufgeklappt bleibt aufgeklappt, auch wenn neu gezeichnet wird */
+      gruppe.addEventListener("toggle", function () { S.erwOffen[b] = gruppe.open; });
+      liste.forEach(function (x) {
+        var zeile = h("div", { class: "agent lang" }, h("span", { class: "punkt " + (x.fehler ? "fehler" : (x.aktiv ? "ok" : "")) }),
+          h("span", { class: "name", title: x.beschreibung, text: x.titel }),
+          h("span", { class: "info", title: x.beschreibung, text: x.fehler ? "Fehler: " + x.fehler : (x.aus ? "abgeschaltet" : (x.beschreibung || "bereit")) }),
+          h("button", { type: "button", class: "knopf knopf-klein", text: x.aus ? "einschalten" : "abschalten",
+            onclick: function () { tun("POST", "/api/erweiterung", { name: x.name, aktiv: !!x.aus }, x.aus ? x.titel + " ist wieder an." : x.titel + " ist abgeschaltet.").then(function () { erweiterungenLaden(true); }); } }));
+        gruppe.appendChild(zeile);
+        (x.status || []).forEach(function (st) { gruppe.appendChild(h("div", { class: "agent lang unter" }, h("span", { class: "name", text: st[0] }), h("span", { class: "info", text: st[1] }))); });
+        if (x.werkzeuge.length) gruppe.appendChild(h("p", { class: "klein", text: "Werkzeuge: " + x.werkzeuge.map(function (w) { return WERKZEUG_NAMEN[w] || w; }).join(", ") }));
+      });
+      box.appendChild(gruppe);
+    });
+  }
+  function zeichnenBetrieb() {
+    var box = $("#betrieb-inhalt"), e = S.erw;
+    if (!e) { if (neu("b-tab", null)) { leeren(box).appendChild(h("p", { class: "leer", text: "Wird geladen …" })); } return; }
+    if (!neu("b-tab", e.tabellen) || tippt(box)) return;
+    leeren(box);
+    if (!e.tabellen.length) { box.appendChild(h("p", { class: "leer", text: "Noch keine Übersichten. Sobald Aufträge, Angebote oder Rechnungen eingetragen sind, stehen sie hier." })); return; }
+    var titel = {};
+    e.erweiterungen.forEach(function (x) { titel[x.name] = x.titel; });
+    e.tabellen.forEach(function (t) {
+      var teil = h("section", { class: "betrieb-tabelle" }, h("h3", { text: t.titel || titel[t.erweiterung] || t.erweiterung }));
+      if (!t.zeilen.length) teil.appendChild(h("p", { class: "leer", text: t.hinweis || "Noch keine Einträge." }));
+      else {
+        var tab = h("table", { class: "tabelle" });
+        tab.appendChild(h("thead", {}, h("tr", {}, t.spalten.map(function (s) { return h("th", { text: s }); }))));
+        tab.appendChild(h("tbody", {}, t.zeilen.map(function (z) { return h("tr", {}, z.map(function (w) { return h("td", { text: w }); })); })));
+        teil.appendChild(h("div", { class: "tabelle-rahmen" }, tab));
+        if (t.hinweis) teil.appendChild(h("p", { class: "klein", text: t.hinweis }));
+      }
+      box.appendChild(teil);
+    });
+  }
+
   /* =============================================================== Aufträge === */
   function sicherKnopf(text, sicher, aktion) {
     var timer = null;
@@ -1175,6 +1237,8 @@
   var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
   var Sprache = { rec: null, modus: null, laeuft: false, pause: false, wartetBis: 0, timer: null };
   var WECKWORT = /^\s*(?:(?:hey|hei|hallo|hi|ok|okay)[\s,]+)?(?:jarvis|jarwis|dscharvis|tscharvis|scharvis)\b[\s,.:;!?-]*/i;
+  /* Ins Wort fallen: „Jarvis, stopp“ wirkt auch, während er spricht (sonst hört er sich selbst nicht zu). */
+  var STOPPWORT = /^\s*(?:(?:hey|hei|hallo|ok|okay)[\s,]+)?(?:jarvis|jarwis|dscharvis|tscharvis|scharvis)[\s,.:;!?-]+(?:stopp?|halt|ruhe|sei still|warte|aufhören|hör auf)\b/i;
 
   function sprachHinweis(text, warnung, zwischen) {
     var box = leeren($("#sprach-hinweis"));
@@ -1248,6 +1312,10 @@
   function sprachGehoert(text) {
     text = (text || "").trim();
     if (!text) return;
+    if (Sprache.nurStopp) {
+      if (STOPPWORT.test(text)) { api("POST", "/api/still", {}).then(function () { laden(); }); sprachHinweis("Gestoppt."); }
+      return; /* während er spricht, zählt nur „Jarvis, stopp“ – alles andere wäre seine eigene Stimme */
+    }
     if (Sprache.modus === "einmal") {
       Sprache.modus = null;
       try { Sprache.rec.stop(); } catch (e) { /* war schon beendet */ }
@@ -1287,6 +1355,8 @@
   /* Während JARVIS spricht, hört er nicht zu (sonst würde er sich selbst verstehen). */
   function sprachePausePruefen() {
     var spricht = !!(S.daten && S.daten.system.stimme.spricht);
+    Sprache.nurStopp = spricht && Sprache.modus === "dauer";
+    if (Sprache.nurStopp) return; /* „Hey Jarvis“ bleibt an: ins Wort fallen geht mit „Jarvis, stopp“ */
     if (spricht && !Sprache.pause && Sprache.modus) {
       Sprache.pause = true;
       if (Sprache.rec) { try { Sprache.rec.abort(); } catch (e) { /* schon beendet */ } Sprache.rec = null; Sprache.laeuft = false; }
@@ -1323,8 +1393,9 @@
     kernSetzen();
     var a = S.ansicht;
     if (a === "jarvis") { zeichnenChat(); zeichnenFreigaben($("#freigaben-inline"), "j-freigaben", ""); zeichnenMini(); }
-    else if (a === "leitstand") zeichnenLeitstand();
+    else if (a === "leitstand") { zeichnenLeitstand(); zeichnenFaehigkeiten(); erweiterungenLaden(false); }
     else if (a === "auftraege") zeichnenAuftraege();
+    else if (a === "betrieb") { zeichnenBetrieb(); erweiterungenLaden(false); }
     else if (a === "wissen") zeichnenWissen();
     else if (a === "system") zeichnenSystem();
   }

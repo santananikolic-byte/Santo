@@ -46,6 +46,7 @@ class Zeitplan(threading.Thread):
                 self.laeufer.wecken()
             self.routinen_pruefen()
             self.rueckblick_pruefen()
+            a.erweiterungen.takt()  # jede Erweiterung einzeln abgesichert
         self.sicherung_falls_faellig()
 
     def routinen_pruefen(self, jetzt=None, warten=False):

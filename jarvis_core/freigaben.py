@@ -39,9 +39,14 @@ class Berechtigung:
 
     # ---------------------------------------------------------- Prüfung ---
 
+    def abgeschaltet(self, w):
+        """Einzeln abgeschaltet oder mit seiner ganzen Erweiterung?"""
+        k = self.agent.konfig
+        return w.name in k.deaktivierte_werkzeuge or bool(w.erweiterung and w.erweiterung in k.erweiterungen_aus)
+
     def sichtbar(self, w, rolle):
         """Soll das Werkzeug dem Modell in dieser Rolle überhaupt gezeigt werden?"""
-        if w.name in self.agent.konfig.deaktivierte_werkzeuge or not rollen.erlaubt(rolle, w.name):
+        if self.abgeschaltet(w) or not rollen.erlaubt(rolle, w.name):
             return False
         return not (w.nur_chat and rolle != "allgemein")
 
@@ -49,7 +54,7 @@ class Berechtigung:
         a = self.agent
         if a.gesperrt.is_set():
             return Entscheidung("verweigert", 0, "Notstopp ist aktiv.")
-        if w.name in a.konfig.deaktivierte_werkzeuge:
+        if self.abgeschaltet(w):
             return Entscheidung("verweigert", 0, "Dieses Werkzeug ist abgeschaltet.")
         if not rollen.erlaubt(ctx.rolle, w.name):
             return Entscheidung("verweigert", 0, "Die Rolle %s darf %s nicht benutzen." % (ctx.rolle, w.name))
@@ -97,7 +102,7 @@ class Berechtigung:
         if a.gesperrt.is_set():
             return 423, {"ok": False, "fehler": "Notstopp ist aktiv. Erst entsperren."}
         w = a.register.get(rec["werkzeug"])
-        if w is None or w.name in a.konfig.deaktivierte_werkzeuge:
+        if w is None or self.abgeschaltet(w):
             self._beenden(freigabe_id, "abgelehnt", "Werkzeug ist inzwischen abgeschaltet.")
             return 403, {"ok": False, "fehler": "Das Werkzeug ist inzwischen abgeschaltet."}
         if not a.speicher.freigabe_entscheiden(freigabe_id, "erteilt"):

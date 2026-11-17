@@ -17,6 +17,7 @@ Zeiten stehen in UTC (siehe ``zeit.py``).
 import datetime
 import json
 import os
+import re
 import sqlite3
 import threading
 import uuid
@@ -24,6 +25,28 @@ import uuid
 from . import textsuche, zeit
 
 SCHEMA_VERSION = 1
+
+# Erweiterungen und Betriebsdaten (erweiterungen/, betrieb.py) arbeiten mit eigenen Tabellen erw_* und betrieb_*.
+# Ihr SQL läuft über sql_lesen/sql_schreiben - und darf nur diese Tabellen berühren, nie das Gedächtnis selbst.
+ZUSATZ_NAME = re.compile(r"^(erw|betrieb)_[a-z0-9_]{1,60}$")
+_ZUSATZ_BEZUG = re.compile(r"\b(?:from|join|into|update)\s+([^\s,();]+)", re.IGNORECASE)
+_ZUSATZ_VERBOTEN = re.compile(r"\b(attach|detach|pragma|drop|alter|vacuum|reindex|create|sqlite_\w+)\b|;\s*\S",
+                              re.IGNORECASE)
+
+
+class ZusatzFehler(ValueError):
+    """SQL einer Erweiterung, das über die eigenen Tabellen hinausgreift."""
+
+
+def _nur_zusatz(sql):
+    if _ZUSATZ_VERBOTEN.search(sql):
+        raise ZusatzFehler("Erweiterungen dürfen nur lesen, einfügen, ändern und löschen - in eigenen Tabellen, ein "
+                           "Befehl je Aufruf.")
+    namen = [n.strip('"`[]').lower() for n in _ZUSATZ_BEZUG.findall(sql)]
+    fremd = [n for n in namen if not ZUSATZ_NAME.match(n)]
+    if not namen or fremd:
+        raise ZusatzFehler("Erweiterungen dürfen nur eigene Tabellen (erw_…, betrieb_…) benutzen%s."
+                           % (", nicht %s" % ", ".join(fremd) if fremd else " - dieser Befehl nennt keine"))
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS meta (schluessel TEXT PRIMARY KEY, wert TEXT);
@@ -216,6 +239,7 @@ class Speicher:
         self.pfad = pfad
         os.makedirs(os.path.dirname(os.path.abspath(pfad)), exist_ok=True)
         self._sperre = threading.RLock()
+        self.zusatz_tabellen = set()  # Tabellen der Erweiterungen und des Betriebs (für Export und „Alles löschen“)
         self._db = sqlite3.connect(pfad, check_same_thread=False, timeout=30)
         self._db.row_factory = sqlite3.Row
         with self._sperre:
@@ -300,6 +324,29 @@ class Speicher:
         """Alle Einträge, deren Schlüssel mit ``praefix`` beginnt: {Rest des Schlüssels: Wert}."""
         zeilen = self._lesen("SELECT schluessel, wert FROM meta WHERE substr(schluessel, 1, ?) = ?", (len(praefix), praefix))
         return {z["schluessel"][len(praefix):]: z["wert"] for z in zeilen}
+
+    # ------------------------------------------- Erweiterungen und Betriebsdaten ---
+
+    def zusatz_anlegen(self, sql, tabellen):
+        """Legt Tabellen einer Erweiterung oder des Betriebs an. ``sql`` erzeugt ``erweiterungen.Tabelle`` (nur
+        CREATE … IF NOT EXISTS, Namen erw_*/betrieb_*). Die Tabellen kommen in Export und „Alles löschen“."""
+        for name in tabellen:
+            if not ZUSATZ_NAME.match(name):
+                raise ZusatzFehler("Ungültiger Tabellenname %r." % name)
+        with self._sperre, self._db:
+            self._db.executescript(sql)
+        self.zusatz_tabellen.update(tabellen)
+
+    def sql_lesen(self, sql, params=()):
+        """SELECT auf eigene Tabellen (erw_*, betrieb_*). Werte immer als Platzhalter ``?`` übergeben."""
+        _nur_zusatz(sql)
+        return self._lesen(sql, params)
+
+    def sql_schreiben(self, sql, params=()):
+        """INSERT/UPDATE/DELETE auf eigene Tabellen. Gibt (lastrowid, rowcount) zurück."""
+        _nur_zusatz(sql)
+        cur = self._schreiben(sql, params)
+        return cur.lastrowid, cur.rowcount
 
     # ---------------------------------------------------------- Erfahrungen ---
 
@@ -713,17 +760,21 @@ class Speicher:
             "erinnerungen_faellig": n("SELECT COUNT(*) AS n FROM erinnerungen WHERE status='faellig'"),
         }
 
+    def _alle_tabellen(self):
+        return TABELLEN + tuple(sorted(self.zusatz_tabellen))
+
     def exportieren(self):
         daten = {"exportiert": zeit.jetzt(), "schema": SCHEMA_VERSION}
-        for tabelle in TABELLEN:
-            daten[tabelle] = self._liste(tabelle, "SELECT * FROM %s ORDER BY 1" % tabelle)  # noqa: S608 - feste Namen
+        for tabelle in self._alle_tabellen():
+            # feste Namen: Kern-Tabellen und geprüfte Namen erw_*/betrieb_* (ZUSATZ_NAME)
+            daten[tabelle] = self._liste(tabelle, "SELECT * FROM %s ORDER BY 1" % tabelle)  # noqa: S608
         return daten
 
     def alles_loeschen(self):
-        """Löscht ALLE gespeicherten Inhalte (nicht die Datei, nicht die Werkstatt)."""
+        """Löscht ALLE gespeicherten Inhalte (nicht die Datei, nicht die Werkstatt) - auch die der Erweiterungen."""
         with self._sperre, self._db:
-            for tabelle in TABELLEN:
-                self._db.execute("DELETE FROM %s" % tabelle)  # noqa: S608 - feste Namen
+            for tabelle in self._alle_tabellen():
+                self._db.execute("DELETE FROM %s" % tabelle)  # noqa: S608 - feste, geprüfte Namen
             self._db.execute("DELETE FROM meta WHERE schluessel != 'schema_version'")
             self._db.execute("DELETE FROM sqlite_sequence")
 

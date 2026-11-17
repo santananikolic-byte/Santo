@@ -362,3 +362,14 @@ code { font: 13px var(--mono); padding: 1px 6px; border-radius: 6px; background:
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
 }
+
+/* ------------------------------------------------ Fähigkeiten, Betrieb --- */
+.agent.lang.unter { padding-left: 22px; opacity: 0.85; }
+.betrieb-tabelle { margin: 18px 0 8px; }
+.betrieb-tabelle h3 { margin: 0 0 6px; font-size: 14px; color: var(--orange-hell); letter-spacing: 0.04em; }
+.tabelle-rahmen { overflow-x: auto; -webkit-overflow-scrolling: touch; border: 1px solid var(--rand); border-radius: 10px; }
+table.tabelle { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+table.tabelle th, table.tabelle td { text-align: left; padding: 7px 10px; border-bottom: 1px solid rgba(255, 150, 60, 0.12); vertical-align: top; }
+table.tabelle th { color: var(--leise); font-weight: 600; font-size: 12px; white-space: nowrap; background: var(--karte); }
+table.tabelle tr:last-child td { border-bottom: 0; }
+@media (max-width: 640px) { table.tabelle { font-size: 12.5px; } table.tabelle th, table.tabelle td { padding: 6px 8px; } }

@@ -42,6 +42,7 @@ class Api:
         route = {
             "/api/zustand": self.zustand, "/api/logs": self.logs, "/api/audit": self.audit, "/api/export": self.export,
             "/api/stimmen": self.stimmen, "/api/suche": self.suche, "/api/auftrag": self.auftrag_details,
+            "/api/erweiterungen": self.erweiterungen,
         }.get(pfad)
         return route(query) if route else None
 
@@ -53,8 +54,34 @@ class Api:
             "/api/freigabe": self.freigabe, "/api/werkzeug": self.werkzeug, "/api/notstopp": self.notstopp,
             "/api/entsperren": self.entsperren, "/api/profil/einlesen": self.profil_einlesen, "/api/umgebung": self.umgebung,
             "/api/sicherung": self.sicherung, "/api/alles-loeschen": self.alles_loeschen, "/api/erfahrung": self.erfahrung,
+            "/api/erweiterung": self.erweiterung_schalten,
         }.get(pfad)
         return route(daten) if route else None
+
+    # ------------------------------------------------------- Erweiterungen ---
+
+    def erweiterungen(self, query):
+        """Alle Erweiterungen mit Zustand, Werkzeugen und Fehlern, dazu ihre Tabellen (Leitstand und Ansicht Betrieb)."""
+        return 200, dict({"ok": True}, **self.s.agent.erweiterungen.anzeige(self._bereich(query.get("bereich"))))
+
+    def erweiterung_schalten(self, daten):
+        """Eine Erweiterung ab- oder wieder einschalten (wirkt sofort: Werkzeuge, Hooks, Hintergrundarbeit)."""
+        name, aktiv = daten.get("name"), daten.get("aktiv")
+        if not isinstance(name, str) or not isinstance(aktiv, bool):
+            return 400, {"ok": False, "fehler": "name (Text) und aktiv (true/false) angeben."}
+        if name not in {e.name for e in self.s.agent.erweiterungen.liste}:
+            return 404, {"ok": False, "fehler": "Diese Erweiterung gibt es nicht."}
+        aus = set(self.s.konfig.erweiterungen_aus)
+        if aktiv:
+            aus.discard(name)
+        else:
+            aus.add(name)
+        try:
+            self.s.konfig.aktualisieren({"erweiterungen_aus": sorted(aus)})
+        except KonfigFehler as fehler:
+            return 400, {"ok": False, "fehler": str(fehler)}
+        self.s.speicher.audit_schreiben("erweiterung_" + ("an" if aktiv else "aus"), details={"name": name})
+        return 200, {"ok": True}
 
     def _bereich(self, wert):
         return gedaechtnis.bereich_pruefen(self.s.konfig, wert or "")
@@ -200,6 +227,8 @@ class Api:
             return 400, {"ok": False, "fehler": "Feld \"text\" fehlt."}
         if self.s.agent.gesperrt.is_set():
             return 423, {"ok": False, "fehler": "Notstopp ist aktiv."}
+        if self.s.agent.erweiterungen.ruhe():  # Ruhezeit: die Antwort steht im Chat, laut wird nichts gesagt
+            return 200, {"ok": True, "gesprochen": False, "ruhe": True}
         return 200, {"ok": True, "gesprochen": self.s.stimme.sprich(text[:MAX_TEXT])}
 
     def still(self, daten):

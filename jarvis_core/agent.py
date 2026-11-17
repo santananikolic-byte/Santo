@@ -15,7 +15,7 @@ import re
 import shutil
 import subprocess
 
-from . import agenten, gedaechtnis, gehirn, rollen, selbst, umgebung, wissen, zeit
+from . import agenten, erweiterungen, gedaechtnis, gehirn, rollen, selbst, umgebung, wissen, zeit
 from .kalender import MacKalender
 from .mac_hand import MacHand
 from .mail import MacMail
@@ -64,6 +64,8 @@ class Agent:
         rollen.eigene_setzen(eigene)
         for problem in probleme:
             log.ereignis("agent_uebersprungen", "WARNING", grund=problem[:300])
+        # Erweiterungen (jarvis_core/erweiterungen/): Werkzeuge, Bausteine, Tabellen und Hooks - jede abgesichert
+        self.erweiterungen = erweiterungen.Verwalter(self)
 
     # ------------------------------------------------------- Grundlagen ---
 
@@ -85,10 +87,11 @@ class Agent:
         kurzen Regeln besser. Dann kommen höchstens zwei Bausteine, ein Wissenspaket, ein Fachmann und nur die
         passenden Werkzeuge hinein - und alles zusammen bleibt unter dem Platz, den das Kontextfenster lässt."""
         kompakt = getattr(self.konfig, "gehirn", "claude") == "lokal"
-        bausteine = gehirn.bausteine_waehlen(frage, verlauf, rolle)
+        ohne = self.erweiterungen.ohne()
+        bausteine = gehirn.bausteine_waehlen(frage, verlauf, rolle, ohne=ohne)
         pakete = wissen.waehlen(frage, verlauf, rolle)
         if kompakt:  # was die Frage selbst trifft, geht vor dem, was nur noch aus dem Verlauf mitläuft
-            zuerst = gehirn.bausteine_waehlen(frage, "", "allgemein")
+            zuerst = gehirn.bausteine_waehlen(frage, "", "allgemein", ohne=ohne)
             bausteine = ([b for b in bausteine if b in zuerst] + [b for b in bausteine if b not in zuerst])[:2]
             direkt = wissen.waehlen(frage, "", "allgemein")
             pakete = [p for p in pakete if p in direkt] + [p for p in pakete if p not in direkt]
@@ -110,13 +113,17 @@ class Agent:
         zustand = selbst.zustand_zeile(self.konfig)
         ich = selbst.selbstbild(self) if rolle == "allgemein" and "selbst" in bausteine else ""
         platz = int(getattr(self.konfig, "lokal_kontext", 8192) or 8192) * 3 * 45 // 100  # Zeichen: 45 % des Fensters
+        faehig = self.erweiterungen.faehigkeiten_text() if rolle == "allgemein" and not kompakt else ""
         while True:
             beratung = agenten.beratung_text(berater, {aid: [e["text"] for e in self.speicher.erfahrungen(agent=aid, limit=2)]
                                                        for aid in berater}) if berater else ""
             nur = gehirn.kompakt_werkzeuge(bausteine, frage, verlauf) if kompakt and rolle == "allgemein" else None
-            prompt = gehirn.systemprompt(self.register.katalog(rolle, nur=nur), sichtbar, bausteine, rollen_auftrag,
-                                         wissen_pakete=pakete, beratung=beratung, organisation=rolle == "allgemein",
-                                         zustand=zustand, selbstbild=ich, kompakt=kompakt)
+            # Werkzeuge der Erweiterungen nur, wenn ihr Thema dran ist - sonst liefe der Katalog über
+            zusatz = self.erweiterungen.sichtbare_werkzeuge(bausteine, verlauf) if rolle == "allgemein" else None
+            prompt = gehirn.systemprompt(self.register.katalog(rolle, nur=nur, erweitert=zusatz), sichtbar, bausteine,
+                                         rollen_auftrag, wissen_pakete=pakete, beratung=beratung,
+                                         organisation=rolle == "allgemein", zustand=zustand, selbstbild=ich,
+                                         kompakt=kompakt, faehigkeiten=faehig)
             if not kompakt or len(prompt) <= platz:
                 break
             if pakete:  # zu lang für das eigene Modell: erst das Wissenspaket weglassen (es bleibt per Werkzeug abrufbar),
@@ -163,13 +170,15 @@ class Agent:
         """Kontext (Gedächtnis, Offenes) und Gesprächsverlauf. Für das eigene Modell gekürzt: Der Platz, den der
         Systemprompt im Kontextfenster lässt, ist klein - das Neueste zählt."""
         kontext = gedaechtnis.kontext_text(self.speicher, self.konfig, ctx.bereich, frage)
+        zusatz = self.erweiterungen.kontext(ctx, frage)  # Lage und Notizen aus den Erweiterungen (gekürzt, entschärft)
         je_text, je_ergebnis = MAX_TEXT_IM_VERLAUF, MAX_ERGEBNIS_IM_PROMPT
         if getattr(self.konfig, "gehirn", "claude") == "lokal":
             fenster = int(getattr(self.konfig, "lokal_kontext", 8192) or 8192)
             kontext = self._kuerzen(kontext, fenster * 3 * 12 // 100)  # 12 % für das Gedächtnis
+            zusatz = self._kuerzen(zusatz, fenster * 3 * 5 // 100) if zusatz else ""  # 5 % für die Erweiterungen
             transkript = transkript[-6:]
             je_text, je_ergebnis = fenster * 3 * 5 // 100, fenster * 3 * 10 // 100  # je Eintrag 5 %, je Werkzeugergebnis 10 %
-        teile = [kontext, ""]
+        teile = [kontext + ("\n" + zusatz if zusatz else ""), ""]
         if transkript:
             teile.append("[GESPRÄCH]")
             for rolle, text in transkript:
@@ -254,6 +263,8 @@ class Agent:
 
     def benachrichtigen(self, titel, text, sprechen=False):
         """Mitteilung des Macs (der Text geht als Argument an osascript, nie in den Skripttext) und optional laut."""
+        if sprechen and self.erweiterungen.ruhe():  # Ruhezeit oder „Ruhe bis …“: nur die stille Mitteilung
+            sprechen = False
         programm = shutil.which("osascript")
         if programm:
             try:
@@ -322,6 +333,15 @@ class Agent:
             fertig, entschieden = self._kurz_entscheiden(gespraech, bereich, *kurz)
             if fertig is not None:
                 return fertig
+        if entschieden is None:  # kurze feste Befehle („Stopp“, „Ruhe bis 14 Uhr“, „Wie spät ist es?“) ohne Modell
+            herkunft, sofort = self.erweiterungen.sofort(text, gespraech, bereich)
+            if sofort:
+                marke = ["sofort:" + herkunft]
+                sp.nachricht_hinzufuegen(gespraech, "jarvis", sofort, meta={"aktionen": [], "bausteine": marke,
+                                                                           "denkstufe": "sofort"})
+                return 200, {"ok": True, "gespraech": gespraech, "bereich": bereich, "antwort": sofort, "aktionen": [],
+                             "freigaben": [], "freigabe_entschieden": None, "modell": None, "ausgewichen": None,
+                             "dauer_ms": 0, "bausteine": marke, "denkstufe": "sofort", "richtigstellung": []}
         ctx = Kontext(self, bereich, gespraech=gespraech)
         transkript = self._transkript(gespraech)
         texte, ergebnisse, runden, dauer = [], [], 0, 0
@@ -350,6 +370,9 @@ class Agent:
                                                 "art": fehler.art, "fehler": str(fehler)}
         antwort = texte[-1] if texte else "\n".join("%s: %s" % (e["kurz"], e["text"][:200]) for e in ergebnisse) or "…"
         antwort, richtigstellung = gehirn.ehrlichkeit_pruefen(antwort, self._bestaetigt(gespraech, ergebnisse), frage=text)
+        hinweise = self.erweiterungen.nach_antwort(gespraech, text, antwort, ergebnisse)  # z. B. „Zahl ohne Quelle“
+        if hinweise:
+            antwort = antwort + "\n\n" + "\n".join(hinweise)
         for baustein in bausteine:
             if baustein.startswith("agent:"):
                 self.einsatz_merken(baustein[6:], "beraten")

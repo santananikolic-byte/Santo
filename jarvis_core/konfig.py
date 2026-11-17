@@ -65,6 +65,11 @@ STANDARD = {
     "api_domains": [],
     # Einzeln abgeschaltete Werkzeuge ("Rechte widerrufen").
     "deaktivierte_werkzeuge": [],
+    # Abgeschaltete Erweiterungen (jarvis_core/erweiterungen/<name>.py): ihre Werkzeuge und Hintergrundarbeit ruhen.
+    "erweiterungen_aus": [],
+    # So oft am Tag dürfen Erweiterungen im Hintergrund selbst denken (z. B. ein Gespräch zusammenfassen). 0 = nie.
+    # Mit Claude kostet jeder Aufruf Abo-Kontingent; mit dem eigenen Gehirn nur Rechenzeit des Macs.
+    "hintergrund_denken": 20,
     # Aufträge und Grenzen
     "max_schritte": 6,
     "max_versuche": 2,
@@ -329,6 +334,9 @@ def normalisieren(werte, daten_ordner):
     _liste(w, "deaktivierte_werkzeuge", 100)
     w["deaktivierte_werkzeuge"] = sorted({str(n).strip() for n in w["deaktivierte_werkzeuge"]
                                           if NAME_MUSTER.match(str(n).strip())})
+    _liste(w, "erweiterungen_aus", 200)
+    w["erweiterungen_aus"] = sorted({str(n).strip() for n in w["erweiterungen_aus"] if NAME_MUSTER.match(str(n).strip())})
+    _ganzzahl(w, "hintergrund_denken", 0, 500)
     return {name: w[name] for name in STANDARD}
 
 

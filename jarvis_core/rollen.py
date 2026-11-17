@@ -46,6 +46,15 @@ def eigene_setzen(liste):
             ROLLEN[a.id] = _eintrag(a)
 
 
+def werkzeug_erlauben(rolle, werkzeug):
+    """Gibt einem Fachmann ein Werkzeug einer Erweiterung dazu (FUER_AGENTEN; mehrfach aufrufen schadet nicht)."""
+    if rolle == "allgemein" or rolle not in ROLLEN:
+        raise ValueError("Unbekannter Fachmann %r." % rolle)
+    werkzeuge = tuple(ROLLEN[rolle]["werkzeuge"] or ())
+    if werkzeug not in werkzeuge:
+        ROLLEN[rolle]["werkzeuge"] = werkzeuge + (werkzeug,)
+
+
 def rolle_pruefen(rolle):
     return rolle if rolle in ROLLEN and rolle != "allgemein" else "allgemein"
 
