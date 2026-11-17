@@ -193,7 +193,8 @@ def einrichten(k, modell=None, frage_ja=None, sage=print):
                             % (modell, " (%.1f GB)" % groesse if groesse else "")):
                 sage("Abgebrochen. Nichts wurde geändert.")
                 return 1
-            if subprocess.run([programm, "pull", modell], timeout=6 * 3600).returncode != 0:  # noqa: S603
+            umgebung = dict(os.environ, OLLAMA_HOST=k.ollama_adresse)  # das Programm spricht mit genau diesem Ollama
+            if subprocess.run([programm, "pull", modell], timeout=6 * 3600, env=umgebung).returncode != 0:  # noqa: S603
                 raise GehirnFehler("Das Laden des Modells hat nicht geklappt. Läuft das Internet? Dann dieselbe Zeile "
                                    "nochmal - es macht dort weiter, wo es aufgehört hat.")
         sage("Probefrage an das Modell (das erste Mal dauert länger, weil es erst in den Speicher geladen wird) …")

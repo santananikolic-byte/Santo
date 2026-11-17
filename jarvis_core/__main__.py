@@ -185,12 +185,17 @@ def provider():
 
     k = _konfig()
     ergebnis = ProviderManager(k, _StillesLog()).pruefen()
-    for p in ergebnis.values():
+    gewaehlt = "lokal" if k.gehirn == "lokal" else "claude_code"
+    for name, p in ergebnis.items():
+        if k.gehirn == "lokal" and name != "lokal":
+            continue  # unabhängiger Betrieb: Claude wird nicht gebraucht und nicht gefragt
         print("%-12s %s %s" % (p["anzeige"], "●" if p["nutzbar"] else "○", p["hinweis"]))
         if p.get("version"):
             print("             Version %s" % p["version"])
+    if k.gehirn == "lokal":
+        print("Unabhängig: JARVIS denkt mit dem eigenen Modell auf diesem Mac. Nichts geht an Claude.")
     # Bereit ist JARVIS, wenn das GEWÄHLTE Gehirn bereit ist: das eigene Modell oder Claude.
-    return 0 if ergebnis["lokal" if k.gehirn == "lokal" else "claude_code"]["nutzbar"] else 1
+    return 0 if ergebnis[gewaehlt]["nutzbar"] else 1
 
 
 def _hinweis(befehl, im_paket):

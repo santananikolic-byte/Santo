@@ -198,7 +198,7 @@ cd "$ZIEL" || exit 1
 ./jarvis.sh pruefen
 PRUEFUNG=$?
 if [ "$NEU_GEHOLT" = "1" ]; then
-    sage "Neue Fassung geholt - JARVIS startet neu, damit sie gilt."
+    sage "JARVIS startet neu, damit die neue Fassung und die Einstellungen gelten."
     ./jarvis.sh stop >/dev/null 2>&1
 fi
 if ! ./jarvis.sh start; then
