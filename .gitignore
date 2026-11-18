@@ -24,3 +24,6 @@ browser_aufnahme.png
 
 # Gebaute Pakete (python3 mac-paket/bauen.py)
 dist/
+
+# Arbeitsordner der Sub-Agenten (git worktrees) - nie einchecken
+.claude/worktrees/
