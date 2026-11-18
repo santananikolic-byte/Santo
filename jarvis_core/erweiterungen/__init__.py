@@ -27,6 +27,7 @@ Was eine Erweiterung mitbringen kann (alles freiwillig, Anleitung: docs/AGENTEN-
     ruhe(agent, jetzt)                             -> bool         True = jetzt nicht laut sprechen
     lage(agent)                                    -> [str]        bis zu 5 kurze Zeilen fürs Lagebild
     bericht(agent, von, bis)                       -> {"titel", "zeilen": [str], "kennzahlen": [(Name, Wert)]}
+                                                   (von, bis: "JJJJ-MM-TT", Ortszeit, BEIDE einschließlich)
     anzeige(agent, bereich)                        -> {"status": [(Name, Text)], "tabellen": [{"titel", "spalten",
                                                        "zeilen", "hinweis"}]}
 

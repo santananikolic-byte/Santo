@@ -76,6 +76,7 @@ def takt(agent, jetzt): ...                          # alle 15 s, schnell! (jetz
 def ruhe(agent, jetzt): ...                          # -> bool: jetzt nicht laut sprechen
 def lage(agent): ...                                 # -> [str], bis zu 5 Zeilen fürs Lagebild
 def bericht(agent, von, bis): ...                    # -> {"titel", "zeilen": [str], "kennzahlen": [(Name, Wert)]}
+                                                     #    von, bis: "JJJJ-MM-TT" (Ortszeit), BEIDE einschließlich
 def anzeige(agent, bereich): ...                     # -> {"status": [(Name, Text)], "tabellen": [{titel, spalten, zeilen, hinweis}]}
 ```
 
