@@ -72,6 +72,25 @@ class TestAufgaben(KernTest):
         finally:
             agent.aufgabe_kennzahlen = original
 
+    def test_abbruch_waehrend_der_bearbeitung(self):
+        """Eigentümer bricht eine laufende Aufgabe ab: Ergebnis wird verworfen, kein Arbeiterfehler."""
+        agent = self.kern.register.hole("ceo")
+        original = agent.aufgabe_kennzahlen
+
+        def langsam(a, k):
+            k.aufgaben.abbrechen(a["id"], "eigentuemer", "doch nicht")  # passiert „währenddessen“
+            return {"folgeaufgaben": [{"titel": "x", "typ": "kennzahlen", "verantwortlich": "ceo"}]}
+        agent.aufgabe_kennzahlen = langsam
+        try:
+            aid = self.kern.aufgaben.anlegen("KZ", "kennzahlen", "ceo", "eigentuemer")
+            self.assertTrue(self.orch.einmal())
+        finally:
+            agent.aufgabe_kennzahlen = original
+        self.assertEqual(self.kern.aufgaben.hole(aid)["status"], "abgebrochen")
+        self.assertEqual(len(self.kern.aufgaben.liste()), 1)  # keine Folgeaufgabe
+        self.assertEqual(self.kern.protokoll.liste("fehler"), [])
+        self.assertIn("Ergebnis verworfen", self.kern.protokoll.liste("info")[0]["ereignis"])
+
     def test_unerlaubter_statuswechsel(self):
         aid = self.kern.aufgaben.anlegen("KZ", "kennzahlen", "ceo", "eigentuemer")
         self.orch.alle_abarbeiten()

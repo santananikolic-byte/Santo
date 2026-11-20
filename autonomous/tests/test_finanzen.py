@@ -51,7 +51,10 @@ class TestWallet(KernTest):
         self.assertTrue([w for w in r2["warnungen"] if "Budget überschritten" in w])
 
     def test_deutsche_betragsschreibweise(self):
-        from autonomous.wallet import betrag_in_cent
+        from autonomous.wallet import betrag_in_cent, euro
+        self.assertEqual(euro(125050), "1.250,50 €")
+        self.assertEqual(euro(-123456789), "-1.234.567,89 €")
+        self.assertEqual(euro(5), "0,05 €")
         for eingabe, cent in (("12,50", 1250), ("1.000", 100000), ("1.234,56", 123456), ("12.5", 1250),
                               ("7", 700), ("3 €", 300), (2.5, 250)):
             self.assertEqual(betrag_in_cent(eingabe), cent, eingabe)

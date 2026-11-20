@@ -1,5 +1,10 @@
 # Jarvis
 
+> **Neu: AUTONOMOUS** (`autonomous/`) – lokales Unternehmenssystem mit Agenten (CEO, Research, Product, Sales,
+> Finance, Learning), Freigaben, Simulations-Wallet und echten Finanzen, dunkle Oberfläche auch fürs iPhone.
+> Start per Doppelklick auf **`AUTONOMOUS-starten.command`**, Anleitung: [`autonomous/README.md`](autonomous/README.md),
+> Stand und Tests: [`autonomous/docs/PHASENBERICHT.md`](autonomous/docs/PHASENBERICHT.md).
+
 Ein persönlicher Sprachassistent für einen Familienbetrieb in Bau und
 Reinigung. Er läuft auf dem Mac, wird per Sprache bedient und antwortet
 gesprochen.

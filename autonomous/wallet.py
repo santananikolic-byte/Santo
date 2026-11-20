@@ -23,7 +23,8 @@ ARTEN_VORZEICHEN = {
 def euro(cent):
     vorzeichen = "-" if cent < 0 else ""
     cent = abs(int(cent))
-    return "%s%d,%02d €" % (vorzeichen, cent // 100, cent % 100)
+    euro_teil = "{:,}".format(cent // 100).replace(",", ".")   # 1250 → 1.250 (deutsche Schreibweise)
+    return "%s%s,%02d €" % (vorzeichen, euro_teil, cent % 100)
 
 
 def betrag_in_cent(wert):

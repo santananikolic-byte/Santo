@@ -1,8 +1,5 @@
 # AUTONOMOUS – Phasenbericht (Abschnitt 14 des Entwicklungsauftrags)
 
-> **ENTWURF** – Oberfläche und Google-Profil-Paket sind noch in Arbeit; dieser Bericht wird nach deren Abschluss
-> mit den echten Testzahlen aktualisiert.
-
 Stand: 20.11.2026. Bedeutung: **Getestet** = automatische Tests laufen grün in der Entwicklungsumgebung (Linux, Python 3.13).
 **Auf dem Mac verifiziert** = noch **nichts** – der erste echte Start auf dem Mac steht aus.
 
@@ -14,7 +11,8 @@ Stand: 20.11.2026. Bedeutung: **Getestet** = automatische Tests laufen grün in 
 | 2 Funktionsfähiger Kern | erledigt, getestet | `tests/test_kern.py`, `tests/test_sicherheit.py` (Server) |
 | 3 Wallet und Finanzen | erledigt, getestet | `tests/test_finanzen.py` |
 | 4 Erste Agenten | erledigt, getestet | CEO, Research, Product, Sales, Finance, Learning + Supervisor |
-| 5 Erstes Produkt und Vertrieb | Webseiten-Paket, Verkaufsseite, Vertrieb: erledigt, getestet. Google-Profil-Paket: **in Arbeit** | `tests/test_produkt_vertrieb.py`, `beispiele/` |
+| 5 Erstes Produkt und Vertrieb | erledigt, getestet | `tests/test_produkt_vertrieb.py`, `tests/test_google_profil.py`, `beispiele/` |
+| Oberfläche (Abschnitt 10) | erledigt, im Browser geprüft | `tests/ui_pruefung.js` (142 Prüfungen, iPhone- und Desktop-Breite) |
 | 6 Erweiterung | teilweise | Finance, Sales, Learning vorhanden; Lasttest vorhanden; Kennzahlen über CEO-Agent |
 
 Gesamtergebnis der automatischen Tests: siehe Abschnitt „Tests“ am Ende (echte Zahlen des letzten Laufs).
@@ -111,6 +109,24 @@ Das Register trägt bis zu 500 logische Rollen, ohne je Rolle einen Prozess zu s
 
 **Keine.** Optional später (nur mit eurer Zustimmung und Preisangabe): lokales Modell über Ollama (kostenlos, eigene Hardware), Hosting für Kunden-Webseiten, ein Versandkanal.
 
-## Tests
+## Oberfläche
 
-Siehe unten – wird nach jedem vollständigen Lauf aktualisiert.
+Dunkles Design (Graphit, Cyan-Akzente), 9 Bereiche: Dashboard, CEO-Zentrale, Agenten, Wallet, Finanzen, Produkte,
+Vertrieb, Aufgaben, Einstellungen. Auf dem iPhone mit Navigation unten. Jede Funktion ist mit einer echten
+Backend-Route verbunden; was es noch nicht gibt, steht sichtbar als „noch nicht verfügbar“ da:
+Herunterladen von Export/Sicherungen über die Oberfläche (Dateien liegen in `autonomous/daten/`),
+Wiederherstellen (nur im Terminal bei gestopptem System), externe kostenpflichtige Modelle (nicht angebunden).
+
+## Tests (letzter vollständiger Lauf, 20.11.2026)
+
+| Prüfung | Ergebnis |
+|---|---|
+| Automatische Tests `python3 -m autonomous test` | **105 von 105 bestanden** (Kern 26, Sicherheit 21, Finanzen 16, Produkt/Vertrieb 22, Google-Profil 18, Last 2) |
+| Oberflächen-Prüfung `python3 autonomous/tests/ui_server.py` | **142 von 142 bestanden** (390×844 und 1280×800) |
+| Lasttest | 600 Aufgaben mit 4 Arbeitern in rund 1 Sekunde, keine doppelt vergeben, keine verloren (Messwert schwankt je Lauf) |
+| Abnahme von außen | Server gestartet, kompletter Ablauf über HTTP: Ziel → Tagesplan → Marktbewertung → Webseite → Angebot → Versand wartet auf Freigabe; Produktdateien nur mit Zugang |
+
+Fehlgeschlagene Tests: **keine** im letzten Lauf. Während der Entwicklung gefundene und behobene Fehler (mit Test):
+Freigabe hätte bei exakt gleichzeitigen Zugriffen doppelt verbraucht werden können; „1.000“ wurde als 1 € gelesen;
+Fehlerzähler 24 h ungenau; Abbruch einer laufenden Aufgabe erzeugte eine falsche Fehlermeldung im Protokoll;
+Beträge ohne Tausenderpunkt.

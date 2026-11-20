@@ -245,7 +245,7 @@ class TestKontakteUndAngebote(VertriebTest):
         with open(pfad, encoding="utf-8") as f:
             html = f.read()
         self.assertIn("ENTWURF – vor Versand prüfen", html)
-        self.assertIn("1200,50 €", html)
+        self.assertIn("1.200,50 €", html)  # deutsche Schreibweise mit Tausenderpunkt
         self.assertIn("Guten Tag Alex Beispiel,", html)
         self.assertNotRegex(html, r"(?i)<script|\son\w+=")
         # Erst prüfen, dann (selbst) versenden

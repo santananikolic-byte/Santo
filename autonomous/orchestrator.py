@@ -73,6 +73,18 @@ class Orchestrator:
         return n
 
     def _bearbeiten(self, aufgabe):
+        try:
+            self._bearbeiten_intern(aufgabe)
+        except ValueError:
+            # Wurde die Aufgabe während der Bearbeitung vom Eigentümer abgebrochen, ist der letzte
+            # Statuswechsel nicht mehr erlaubt. Das ist kein Fehler: Ergebnis verwerfen, sauber protokollieren.
+            status = self.kern.db.wert("SELECT status FROM aufgaben WHERE id=?", (aufgabe["id"],))
+            if status == "laufend":
+                raise
+            self.kern.protokoll.info("orchestrator", "Aufgabe wurde während der Bearbeitung beendet – Ergebnis "
+                                     "verworfen, keine Folgeaufgaben", {"aufgabe": aufgabe["id"], "status": status})
+
+    def _bearbeiten_intern(self, aufgabe):
         k = self.kern
         agent = k.register.hole(aufgabe["verantwortlich"])
         aid = aufgabe["id"]

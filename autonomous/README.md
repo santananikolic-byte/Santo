@@ -45,8 +45,8 @@ Dann auf dem iPhone `http://DEIN-MAC.local:8770/?k=SCHLÜSSEL` öffnen. Den Schl
 | `autonomous/berechtigungen.py` | Supervisor: Risikoklassen, Freigaben, Sperren |
 | `autonomous/wallet.py` | Simulations-Wallet (15,00 € SIMULATION) |
 | `autonomous/finanzen.py` | Reale Finanzen (nur geprüfte Zahlungen) |
-| `autonomous/docs/` | Marktanalyse, Bedrohungsmodell, Phasenbericht |
-| `autonomous/beispiele/` | Beispiel-Webseite und Verkaufsseite (zum Ansehen per Doppelklick) |
+| `autonomous/docs/` | `MARKTANALYSE.md` (Empfehlung erstes Angebot, Quellen), `BEDROHUNGSMODELL.md`, `PHASENBERICHT.md` (Stand, Tests, nächste Schritte) |
+| `autonomous/beispiele/` | Beispiele zum Ansehen per Doppelklick (fiktive Musterfirma): Google-Profil-Paket (Entwurf, Prüfliste, Übergabe-Anleitung), Verkaufsseite, Kunden-Webseite |
 
 ## Die wichtigsten Regeln im System
 
@@ -55,3 +55,23 @@ Dann auf dem iPhone `http://DEIN-MAC.local:8770/?k=SCHLÜSSEL` öffnen. Den Schl
 - **Wallet = Spielgeld.** Es dient nur zum Üben und Planen. Ein Stand von null schaltet nichts ab.
 - **Einnahme = nur echtes, geprüftes Geld.** Dafür braucht es einen Zahlungsnachweis (zum Beispiel einen Kontoauszug) und den Namen, wer ihn geprüft hat. Eine Rechnung ist noch keine Einnahme.
 - **Agenten erfinden nichts.** Pläne und Zahlen kommen aus der Datenbank. Empfehlungen werden als *Vorschlag* gespeichert. Entscheidungen trefft ihr.
+
+## Das erste Angebot (Vorschlag – ihr entscheidet)
+
+Die Marktanalyse (`docs/MARKTANALYSE.md`) empfiehlt ein **Google-Profil-Paket** für kleine Handwerks-, Bau- und
+Reinigungsbetriebe in NRW: Profil prüfen, anlegen oder übernehmen, vollständig ausfüllen, echte Fotos, Übergabe mit
+Kurzanleitung. Der Betrieb bleibt Inhaber. Webseiten sind Stufe 2.
+
+In AUTONOMOUS: Bereich **Produkte → Google-Profil-Paket erstellen**. Es entstehen drei Unterlagen für den Termin
+vor Ort. **AUTONOMOUS trägt selbst nichts bei Google ein.**
+
+Preis: Die Recherche schlägt 199–349 € netto vor, die Anbieterpreise dazu sind aber **nicht bestätigt** (siehe
+Nachprüfung in der Marktanalyse). Erst selbst prüfen, dann festlegen. Auf Verkaufsseite und Angebot steht nur ein
+Preis, den ihr eingebt.
+
+## Prüfen, ob alles funktioniert
+
+```
+python3 -m autonomous test               # 105 automatische Tests
+python3 autonomous/tests/ui_server.py    # Oberfläche im Browser (braucht Node.js + Playwright, nur für Entwickler)
+```
