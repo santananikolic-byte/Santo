@@ -27,3 +27,6 @@ dist/
 
 # Arbeitsordner der Sub-Agenten (git worktrees) - nie einchecken
 .claude/worktrees/
+
+# AUTONOMOUS: Laufzeitdaten (Datenbank, Zugangsschlüssel, Sicherungen, Exporte, erzeugte Produkte)
+autonomous/daten/

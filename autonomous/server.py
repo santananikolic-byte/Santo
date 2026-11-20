@@ -1,0 +1,232 @@
+# -*- coding: utf-8 -*-
+"""Lokaler HTTP-Server (nur Python-Standardbibliothek).
+
+Schutz:
+1. Standardmäßig nur 127.0.0.1 erreichbar.
+2. Host-Prüfung gegen DNS-Rebinding.
+3. Zugangsschlüssel (Cookie oder Kopfzeile X-Zugang) für alles unter /api/.
+   Der Schlüssel liegt in daten/zugang.txt (nur für den Besitzer lesbar, nie in Git).
+4. Bei POST: Herkunftsprüfung (Origin) und nur JSON, Größenlimit.
+5. Strikte Content-Security-Policy, keine fremden Skripte.
+"""
+
+import hmac
+import json
+import mimetypes
+import os
+import secrets
+import threading
+import traceback
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import parse_qs, urlparse
+
+from . import api, konfig, sicherung
+
+try:  # Vertriebs- und Produkt-Routen (eigenes Modul)
+    from . import api_vertrieb  # noqa: F401
+except ImportError:
+    pass
+
+MAX_KOERPER = 512 * 1024
+PRODUKT_CSP = "default-src 'none'; style-src 'unsafe-inline'; img-src data:; frame-ancestors 'self'"
+CSP = ("default-src 'self'; style-src 'self'; script-src 'self'; img-src 'self' data:; connect-src 'self'; "
+       "frame-src 'self'; frame-ancestors 'self'; base-uri 'none'; form-action 'none'")
+
+
+def zugangsschluessel():
+    pfad = os.path.join(konfig.datenordner(), "zugang.txt")
+    if not os.path.exists(pfad):
+        fd = os.open(pfad, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(fd, "w") as f:
+            f.write(secrets.token_urlsafe(24))
+    with open(pfad) as f:
+        return f.read().strip()
+
+
+def erlaubte_hosts(port):
+    namen = {"127.0.0.1", "localhost", "[::1]"}
+    extra = os.environ.get("AUTONOMOUS_ERLAUBTE_HOSTS", "")
+    namen |= {h.strip() for h in extra.split(",") if h.strip()}
+    return {n for n in namen} | {"%s:%d" % (n, port) for n in namen}
+
+
+class Handler(BaseHTTPRequestHandler):
+    server_version = "AUTONOMOUS"
+    sys_version = ""
+    kern = None
+    schluessel = ""
+    hosts = set()
+
+    def log_message(self, fmt, *args):  # keine Zugriffe mit Schlüsseln ins Terminal
+        pass
+
+    # ---- Antworten ----
+    def _senden(self, status, daten, typ="application/json; charset=utf-8", extra=None, csp=CSP):
+        if isinstance(daten, (dict, list)):
+            daten = json.dumps(daten, ensure_ascii=False, default=str).encode("utf-8")
+        elif isinstance(daten, str):
+            daten = daten.encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", typ)
+        self.send_header("Content-Length", str(len(daten)))
+        self.send_header("Content-Security-Policy", csp)
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("Referrer-Policy", "no-referrer")
+        self.send_header("X-Frame-Options", "SAMEORIGIN")
+        self.send_header("Cache-Control", "no-store")
+        for k, v in (extra or {}).items():
+            self.send_header(k, v)
+        self.end_headers()
+        if self.command != "HEAD":
+            self.wfile.write(daten)
+
+    def _fehler(self, status, meldung):
+        self._senden(status, {"fehler": meldung})
+
+    # ---- Prüfungen ----
+    def _host_ok(self):
+        return (self.headers.get("Host") or "").lower() in self.hosts
+
+    def _zugang_ok(self):
+        kopf = self.headers.get("X-Zugang", "")
+        cookie = ""
+        for teil in (self.headers.get("Cookie") or "").split(";"):
+            name, _, wert = teil.strip().partition("=")
+            if name == "autonomous_zugang":
+                cookie = wert
+        return any(w and hmac.compare_digest(w, self.schluessel) for w in (kopf, cookie))
+
+    def _herkunft_ok(self):
+        herkunft = self.headers.get("Origin")
+        if not herkunft:
+            return True  # z. B. Kommandozeile mit Schlüssel
+        return urlparse(herkunft).netloc.lower() in self.hosts
+
+    # ---- Methoden ----
+    def do_HEAD(self):
+        self.do_GET()
+
+    def do_GET(self):
+        self._verarbeiten("GET")
+
+    def do_POST(self):
+        self._verarbeiten("POST")
+
+    def _verarbeiten(self, methode):
+        if not self._host_ok():
+            return self._fehler(421, "Unbekannter Host")
+        url = urlparse(self.path)
+        pfad = url.path
+        query = {k: v[0] for k, v in parse_qs(url.query).items()}
+
+        if pfad == "/status":
+            s = self.kern.status()
+            return self._senden(200, {"system": s["system"], "version": s["version"], "betrieb": s["betrieb"]})
+
+        if not pfad.startswith("/api/"):
+            if methode != "GET":
+                return self._fehler(405, "Methode nicht erlaubt")
+            # Anmeldung über Link mit ?k=SCHLUESSEL: Cookie setzen, Schlüssel aus der Adresse entfernen
+            if "k" in query:
+                if hmac.compare_digest(query["k"], self.schluessel):
+                    return self._senden(303, b"", extra={
+                        "Location": "/", "Set-Cookie": "autonomous_zugang=%s; Path=/; HttpOnly; SameSite=Strict; "
+                                                       "Max-Age=31536000" % self.schluessel})
+                return self._fehler(403, "Falscher Zugangsschlüssel")
+            if pfad.startswith("/produkte/"):
+                return self._produktdatei(pfad)
+            return self._statisch(pfad)
+
+        if not self._zugang_ok():
+            return self._fehler(401, "Zugang fehlt – bitte über den Startlink öffnen")
+        body = {}
+        if methode == "POST":
+            if not self._herkunft_ok():
+                return self._fehler(403, "Fremde Herkunft")
+            if "application/json" not in (self.headers.get("Content-Type") or ""):
+                return self._fehler(415, "Nur JSON")
+            laenge = int(self.headers.get("Content-Length") or 0)
+            if laenge > MAX_KOERPER:
+                return self._fehler(413, "Anfrage zu groß")
+            try:
+                body = json.loads(self.rfile.read(laenge).decode("utf-8") or "{}") if laenge else {}
+            except (ValueError, UnicodeDecodeError):
+                return self._fehler(400, "Ungültiges JSON")
+            if not isinstance(body, dict):
+                return self._fehler(400, "JSON-Objekt erwartet")
+        try:
+            funktion, parameter = api.finden(methode, pfad)
+            ergebnis = funktion(self.kern, {"pfad": pfad, "parameter": parameter, "query": query, "body": body})
+            return self._senden(200, ergebnis)
+        except api.ApiFehler as f:
+            return self._fehler(f.status, f.meldung)
+        except PermissionError as f:
+            return self._fehler(403, str(f))
+        except KeyError as f:
+            return self._fehler(404, str(f).strip("'\""))
+        except ValueError as f:
+            return self._fehler(400, str(f))
+        except Exception:
+            self.kern.protokoll.fehler("server", "Interner Fehler", {"pfad": pfad, "fehler": traceback.format_exc()})
+            return self._fehler(500, "Interner Fehler – steht im Protokoll")
+
+    def _statisch(self, pfad):
+        if pfad in ("", "/"):
+            pfad = "/index.html"
+        name = os.path.normpath(pfad.lstrip("/"))
+        if name.startswith("..") or os.path.isabs(name):
+            return self._fehler(404, "Nicht gefunden")
+        datei = os.path.join(konfig.UI, name)
+        if not os.path.realpath(datei).startswith(os.path.realpath(konfig.UI) + os.sep) or not os.path.isfile(datei):
+            return self._fehler(404, "Nicht gefunden")
+        typ = mimetypes.guess_type(datei)[0] or "application/octet-stream"
+        if typ.startswith("text/") or typ in ("application/javascript", "application/json", "image/svg+xml"):
+            typ += "; charset=utf-8"
+        with open(datei, "rb") as f:
+            return self._senden(200, f.read(), typ)
+
+    def _produktdatei(self, pfad):
+        """Erzeugte Produkte (Webseiten, Angebote) ansehen – nur mit Zugang, nur aus dem Produktordner."""
+        if not self._zugang_ok():
+            return self._fehler(401, "Zugang fehlt")
+        wurzel = os.path.realpath(konfig.unterordner("produkte"))
+        datei = os.path.realpath(os.path.join(wurzel, os.path.normpath(pfad[len("/produkte/"):])))
+        if not datei.startswith(wurzel + os.sep) or not os.path.isfile(datei):
+            return self._fehler(404, "Nicht gefunden")
+        typ = mimetypes.guess_type(datei)[0] or "application/octet-stream"
+        if typ.startswith("text/"):
+            typ += "; charset=utf-8"
+        with open(datei, "rb") as f:
+            # Erzeugte Seiten laufen ohne Skripte und ohne Netz – nur eingebettete Stile und Bilder
+            return self._senden(200, f.read(), typ, csp=PRODUKT_CSP)
+
+
+def starten(kern, host=None, port=None):
+    host = host or konfig.HOST
+    port = port or konfig.PORT
+    Handler.kern = kern
+    Handler.schluessel = zugangsschluessel()
+    Handler.hosts = erlaubte_hosts(port)
+    server = ThreadingHTTPServer((host, port), Handler)
+    server.daemon_threads = True
+    return server
+
+
+def taegliche_sicherung(kern, stopp):
+    """Einmal pro Tag eine Sicherung, solange das System läuft."""
+    while not stopp.is_set():
+        letzte = kern._letzte_sicherung()
+        heute = __import__("datetime").date.today().strftime("%Y%m%d")
+        if not letzte or heute not in letzte:
+            try:
+                sicherung.sichern(kern, "täglich")
+            except Exception as fehler:
+                kern.protokoll.fehler("sicherung", "Tägliche Sicherung fehlgeschlagen", str(fehler))
+        stopp.wait(3600)
+
+
+def hintergrund(kern):
+    stopp = threading.Event()
+    t = threading.Thread(target=taegliche_sicherung, args=(kern, stopp), daemon=True)
+    t.start()
+    return stopp
