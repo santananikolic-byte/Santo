@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="dark">
+  <meta name="theme-color" content="#0b0d10">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="AUTONOMOUS">
+  <meta name="referrer" content="no-referrer">
+  <title>AUTONOMOUS</title>
+  <link rel="icon" href="/icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/stil.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <div class="app">
+    <aside class="seitenleiste">
+      <div class="marke">
+        <img src="/icon.svg" alt="" width="34" height="34">
+        <div>
+          <div class="marke-name">AUTONOMOUS</div>
+          <div class="marke-sub">Lokales Unternehmenssystem</div>
+        </div>
+      </div>
+      <nav id="nav-seite" class="nav-seite" aria-label="Hauptnavigation"></nav>
+      <div id="seitenleiste-fuss" class="seitenleiste-fuss"></div>
+    </aside>
+
+    <div class="hauptbereich">
+      <header class="kopfzeile">
+        <img class="mobil-logo" src="/icon.svg" alt="" width="30" height="30">
+        <h1 id="seitentitel">AUTONOMOUS</h1>
+        <span id="systempille" class="pille" role="status" aria-live="polite">verbinde …</span>
+      </header>
+      <main id="inhalt" tabindex="-1" data-status="laedt">
+        <p class="laedt">Lädt …</p>
+      </main>
+    </div>
+  </div>
+
+  <nav id="nav-unten" class="nav-unten" aria-label="Schnellnavigation"></nav>
+
+  <div id="mehr-blatt" class="blatt-hintergrund" hidden>
+    <div class="blatt" role="dialog" aria-modal="true" aria-labelledby="mehr-titel">
+      <div class="blatt-kopf">
+        <h2 id="mehr-titel">Alle Bereiche</h2>
+        <button type="button" class="knopf zweit" id="mehr-zu">Schließen</button>
+      </div>
+      <nav id="nav-mehr" class="blatt-raster" aria-label="Alle Bereiche"></nav>
+    </div>
+  </div>
+
+  <div id="meldungen" class="meldungen" aria-live="polite"></div>
+
+  <noscript><p class="noscript">AUTONOMOUS braucht JavaScript im Browser.</p></noscript>
+</body>
+</html>
