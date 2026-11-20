@@ -1,0 +1,1614 @@
+{
+ "stand": "2026-11-20",
+ "titel": "Marktbewertung – erstes verkaufbares digitales Angebot (Projekt AUTONOMOUS)",
+ "hinweise": [
+  "Punktwerte 1–5 sind begründete Einschätzungen auf Basis der Quellen, keine Messwerte. 5 = gut für uns. Bei Wettbewerb, Entwicklungsaufwand, direkten Kosten, Lieferzeit und rechtlichen Risiken heißt 5: wenig Wettbewerb, wenig Aufwand, niedrige Kosten, schnelle Lieferung, geringes Risiko.",
+  "Alle Quellen wurden am 2026-11-20 über die Websuche gefunden. Direktes Öffnen der Seiten war in der Arbeitsumgebung gesperrt. Zahlen stammen aus Suchergebnis-Auszügen und sollten vor Entscheidungen im Original geprüft werden.",
+  "Preise sind VORSCHLÄGE – Entscheidung beim Inhaber (Vater und Sohn gemeinsam).",
+  "Keine Rechtsberatung, keine Steuerberatung.",
+  "Ausführliche Fassung mit Erklärungen: autonomous/docs/MARKTANALYSE.md"
+ ],
+ "belegstatus_werte": {
+  "belegt": "mit Quelle (URL und Abrufdatum)",
+  "annahme": "plausibel, aber nicht geprüft",
+  "schaetzung": "eigene Rechnung oder Einschätzung",
+  "unsicher": "Quellen fehlen oder widersprechen sich"
+ },
+ "kriterien": [
+  {
+   "id": "nachfrage",
+   "name": "Nachfrage",
+   "bedeutung_5_punkte": "viele Betriebe, die dafür zahlen würden"
+  },
+  {
+   "id": "kundenproblem",
+   "name": "Kundenproblem",
+   "bedeutung_5_punkte": "dringendes, spürbares Problem beim Kunden"
+  },
+  {
+   "id": "erreichbarkeit",
+   "name": "Erreichbarkeit der Zielgruppe",
+   "bedeutung_5_punkte": "über eigene Kontakte in Bau und Reinigung leicht erreichbar"
+  },
+  {
+   "id": "wettbewerb",
+   "name": "Wettbewerb",
+   "bedeutung_5_punkte": "wenig Konkurrenz"
+  },
+  {
+   "id": "differenzierung",
+   "name": "Differenzierung",
+   "bedeutung_5_punkte": "wir heben uns klar ab"
+  },
+  {
+   "id": "entwicklungsaufwand",
+   "name": "Entwicklungsaufwand",
+   "bedeutung_5_punkte": "sehr wenig Aufwand bis zum ersten Verkauf"
+  },
+  {
+   "id": "direkte_kosten",
+   "name": "Direkte Kosten",
+   "bedeutung_5_punkte": "fast keine Kosten"
+  },
+  {
+   "id": "verkaufspreis",
+   "name": "Möglicher Verkaufspreis",
+   "bedeutung_5_punkte": "hoher Preis pro Auftrag"
+  },
+  {
+   "id": "lieferzeit",
+   "name": "Lieferzeit",
+   "bedeutung_5_punkte": "in wenigen Tagen lieferbar"
+  },
+  {
+   "id": "rechtliche_risiken",
+   "name": "Rechtliche Risiken",
+   "bedeutung_5_punkte": "geringes Risiko"
+  }
+ ],
+ "felder": [
+  {
+   "id": "digitale_dienstleistungen",
+   "name": "Digitale Dienstleistungen für kleine Betriebe – Schwerpunkt Google-Unternehmensprofil einrichten, aufräumen, pflegen",
+   "punkte": {
+    "nachfrage": 3,
+    "kundenproblem": 3,
+    "erreichbarkeit": 4,
+    "wettbewerb": 3,
+    "differenzierung": 3,
+    "entwicklungsaufwand": 5,
+    "direkte_kosten": 5,
+    "verkaufspreis": 2,
+    "lieferzeit": 4,
+    "rechtliche_risiken": 4
+   },
+   "summe_ungewichtet": 36,
+   "rang_ungewichtet": 1,
+   "begruendung": {
+    "nachfrage": "88 % der Handwerksbetriebe sind schon in Online-Verzeichnissen (Q1) – meist geht es ums Aufräumen und Vervollständigen, nicht ums Neuanlegen. Dass Agenturen solche Pakete für 199–799 € anbieten (Q15–Q19), zeigt zahlende Kundschaft. Wie viele kleine Betriebe in NRW zahlen würden, ist nicht belegt.",
+    "kundenproblem": "Gefunden werden bei Suchen in der Umgebung und Bewertungen. Bei der Handwerkersuche nutzen 15 % Online-Bewertungen und 20 % Online-Plattformen (Q3) – wichtig, aber nicht der Hauptweg (Empfehlung im Bekanntenkreis 83 %).",
+    "erreichbarkeit": "Zielgruppe ist die eigene Branche. Das Ergebnis lässt sich im Gespräch am Handy sofort zeigen; der niedrige Preis macht die Entscheidung leicht (Annahme). Wie groß unser Kontaktkreis ist, ist offen – laut BRAIN.md fehlen bisher Partner, Netzwerk und Empfehlungen.",
+    "wettbewerb": "Mehrere Agenturen (Q15–Q19) und Verzeichnis-Anbieter wie SELLWERK (Q21). Größter Konkurrent ist das Selbermachen: Google ist kostenlos (Q11), die Grundeinrichtung dauert etwa 1 Stunde (Q20), laut Hootsuite sogar 5 Minuten (Q22).",
+    "differenzierung": "Wir sind selbst Bau- und Reinigungsbetrieb, kennen Leistungen und Kundenfragen und machen echte Fotos vor Ort. Klare Ehrlichkeit („Das Profil ist kostenlos, Sie bezahlen unsere Arbeit“) grenzt uns von unseriösen Anrufern ab, vor denen die Google-Community warnt (Q14).",
+    "entwicklungsaufwand": "Kein Produkt zu bauen: Checkliste, Kurzanleitung, Übung am eigenen Profil – etwa 1–2 Tage Einarbeitung (Schätzung).",
+    "direkte_kosten": "Das Google-Profil ist kostenlos (Q11). Kosten entstehen nur durch Zeit und Fahrt; Versicherungsschutz prüfen (Q62).",
+    "verkaufspreis": "Einmalig 199 € (Basis) bis 799 € (mit Texten) zzgl. MwSt. (Q15); oft um 249 € (Q16, Q17); 545 € (Q18, Q19). Pflege-Abo ab 99,99 € im Monat (Q17). Kleiner Auftragswert.",
+    "lieferzeit": "Unsere Arbeit: 1–2 Termine (Schätzung); ein Anbieter nennt 5 Werktage (Q17). Google-Bestätigung per Video bis 5 Arbeitstage, per Postkarte meist innerhalb von 14 Tagen plus Prüfung (Q12).",
+    "rechtliche_risiken": "Gering, weil kein Hosting und keine Website. Zu beachten: Google-Regeln für Drittanbieter – schriftliche Erlaubnis, Inhaber bleibt Inhaber, bei Vertragsende Freigabe binnen 7 Arbeitstagen (Q13); keine gefälschten oder gekauften Bewertungen (UWG Anhang Nr. 23c, Q57); Bildrechte und Einwilligung abgebildeter Personen (Annahme)."
+   },
+   "belegstatus": "belegt",
+   "belegstatus_je_kriterium": {
+    "nachfrage": "belegt",
+    "kundenproblem": "belegt",
+    "erreichbarkeit": "annahme",
+    "wettbewerb": "belegt",
+    "differenzierung": "annahme",
+    "entwicklungsaufwand": "schaetzung",
+    "direkte_kosten": "belegt",
+    "verkaufspreis": "belegt",
+    "lieferzeit": "belegt",
+    "rechtliche_risiken": "belegt"
+   },
+   "marktpreise": [
+    {
+     "anbieter": "Google (Profil selbst)",
+     "preis": "0 €",
+     "quelle_id": "Q11"
+    },
+    {
+     "anbieter": "mein-firmenprofil.de – Basic (Erstellung und Bestätigung)",
+     "preis": "199 € zzgl. MwSt., einmalig",
+     "quelle_id": "Q15"
+    },
+    {
+     "anbieter": "mein-firmenprofil.de – Business (ohne Texte) / Professional (mit Texten)",
+     "preis": "499 € / 799 € zzgl. MwSt., einmalig",
+     "quelle_id": "Q15"
+    },
+    {
+     "anbieter": "netzreich.de",
+     "preis": "249 € Festpreis, kein Abo",
+     "quelle_id": "Q16"
+    },
+    {
+     "anbieter": "LocSEO (Raum Nürnberg)",
+     "preis": "249,99 € zzgl. MwSt. je Standort; Pflege ab 99,99 €/Monat, Pro 149,99 €/Monat",
+     "quelle_id": "Q17"
+    },
+    {
+     "anbieter": "diedesigner.net (Willich, NRW)",
+     "preis": "545 € zzgl. MwSt., Ersteinrichtung oder Neuordnung",
+     "quelle_id": "Q18"
+    },
+    {
+     "anbieter": "Suchmeisterei (Berlin)",
+     "preis": "545 € einmalig (Seite möglicherweise älter)",
+     "quelle_id": "Q19"
+    },
+    {
+     "anbieter": "SELLWERK Local Listing Starter (Filialen)",
+     "preis": "24,90 €/Monat + 249 € Einrichtung (Stand Juli 2024)",
+     "quelle_id": "Q21"
+    }
+   ],
+   "quellen": [
+    {
+     "id": "Q11",
+     "titel": "Google – Bei Google gelistet werden (Google Unternehmensprofil)",
+     "url": "https://business.google.com/de/business-profile/",
+     "abgerufen": "2026-11-20"
+    },
+    {
+     "id": "Q15",
+     "titel": "mein-firmenprofil.de – Google Unternehmensprofil Einrichtungsservice",
+     "url": "https://mein-firmenprofil.de/unternehmensprofile/google-unternehmensprofil-einrichtungsservice/",
+     "abgerufen": "2026-11-20"
+    },
+    {
+     "id": "Q16",
+     "titel": "netzreich – Google-Unternehmensprofil optimieren lassen",
+     "url": "https://netzreich.de/google-unternehmensprofil-optimieren",
+     "abgerufen": "2026-11-20"
+    },
+    {
+     "id": "Q17",
+     "titel": "LocSEO – Google Profil optimieren lassen für 249,99 €",
+     "url": "https://locseo.eu/google-profil-optimieren",
+     "abgerufen": "2026-11-20"
+    },
+    {
+     "id": "Q18",
+     "titel": "diedesigner.net – Google Business Profil Optimierung",
+     "url": "https://diedesigner.net/google-business-profil-optimierung/",
+     "abgerufen": "2026-11-20"
+    },
+    {
+     "id": "Q19",
+     "titel": "Suchmeisterei – Google My Business optimieren lassen",
+     "url": "https://www.suchmeisterei.de/seo-agentur-berlin/google-my-business/",
+     "abgerufen": "2026-11-20"
+    },
+    {
+     "id": "Q12a",
+     "titel": "Google-Hilfe – Unternehmen bei Google bestätigen",
+     "url": "https://support.google.com/business/answer/7107242?hl=de",
+     "abgerufen": "2026-11-20"
+    },
+    {
+     "id": "Q12b",
+     "titel": "Google-Hilfe – Unternehmen per Video bestätigen",
+     "url": "https://support.google.com/business/answer/14271705?hl=de",
+     "abgerufen": "2026-11-20"
+    },
+    {
+     "id": "Q13a",
+     "titel": "Google-Hilfe – Richtlinien für Drittanbieter (Unternehmensprofil)",
+     "url": "https://support.google.com/business/answer/7353941?hl=de",
+     "abgerufen": "2026-11-20"
+    },
+    {
+     "id": "Q14",
+     "titel": "Google-Community-FAQ – Welche Kosten entstehen für ein Google-Unternehmensprofil? (keine offizielle Google-Seite)",
+     "url": "https://support.google.com/business/community-guide/396857162/%F0%9F%91%89-faq-welche-kosten-entstehen-f%C3%BCr-ein-google-unternehmensprofil?hl=de",
+     "abgerufen": "2026-11-20"
+    },
+    {
+     "id": "Q1",
+     "titel": "Bitkom – Digitalisierung des Handwerks, Bitkom-Studie 2025 (Studienbericht)",
+     "url": "https://www.bitkom.org/sites/main/files/2026-01/bitkom-studienbericht-handwerk.pdf",
+     "abgerufen": "2026-11-20"
+    },
+    {
+     "id": "Q3",
+     "titel": "Bitkom-Presseinformation (12.06.2025) – Handwerkersuche: Persönliches Gespräch schlägt Infos im Netz",
+     "url": "https://www.bitkom.org/Presse/Presseinformation/Handwerkersuche-Gespraech-schlaegt-Netz",
+     "abgerufen": "2026-11-20"
+    },
+    {
+     "id": "Q20",
+     "titel": "PIKSEL – Google My Business optimieren: 7 Schritte, 0 Euro",
+     "url": "https://piksel.digital/blog/google-my-business-optimieren",
+     "abgerufen": "2026-11-20"
+    },
+    {
+     "id": "Q21",
+     "titel": "SELLWERK – Produktbeschreibung Local Listing Filialen (Stand Juli 2024)",
+     "url": "https://sellwerk.de/pdfs/terms-conditions/2024-07_Produktbeschreibung_Local_Listing_Filialen.pdf",
+     "abgerufen": "2026-11-20"
+    },
+    {
+     "id": "Q22",
+     "titel": "Hootsuite – Google My Business einrichten",
+     "url": "https://blog.hootsuite.com/de/google-my-business/",
+     "abgerufen": "2026-11-20"
+    },
+    {
+     "id": "Q57a",
+     "titel": "IHK Hannover – Wettbewerbsrecht: Neue Regeln gelten ab 28. Mai (2022)",
+     "url": "https://www.ihk.de/hannover/hauptnavigation/recht/wirtschafts-und-wettbewerbsrecht2/wettbewerbsrecht/wettbewerbsrecht-neue-regeln-gelten-ab-28-mai-5551918",
+     "abgerufen": "2026-11-20"
+    },
+    {
+     "id": "Q62a",
+     "titel": "freelancermap – Berufshaftpflichtversicherung für Freelancer",
+     "url": "https://www.freelancermap.de/blog/berufshaftpflichtversicherung-fuer-freelancer/",
+     "abgerufen": "2026-11-20"
+    },
+    {
+     "id": "Q13b",
+     "titel": "Google-Hilfe – Richtlinien zur Berechtigung und Inhaberschaft",
+     "url": "https://support.google.com/business/answer/13763036?hl=de",
+     "abgerufen": "2026-11-20"
+    },
+    {
+     "id": "Q62b",
+     "titel": "exali – Was kostet eine Berufshaftpflichtversicherung?",
+     "url": "https://exali.de/Info-Base/berufshaftpflicht-kosten",
+     "abgerufen": "2026-11-20"
+    },
+    {
+     "id": "Q57b",
+     "titel": "Rechtsanwalt Plutte – FAQ Werbung mit Bewertungen ab 28.05.2022",
+     "url": "https://www.ra-plutte.de/recht-faq-muster-werbung-mit-bewertungen-ab-28-05-2022/",
+     "abgerufen": "2026-11-20"
+    }
+   ]
+  },
+  {
+   "id": "webseiten",
+   "name": "Webseiten / einfache digitale Auftritte für kleine Betriebe (Handwerk, Reinigung, Bau in NRW)",
+   "punkte": {
+    "nachfrage": 3,
+    "kundenproblem": 3,
+    "erreichbarkeit": 4,
+    "wettbewerb": 1,
+    "differenzierung": 3,
+    "entwicklungsaufwand": 3,
+    "direkte_kosten": 4,
+    "verkaufspreis": 4,
+    "lieferzeit": 3,
+    "rechtliche_risiken": 2
+   },
+   "summe_ungewichtet": 30,
+   "rang_ungewichtet": 3,
+   "begruendung": {
+    "nachfrage": "94 % der Handwerksbetriebe haben schon eine Website (Q1) – der Markt für ganz neue Websites ist klein. Bedarf besteht eher bei der Erneuerung: Viele Seiten sind schwach (500 geprüfte Handwerker-Seiten: im Schnitt 2,12 von 9 Punkten, Q7). In NRW gibt es 199.474 Handwerksbetriebe (Q5).",
+    "kundenproblem": "Für 40 % der Verbraucher ist eine fehlende Website ein Ausschlussgrund, aber nur 26 % schauen bei der Handwerkersuche Websites an; 83 % verlassen sich auf Empfehlungen (Q3). Das Problem ist echt, für die meisten Betriebe aber nicht dringend.",
+    "erreichbarkeit": "Zielgruppe ist die eigene Branche (Bau, Reinigung, andere Gewerke) – persönlich und per Brief erreichbar. Annahme: Wie groß unser Kontaktkreis ist, ist offen; laut BRAIN.md fehlen bisher Partner, Netzwerk und Empfehlungen.",
+    "wettbewerb": "Sehr starke Konkurrenz: Baukästen ab ca. 11 € im Monat (Jimdo, Q26), Rundum-Abos bei IONOS ab 45 €/Monat + 199 € (Q23), STRATO ab 30 €/Monat (Q24), SELLWERK ab 49,90 €/Monat (Q25), allein 5.599 Webdesign-Freelancer bei freelancermap (Q32).",
+    "differenzierung": "Branchenwissen und Termin vor Ort statt Hotline. Technisch und gestalterisch haben wir keinen Vorsprung (Annahme).",
+    "entwicklungsaufwand": "Mit Baukasten etwa 10–20 Stunden pro einfacher Seite inklusive Texte, Fotos und Abstimmung; dazu Einarbeitung und laufende Pflege (Schätzung).",
+    "direkte_kosten": "Gering: Baukasten ca. 11–18 € im Monat (Q26) oder Webspace; Domain 5–50 € im Jahr, Hosting 10–80 € im Monat je nach Anspruch (Q30). Meist an den Kunden weiterberechenbar (Annahme).",
+    "verkaufspreis": "Einmalig 300–800 € über Student oder Freelancer (Q28), Ein-Seiten-Website bei Agenturen 1.500–2.500 € (Q29); Abo-Modelle 30–75 € im Monat plus bis zu 699 € Einrichtung (Q23–Q25). Deutlich mehr pro Auftrag als beim Google-Profil.",
+    "lieferzeit": "Marktüblich ca. 4 Wochen (SELLWERK, Q25) bis 4–6 Wochen (STRATO, Q24). Wir: 1–3 Wochen, abhängig von Texten und Fotos des Kunden (Schätzung).",
+    "rechtliche_risiken": "Viele Pflichten, Fehler fallen auf uns zurück: Impressum nach § 5 DDG (Q51, Q52), Datenschutz – z. B. 100 € Schadensersatz wegen Google Fonts (LG München I, Q53), Cookie-Einwilligung nach § 25 TDDDG (Q55), Auftragsverarbeitungsvertrag bei Hosting oder Wartung (Q54), Barrierefreiheit bei Online-Shops prüfen (Q56). Ob wir Rechtstexte für Kunden schreiben dürften (Rechtsdienstleistungsgesetz), ist ungeklärt (unsicher)."
+   },
+   "belegstatus": "belegt",
+   "belegstatus_je_kriterium": {
+    "nachfrage": "belegt",
+    "kundenproblem": "belegt",
+    "erreichbarkeit": "annahme",
+    "wettbewerb": "belegt",
+    "differenzierung": "annahme",
+    "entwicklungsaufwand": "schaetzung",
+    "direkte_kosten": "belegt",
+    "verkaufspreis": "belegt",
+    "lieferzeit": "belegt",
+    "rechtliche_risiken": "belegt"
+   },
+   "marktpreise": [
+    {
+     "anbieter": "Jimdo Start / Grow (selbst bauen)",
+     "preis": "ca. 11 € / 18 € pro Monat (Jahresvertrag)",
+     "quelle_id": "Q26"
+    },
+    {
+     "anbieter": "Wix Light / Core / Business (selbst bauen)",
+     "preis": "ab 16,99 € / 29 € / 36 € pro Monat (jährlich, inkl. MwSt.)",
+     "quelle_id": "Q27"
+    },
+    {
+     "anbieter": "IONOS Design-Service S / M / L",
+     "preis": "45 € / 65 € / 85 € pro Monat + 199 € / 299 € / 399 € Einrichtung",
+     "quelle_id": "Q23"
+    },
+    {
+     "anbieter": "STRATO Design-Service Basic / Plus / Pro",
+     "preis": "30 € / 50 € / 70 € pro Monat; einmalig 200 € bei Basic (Angaben widersprüchlich)",
+     "quelle_id": "Q24"
+    },
+    {
+     "anbieter": "SELLWERK Website Basic / Starter",
+     "preis": "49,90 €/Monat / 74,90 €/Monat + 699 € Einrichtung (Stand November 2024, 12 Monate Laufzeit)",
+     "quelle_id": "Q25"
+    },
+    {
+     "anbieter": "Student oder Freelancer (einfache Seite)",
+     "preis": "300–800 € einmalig",
+     "quelle_id": "Q28"
+    },
+    {
+     "anbieter": "Agentur Ein-Seiten-Website / KMU-Website",
+     "preis": "1.500–2.500 € / 3.000–8.000 € einmalig",
+     "quelle_id": "Q29"
+    }
+   ],
+   "quellen": [
+    {
+     "id": "Q1",
+     "titel": "Bitkom – Digitalisierung des Handwerks, Bitkom-Studie 2025 (Studienbericht)",
+     "url": "https://www.bitkom.org/sites/main/files/2026-01/bitkom-studienbericht-handwerk.pdf",
+     "abgerufen": "2026-11-20"
+    },
+    {
+     "id": "Q3",
+     "titel": "Bitkom-Presseinformation (12.06.2025) – Handwerkersuche: Persönliches Gespräch schlägt Infos im Netz",
+     "url": "https://www.bitkom.org/Presse/Presseinformation/Handwerkersuche-Gespraech-schlaegt-Netz",
+     "abgerufen": "2026-11-20"
+    },
+    {
+     "id": "Q7a",
+     "titel": "Deutsche Handwerks Zeitung – 500 Seiten im Check: Handwerker-Webseiten schrecken Kunden ab",
+     "url": "https://www.deutsche-handwerks-zeitung.de/?p=366126",
+     "abgerufen": "2026-11-20"
+    },
+    {
+     "id": "Q5a",
+     "titel": "Wirtschaftsministerium NRW – Handwerk (Eckdaten)",
+     "url": "https://www.wirtschaft.nrw/handwerk",
+     "abgerufen": "2026-11-20"
+    },
+    {
+     "id": "Q23",
+     "titel": "IONOS – Website Design Service",
+     "url": "https://www.ionos.de/websites/homepage-erstellen-lassen",
+     "abgerufen": "2026-11-20"
+    },
+    {
+     "id": "Q24a",
+     "titel": "STRATO – Homepage erstellen lassen",
+     "url": "https://strato.de/homepage-baukasten/homepage-erstellen-lassen/",
+     "abgerufen": "2026-11-20"
+    },
+    {
+     "id": "Q25a",
+     "titel": "SELLWERK – Produktbeschreibung Website (Stand November 2024)",
+     "url": "https://sellwerk.de/pdfs/terms-conditions/Produktbeschreibung_Website_final_November_2024_mit_Website_Basic_1.pdf",
+     "abgerufen": "2026-11-20"
+    },
+    {
+     "id": "Q26",
+     "titel": "Tooltester – Jimdo Kosten",
+     "url": "https://www.tooltester.com/de/testberichte/jimdo-test/jimdo-kosten",
+     "abgerufen": "2026-11-20"
+    },
+    {
+     "id": "Q28a",
+     "titel": "bau.net – Entscheidung: Webseiten für Handwerker erfolgreich nutzen",
+     "url": "https://bau.net/text/260325-webseite-handwerker-entscheidung",
+     "abgerufen": "2026-11-20"
+    },
+    {
+     "id": "Q29",
+     "titel": "Dr. Web – Was kostet Webdesign wirklich?",
+     "url": "https://www.drweb.de/was-kostet-webdesign-wirklich/",
+     "abgerufen": "2026-11-20"
+    },
+    {
+     "id": "Q32",
+     "titel": "freelancermap – Freelancer für Webdesign",
+     "url": "https://www.freelancermap.de/freelancer/webdesign",
+     "abgerufen": "2026-11-20"
+    },
+    {
+     "id": "Q30",
+     "titel": "heise (Solutions) – Website erstellen lassen: Lohnt sich die Investition?",
+     "url": "https://www.heise.de/solutions/hrc/website-erstellen-lassen-lohnt-sich-die-investition/",
+     "abgerufen": "2026-11-20"
+    },
+    {
+     "id": "Q51a",
+     "titel": "IHK Bonn – Das Digitale-Dienste-Gesetz ersetzt das Telemediengesetz",
+     "url": "https://ihk-bonn.de/recht-und-steuern/recht/aktuelles/das-digitale-dienste-gesetz-ersetzt-das-telemediengesetz",
+     "abgerufen": "2026-11-20"
+    },
+    {
+     "id": "Q52",
+     "titel": "IHK Rhein-Neckar – Informationspflichten im Internet",
+     "url": "https://www.ihk.de/rhein-neckar/recht/wirtschaftsrecht/internet/informationspflichten-internet-938654",
+     "abgerufen": "2026-11-20"
+    },
+    {
+     "id": "Q53a",
+     "titel": "IT-Recht Kanzlei – LG München I: Webfonts ohne Einwilligung, Schadensersatz",
+     "url": "https://www.it-recht-kanzlei.de/lg-muenchen-I-webfonts-einwilligung-schadensersatz.html",
+     "abgerufen": "2026-11-20"
+    },
+    {
+     "id": "Q54",
+     "titel": "eRecht24 – Auftragsverarbeitung (AV-Vertrag) für Webseitenbetreiber",
+     "url": "https://www.e-recht24.de/artikel/datenschutz/10807-auftragsverarbeitung-dsgvo-fuer-webseitenbetreiber.html",
+     "abgerufen": "2026-11-20"
+    },
+    {
+     "id": "Q55",
+     "titel": "eRecht24 – TDDDG (ehemals TTDSG)",
+     "url": "https://www.e-recht24.de/datenschutz/12834-tdddg.html",
+     "abgerufen": "2026-11-20"
+    },
+    {
+     "id": "Q56a",
+     "titel": "IHK Ostwestfalen – Barrierefreiheitsstärkungsgesetz",
+     "url": "https://www.ihk.de/ostwestfalen/recht-und-steuern/barrierefreiheitsstaerkungsgesetz-6710554",
+     "abgerufen": "2026-11-20"
+    },
+    {
+     "id": "Q27",
+     "titel": "Wix-Blog – Wix Harmony Kosten",
+     "url": "https://de.wix.com/blog/beitrag/wix-harmony-kosten",
+     "abgerufen": "2026-11-20"
+    },
+    {
+     "id": "Q24b",
+     "titel": "STRATO – Website erstellen: Kosten",
+     "url": "https://www.strato.de/homepage-baukasten/website-erstellen-kosten/",
+     "abgerufen": "2026-11-20"
+    },
+    {
+     "id": "Q24c",
+     "titel": "STRATO-FAQ – Wie lange dauert es, bis meine Website erstellt wird?",
+     "url": "https://www.strato.de/faq/homepage-baukasten/strato-design-service-wie-lange-dauert-es-bis-meine-website-erstellt-wird/",
+     "abgerufen": "2026-11-20"
+    },
+    {
+     "id": "Q25b",
+     "titel": "SELLWERK – Shop: Website",
+     "url": "https://sellwerk.de/shop/produkt/website",
+     "abgerufen": "2026-11-20"
+    },
+    {
+     "id": "Q7b",
+     "titel": "haustechnikdialog – Webseiten im Handwerk",
+     "url": "https://www.haustechnikdialog.de/SHKwissen/3731/Webseiten-im-Handwerk",
+     "abgerufen": "2026-11-20"
+    },
+    {
+     "id": "Q53b",
+     "titel": "Rechtsanwalt Plutte – LG München: Dynamische Einbindung von Google Web Fonts",
+     "url": "https://www.ra-plutte.de/lg-muenchen-dynamische-einbindung-google-web-fonts-ist-dsgvo/",
+     "abgerufen": "2026-11-20"
+    },
+    {
+     "id": "Q51b",
+     "titel": "IHK München – Impressum",
+     "url": "https://www.ihk-muenchen.de/ratgeber/recht/internetrecht/impressum/",
+     "abgerufen": "2026-11-20"
+    },
+    {
+     "id": "Q56b",
+     "titel": "Händlerbund – Kleinstunternehmen: Ausnahme vom BFSG",
+     "url": "https://ohn.haendlerbund.de/recht/rechtsfragen/kleinstunternehmen-bfsg-ausnahme",
+     "abgerufen": "2026-11-20"
+    }
+   ]
+  },
+  {
+   "id": "automatisierung",
+   "name": "Einfache Geschäftsautomatisierungen / strukturierte Abläufe",
+   "punkte": {
+    "nachfrage": 2,
+    "kundenproblem": 4,
+    "erreichbarkeit": 3,
+    "wettbewerb": 3,
+    "differenzierung": 3,
+    "entwicklungsaufwand": 2,
+    "direkte_kosten": 3,
+    "verkaufspreis": 3,
+    "lieferzeit": 3,
+    "rechtliche_risiken": 2
+   },
+   "summe_ungewichtet": 28,
+   "rang_ungewichtet": 5,
+   "begruendung": {
+    "nachfrage": "Nur 30 % der Mittelständler haben 2022–2024 ein Digitalisierungsprojekt abgeschlossen, Tendenz fallend (Q8). Viele Handwerksbetriebe nutzen schon Standardlösungen: 68 % versenden Angebote digital, 62 % Rechnungen, 48 % bieten Online-Terminbuchung an (Q1, Q2).",
+    "kundenproblem": "Bürokratie frisst Zeit: Gebäudereiniger-Betriebe schätzen im Schnitt 32 % der Arbeitszeit für Bürokratie (Umfrage Oktober 2025, ca. 300 Betriebe, Q9). Großes Problem – ob eine Automatisierung hilft, hängt vom Einzelfall ab.",
+    "erreichbarkeit": "Dieselben Kontakte, aber schwerer zu erklären; Kunden müssen uns Zugriff auf ihre Daten anvertrauen (Annahme).",
+    "wettbewerb": "Branchensoftware (CleanCalc ab 19,95 € im Monat, Q41; PlanD ca. 10 € je Mitarbeiter und Monat, Q42), Büro-Software und IT-Freelancer mit Median 90–95 € pro Stunde (Q34).",
+    "differenzierung": "Eigene Abläufe in Bau und Reinigung als Übungsfeld – aber noch keine Referenz (Annahme).",
+    "entwicklungsaufwand": "Jeder Betrieb ist anders: Ablauf aufnehmen, Werkzeug einrichten, testen, Fehler betreuen (Schätzung).",
+    "direkte_kosten": "Werkzeug-Abos meist beim Kunden: Make ab ca. 9 $ im Monat, Zapier Professional ab 19,99 $ im Monat (Q35); n8n selbst betrieben kostenlos, als Cloud ab ca. 20–24 € im Monat (Q36).",
+    "verkaufspreis": "Kein klarer Marktpreis für kleine Automatisierungen gefunden (unsicher). Profis rechnen 90–95 € pro Stunde (Q34); als Neuling ohne Referenz deutlich darunter (Schätzung).",
+    "lieferzeit": "1–4 Wochen inklusive Test (Schätzung).",
+    "rechtliche_risiken": "Zugriff auf Kunden- und Mitarbeiterdaten – Auftragsverarbeitungsvertrag nach Art. 28 DSGVO (Q54); Werkzeuge mit Servern in den USA brauchen eine Zusatzprüfung (Q36); Haftung, wenn Rechnungen oder Abläufe falsch laufen (Annahme)."
+   },
+   "belegstatus": "schaetzung",
+   "belegstatus_je_kriterium": {
+    "nachfrage": "belegt",
+    "kundenproblem": "belegt",
+    "erreichbarkeit": "annahme",
+    "wettbewerb": "belegt",
+    "differenzierung": "annahme",
+    "entwicklungsaufwand": "schaetzung",
+    "direkte_kosten": "belegt",
+    "verkaufspreis": "unsicher",
+    "lieferzeit": "schaetzung",
+    "rechtliche_risiken": "annahme"
+   },
+   "quellen": [
+    {
+     "id": "Q8",
+     "titel": "KfW Research – Meldung vom 23.04.2026 (Digitalisierungsbericht Mittelstand 2025)",
+     "url": "https://www.kfw.de/%C3%9Cber-die-KfW/Newsroom/Aktuelles/News-Details_891136.html",
+     "abgerufen": "2026-11-20"
+    },
+    {
+     "id": "Q9a",
+     "titel": "Handwerksblatt – Gebäudereinigung: So viel Zeit frisst die Bürokratie",
+     "url": "https://www.handwerksblatt.de/themen-specials/buerokratiewahnsinn-im-handwerk/gebaeudereinigung-so-viel-zeit-frisst-die-buerokratie",
+     "abgerufen": "2026-11-20"
+    },
+    {
+     "id": "Q1",
+     "titel": "Bitkom – Digitalisierung des Handwerks, Bitkom-Studie 2025 (Studienbericht)",
+     "url": "https://www.bitkom.org/sites/main/files/2026-01/bitkom-studienbericht-handwerk.pdf",
+     "abgerufen": "2026-11-20"
+    },
+    {
+     "id": "Q2a",
+     "titel": "Bitkom-Presseinformation (28.08.2025) – Handwerk: Azubis machen Betriebe fit für die Digitalisierung",
+     "url": "https://www.bitkom.org/Presse/Presseinformation/Handwerk-Azubis-Betriebe-Digitalisierung",
+     "abgerufen": "2026-11-20"
+    },
+    {
+     "id": "Q41a",
+     "titel": "CleanCalc – Startseite und Preise",
+     "url": "https://www.cleancalc.de/",
+     "abgerufen": "2026-11-20"
+    },
+    {
+     "id": "Q42",
+     "titel": "Handwerksblatt – PlanD bündelt Einsatzplanung, Zeiterfassung und Auswertung für Gebäudereiniger",
+     "url": "https://www.handwerksblatt.de/betriebsfuehrung/pland-buendelt-einsatzplanung-zeiterfassung-und-auswertung-fuer-gebaeudereiniger-und-facility-manager-in-einer-app",
+     "abgerufen": "2026-11-20"
+    },
+    {
+     "id": "Q34a",
+     "titel": "freelancermap – Stundensatz Softwareentwickler",
+     "url": "https://www.freelancermap.de/blog/?p=72121",
+     "abgerufen": "2026-11-20"
+    },
+    {
+     "id": "Q34b",
+     "titel": "freelancermap – IT-Freelancer Stundensatz 2026",
+     "url": "https://www.freelancermap.de/blog/stundensatz-it-freelancer/",
+     "abgerufen": "2026-11-20"
+    },
+    {
+     "id": "Q35a",
+     "titel": "Zapier-Blog – Make.com pricing",
+     "url": "https://zapier.com/blog/make-com-pricing/",
+     "abgerufen": "2026-11-20"
+    },
+    {
+     "id": "Q35b",
+     "titel": "Latenode – Make.com Preise 2026",
+     "url": "https://latenode.com/de/blog/make-com-preise-2026-tarife-credits-und-kosten-pro-workflow-ausfuehrung",
+     "abgerufen": "2026-11-20"
+    },
+    {
+     "id": "Q36a",
+     "titel": "virtua.cloud – n8n vs Zapier vs Make: Kosten, Datenschutz und DSGVO",
+     "url": "https://www.virtua.cloud/learn/de/concepts/n8n-vs-zapier-vs-make-kosten-datenschutz",
+     "abgerufen": "2026-11-20"
+    },
+    {
+     "id": "Q36b",
+     "titel": "Contabo-Blog – n8n vs Zapier vs Make",
+     "url": "https://contabo.com/blog/de/n8n-vs-zapier-vs-make/",
+     "abgerufen": "2026-11-20"
+    },
+    {
+     "id": "Q54",
+     "titel": "eRecht24 – Auftragsverarbeitung (AV-Vertrag) für Webseitenbetreiber",
+     "url": "https://www.e-recht24.de/artikel/datenschutz/10807-auftragsverarbeitung-dsgvo-fuer-webseitenbetreiber.html",
+     "abgerufen": "2026-11-20"
+    },
+    {
+     "id": "Q9b",
+     "titel": "Deutsche Handwerks Zeitung – Jede dritte Stunde für Formulare: Gebäudereiniger schlagen Alarm",
+     "url": "https://www.deutsche-handwerks-zeitung.de/?p=370116",
+     "abgerufen": "2026-11-20"
+    }
+   ]
+  },
+  {
+   "id": "vorlagen",
+   "name": "Digitale Vorlagen und Branchen-Hilfsmittel (z. B. Kalkulations- und Angebotsvorlagen für Reinigungsfirmen)",
+   "punkte": {
+    "nachfrage": 2,
+    "kundenproblem": 4,
+    "erreichbarkeit": 3,
+    "wettbewerb": 2,
+    "differenzierung": 3,
+    "entwicklungsaufwand": 4,
+    "direkte_kosten": 4,
+    "verkaufspreis": 1,
+    "lieferzeit": 5,
+    "rechtliche_risiken": 3
+   },
+   "summe_ungewichtet": 31,
+   "rang_ungewichtet": 2,
+   "begruendung": {
+    "nachfrage": "Bedarf ist da – ein Gebäudereiniger suchte z. B. ausdrücklich kostengünstige Kalkulationssoftware (Q43) –, aber es gibt viele kostenlose Vorlagen (Q40, Q41). Die Zahlungsbereitschaft ist deshalb gering.",
+    "kundenproblem": "Falsch kalkulierte Preise kosten Geld; Lohnkosten ändern sich jährlich (Mindestlohn Gebäudereinigung Lohngruppe 1 seit 1.1.2026: 15,00 € pro Stunde, Q44). Das ist auch unser eigenes Thema (feste Preiskalkulation).",
+    "erreichbarkeit": "Reinigungsfirmen sind über Kontakte erreichbar; ein Verkauf im Internet bräuchte eigene Werbung (Annahme).",
+    "wettbewerb": "Kostenlose Vorlagen (Q40, Q41), günstige Kauf-Vorlagen für 4–29,50 € (Q37–Q39), Software-Abos ab 19,95 € im Monat (Q41).",
+    "differenzierung": "Echte Leistungswerte aus der eigenen Praxis wären ein Plus – die sind aber noch nicht festgelegt (Stundensatz offen laut CLAUDE.md).",
+    "entwicklungsaufwand": "Überschaubar; im Repo gibt es schon einen Preisrechner (Preisrechner.html). Jährliche Aktualisierung nötig (Schätzung).",
+    "direkte_kosten": "Sehr gering; Kosten nur für den Verkaufsweg (Shop- oder Plattformgebühren nicht recherchiert, Annahme).",
+    "verkaufspreis": "Kauf-Vorlagen kosten am Markt 4,00 € (Q38), 7,90 € (Q37) bis 29,50 € (Q39). Für spürbaren Umsatz bräuchte es Hunderte Verkäufe (Schätzung).",
+    "lieferzeit": "Sofort per Download, wenn einmal fertig (Schätzung).",
+    "rechtliche_risiken": "Haftung bei Rechenfehlern oder veralteten Löhnen (klarer Hinweis nötig); Verkauf im Internet braucht Impressum, AGB und Umsatzsteuer-Klärung, bei Privatkunden auch Widerrufsbelehrung (Annahme)."
+   },
+   "belegstatus": "belegt",
+   "belegstatus_je_kriterium": {
+    "nachfrage": "belegt",
+    "kundenproblem": "belegt",
+    "erreichbarkeit": "annahme",
+    "wettbewerb": "belegt",
+    "differenzierung": "annahme",
+    "entwicklungsaufwand": "schaetzung",
+    "direkte_kosten": "annahme",
+    "verkaufspreis": "belegt",
+    "lieferzeit": "schaetzung",
+    "rechtliche_risiken": "annahme"
+   },
+   "marktpreise": [
+    {
+     "anbieter": "Formularbox – Excel Reinigungskosten",
+     "preis": "4,00 € inkl. MwSt.",
+     "quelle_id": "Q38"
+    },
+    {
+     "anbieter": "Rechnungswesen-Portal – Arbeitshilfe Kalkulation Gebäudereiniger",
+     "preis": "7,90 € inkl. MwSt.",
+     "quelle_id": "Q37"
+    },
+    {
+     "anbieter": "Lohn1x1 – Arbeitshilfe Kalkulation Gebäudereiniger",
+     "preis": "29,50 €",
+     "quelle_id": "Q39"
+    },
+    {
+     "anbieter": "dynvon – Excel-Kalkulationsvorlage",
+     "preis": "kostenlos",
+     "quelle_id": "Q40"
+    },
+    {
+     "anbieter": "CleanCalc – Vorlage / Software Starter, Pro, Business",
+     "preis": "Vorlage kostenlos; Software 19,95 € / 39,95 € / 89,95 € pro Monat",
+     "quelle_id": "Q41"
+    }
+   ],
+   "quellen": [
+    {
+     "id": "Q37",
+     "titel": "Rechnungswesen-Portal – Arbeitshilfe Kalkulation und Planung für Gebäudereiniger",
+     "url": "https://www.rechnungswesen-portal.de/Marktplatz/Excel-Tools/arbeitshilfe-kalkulation-und-planung-fuer-gebaeudereiniger.html",
+     "abgerufen": "2026-11-20"
+    },
+    {
+     "id": "Q38",
+     "titel": "Formularbox – Berechnung monatliche Reinigungskosten",
+     "url": "https://www.formularbox.de/geschaeft/xls-reinigung-kosten",
+     "abgerufen": "2026-11-20"
+    },
+    {
+     "id": "Q39",
+     "titel": "Lohn1x1 – Arbeitshilfe Kalkulation und Planung für Gebäudereiniger",
+     "url": "https://www.lohn1x1.de/Marktplatz/Excel-Tools/arbeitshilfe-kalkulation-und-planung-fuer-gebaeudereiniger.html",
+     "abgerufen": "2026-11-20"
+    },
+    {
+     "id": "Q40",
+     "titel": "dynvon – Kalkulation Gebäudereinigung: Preis pro qm und Muster",
+     "url": "https://www.dynvon.com/blog/gebaeudereinigung-kalkulieren-preis-pro-qm",
+     "abgerufen": "2026-11-20"
+    },
+    {
+     "id": "Q41a",
+     "titel": "CleanCalc – Startseite und Preise",
+     "url": "https://www.cleancalc.de/",
+     "abgerufen": "2026-11-20"
+    },
+    {
+     "id": "Q41b",
+     "titel": "CleanCalc – Reinigungsangebot Vorlage",
+     "url": "https://www.cleancalc.de/reinigungsangebot-vorlage.html",
+     "abgerufen": "2026-11-20"
+    },
+    {
+     "id": "Q43",
+     "titel": "Softguide – Gebäudereiniger sucht Kalkulationssoftware",
+     "url": "https://www.softguide.de/ausschreibungen/gebaeudereiniger-sucht-kalkulationssoftware",
+     "abgerufen": "2026-11-20"
+    },
+    {
+     "id": "Q44a",
+     "titel": "Land Mecklenburg-Vorpommern – Tarifdaten Gebäudereinigerhandwerk",
+     "url": "https://www.regierung-mv.de/static/Regierungsportal/Ministerium%20f%C3%BCr%20Wirtschaft%2c%20Arbeit%20und%20Gesundheit/Dateien/Downloads/tarifdaten/Geb%C3%A4udereinigerhandwerk.pdf",
+     "abgerufen": "2026-11-20"
+    },
+    {
+     "id": "Q44b",
+     "titel": "DGB – Branchenmindestlöhne",
+     "url": "https://www.dgb.de/service/ratgeber/branchenmindestloehne/",
+     "abgerufen": "2026-11-20"
+    },
+    {
+     "id": "Q44c",
+     "titel": "IG BAU – Tarifforderung Gebäudereinigung 2026",
+     "url": "https://igbau.de/Binaries/Binary22959/2026-PM-15-Tarifforderung-GebR.pdf",
+     "abgerufen": "2026-11-20"
+    }
+   ]
+  },
+  {
+   "id": "recherche",
+   "name": "Recherche-, Analyse- und Aufbereitungsleistungen",
+   "punkte": {
+    "nachfrage": 2,
+    "kundenproblem": 3,
+    "erreichbarkeit": 3,
+    "wettbewerb": 2,
+    "differenzierung": 3,
+    "entwicklungsaufwand": 4,
+    "direkte_kosten": 4,
+    "verkaufspreis": 2,
+    "lieferzeit": 4,
+    "rechtliche_risiken": 3
+   },
+   "summe_ungewichtet": 30,
+   "rang_ungewichtet": 3,
+   "begruendung": {
+    "nachfrage": "Keine Daten zur Nachfrage kleiner Betriebe nach solchen Leistungen gefunden (unsicher).",
+    "kundenproblem": "Z. B. Firmen- und Anruferprüfung gegen Betrug (unser eigenes Thema) oder Ausschreibungen finden – echte Probleme, die Betriebe aber oft selbst erledigen (Annahme).",
+    "erreichbarkeit": "Über Kontakte erreichbar, aber schwer greifbar zu verkaufen (Annahme).",
+    "wettbewerb": "Viele virtuelle Assistenzen mit ca. 20–50 € pro Stunde (Q45, Q46), dazu KI-Werkzeuge, die Kunden selbst nutzen (Annahme).",
+    "differenzierung": "Branchenwissen: worauf man bei Bau- und Reinigungsaufträgen achten muss (Annahme).",
+    "entwicklungsaufwand": "Gering: Ablauf und Vorlagen (Schätzung).",
+    "direkte_kosten": "Gering (Annahme).",
+    "verkaufspreis": "Assistenz-Stundensätze ca. 20–50 € (Q45, Q46).",
+    "lieferzeit": "Wenige Tage (Schätzung).",
+    "rechtliche_risiken": "Nur öffentliche Quellen, keine Profile von Privatpersonen (Datenschutz), keine rechtliche Bewertung im Einzelfall (Rechtsdienstleistungsgesetz), Haftung für falsche Angaben (Annahme)."
+   },
+   "belegstatus": "annahme",
+   "belegstatus_je_kriterium": {
+    "nachfrage": "unsicher",
+    "kundenproblem": "annahme",
+    "erreichbarkeit": "annahme",
+    "wettbewerb": "belegt",
+    "differenzierung": "annahme",
+    "entwicklungsaufwand": "schaetzung",
+    "direkte_kosten": "annahme",
+    "verkaufspreis": "belegt",
+    "lieferzeit": "schaetzung",
+    "rechtliche_risiken": "annahme"
+   },
+   "quellen": [
+    {
+     "id": "Q45",
+     "titel": "freelancermap – Virtuelle Assistenz: Aufgaben, Gehalt und Skills",
+     "url": "https://www.freelancermap.de/blog/was-macht-eine-virtuelle-assistenz/",
+     "abgerufen": "2026-11-20"
+    },
+    {
+     "id": "Q46a",
+     "titel": "kostenlose-erechnung.de – Virtuelle Assistenz selbstständig machen 2026",
+     "url": "https://kostenlose-erechnung.de/ratgeber/selbststaendig-virtuelle-assistenz/",
+     "abgerufen": "2026-11-20"
+    },
+    {
+     "id": "Q46b",
+     "titel": "selbststaendig.de – Selbstständig machen mit einem Büroservice",
+     "url": "https://www.selbststaendig.de/geschaeftsideen/bueroservice",
+     "abgerufen": "2026-11-20"
+    }
+   ]
+  },
+  {
+   "id": "software_prototypen",
+   "name": "Kleine individuelle Softwarelösungen / Prototypen",
+   "punkte": {
+    "nachfrage": 2,
+    "kundenproblem": 3,
+    "erreichbarkeit": 2,
+    "wettbewerb": 2,
+    "differenzierung": 3,
+    "entwicklungsaufwand": 1,
+    "direkte_kosten": 3,
+    "verkaufspreis": 4,
+    "lieferzeit": 1,
+    "rechtliche_risiken": 1
+   },
+   "summe_ungewichtet": 22,
+   "rang_ungewichtet": 6,
+   "begruendung": {
+    "nachfrage": "Digitalisierungsprojekte im Mittelstand werden weniger (Q8); kleine Betriebe greifen eher zu fertiger Software (Annahme).",
+    "kundenproblem": "Lücken gibt es (z. B. Firmenprüfung, Einsatzplanung), oft aber mit fertigen Programmen lösbar (Q41, Q42).",
+    "erreichbarkeit": "Braucht technisches Vertrauen und Referenzen. Die vorhandene Chatbot-Interessentenliste (leads/chatbot-leads.xlsx) enthält Großunternehmen wie Festo oder Knorr-Bremse – für den Start ungeeignet (Annahme).",
+    "wettbewerb": "Professionelle Entwickler (Median 90 € pro Stunde, Q34), Agenturen und fertige Software.",
+    "differenzierung": "Branchenwissen plus KI-gestütztes Programmieren könnte günstiger sein – unbewiesen; Jarvis ist laut CLAUDE.md noch nicht auf dem Mac getestet.",
+    "entwicklungsaufwand": "Hoch: Anforderungen, Programmierung, Tests, Wartung, Betreuung (Schätzung).",
+    "direkte_kosten": "Server, Werkzeuge, ggf. Kosten für KI-Dienste (Schätzung).",
+    "verkaufspreis": "Projekte können mehrere Tausend Euro wert sein; Marktsatz Median 90 € pro Stunde (Q34).",
+    "lieferzeit": "Wochen bis Monate (Schätzung).",
+    "rechtliche_risiken": "Gewährleistung und Haftung, Datenschutz (Q54), IT-Sicherheit; bei Chatbots Hinweispflicht nach KI-Verordnung Art. 50 seit 2.8.2026 (Q61)."
+   },
+   "belegstatus": "schaetzung",
+   "belegstatus_je_kriterium": {
+    "nachfrage": "annahme",
+    "kundenproblem": "annahme",
+    "erreichbarkeit": "annahme",
+    "wettbewerb": "belegt",
+    "differenzierung": "annahme",
+    "entwicklungsaufwand": "schaetzung",
+    "direkte_kosten": "schaetzung",
+    "verkaufspreis": "belegt",
+    "lieferzeit": "schaetzung",
+    "rechtliche_risiken": "belegt"
+   },
+   "quellen": [
+    {
+     "id": "Q8",
+     "titel": "KfW Research – Meldung vom 23.04.2026 (Digitalisierungsbericht Mittelstand 2025)",
+     "url": "https://www.kfw.de/%C3%9Cber-die-KfW/Newsroom/Aktuelles/News-Details_891136.html",
+     "abgerufen": "2026-11-20"
+    },
+    {
+     "id": "Q34a",
+     "titel": "freelancermap – Stundensatz Softwareentwickler",
+     "url": "https://www.freelancermap.de/blog/?p=72121",
+     "abgerufen": "2026-11-20"
+    },
+    {
+     "id": "Q34b",
+     "titel": "freelancermap – IT-Freelancer Stundensatz 2026",
+     "url": "https://www.freelancermap.de/blog/stundensatz-it-freelancer/",
+     "abgerufen": "2026-11-20"
+    },
+    {
+     "id": "Q41a",
+     "titel": "CleanCalc – Startseite und Preise",
+     "url": "https://www.cleancalc.de/",
+     "abgerufen": "2026-11-20"
+    },
+    {
+     "id": "Q42",
+     "titel": "Handwerksblatt – PlanD bündelt Einsatzplanung, Zeiterfassung und Auswertung für Gebäudereiniger",
+     "url": "https://www.handwerksblatt.de/betriebsfuehrung/pland-buendelt-einsatzplanung-zeiterfassung-und-auswertung-fuer-gebaeudereiniger-und-facility-manager-in-einer-app",
+     "abgerufen": "2026-11-20"
+    },
+    {
+     "id": "Q54",
+     "titel": "eRecht24 – Auftragsverarbeitung (AV-Vertrag) für Webseitenbetreiber",
+     "url": "https://www.e-recht24.de/artikel/datenschutz/10807-auftragsverarbeitung-dsgvo-fuer-webseitenbetreiber.html",
+     "abgerufen": "2026-11-20"
+    },
+    {
+     "id": "Q61a",
+     "titel": "IHK Frankfurt am Main – Der neue KI-Omnibus (Verordnung (EU) 2026/1744)",
+     "url": "https://www.frankfurt-main.ihk.de/recht/uebersicht-alle-rechtsthemen/digitalisierung2/neue-ki-omnibus-verordnung-eu-2026-1744-7137020",
+     "abgerufen": "2026-11-20"
+    },
+    {
+     "id": "Q61b",
+     "titel": "FGS – EU AI Act: Was ab dem 2. August 2026 gilt – und was verschoben wurde",
+     "url": "https://www.fgs.de/news-and-insights/blog/detail/eu-ai-act-was-ab-dem-2-august-2026-gilt-und-was-verschoben-wurde",
+     "abgerufen": "2026-11-20"
+    }
+   ]
+  }
+ ],
+ "empfehlung": {
+  "feld_id": "digitale_dienstleistungen",
+  "angebot": "Google-Profil-Paket für kleine Handwerks-, Bau- und Reinigungsbetriebe in NRW: vorhandenes Google-Unternehmensprofil prüfen, anlegen oder übernehmen, vollständig ausfüllen (Kategorien, Leistungen, Einzugsgebiet, Öffnungszeiten, Beschreibung), echte Fotos vor Ort, Link für Bewertungen echter Kunden, Übergabe mit einseitiger Kurzanleitung. Der Betrieb bleibt Inhaber, wir werden nur als Verwalter eingetragen.",
+  "preis_vorschlag_eur": {
+   "min": 199,
+   "max": 349,
+   "einheit": "einmalig pro Standort, netto",
+   "hinweis": "199 € für einfache Fälle (Profil vorhanden, nur vervollständigen), bis 349 € mit Neuanlage, Bestätigung, Fotos vor Ort und Texten. Bei Regelbesteuerung zzgl. 19 % USt. (ca. 237–415 € brutto).",
+   "status": "VORSCHLAG – Entscheidung Inhaber",
+   "nachpruefung": "UNSICHER: Anbieterpreise Q15–Q19 nur aus Suchauszügen; Seiten in der Arbeitsumgebung nicht abrufbar; Kontrollsuchen am 20.11.2026 fanden diese Preise nicht, dafür 99 €/Profil (Jotform) und 499 € (digistore24). Vor Festlegung selbst prüfen."
+  },
+  "marktvergleich_eur": {
+   "min": 199,
+   "max": 799,
+   "haeufig": 249,
+   "einheit": "einmalig, meist zzgl. MwSt.",
+   "quellen_ids": [
+    "Q15",
+    "Q16",
+    "Q17",
+    "Q18",
+    "Q19"
+   ]
+  },
+  "begruendung": "Höchste Punktzahl (36 von 50) und auch mit der Standard-Gewichtung des Research-Agenten vorne. Google verlangt für das Profil nichts (Q11), die Arbeit ist in Tagen erledigt (Google-Bestätigung per Video bis 5 Arbeitstage, Q12), das Rechtsrisiko ist gering, und die Zielgruppe ist unsere eigene Branche. Marktpreise von 199–799 € netto zeigen, dass Betriebe dafür zahlen (Q15–Q19); als Neuling ohne Referenzen eher am unteren Rand einsteigen. Webseiten bringen pro Auftrag mehr, haben aber sehr starke Konkurrenz (Q23–Q26) und mehr Haftung (Q51–Q55) – daher erst Stufe 2. Ehrlich: ein kleiner Zusatzverdienst und Türöffner, kein Ersatz für Daueraufträge.",
+  "erster_testkunde": "Der eigene Betrieb: stärkt sofort die eigene Sichtbarkeit (Priorität der nächsten 3 Monate: mehr Aufträge) und liefert die erste Referenz.",
+  "nicht_enthalten": [
+   "Google-Werbung (Ads)",
+   "Rechtstexte für den Kunden",
+   "Zusagen zu Platzierungen bei Google",
+   "gekaufte, gefälschte oder selbst geschriebene Bewertungen",
+   "Passwörter des Kunden – der Inhaber meldet sich selbst an und fügt uns als Verwalter hinzu"
+  ],
+  "schaetzungen": {
+   "zeit_pro_kunde": "2–4 Stunden plus Fahrt (Schätzung)",
+   "dauer_bis_fertig": "meist 1–3 Wochen wegen der Google-Bestätigung (Schätzung, Q12)",
+   "umsatz_beispiel": "bei 249 € netto: 4 Aufträge ≈ 996 € netto, 10 Aufträge ≈ 2.490 € netto (vor Steuern und Fahrtkosten, Schätzung)",
+   "stundenwert_beispiel": "ca. 50–125 € pro Stunde je nach Fahrzeit (Schätzung)",
+   "startkosten": "Porto 0,95 € je Brief (Q63), ggf. Gewerbe-Ummeldung 26 € (Q59), ggf. Versicherung ab ca. 207 € netto im Jahr (Q62) – zusammen grob unter 500 € im ersten Jahr (Schätzung)"
+  },
+  "ausbaustufe_2": {
+   "feld_id": "webseiten",
+   "angebot": "Einfache Ein-Seiten-Website für Betriebe, die schon Profil-Kunden sind",
+   "wann": "nach 3–5 zufriedenen Profil-Kunden",
+   "marktpreise": "einmalig 300–800 € (Student oder Freelancer, Q28), Ein-Seiten-Website bei Agenturen 1.500–2.500 € (Q29); im Abo 30–75 € im Monat plus bis zu 699 € Einrichtung (Q23–Q25)",
+   "preis_vorschlag": "noch keiner – erst nach Stufe 1 festlegen"
+  },
+  "offene_fragen": [
+   "Wer ist steuerlich der Unternehmer (Rechtsform offen) – und ist die Kleinunternehmerregelung damit überhaupt möglich?",
+   "Deckt die bestehende Gewerbeanmeldung die neue Leistung ab?",
+   "Wie viele Betriebe kennen wir persönlich, die infrage kommen?",
+   "Hat unser eigener Betrieb schon ein Google-Profil und eine Website?",
+   "Wie viele Stunden pro Woche können wir neben Bau und Reinigung einsetzen?",
+   "Deckt unsere Betriebshaftpflicht digitale Dienstleistungen ab?"
+  ],
+  "naechste_schritte_vorschlag": [
+   "Vater und Sohn entscheiden: Ja oder Nein zum Google-Profil-Paket und zum Preisrahmen.",
+   "Pilot am eigenen Betrieb (Profil prüfen und vervollständigen), erst danach anderen anbieten.",
+   "Mit dem Steuerberater klären: Unternehmer, Umsatzsteuer, Gewerbe-Ummeldung.",
+   "Einseitige Leistungsbeschreibung und Auftragsformular entwerfen – nichts versenden ohne Ja.",
+   "5–10 Gespräche im eigenen Umfeld führen (keine Kaltanrufe, keine Kaltmails) und Interesse, Einwände und Preisreaktion notieren.",
+   "Nach 3 Kunden auswerten und dann über Stufe 2 (Website) entscheiden."
+  ]
+ },
+ "akquise_regeln": {
+  "erlaubt": [
+   "Persönliches Gespräch mit bestehenden Kontakten (Subunternehmer, Lieferanten, Kollegen, Kunden mit eigenem Betrieb).",
+   "Weiterempfehlungen zufriedener Kunden.",
+   "Werbebrief per Post an Betriebe: grundsätzlich ohne Einwilligung zulässig, wenn nicht erkennbar unerwünscht, die Werbung als Werbung erkennbar ist und ein Widerspruch beachtet wird (Q49).",
+   "Anfragen beantworten, die Betriebe selbst an uns richten.",
+   "Eigene Infoseite mit Impressum; eigener Google-Eintrag nur, wenn die Google-Richtlinien das zulassen (Q13b).",
+   "Netzwerktreffen, z. B. IHK Köln Netzwerk Mittelstand oder Gründerforen in Leverkusen (Q64)."
+  ],
+  "nur_mit_vorsicht": [
+   "Persönlicher Besuch ohne Termin: keine eindeutige Regel für Firmenbesuche gefunden (unsicher). Kurz und höflich bleiben, ein Nein sofort akzeptieren; besser vorher per Brief einen Termin anbieten.",
+   "Anruf bei Firmen nur bei bestehender Geschäftsbeziehung, wenn der Kontakt den Anruf erwarten kann; ein ausdrücklicher Widerspruch schließt das aus (Q47, Q50)."
+  ],
+  "nicht_erlaubt": [
+   "Werbe-E-Mails, Faxe, SMS oder Messenger-Nachrichten an Firmen ohne vorherige ausdrückliche Einwilligung (Q47); Ausnahme nur für Bestandskunden nach § 7 Abs. 3 UWG unter engen Voraussetzungen.",
+   "Kaltanrufe: Öffentliche Nummern aus Impressum oder Verzeichnissen und ein allgemeiner Branchenbezug begründen keine mutmaßliche Einwilligung (Q48); auch ein Anruf zur Bedarfsabfrage ist Werbung (Q50).",
+   "Die vorhandene Chatbot-Interessentenliste (leads/chatbot-leads.xlsx) für Kaltanrufe oder Kaltmails verwenden.",
+   "Sich als Google oder im Auftrag von Google ausgeben (Q14).",
+   "Gefälschte, gekaufte oder selbst geschriebene Bewertungen (Q57).",
+   "Irgendetwas senden ohne ausdrückliches Ja von Vater und Sohn (Hausregel)."
+  ]
+ },
+ "gewichtete_gegenprobe": {
+  "beschreibung": "Mit der Standard-Gewichtung des Research-Agenten (autonomous/agenten/research.py, Stand 2026-11-20) bleibt die Reihenfolge an der Spitze gleich.",
+  "ergebnis": [
+   {
+    "feld_id": "digitale_dienstleistungen",
+    "wert": 3.59
+   },
+   {
+    "feld_id": "webseiten",
+    "wert": 3.12
+   },
+   {
+    "feld_id": "vorlagen",
+    "wert": 3.0
+   },
+   {
+    "feld_id": "recherche",
+    "wert": 2.94
+   },
+   {
+    "feld_id": "automatisierung",
+    "wert": 2.76
+   },
+   {
+    "feld_id": "software_prototypen",
+    "wert": 2.18
+   }
+  ]
+ },
+ "quellenverzeichnis": [
+  {
+   "id": "Q1",
+   "titel": "Bitkom – Digitalisierung des Handwerks, Bitkom-Studie 2025 (Studienbericht)",
+   "url": "https://www.bitkom.org/sites/main/files/2026-01/bitkom-studienbericht-handwerk.pdf",
+   "abgerufen": "2026-11-20"
+  },
+  {
+   "id": "Q2a",
+   "titel": "Bitkom-Presseinformation (28.08.2025) – Handwerk: Azubis machen Betriebe fit für die Digitalisierung",
+   "url": "https://www.bitkom.org/Presse/Presseinformation/Handwerk-Azubis-Betriebe-Digitalisierung",
+   "abgerufen": "2026-11-20"
+  },
+  {
+   "id": "Q2b",
+   "titel": "Deutsche Handwerks Zeitung – „Note 3“ bei Bitkom-Studie: Mehr Faxgeräte als KI im Einsatz",
+   "url": "https://www.deutsche-handwerks-zeitung.de/?p=367201",
+   "abgerufen": "2026-11-20"
+  },
+  {
+   "id": "Q3",
+   "titel": "Bitkom-Presseinformation (12.06.2025) – Handwerkersuche: Persönliches Gespräch schlägt Infos im Netz",
+   "url": "https://www.bitkom.org/Presse/Presseinformation/Handwerkersuche-Gespraech-schlaegt-Netz",
+   "abgerufen": "2026-11-20"
+  },
+  {
+   "id": "Q4",
+   "titel": "Bitkom-Presseinformation (14.03.2025) – Digitale Services im Handwerk bislang wenig genutzt",
+   "url": "https://www.bitkom.org/Presse/Presseinformation/Digitale-Services-Handwerk",
+   "abgerufen": "2026-11-20"
+  },
+  {
+   "id": "Q5a",
+   "titel": "Wirtschaftsministerium NRW – Handwerk (Eckdaten)",
+   "url": "https://www.wirtschaft.nrw/handwerk",
+   "abgerufen": "2026-11-20"
+  },
+  {
+   "id": "Q5b",
+   "titel": "Wirtschaftsministerium NRW – Handwerksbericht 2024/2025",
+   "url": "https://www.wirtschaft.nrw/handwerksbericht-der-landesregierung-nordrhein-westfalen-fuer-die-jahre-2024-und-2025-foerderung-um",
+   "abgerufen": "2026-11-20"
+  },
+  {
+   "id": "Q6",
+   "titel": "Deutsche Handwerks Zeitung – Branchenreport Gebäudereiniger-Handwerk: Der stille Riese der Branche",
+   "url": "https://www.deutsche-handwerks-zeitung.de/?p=364247",
+   "abgerufen": "2026-11-20"
+  },
+  {
+   "id": "Q7a",
+   "titel": "Deutsche Handwerks Zeitung – 500 Seiten im Check: Handwerker-Webseiten schrecken Kunden ab",
+   "url": "https://www.deutsche-handwerks-zeitung.de/?p=366126",
+   "abgerufen": "2026-11-20"
+  },
+  {
+   "id": "Q7b",
+   "titel": "haustechnikdialog – Webseiten im Handwerk",
+   "url": "https://www.haustechnikdialog.de/SHKwissen/3731/Webseiten-im-Handwerk",
+   "abgerufen": "2026-11-20"
+  },
+  {
+   "id": "Q8",
+   "titel": "KfW Research – Meldung vom 23.04.2026 (Digitalisierungsbericht Mittelstand 2025)",
+   "url": "https://www.kfw.de/%C3%9Cber-die-KfW/Newsroom/Aktuelles/News-Details_891136.html",
+   "abgerufen": "2026-11-20"
+  },
+  {
+   "id": "Q9a",
+   "titel": "Handwerksblatt – Gebäudereinigung: So viel Zeit frisst die Bürokratie",
+   "url": "https://www.handwerksblatt.de/themen-specials/buerokratiewahnsinn-im-handwerk/gebaeudereinigung-so-viel-zeit-frisst-die-buerokratie",
+   "abgerufen": "2026-11-20"
+  },
+  {
+   "id": "Q9b",
+   "titel": "Deutsche Handwerks Zeitung – Jede dritte Stunde für Formulare: Gebäudereiniger schlagen Alarm",
+   "url": "https://www.deutsche-handwerks-zeitung.de/?p=370116",
+   "abgerufen": "2026-11-20"
+  },
+  {
+   "id": "Q10",
+   "titel": "Das Örtliche / SIINDA – Studie zur Online-Sichtbarkeit von KMU (2019, älter)",
+   "url": "https://www.dasoertliche.de/unternehmen/wp-content/uploads/2019/06/Das-Oertliche_SIINDA_Studie.pdf",
+   "abgerufen": "2026-11-20"
+  },
+  {
+   "id": "Q11",
+   "titel": "Google – Bei Google gelistet werden (Google Unternehmensprofil)",
+   "url": "https://business.google.com/de/business-profile/",
+   "abgerufen": "2026-11-20"
+  },
+  {
+   "id": "Q12a",
+   "titel": "Google-Hilfe – Unternehmen bei Google bestätigen",
+   "url": "https://support.google.com/business/answer/7107242?hl=de",
+   "abgerufen": "2026-11-20"
+  },
+  {
+   "id": "Q12b",
+   "titel": "Google-Hilfe – Unternehmen per Video bestätigen",
+   "url": "https://support.google.com/business/answer/14271705?hl=de",
+   "abgerufen": "2026-11-20"
+  },
+  {
+   "id": "Q13a",
+   "titel": "Google-Hilfe – Richtlinien für Drittanbieter (Unternehmensprofil)",
+   "url": "https://support.google.com/business/answer/7353941?hl=de",
+   "abgerufen": "2026-11-20"
+  },
+  {
+   "id": "Q13b",
+   "titel": "Google-Hilfe – Richtlinien zur Berechtigung und Inhaberschaft",
+   "url": "https://support.google.com/business/answer/13763036?hl=de",
+   "abgerufen": "2026-11-20"
+  },
+  {
+   "id": "Q14",
+   "titel": "Google-Community-FAQ – Welche Kosten entstehen für ein Google-Unternehmensprofil? (keine offizielle Google-Seite)",
+   "url": "https://support.google.com/business/community-guide/396857162/%F0%9F%91%89-faq-welche-kosten-entstehen-f%C3%BCr-ein-google-unternehmensprofil?hl=de",
+   "abgerufen": "2026-11-20"
+  },
+  {
+   "id": "Q15",
+   "titel": "mein-firmenprofil.de – Google Unternehmensprofil Einrichtungsservice",
+   "url": "https://mein-firmenprofil.de/unternehmensprofile/google-unternehmensprofil-einrichtungsservice/",
+   "abgerufen": "2026-11-20"
+  },
+  {
+   "id": "Q16",
+   "titel": "netzreich – Google-Unternehmensprofil optimieren lassen",
+   "url": "https://netzreich.de/google-unternehmensprofil-optimieren",
+   "abgerufen": "2026-11-20"
+  },
+  {
+   "id": "Q17",
+   "titel": "LocSEO – Google Profil optimieren lassen für 249,99 €",
+   "url": "https://locseo.eu/google-profil-optimieren",
+   "abgerufen": "2026-11-20"
+  },
+  {
+   "id": "Q18",
+   "titel": "diedesigner.net – Google Business Profil Optimierung",
+   "url": "https://diedesigner.net/google-business-profil-optimierung/",
+   "abgerufen": "2026-11-20"
+  },
+  {
+   "id": "Q19",
+   "titel": "Suchmeisterei – Google My Business optimieren lassen",
+   "url": "https://www.suchmeisterei.de/seo-agentur-berlin/google-my-business/",
+   "abgerufen": "2026-11-20"
+  },
+  {
+   "id": "Q20",
+   "titel": "PIKSEL – Google My Business optimieren: 7 Schritte, 0 Euro",
+   "url": "https://piksel.digital/blog/google-my-business-optimieren",
+   "abgerufen": "2026-11-20"
+  },
+  {
+   "id": "Q21",
+   "titel": "SELLWERK – Produktbeschreibung Local Listing Filialen (Stand Juli 2024)",
+   "url": "https://sellwerk.de/pdfs/terms-conditions/2024-07_Produktbeschreibung_Local_Listing_Filialen.pdf",
+   "abgerufen": "2026-11-20"
+  },
+  {
+   "id": "Q22",
+   "titel": "Hootsuite – Google My Business einrichten",
+   "url": "https://blog.hootsuite.com/de/google-my-business/",
+   "abgerufen": "2026-11-20"
+  },
+  {
+   "id": "Q23",
+   "titel": "IONOS – Website Design Service",
+   "url": "https://www.ionos.de/websites/homepage-erstellen-lassen",
+   "abgerufen": "2026-11-20"
+  },
+  {
+   "id": "Q24a",
+   "titel": "STRATO – Homepage erstellen lassen",
+   "url": "https://strato.de/homepage-baukasten/homepage-erstellen-lassen/",
+   "abgerufen": "2026-11-20"
+  },
+  {
+   "id": "Q24b",
+   "titel": "STRATO – Website erstellen: Kosten",
+   "url": "https://www.strato.de/homepage-baukasten/website-erstellen-kosten/",
+   "abgerufen": "2026-11-20"
+  },
+  {
+   "id": "Q24c",
+   "titel": "STRATO-FAQ – Wie lange dauert es, bis meine Website erstellt wird?",
+   "url": "https://www.strato.de/faq/homepage-baukasten/strato-design-service-wie-lange-dauert-es-bis-meine-website-erstellt-wird/",
+   "abgerufen": "2026-11-20"
+  },
+  {
+   "id": "Q24d",
+   "titel": "trusted.de – Website erstellen lassen: Anbieter im Vergleich",
+   "url": "https://trusted.de/beste-website-erstellen-lassen",
+   "abgerufen": "2026-11-20"
+  },
+  {
+   "id": "Q25a",
+   "titel": "SELLWERK – Produktbeschreibung Website (Stand November 2024)",
+   "url": "https://sellwerk.de/pdfs/terms-conditions/Produktbeschreibung_Website_final_November_2024_mit_Website_Basic_1.pdf",
+   "abgerufen": "2026-11-20"
+  },
+  {
+   "id": "Q25b",
+   "titel": "SELLWERK – Shop: Website",
+   "url": "https://sellwerk.de/shop/produkt/website",
+   "abgerufen": "2026-11-20"
+  },
+  {
+   "id": "Q26",
+   "titel": "Tooltester – Jimdo Kosten",
+   "url": "https://www.tooltester.com/de/testberichte/jimdo-test/jimdo-kosten",
+   "abgerufen": "2026-11-20"
+  },
+  {
+   "id": "Q27",
+   "titel": "Wix-Blog – Wix Harmony Kosten",
+   "url": "https://de.wix.com/blog/beitrag/wix-harmony-kosten",
+   "abgerufen": "2026-11-20"
+  },
+  {
+   "id": "Q28a",
+   "titel": "bau.net – Entscheidung: Webseiten für Handwerker erfolgreich nutzen",
+   "url": "https://bau.net/text/260325-webseite-handwerker-entscheidung",
+   "abgerufen": "2026-11-20"
+  },
+  {
+   "id": "Q28b",
+   "titel": "bau.net – Webseite für Handwerker: Anbieter und Strategien 2026",
+   "url": "https://bau.net/text/260325-webseite-handwerker",
+   "abgerufen": "2026-11-20"
+  },
+  {
+   "id": "Q29",
+   "titel": "Dr. Web – Was kostet Webdesign wirklich?",
+   "url": "https://www.drweb.de/was-kostet-webdesign-wirklich/",
+   "abgerufen": "2026-11-20"
+  },
+  {
+   "id": "Q30",
+   "titel": "heise (Solutions) – Website erstellen lassen: Lohnt sich die Investition?",
+   "url": "https://www.heise.de/solutions/hrc/website-erstellen-lassen-lohnt-sich-die-investition/",
+   "abgerufen": "2026-11-20"
+  },
+  {
+   "id": "Q31",
+   "titel": "W&V – Das verdienen Webdesigner (GoDaddy-Befragung)",
+   "url": "https://www.wuv.de/Dossier/Gehaltscheck-Das-zahlt-die-Branche/Das-verdienen-Webdesigner",
+   "abgerufen": "2026-11-20"
+  },
+  {
+   "id": "Q32",
+   "titel": "freelancermap – Freelancer für Webdesign",
+   "url": "https://www.freelancermap.de/freelancer/webdesign",
+   "abgerufen": "2026-11-20"
+  },
+  {
+   "id": "Q33",
+   "titel": "freelancermap – Freelancer-Kompass 2026: Einkommen",
+   "url": "https://www.freelancermap.de/freelancer-kompass/einkommen",
+   "abgerufen": "2026-11-20"
+  },
+  {
+   "id": "Q34a",
+   "titel": "freelancermap – Stundensatz Softwareentwickler",
+   "url": "https://www.freelancermap.de/blog/?p=72121",
+   "abgerufen": "2026-11-20"
+  },
+  {
+   "id": "Q34b",
+   "titel": "freelancermap – IT-Freelancer Stundensatz 2026",
+   "url": "https://www.freelancermap.de/blog/stundensatz-it-freelancer/",
+   "abgerufen": "2026-11-20"
+  },
+  {
+   "id": "Q35a",
+   "titel": "Zapier-Blog – Make.com pricing",
+   "url": "https://zapier.com/blog/make-com-pricing/",
+   "abgerufen": "2026-11-20"
+  },
+  {
+   "id": "Q35b",
+   "titel": "Latenode – Make.com Preise 2026",
+   "url": "https://latenode.com/de/blog/make-com-preise-2026-tarife-credits-und-kosten-pro-workflow-ausfuehrung",
+   "abgerufen": "2026-11-20"
+  },
+  {
+   "id": "Q36a",
+   "titel": "virtua.cloud – n8n vs Zapier vs Make: Kosten, Datenschutz und DSGVO",
+   "url": "https://www.virtua.cloud/learn/de/concepts/n8n-vs-zapier-vs-make-kosten-datenschutz",
+   "abgerufen": "2026-11-20"
+  },
+  {
+   "id": "Q36b",
+   "titel": "Contabo-Blog – n8n vs Zapier vs Make",
+   "url": "https://contabo.com/blog/de/n8n-vs-zapier-vs-make/",
+   "abgerufen": "2026-11-20"
+  },
+  {
+   "id": "Q37",
+   "titel": "Rechnungswesen-Portal – Arbeitshilfe Kalkulation und Planung für Gebäudereiniger",
+   "url": "https://www.rechnungswesen-portal.de/Marktplatz/Excel-Tools/arbeitshilfe-kalkulation-und-planung-fuer-gebaeudereiniger.html",
+   "abgerufen": "2026-11-20"
+  },
+  {
+   "id": "Q38",
+   "titel": "Formularbox – Berechnung monatliche Reinigungskosten",
+   "url": "https://www.formularbox.de/geschaeft/xls-reinigung-kosten",
+   "abgerufen": "2026-11-20"
+  },
+  {
+   "id": "Q39",
+   "titel": "Lohn1x1 – Arbeitshilfe Kalkulation und Planung für Gebäudereiniger",
+   "url": "https://www.lohn1x1.de/Marktplatz/Excel-Tools/arbeitshilfe-kalkulation-und-planung-fuer-gebaeudereiniger.html",
+   "abgerufen": "2026-11-20"
+  },
+  {
+   "id": "Q40",
+   "titel": "dynvon – Kalkulation Gebäudereinigung: Preis pro qm und Muster",
+   "url": "https://www.dynvon.com/blog/gebaeudereinigung-kalkulieren-preis-pro-qm",
+   "abgerufen": "2026-11-20"
+  },
+  {
+   "id": "Q41a",
+   "titel": "CleanCalc – Startseite und Preise",
+   "url": "https://www.cleancalc.de/",
+   "abgerufen": "2026-11-20"
+  },
+  {
+   "id": "Q41b",
+   "titel": "CleanCalc – Reinigungsangebot Vorlage",
+   "url": "https://www.cleancalc.de/reinigungsangebot-vorlage.html",
+   "abgerufen": "2026-11-20"
+  },
+  {
+   "id": "Q42",
+   "titel": "Handwerksblatt – PlanD bündelt Einsatzplanung, Zeiterfassung und Auswertung für Gebäudereiniger",
+   "url": "https://www.handwerksblatt.de/betriebsfuehrung/pland-buendelt-einsatzplanung-zeiterfassung-und-auswertung-fuer-gebaeudereiniger-und-facility-manager-in-einer-app",
+   "abgerufen": "2026-11-20"
+  },
+  {
+   "id": "Q43",
+   "titel": "Softguide – Gebäudereiniger sucht Kalkulationssoftware",
+   "url": "https://www.softguide.de/ausschreibungen/gebaeudereiniger-sucht-kalkulationssoftware",
+   "abgerufen": "2026-11-20"
+  },
+  {
+   "id": "Q44a",
+   "titel": "Land Mecklenburg-Vorpommern – Tarifdaten Gebäudereinigerhandwerk",
+   "url": "https://www.regierung-mv.de/static/Regierungsportal/Ministerium%20f%C3%BCr%20Wirtschaft%2c%20Arbeit%20und%20Gesundheit/Dateien/Downloads/tarifdaten/Geb%C3%A4udereinigerhandwerk.pdf",
+   "abgerufen": "2026-11-20"
+  },
+  {
+   "id": "Q44b",
+   "titel": "DGB – Branchenmindestlöhne",
+   "url": "https://www.dgb.de/service/ratgeber/branchenmindestloehne/",
+   "abgerufen": "2026-11-20"
+  },
+  {
+   "id": "Q44c",
+   "titel": "IG BAU – Tarifforderung Gebäudereinigung 2026",
+   "url": "https://igbau.de/Binaries/Binary22959/2026-PM-15-Tarifforderung-GebR.pdf",
+   "abgerufen": "2026-11-20"
+  },
+  {
+   "id": "Q45",
+   "titel": "freelancermap – Virtuelle Assistenz: Aufgaben, Gehalt und Skills",
+   "url": "https://www.freelancermap.de/blog/was-macht-eine-virtuelle-assistenz/",
+   "abgerufen": "2026-11-20"
+  },
+  {
+   "id": "Q46a",
+   "titel": "kostenlose-erechnung.de – Virtuelle Assistenz selbstständig machen 2026",
+   "url": "https://kostenlose-erechnung.de/ratgeber/selbststaendig-virtuelle-assistenz/",
+   "abgerufen": "2026-11-20"
+  },
+  {
+   "id": "Q46b",
+   "titel": "selbststaendig.de – Selbstständig machen mit einem Büroservice",
+   "url": "https://www.selbststaendig.de/geschaeftsideen/bueroservice",
+   "abgerufen": "2026-11-20"
+  },
+  {
+   "id": "Q47",
+   "titel": "IHK Köln – Werbung per Telefon, Brief und E-Mail",
+   "url": "https://www.ihk.de/koeln/hauptnavigation/recht-steuern/werbung-per-telefon-fax-und-e-mail-5224338",
+   "abgerufen": "2026-11-20"
+  },
+  {
+   "id": "Q48",
+   "titel": "IHK Region Stuttgart – Werbung mittels Telefon, Telefax, E-Mail, SMS oder Brief: Was ist erlaubt?",
+   "url": "https://www.ihk.de/stuttgart/f%C3%BCr-unternehmen/recht-und-steuern/wettbewerbsrecht/richtig-werben/was-ist-erlaubt-684868",
+   "abgerufen": "2026-11-20"
+  },
+  {
+   "id": "Q49a",
+   "titel": "IHK Osnabrück – Werbung per Telefon, Brief, E-Mail etc.: Was ist erlaubt?",
+   "url": "https://www.ihk.de/osnabrueck/recht-und-fair-play/wettbewerb/unzumutbare-belaestigungen/co-telefonwerbung-1086504",
+   "abgerufen": "2026-11-20"
+  },
+  {
+   "id": "Q49b",
+   "titel": "IT-Recht Kanzlei – Voraussetzungen der Zulässigkeit von Briefwerbung",
+   "url": "https://www.it-recht-kanzlei.de/voraussetzung-zulaessigkeit-briefwerbung.html",
+   "abgerufen": "2026-11-20"
+  },
+  {
+   "id": "Q50",
+   "titel": "LG Nürnberg-Fürth, Urteil vom 29.09.2023 – 19 O 1485/23 (Werbeanruf bei Gewerbetreibenden)",
+   "url": "https://www.gesetze-bayern.de/Content/Pdf/Y-300-Z-GRURRS-B-2023-N-36137",
+   "abgerufen": "2026-11-20"
+  },
+  {
+   "id": "Q51a",
+   "titel": "IHK Bonn – Das Digitale-Dienste-Gesetz ersetzt das Telemediengesetz",
+   "url": "https://ihk-bonn.de/recht-und-steuern/recht/aktuelles/das-digitale-dienste-gesetz-ersetzt-das-telemediengesetz",
+   "abgerufen": "2026-11-20"
+  },
+  {
+   "id": "Q51b",
+   "titel": "IHK München – Impressum",
+   "url": "https://www.ihk-muenchen.de/ratgeber/recht/internetrecht/impressum/",
+   "abgerufen": "2026-11-20"
+  },
+  {
+   "id": "Q52",
+   "titel": "IHK Rhein-Neckar – Informationspflichten im Internet",
+   "url": "https://www.ihk.de/rhein-neckar/recht/wirtschaftsrecht/internet/informationspflichten-internet-938654",
+   "abgerufen": "2026-11-20"
+  },
+  {
+   "id": "Q53a",
+   "titel": "IT-Recht Kanzlei – LG München I: Webfonts ohne Einwilligung, Schadensersatz",
+   "url": "https://www.it-recht-kanzlei.de/lg-muenchen-I-webfonts-einwilligung-schadensersatz.html",
+   "abgerufen": "2026-11-20"
+  },
+  {
+   "id": "Q53b",
+   "titel": "Rechtsanwalt Plutte – LG München: Dynamische Einbindung von Google Web Fonts",
+   "url": "https://www.ra-plutte.de/lg-muenchen-dynamische-einbindung-google-web-fonts-ist-dsgvo/",
+   "abgerufen": "2026-11-20"
+  },
+  {
+   "id": "Q54",
+   "titel": "eRecht24 – Auftragsverarbeitung (AV-Vertrag) für Webseitenbetreiber",
+   "url": "https://www.e-recht24.de/artikel/datenschutz/10807-auftragsverarbeitung-dsgvo-fuer-webseitenbetreiber.html",
+   "abgerufen": "2026-11-20"
+  },
+  {
+   "id": "Q55",
+   "titel": "eRecht24 – TDDDG (ehemals TTDSG)",
+   "url": "https://www.e-recht24.de/datenschutz/12834-tdddg.html",
+   "abgerufen": "2026-11-20"
+  },
+  {
+   "id": "Q56a",
+   "titel": "IHK Ostwestfalen – Barrierefreiheitsstärkungsgesetz",
+   "url": "https://www.ihk.de/ostwestfalen/recht-und-steuern/barrierefreiheitsstaerkungsgesetz-6710554",
+   "abgerufen": "2026-11-20"
+  },
+  {
+   "id": "Q56b",
+   "titel": "Händlerbund – Kleinstunternehmen: Ausnahme vom BFSG",
+   "url": "https://ohn.haendlerbund.de/recht/rechtsfragen/kleinstunternehmen-bfsg-ausnahme",
+   "abgerufen": "2026-11-20"
+  },
+  {
+   "id": "Q57a",
+   "titel": "IHK Hannover – Wettbewerbsrecht: Neue Regeln gelten ab 28. Mai (2022)",
+   "url": "https://www.ihk.de/hannover/hauptnavigation/recht/wirtschafts-und-wettbewerbsrecht2/wettbewerbsrecht/wettbewerbsrecht-neue-regeln-gelten-ab-28-mai-5551918",
+   "abgerufen": "2026-11-20"
+  },
+  {
+   "id": "Q57b",
+   "titel": "Rechtsanwalt Plutte – FAQ Werbung mit Bewertungen ab 28.05.2022",
+   "url": "https://www.ra-plutte.de/recht-faq-muster-werbung-mit-bewertungen-ab-28-05-2022/",
+   "abgerufen": "2026-11-20"
+  },
+  {
+   "id": "Q58",
+   "titel": "eRecht24 – Webdesigner: Freiberufler oder Gewerbetreibende?",
+   "url": "https://www.e-recht24.de/unternehmensgruendung/11066-webdesigner-freiberufler.html",
+   "abgerufen": "2026-11-20"
+  },
+  {
+   "id": "Q59a",
+   "titel": "firma.de – Gewerbeamt Leverkusen (Angaben der Stadt, Stand 19.10.2026)",
+   "url": "https://www.firma.de/gewerbeamt/leverkusen/",
+   "abgerufen": "2026-11-20"
+  },
+  {
+   "id": "Q59b",
+   "titel": "Land NRW – Allgemeiner Gebührentarif, Tarifstelle 10 (Stand 25.04.2026)",
+   "url": "https://recht.nrw.de/system/files/2026-04/agt_tarifstelle-10_stand-25.04.2026.pdf",
+   "abgerufen": "2026-11-20"
+  },
+  {
+   "id": "Q60a",
+   "titel": "IHK Heilbronn-Franken – Kleinunternehmerregelung in der Umsatzsteuer",
+   "url": "https://www.ihk.de/heilbronn-franken/produktmarken/recht/steuern/umsatzsteuer-national/kleinunternehmerregelung-in-der-umsatzsteuer2-6578226",
+   "abgerufen": "2026-11-20"
+  },
+  {
+   "id": "Q60b",
+   "titel": "IHK Ostwestfalen – Kleinunternehmerregelung in der Umsatzsteuer",
+   "url": "https://www.ihk.de/ostwestfalen/recht-und-steuern/steuern/kleinunternehmerregelung-in-der-umsatzsteuer-6719388",
+   "abgerufen": "2026-11-20"
+  },
+  {
+   "id": "Q60c",
+   "titel": "steuernaut – Kleinunternehmerregelung 2026",
+   "url": "https://steuernaut.de/blog/kleinunternehmerregelung-2026",
+   "abgerufen": "2026-11-20"
+  },
+  {
+   "id": "Q61a",
+   "titel": "IHK Frankfurt am Main – Der neue KI-Omnibus (Verordnung (EU) 2026/1744)",
+   "url": "https://www.frankfurt-main.ihk.de/recht/uebersicht-alle-rechtsthemen/digitalisierung2/neue-ki-omnibus-verordnung-eu-2026-1744-7137020",
+   "abgerufen": "2026-11-20"
+  },
+  {
+   "id": "Q61b",
+   "titel": "FGS – EU AI Act: Was ab dem 2. August 2026 gilt – und was verschoben wurde",
+   "url": "https://www.fgs.de/news-and-insights/blog/detail/eu-ai-act-was-ab-dem-2-august-2026-gilt-und-was-verschoben-wurde",
+   "abgerufen": "2026-11-20"
+  },
+  {
+   "id": "Q62a",
+   "titel": "freelancermap – Berufshaftpflichtversicherung für Freelancer",
+   "url": "https://www.freelancermap.de/blog/berufshaftpflichtversicherung-fuer-freelancer/",
+   "abgerufen": "2026-11-20"
+  },
+  {
+   "id": "Q62b",
+   "titel": "exali – Was kostet eine Berufshaftpflichtversicherung?",
+   "url": "https://exali.de/Info-Base/berufshaftpflicht-kosten",
+   "abgerufen": "2026-11-20"
+  },
+  {
+   "id": "Q63a",
+   "titel": "Deutsche Post – Briefe in Deutschland 2026",
+   "url": "https://www.deutschepost.de/de/b/briefe-in-deutschland.html",
+   "abgerufen": "2026-11-20"
+  },
+  {
+   "id": "Q63b",
+   "titel": "DHL Group – Deutsche Post AG passt Briefporto zum 1. Januar 2027 an",
+   "url": "https://group.dhl.com/de/presse/pressemitteilungen/2026/deutsche-post-ag-passt-briefporto-und-produkte-zum-ersten-januar-2027-an.html",
+   "abgerufen": "2026-11-20"
+  },
+  {
+   "id": "Q64a",
+   "titel": "IHK Köln – Netzwerk Mittelstand",
+   "url": "https://www.ihk.de/koeln/hauptnavigation/ihre-ihk/netzwerk-mittelstand-5139372",
+   "abgerufen": "2026-11-20"
+  },
+  {
+   "id": "Q64b",
+   "titel": "IHK Köln – Gründerforen in Bergisch Gladbach und Leverkusen",
+   "url": "https://www.ihk.de/koeln/hauptnavigation/gruendung/gruendung-zwei/gruenderforen-in-bergisch-gladbach-und-leverkusen-5116154",
+   "abgerufen": "2026-11-20"
+  }
+ ]
+}
