@@ -5,6 +5,7 @@ Wichtig (Abschnitt 6.3): Der Systemstatus hängt NICHT vom Wallet ab. Ein Wallet
 oder darunter ändert nichts an der Lauffähigkeit.
 """
 
+import datetime
 import os
 import platform
 import time
@@ -54,8 +55,9 @@ class Kern:
             warnungen.append("%d Freigabe(n) warten auf deine Entscheidung" % offene_freigaben)
         if zahlen["fehlgeschlagen"]:
             warnungen.append("%d Aufgabe(n) fehlgeschlagen" % zahlen["fehlgeschlagen"])
+        grenze = (datetime.datetime.now().astimezone() - datetime.timedelta(days=1)).isoformat(timespec="seconds")
         fehler_24h = self.db.wert("SELECT COUNT(*) FROM protokoll WHERE ebene IN ('fehler','kritisch') "
-                                  "AND zeit >= datetime('now','-1 day')")
+                                  "AND zeit >= ?", (grenze,))
         letzte_sicherung = self._letzte_sicherung()
         if not letzte_sicherung:
             warnungen.append("Noch keine Sicherung vorhanden")

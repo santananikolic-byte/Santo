@@ -106,35 +106,45 @@ class Supervisor:
             return self._blockiert(details, "Kostenpflichtige Aktionen sind gesperrt (Einstellungen)")
 
         fp = fingerabdruck(aktion, ziel, nutzlast)
-        abgelehnt = self.db.eins("SELECT id FROM freigaben WHERE fingerabdruck=? AND status='abgelehnt'", (fp,))
-        if abgelehnt:
-            return self._blockiert(details, "Eigentümer hat genau diese Aktion abgelehnt (%s)" % abgelehnt["id"],
-                                   abgelehnt["id"])
+        # Alles Weitere in EINER Transaktion: parallel arbeitende Agenten können ein Ja nicht doppelt
+        # verbrauchen und keine doppelten Anfragen erzeugen.
+        with self.db.transaktion() as con:
+            abgelehnt = con.execute("SELECT id FROM freigaben WHERE fingerabdruck=? AND status='abgelehnt'",
+                                    (fp,)).fetchone()
+            if abgelehnt:
+                ergebnis = ("blockiert", abgelehnt["id"])
+            elif klasse == AUTO and not kosten_cent:
+                ergebnis = ("auto", None)
+            else:
+                erteilt = con.execute("SELECT id FROM freigaben WHERE fingerabdruck=? AND status='erteilt' "
+                                      "ORDER BY zeit LIMIT 1", (fp,)).fetchone()
+                offen = con.execute("SELECT id FROM freigaben WHERE fingerabdruck=? AND status='offen'",
+                                    (fp,)).fetchone()
+                if erteilt and con.execute("UPDATE freigaben SET status='verbraucht' WHERE id=? AND "
+                                           "status='erteilt'", (erteilt["id"],)).rowcount == 1:
+                    ergebnis = ("verbraucht", erteilt["id"])  # ein Ja gilt für genau eine Ausführung
+                elif offen:
+                    ergebnis = ("wartet", offen["id"])
+                else:
+                    fid = neue_id("f_")
+                    con.execute(
+                        "INSERT INTO freigaben (id, zeit, agent, aktion, ziel, kosten_cent, datenumfang, folgen, risiko,"
+                        " fingerabdruck, status, nutzlast, aufgabe_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                        (fid, jetzt(), agent, aktion, str(ziel)[:500], int(kosten_cent or 0), str(datenumfang)[:500],
+                         str(folgen or AKTIONEN[aktion][1])[:1000], klasse, fp, "offen",
+                         json.dumps(nutzlast or {}, ensure_ascii=False, default=str)[:20000], aufgabe_id))
+                    ergebnis = ("angefragt", fid)
 
-        if klasse == AUTO and not kosten_cent:
+        art, fid = ergebnis
+        if art == "blockiert":
+            return self._blockiert(details, "Eigentümer hat genau diese Aktion abgelehnt (%s)" % fid, fid)
+        if art == "auto":
             return Entscheidung("erlaubt", "automatisch erlaubt")
-
-        # Freigabepflichtig
-        erteilt = self.db.eins("SELECT id FROM freigaben WHERE fingerabdruck=? AND status='erteilt' "
-                               "ORDER BY zeit LIMIT 1", (fp,))
-        if erteilt:
-            # Ein Ja gilt für genau eine Ausführung
-            self.db.ausfuehren("UPDATE freigaben SET status='verbraucht' WHERE id=? AND status='erteilt'",
-                               (erteilt["id"],))
-            self.protokoll.audit("supervisor", "Freigabe verbraucht", dict(details, freigabe=erteilt["id"]))
-            return Entscheidung("erlaubt", "Freigabe des Eigentümers liegt vor", erteilt["id"])
-
-        offen = self.db.eins("SELECT id FROM freigaben WHERE fingerabdruck=? AND status='offen'", (fp,))
-        if offen:
-            return Entscheidung("wartet", "Freigabe angefragt, Entscheidung steht aus", offen["id"])
-
-        fid = neue_id("f_")
-        self.db.ausfuehren(
-            "INSERT INTO freigaben (id, zeit, agent, aktion, ziel, kosten_cent, datenumfang, folgen, risiko,"
-            " fingerabdruck, status, nutzlast, aufgabe_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
-            (fid, jetzt(), agent, aktion, str(ziel)[:500], int(kosten_cent or 0), str(datenumfang)[:500],
-             str(folgen or AKTIONEN[aktion][1])[:1000], klasse, fp, "offen",
-             json.dumps(nutzlast or {}, ensure_ascii=False, default=str)[:20000], aufgabe_id))
+        if art == "verbraucht":
+            self.protokoll.audit("supervisor", "Freigabe verbraucht", dict(details, freigabe=fid))
+            return Entscheidung("erlaubt", "Freigabe des Eigentümers liegt vor", fid)
+        if art == "wartet":
+            return Entscheidung("wartet", "Freigabe angefragt, Entscheidung steht aus", fid)
         self.protokoll.audit("supervisor", "Freigabe angefragt", dict(details, freigabe=fid))
         return Entscheidung("freigabe_noetig", "Ausdrückliche Freigabe des Eigentümers nötig", fid)
 

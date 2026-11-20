@@ -8,6 +8,8 @@
   Einfluss auf den Systemstatus (Abschnitt 6.3).
 """
 
+import re
+
 from .db import jetzt, neue_id
 
 KENNZEICHEN = "SIMULATION"
@@ -31,9 +33,13 @@ def betrag_in_cent(wert):
     if isinstance(wert, (int, float)):
         cent = round(float(wert) * 100)
     else:
-        text = str(wert).strip().replace("€", "").replace(" ", "")
+        text = str(wert).strip().replace("€", "").replace(" ", "").replace("\u00a0", "")
         if "," in text:
-            text = text.replace(".", "").replace(",", ".")
+            text = text.replace(".", "").replace(",", ".")      # 1.234,50 → 1234.50
+        elif re.fullmatch(r"\d{1,3}(\.\d{3})+", text):
+            text = text.replace(".", "")                        # 1.000 → 1000 (deutsche Tausenderpunkte)
+        if not re.fullmatch(r"\d+(\.\d+)?", text):
+            raise ValueError("Ungültiger Betrag – bitte z. B. 12,50 eingeben")
         cent = round(float(text) * 100)
     if cent <= 0 or cent > 100_000_000:
         raise ValueError("Betrag muss zwischen 0,01 € und 1.000.000 € liegen")

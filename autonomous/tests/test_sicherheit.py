@@ -77,6 +77,24 @@ class TestFreigaben(KernTest):
             self.assertEqual(self.kern.aufgaben.hole(aid2)["status"], "abgebrochen")
         self.assertEqual(len(self.kern.supervisor.liste("offen")), 0)
 
+    def test_ein_ja_wird_auch_parallel_nur_einmal_verbraucht(self):
+        e = self.kern.supervisor.pruefe("testsales", "externe_nachricht", "kunde", nutzlast={"t": 1})
+        self.kern.supervisor.entscheiden(e.freigabe_id, True, "eigentuemer")
+        ergebnisse, start = [], threading.Barrier(8)
+
+        def versuch():
+            start.wait()
+            ergebnisse.append(self.kern.supervisor.pruefe("testsales", "externe_nachricht", "kunde",
+                                                          nutzlast={"t": 1}).ergebnis)
+        faeden = [threading.Thread(target=versuch) for _ in range(8)]
+        for f in faeden:
+            f.start()
+        for f in faeden:
+            f.join()
+        self.assertEqual(ergebnisse.count("erlaubt"), 1, ergebnisse)
+        # die übrigen haben genau EINE neue Anfrage erzeugt bzw. warten darauf – keine Doppelanfragen
+        self.assertEqual(len(self.kern.supervisor.liste("offen")), 1)
+
     def test_kostenpflichtig_standardmaessig_gesperrt(self):
         aid = self._aufgabe("zahlen", {})
         self.orch.alle_abarbeiten()

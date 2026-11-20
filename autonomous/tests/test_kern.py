@@ -114,6 +114,12 @@ class TestStatusUndAgenten(KernTest):
         self.kern.aufgaben.anlegen("KZ", "kennzahlen", "ceo", "eigentuemer")
         self.assertEqual(self.kern.status()["aufgaben"]["bereit"], 1)
 
+    def test_fehler_der_letzten_24_stunden(self):
+        self.kern.protokoll.fehler("test", "frischer Fehler")
+        self.kern.db.ausfuehren("INSERT INTO protokoll (zeit, ebene, quelle, ereignis) VALUES "
+                                "('2020-01-01T08:00:00+01:00','fehler','test','alter Fehler')")
+        self.assertEqual(self.kern.status()["fehler_24h"], 1)
+
     def test_erste_rollen_vorhanden(self):
         for rolle in ("ceo", "research", "product", "sales", "finance", "learning"):
             self.assertIsNotNone(self.kern.register.hole(rolle), rolle)
