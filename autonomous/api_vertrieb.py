@@ -12,7 +12,7 @@ from .api import EIGENTUEMER, ApiFehler, ganzzahl, route, text
 from .db import jetzt, neue_id
 from .produkte import datei_schreiben, produkt_hole, produkte_liste, sicherer_pfad
 from .produkte import angebot as angebot_vorlage
-from .produkte import verkaufsseite, webseite
+from .produkte import google_profil, verkaufsseite, webseite
 from .wallet import euro
 
 STUFEN = ["neu", "kontaktiert", "interessiert", "angebot", "gewonnen", "verloren"]
@@ -55,11 +55,23 @@ def r_webseite(kern, a):
     return {"aufgabe_id": aid}
 
 
+@route("POST", "/api/produkte/google_profil")
+def r_google_profil(kern, a):
+    eingabe = _felder(a["body"], google_profil.FELDER)
+    d = google_profil.eingabe_pruefen(eingabe)  # Fehler sofort melden (400), nicht erst in der Aufgabe
+    aid = kern.aufgaben.anlegen("Google-Profil-Paket: %s" % d["firma"], "google_profil_paket", "product", EIGENTUEMER,
+                                eingabe, ganzzahl(a["body"], "prioritaet", 2, 1, 5))
+    return {"aufgabe_id": aid}
+
+
 @route("POST", "/api/produkte/verkaufsseite")
 def r_verkaufsseite(kern, a):
-    eingabe = _felder(a["body"], ("preis", "lieferzeit", "preis_hinweis", "anbieter", "region", "telefon", "email"))
-    verkaufsseite.eingabe_pruefen(eingabe)
-    aid = kern.aufgaben.anlegen("Verkaufsseite erstellen", "verkaufsseite_erstellen", "product", EIGENTUEMER, eingabe,
+    eingabe = _felder(a["body"], ("angebot", "preis", "lieferzeit", "preis_hinweis", "anbieter", "region", "telefon",
+                                  "email"))
+    d = verkaufsseite.eingabe_pruefen(eingabe)
+    titel = "Verkaufsseite erstellen (%s)" % ("Google-Profil-Paket" if d["angebot"] == "google_profil"
+                                              else "Webseiten-Paket")
+    aid = kern.aufgaben.anlegen(titel, "verkaufsseite_erstellen", "product", EIGENTUEMER, eingabe,
                                 ganzzahl(a["body"], "prioritaet", 2, 1, 5))
     return {"aufgabe_id": aid}
 

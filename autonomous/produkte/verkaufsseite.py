@@ -1,5 +1,9 @@
 # -*- coding: utf-8 -*-
-"""Verkaufsseite für das erste Angebot („Webseiten-Paket“).
+"""Verkaufsseite für das erste Angebot.
+
+Zwei Varianten (Eingabe ``angebot``):
+- ``google_profil`` (Standard, Empfehlung der Marktrecherche): „Google-Profil-Paket“
+- ``webseite`` (Stufe 2): „Webseiten-Paket“
 
 Ehrlichkeitsregeln:
 - Preis und Lieferzeit erscheinen NUR, wenn der Inhaber sie eingegeben hat. Sonst steht dort
@@ -13,7 +17,7 @@ import os
 
 from . import (SYMBOLE, bereinigen, css_seite, email_pruefen, esc, platzhalter_rechtliches,
                telefon_pruefen)
-from . import webseite
+from . import google_profil, webseite
 from ..wallet import betrag_in_cent, euro
 
 ENTWURF_HINWEIS = ("ENTWURF – Verkaufsseite. Vor der Veröffentlichung legt der Inhaber Preis, Lieferzeit, "
@@ -42,10 +46,20 @@ VON_IHNEN = [
 ]
 
 
+ANGEBOTE = ("google_profil", "webseite")
+STANDARD_ANGEBOT = "google_profil"  # Empfehlung der Marktrecherche (autonomous/docs/MARKTANALYSE.md)
+
+
 def eingabe_pruefen(eingabe):
     if not isinstance(eingabe, dict):
         raise ValueError("Eingabe muss ein Objekt sein.")
     d = {}
+    angebot = eingabe.get("angebot")
+    if angebot in (None, ""):
+        angebot = STANDARD_ANGEBOT
+    if not isinstance(angebot, str) or angebot not in ANGEBOTE:
+        raise ValueError("angebot muss 'google_profil' oder 'webseite' sein.")
+    d["angebot"] = angebot
     preis = eingabe.get("preis")
     d["preis_cent"] = betrag_in_cent(preis) if preis not in (None, "") else None
     d["lieferzeit"] = bereinigen(eingabe.get("lieferzeit"), 60, streng=True, name="lieferzeit")
@@ -81,8 +95,10 @@ CSS_ZUSATZ = (
 )
 
 
-def erzeugen(d, beispiel_link="beispiel.html", banner=ENTWURF_HINWEIS):
+def erzeugen(d, beispiel_link="beispiel.html", banner=ENTWURF_HINWEIS, uebergabe_link="beispiel-uebergabe.html"):
     """Baut die Verkaufsseite aus geprüften Eingaben (Ergebnis von eingabe_pruefen)."""
+    if d.get("angebot", STANDARD_ANGEBOT) == "google_profil":
+        return _erzeugen_google(d, beispiel_link, banner, uebergabe_link)
     region = esc(d["region"])
     marke = esc(d["anbieter"]) if d["anbieter"] else "Webseiten-Paket"
     beispiel = esc(beispiel_link)
@@ -188,6 +204,9 @@ def einschraenkungen(d):
     liste = ["Impressum und Datenschutzerklärung sind Platzhalter – muss der Inhaber ausfüllen (keine Rechtsberatung).",
              "Kein Hosting und keine Domain enthalten.",
              "Kein Anfrageformular (bewusst: ohne JavaScript und ohne Server) – Anfragen per Telefon oder E-Mail."]
+    if d.get("angebot", STANDARD_ANGEBOT) == "google_profil":
+        liste.append("Bestätigung und Darstellung bei Google liegen nicht in unserer Hand – die Seite verspricht "
+                     "keine Platzierung und keine Dauer.")
     if d["preis_cent"] is None:
         liste.append("Preis nicht festgelegt – Entscheidung des Inhabers.")
     if not d["lieferzeit"]:
@@ -203,14 +222,166 @@ def beispiel_erzeugen():
                              banner_offen=None)
 
 
-def beispiele_schreiben(ordner):
-    """Schreibt die committeten Beispiele (autonomous/beispiele). Überschreibt nur diese zwei Dateien."""
-    os.makedirs(ordner, exist_ok=True)
-    dateien = {
+def beispiele_inhalte():
+    """Alle committeten Beispiele (autonomous/beispiele) als {dateiname: html}."""
+    namen = google_profil.BEISPIEL_COMMITTET
+    inhalte = {
         "beispiel-webseite.html": beispiel_erzeugen(),
-        "verkaufsseite.html": erzeugen(eingabe_pruefen({}), beispiel_link="beispiel-webseite.html"),
+        "verkaufsseite.html": erzeugen(eingabe_pruefen({"angebot": "google_profil"}), beispiel_link=namen["entwurf"],
+                                       uebergabe_link=namen["uebergabe"]),
+        "verkaufsseite-webseiten.html": erzeugen(eingabe_pruefen({"angebot": "webseite"}),
+                                                 beispiel_link="beispiel-webseite.html"),
     }
+    inhalte.update(google_profil.beispiel_alle(namen))
+    return inhalte
+
+
+def beispiele_schreiben(ordner):
+    """Schreibt die committeten Beispiele (autonomous/beispiele). Überschreibt nur diese Dateien."""
+    os.makedirs(ordner, exist_ok=True)
+    dateien = beispiele_inhalte()
     for name, inhalt in dateien.items():
         with open(os.path.join(ordner, name), "w", encoding="utf-8", newline="\n") as f:
             f.write(inhalt)
     return sorted(dateien)
+
+
+# ---------------------------------------------------------------- Variante Google-Profil-Paket
+GP_ENTHALTEN = [
+    "Kurzer Check: Gibt es schon ein Profil, wer hat Zugriff, stimmen Name, Adresse, Telefon und Öffnungszeiten?",
+    "Profil anlegen oder übernehmen und die Bestätigung bei Google anstoßen",
+    "Alles ausfüllen: Kategorien, Leistungen, Einsatzgebiet, Öffnungszeiten und eine sachliche Beschreibung",
+    "Echte Fotos bei einem Termin vor Ort – Team, Fahrzeuge, Arbeiten (nur mit Einwilligung der Abgebildeten)",
+    "Ein Link, mit dem Sie Ihre Kunden um eine Bewertung bitten können",
+    "Übergabe mit einer einseitigen Kurzanleitung",
+]
+GP_NICHT_ENTHALTEN = [
+    "Keine Garantie für eine bestimmte Platzierung bei Google",
+    "Keine Bewertungen – weder gekauft noch selbst geschrieben",
+    "Keine Werbung bei Google (Anzeigen)",
+    "Keine Rechtstexte und keine Rechtsberatung",
+    "Keine laufende Pflege nach der Übergabe",
+]
+GP_VON_IHNEN = [
+    "Ihr eigenes Google-Konto – Sie melden sich selbst an, wir brauchen kein Passwort",
+    "Ihre Leistungen und Ihr Einsatzgebiet",
+    "Ihre Öffnungszeiten und Kontaktdaten",
+    "Zeit für einen Termin vor Ort",
+    "Die Einwilligung der Personen, die auf Fotos zu sehen sein sollen",
+]
+
+
+# Fünf Ablaufschritte passen auf breiten Bildschirmen in eine Reihe
+GP_CSS = ".schritte.fuenf{grid-template-columns:repeat(auto-fit,minmax(180px,1fr))}"
+
+
+def _erzeugen_google(d, beispiel_link, banner, uebergabe_link):
+    region = esc(d["region"])
+    marke = esc(d["anbieter"]) if d["anbieter"] else "Google-Profil-Paket"
+    beispiel = esc(beispiel_link)
+    uebergabe = esc(uebergabe_link)
+    teile = [
+        "<!DOCTYPE html>\n<!-- Erstellt mit AUTONOMOUS (Product-Agent): ohne JavaScript, ohne externe Dienste. -->\n"
+        '<html lang="de">\n<head>\n<meta charset="utf-8">\n'
+        '<meta name="viewport" content="width=device-width, initial-scale=1">\n',
+        "<title>Google-Profil-Paket für Handwerk, Bau und Reinigung – %s</title>\n" % region,
+        '<meta name="description" content="Google-Unternehmensprofil für kleine Handwerks-, Bau- und Reinigungsbetriebe '
+        'in %s: prüfen, anlegen oder übernehmen, vollständig ausfüllen, echte Fotos – Sie bleiben Inhaber.">\n' % region,
+        "<style>%s%s</style>\n</head>\n<body>\n" % (css_seite("verkauf"), CSS_ZUSATZ + GP_CSS),
+    ]
+    if banner:
+        teile.append('<div class="entwurf" role="note" data-offen="Entwurfshinweis vor der Veröffentlichung '
+                     'entfernen">%s</div>\n' % esc(banner))
+    teile.append('<header class="kopf"><div class="wrap kopf-innen"><a class="marke" href="#titel">%s</a>'
+                 '<a class="knopf klein" href="#anfrage">Anfragen</a></div></header>\n<main>\n' % marke)
+    teile.append(
+        '<section class="held" aria-labelledby="titel"><div class="wrap">'
+        '<p class="dachzeile">Für Handwerk, Bau und Reinigung in %s</p>'
+        '<h1 id="titel">Ihr Google-Profil – vollständig, echt und ordentlich übergeben</h1>'
+        '<p class="slogan">Wer Ihren Betrieb bei Google oder Google Maps sucht, sieht dort Ihr Unternehmensprofil – '
+        'mit Telefonnummer, Öffnungszeiten, Fotos und Bewertungen. Wir sorgen dafür, dass die Angaben stimmen und '
+        'vollständig sind. Sie bleiben Inhaber.</p>'
+        '<div class="aktionen"><a class="knopf weiss" href="#anfrage">Unverbindlich anfragen</a>'
+        '<a class="knopf umriss" href="%s">Beispiel ansehen</a></div></div></section>\n' % (region, beispiel))
+
+    abschnitte = [
+        ("leistung", '<h2>Das ist enthalten</h2><p class="einleitung">Google-Profil-Paket für kleine Handwerks-, Bau- '
+                     'und Reinigungsbetriebe in %s.</p><div class="zwei"><div>%s</div>'
+                     '<div><h3>Nicht enthalten</h3>%s</div></div>'
+         % (region, _liste(GP_ENTHALTEN, "haken"), _liste(GP_NICHT_ENTHALTEN, "kreuz"))),
+        ("inhaber", '<h2>Sie bleiben Inhaber</h2><p class="einleitung">Wir fragen nie nach Ihren Passwörtern. Sie '
+                    'melden sich selbst an und tragen uns als Verwalter ein. Sie können uns jederzeit wieder '
+                    'entfernen – dafür müssen Sie niemanden fragen.</p>'),
+        ("ablauf", '<h2>So läuft es ab</h2><ol class="schritte fuenf">'
+                   '<li><h3>Anfrage</h3><p>Sie melden sich per Telefon oder E-Mail.</p></li>'
+                   '<li><h3>Kurzes Gespräch</h3><p>Wir klären, ob es schon ein Profil gibt und was Sie brauchen. '
+                   'Danach erhalten Sie ein schriftliches Angebot. Erst mit Ihrer Zusage geht es los.</p></li>'
+                   '<li><h3>Termin vor Ort</h3><p>Wir gehen die Angaben gemeinsam durch und machen echte Fotos.</p></li>'
+                   '<li><h3>Profil fertig</h3><p>Wir tragen alles ein. Die Bestätigung durch Google kann je nach '
+                   'Verfahren dauern – darauf haben wir keinen Einfluss.</p></li>'
+                   '<li><h3>Übergabe</h3><p>Sie erhalten die Kurzanleitung und prüfen alles. Erst nach Ihrer Abnahme '
+                   'ist der Auftrag erledigt.</p></li></ol>'),
+        ("beispiel", '<div class="zwei"><div><h2>Beispiel</h2><p>So bereiten wir ein Profil vor: '
+                     '<a href="%s">Profil-Entwurf einer fiktiven Musterfirma</a> und die '
+                     '<a href="%s">Kurzanleitung zur Übergabe</a>. Die Musterfirma ist erfunden – sie zeigt nur '
+                     'Aufbau und Inhalt.</p></div><div><h2>Das brauchen wir von Ihnen</h2>%s</div></div>'
+         % (beispiel, uebergabe, _liste(GP_VON_IHNEN, "haken"))),
+    ]
+
+    if d["preis_cent"] is not None:
+        preis = ('<p class="preis">%s</p><p>Paketpreis für den oben beschriebenen Umfang, einmalig je Standort.</p>'
+                 % esc(euro(d["preis_cent"])))
+        if d["preis_hinweis"]:
+            preis += "<p>%s</p>" % esc(d["preis_hinweis"])
+        else:
+            preis += _offen("Angabe zur Umsatzsteuer: wird vom Inhaber ergänzt.",
+                            "Umsatzsteuer-Hinweis zum Preis ergänzen (Inhaber)")
+    else:
+        preis = _offen("Preis: wird vom Inhaber festgelegt.", "Preis festlegen (Inhaber)")
+    if d["lieferzeit"]:
+        liefer = "<p><strong>Lieferzeit:</strong> %s</p>" % esc(d["lieferzeit"])
+    else:
+        liefer = _offen("Lieferzeit: wird vom Inhaber festgelegt.", "Lieferzeit festlegen (Inhaber)")
+    abschnitte.append(("preis", '<h2>Preis</h2><div class="preisbox">%s%s</div>' % (preis, liefer)))
+
+    abschnitte.append(("fragen", '<h2>Häufige Fragen</h2>'
+                       '<details><summary>Kostet das Google-Profil selbst etwas?</summary><p>Google verlangt für das '
+                       'Unternehmensprofil nach unserem Kenntnisstand kein Geld. Sie bezahlen nur unsere Arbeit.</p>'
+                       '</details>'
+                       '<details><summary>Komme ich damit bei Google nach oben?</summary><p>Das kann niemand seriös '
+                       'versprechen – über die Reihenfolge entscheidet Google. Ein vollständiges, richtiges Profil '
+                       'hilft Kunden aber, Sie zu finden und zu erreichen.</p></details>'
+                       '<details><summary>Brauchen Sie mein Passwort?</summary><p>Nein. Sie melden sich selbst an und '
+                       'tragen uns als Verwalter ein.</p></details>'
+                       '<details><summary>Was ist mit Bewertungen?</summary><p>Wir schreiben und kaufen keine '
+                       'Bewertungen. Sie bekommen einen Link, mit dem Sie Ihre Kunden um eine Bewertung bitten '
+                       'können.</p></details>'))
+
+    kontakt = []
+    if d["telefon"]:
+        kontakt.append('<a class="knopf" href="tel:%s">%s %s</a>' % (esc(d["telefon_link"]), SYMBOLE["telefon"],
+                                                                     esc(d["telefon"])))
+    if d["email"]:
+        kontakt.append('<a class="knopf" href="mailto:%s">%s %s</a>' % (esc(d["email"]), SYMBOLE["mail"],
+                                                                        esc(d["email"])))
+    anfrage = '<h2>Anfrage</h2><p class="einleitung">Rufen Sie an oder schreiben Sie eine E-Mail. Die Anfrage ist ' \
+              'unverbindlich.</p>'
+    if d["anbieter"]:
+        anfrage += "<p><strong>Anbieter:</strong> %s</p>" % esc(d["anbieter"])
+    else:
+        anfrage += _offen("Anbieter: Firmenname wird vom Inhaber ergänzt.", "Firmennamen des Anbieters ergänzen")
+    if kontakt:
+        anfrage += '<div class="aktionen">%s</div>' % "".join(kontakt)
+    else:
+        anfrage += _offen("Kontakt: Telefon und E-Mail werden vom Inhaber ergänzt.",
+                          "Kontaktdaten des Anbieters ergänzen (Telefon oder E-Mail)")
+    abschnitte.append(("anfrage", anfrage))
+
+    for i, (anker, inhalt) in enumerate(abschnitte):
+        klasse = "abschnitt alt" if i % 2 else "abschnitt"
+        teile.append('<section id="%s" class="%s"><div class="wrap">%s</div></section>\n' % (anker, klasse, inhalt))
+    teile.append(platzhalter_rechtliches())
+    teile.append('</main>\n<footer class="fuss"><div class="wrap"><span>%s</span><nav aria-label="Rechtliches">'
+                 '<a href="#impressum">Impressum</a><a href="#datenschutz">Datenschutz</a></nav></div></footer>\n'
+                 '</body>\n</html>\n' % marke)
+    return "".join(teile)

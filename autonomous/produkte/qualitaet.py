@@ -10,6 +10,7 @@ den Inhaber.
 Die Prüfung liest die Datei nur als Daten; Inhalte werden nie ausgeführt.
 """
 
+import os
 import re
 from html.parser import HTMLParser
 
@@ -140,8 +141,11 @@ def _eingaben_texte(eingaben):
     return texte
 
 
-def pruefen(html_text, eingaben=None, groesse=None, kontakt_pflicht=True):
-    """Prüft HTML-Text. Rückgabe: {pruefungen:[{name, ok, hinweis}], bestanden, offene_punkte}."""
+def pruefen(html_text, eingaben=None, groesse=None, kontakt_pflicht=True, seite=True):
+    """Prüft HTML-Text. Rückgabe: {pruefungen:[{name, ok, hinweis}], bestanden, offene_punkte}.
+
+    ``seite=False``: Arbeitsunterlage statt veröffentlichter Webseite – dann entfallen die Prüfungen auf
+    Impressum- und Datenschutz-Abschnitt."""
     pruefungen = []
 
     def pruefung(name, ok, hinweis=""):
@@ -176,8 +180,9 @@ def pruefen(html_text, eingaben=None, groesse=None, kontakt_pflicht=True):
     groesse = len(html_text.encode("utf-8")) if groesse is None else groesse
     pruefung("Dateigröße unter 200 KB", groesse < MAX_BYTES, "%d KB" % (groesse // 1024))
 
-    pruefung("Impressum-Abschnitt vorhanden", "impressum" in s.ids, "" if "impressum" in s.ids else "fehlt")
-    pruefung("Datenschutz-Abschnitt vorhanden", "datenschutz" in s.ids, "" if "datenschutz" in s.ids else "fehlt")
+    if seite:
+        pruefung("Impressum-Abschnitt vorhanden", "impressum" in s.ids, "" if "impressum" in s.ids else "fehlt")
+        pruefung("Datenschutz-Abschnitt vorhanden", "datenschutz" in s.ids, "" if "datenschutz" in s.ids else "fehlt")
 
     if eingaben is None:
         pruefung("Eingaben sicher eingebaut (escaped)", True, "kein Abgleich – Eingaben nicht bekannt")
@@ -200,7 +205,7 @@ def pruefen(html_text, eingaben=None, groesse=None, kontakt_pflicht=True):
     return {"pruefungen": pruefungen, "bestanden": all(p["ok"] for p in pruefungen), "offene_punkte": offene}
 
 
-def datei_pruefen(pfad, eingaben=None, kontakt_pflicht=True):
+def datei_pruefen(pfad, eingaben=None, kontakt_pflicht=True, seite=True):
     with open(pfad, "rb") as f:
         roh = f.read(MAX_BYTES * 5)
     try:
@@ -208,7 +213,7 @@ def datei_pruefen(pfad, eingaben=None, kontakt_pflicht=True):
     except UnicodeDecodeError:
         return {"pruefungen": [{"name": "Zeichensatz UTF-8", "ok": False, "hinweis": "Datei ist kein UTF-8"}],
                 "bestanden": False, "offene_punkte": []}
-    return pruefen(text, eingaben, groesse=len(roh), kontakt_pflicht=kontakt_pflicht)
+    return pruefen(text, eingaben, groesse=len(roh), kontakt_pflicht=kontakt_pflicht, seite=seite)
 
 
 def zusammenfassen(ergebnisse):
@@ -223,3 +228,142 @@ def zusammenfassen(ergebnisse):
                 offene.append(eintrag)
     return {"pruefungen": pruefungen, "bestanden": all(e["bestanden"] for e in ergebnisse.values()),
             "offene_punkte": offene, "dateien": ergebnisse}
+
+
+# ---------------------------------------------------------------- Google-Profil-Paket
+BESCHREIBUNG_MAX = 750  # Höchstlänge der Unternehmensbeschreibung im Google-Unternehmensprofil
+
+_LINK = re.compile(r"(?i)(?:https?://|www\.)\S+|\b[a-z0-9][a-z0-9\-]*\.(?:de|com|net|org|eu|info|nrw|biz|io|"
+                   r"example)\b")
+# Telefonnummern beginnen mit + oder 0 (z. B. „0214 123456“, „+49 214 …“); Jahreszahlen oder Normen nicht
+_TELEFON = re.compile(r"(?<![\w+])(?:\+\d|0)[\d \t/().\-]{4,}\d")
+# Trenner, hinter denen ein Zusatz am Firmennamen hängt („Muster GmbH – Leverkusen“, „Muster | Reinigung“)
+_TRENNER = re.compile(r"\s+[-/•·:]\s+|\s*[|–—]\s*|,\s+")
+_LEER = {"br", "meta", "hr", "img", "input", "link", "area", "base", "col", "embed", "source", "track", "wbr"}
+
+
+def enthaelt_link(text):
+    return bool(_LINK.search(text or ""))
+
+
+def enthaelt_telefon(text):
+    for treffer in _TELEFON.finditer(text or ""):
+        if len(re.sub(r"\D", "", treffer.group())) >= 6:
+            return True
+    return False
+
+
+class _IdText(HTMLParser):
+    """Sammelt den reinen Text von Elementen mit bestimmten ids."""
+
+    def __init__(self, ids):
+        super().__init__(convert_charrefs=True)
+        self.ids = set(ids)
+        self.texte = {}
+        self._aktiv = None
+        self._tiefe = 0
+
+    def handle_starttag(self, tag, attrs):
+        if tag in _LEER:
+            return
+        if self._aktiv:
+            self._tiefe += 1
+            return
+        ident = dict(attrs).get("id")
+        if ident in self.ids:
+            self._aktiv, self._tiefe = ident, 1
+            self.texte.setdefault(ident, "")
+
+    def handle_startendtag(self, tag, attrs):
+        pass  # selbstschließende Elemente enthalten keinen Text
+
+    def handle_endtag(self, tag):
+        if self._aktiv and tag not in _LEER:
+            self._tiefe -= 1
+            if self._tiefe == 0:
+                self._aktiv = None
+
+    def handle_data(self, data):
+        if self._aktiv:
+            self.texte[self._aktiv] += data
+
+
+def name_zusaetze(name, eingaben=None):
+    """Findet Orte oder Suchbegriffe, die hinter einem Trenner an den Firmennamen gehängt sind
+    (oder „in/aus <Ort>“ am Ende). Rückgabe: Liste der Funde (leer = in Ordnung)."""
+    name = " ".join(str(name or "").split())
+    teile = [t for t in _TRENNER.split(name) if t.strip()]
+    zusatz = " ".join(teile[1:]).lower()
+    begriffe = set()
+    ort = ""
+    if isinstance(eingaben, dict):
+        ort = str(eingaben.get("ort") or "").strip()
+        for wert in [ort, eingaben.get("branche")] + list(eingaben.get("leistungen") or []):
+            wert = str(wert or "").strip().lower()
+            if len(wert) >= 3:
+                begriffe.add(wert)
+            begriffe.update(w for w in re.findall(r"[a-zäöüß]{5,}", wert))
+    funde = sorted(b for b in begriffe if zusatz and b in zusatz)
+    if ort and re.search(r"\s(?:in|aus|bei)\s+%s\s*$" % re.escape(ort.lower()), name.lower()):
+        funde.append("„… %s“ am Ende" % ort)
+    if zusatz and not funde and not isinstance(eingaben, dict):
+        funde.append("Zusatz nach Trenner: %s" % zusatz[:40])
+    return funde
+
+
+def profil_entwurf_pruefen(html_text, eingaben=None):
+    """Zusatzprüfungen für den Profil-Entwurf (Beschreibung und Unternehmensname)."""
+    p = _IdText({"beschreibung-text", "firmenname"})
+    try:
+        p.feed(html_text)
+        p.close()
+    except Exception:
+        pass
+    text = " ".join(p.texte.get("beschreibung-text", "").split())
+    name = " ".join(p.texte.get("firmenname", "").split())
+    pruefungen = [
+        {"name": "Beschreibung vorhanden", "ok": bool(text), "hinweis": "" if text else "fehlt"},
+        {"name": "Beschreibung höchstens %d Zeichen" % BESCHREIBUNG_MAX, "ok": len(text) <= BESCHREIBUNG_MAX,
+         "hinweis": "%d Zeichen" % len(text)},
+        {"name": "Beschreibung ohne Links", "ok": not enthaelt_link(text),
+         "hinweis": "Link gefunden" if enthaelt_link(text) else ""},
+        {"name": "Beschreibung ohne Telefonnummern", "ok": not enthaelt_telefon(text),
+         "hinweis": "Telefonnummer gefunden" if enthaelt_telefon(text) else ""},
+    ]
+    funde = name_zusaetze(name, eingaben) if name else []
+    pruefungen.append({
+        "name": "Firmenname ohne angehängte Orte oder Suchbegriffe", "ok": bool(name) and not funde,
+        "hinweis": ("Warnung: Am Firmennamen hängt ein Zusatz (%s). Google verlangt den echten Namen ohne Orte oder "
+                    "Suchbegriffe. Falls der Betrieb genau so heißt (z. B. laut Handelsregister), ist er zulässig."
+                    % ", ".join(funde)) if funde else ("" if name else "Firmenname fehlt")})
+    return pruefungen
+
+
+def google_profil_pruefen(pfade, eingaben, namen):
+    """Prüft die drei Unterlagen des Google-Profil-Pakets.
+
+    pfade: {dateiname: pfad}; namen: {"entwurf": dateiname, "pruefliste": …, "uebergabe": …}.
+    Arbeitsunterlagen sind keine Webseiten: ohne Impressum-/Datenschutz- und Kontaktpflicht, aber mit
+    denselben Sicherheitsprüfungen (kein JavaScript, keine externen Ressourcen, Eingaben escaped)."""
+    ergebnisse = {}
+    for rolle in ("entwurf", "pruefliste", "uebergabe"):
+        name = namen[rolle]
+        pfad = pfade.get(name)
+        if not pfad or not os.path.isfile(pfad):
+            ergebnisse[name] = {"pruefungen": [{"name": "Datei vorhanden", "ok": False, "hinweis": "fehlt"}],
+                                "bestanden": False, "offene_punkte": []}
+            continue
+        e = datei_pruefen(pfad, eingaben, kontakt_pflicht=False, seite=False)
+        if rolle == "entwurf":
+            with open(pfad, "rb") as f:
+                text = f.read(MAX_BYTES * 5).decode("utf-8", "replace")
+            e["pruefungen"] += profil_entwurf_pruefen(text, eingaben)
+            e["bestanden"] = all(p["ok"] for p in e["pruefungen"])
+        ergebnisse[name] = e
+    fehlend = [namen[r] for r in ("entwurf", "pruefliste", "uebergabe")
+               if not (pfade.get(namen[r]) and os.path.isfile(pfade[namen[r]]))]
+    erster = ergebnisse[namen["entwurf"]]
+    erster["pruefungen"].append({"name": "Paket vollständig (3 Unterlagen)", "ok": not fehlend,
+                                 "hinweis": "fehlt: " + ", ".join(fehlend) if fehlend else ""})
+    erster["bestanden"] = all(p["ok"] for p in erster["pruefungen"])
+    return zusammenfassen(ergebnisse)

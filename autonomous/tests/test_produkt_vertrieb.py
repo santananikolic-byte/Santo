@@ -397,11 +397,8 @@ class TestApiUndDateien(VertriebTest):
 
 class TestBeispiele(unittest.TestCase):
     def test_committete_beispiele_sind_aktuell_und_fehlerfrei(self):
-        erwartet = {
-            "beispiel-webseite.html": verkaufsseite.beispiel_erzeugen(),
-            "verkaufsseite.html": verkaufsseite.erzeugen(verkaufsseite.eingabe_pruefen({}),
-                                                         beispiel_link="beispiel-webseite.html"),
-        }
+        # Alle committeten Beispiele (Webseite, Verkaufsseiten beider Angebote, Google-Profil-Unterlagen)
+        erwartet = verkaufsseite.beispiele_inhalte()
         for name, inhalt in erwartet.items():
             with open(os.path.join(BEISPIELE, name), encoding="utf-8") as f:
                 self.assertEqual(f.read(), inhalt, "%s veraltet – neu erzeugen mit: python3 -c \"from "
