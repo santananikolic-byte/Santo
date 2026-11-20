@@ -38,7 +38,8 @@ class SalesAgent(Agent):
     aufgabentypen = {
         "angebot_entwurf": "Angebot als druckbaren Entwurf erstellen (Eingabe: betrag, kontakt_id?, produkt_id?, "
                            "titel?, leistungen?, lieferzeit?)",
-        "nachricht_entwurf": "Nachricht an einen Kontakt entwerfen – wird nicht versendet (Eingabe: kontakt_id, anlass)",
+        "nachricht_entwurf": "Nachricht an einen Kontakt entwerfen – wird nicht versendet (Eingabe: kontakt_id, anlass, "
+                             "angebot? = google_profil (Standard) | webseite)",
         "pipeline_auswertung": "Interessenten und Angebote nach Status auswerten",
         "angebot_versenden": "Geprüftes Angebot versenden – nur nach Freigabe des Eigentümers (Eingabe: angebot_id)",
     }
@@ -106,6 +107,7 @@ class SalesAgent(Agent):
         if not kontakt:
             raise KeyError("Kontakt nicht gefunden.")
         anlass = bereinigen(e.get("anlass"), 200) or "Erstkontakt"
+        angebot_art = e.get("angebot") if e.get("angebot") in ("google_profil", "webseite") else "google_profil"
         self.darf(k, "entwurf_erstellen", "nachricht:" + kontakt["id"], aufgabe)
 
         einwilligung = kontakt["einwilligung"] == "ja" and bool((kontakt["einwilligung_nachweis"] or "").strip())
@@ -121,11 +123,19 @@ class SalesAgent(Agent):
             betreff = "Unser Angebot: %s" % letztes["titel"]
             kern_text = ("vor einiger Zeit haben wir Ihnen unser Angebot „%s“ geschickt. Haben Sie dazu noch Fragen? "
                          "Gern besprechen wir es mit Ihnen – telefonisch oder persönlich." % letztes["titel"])
-        else:
+        elif angebot_art == "webseite":
             betreff = "Ihre eigene Webseite – kurze Information"
             kern_text = ("wir erstellen für kleine Betriebe%s eine übersichtliche eigene Webseite: mit Ihren "
                          "Leistungen, Ihrem Einsatzgebiet und direktem Kontakt per Anruf oder E-Mail, gut lesbar auf "
                          "dem Handy. Gern zeigen wir Ihnen ein Beispiel." % branche)
+        else:
+            # Standard: das von der Marktrecherche empfohlene erste Angebot (Google-Profil-Paket).
+            # Bewusst ohne Versprechen zur Platzierung bei Google.
+            betreff = "Ihr Google-Unternehmensprofil – kurze Information"
+            kern_text = ("wir helfen kleinen Betrieben%s, ihr kostenloses Google-Unternehmensprofil vollständig und "
+                         "richtig einzurichten: mit Ihren Leistungen, Ihrem Einsatzgebiet, Öffnungszeiten und echten "
+                         "Fotos, damit Ihre Angaben bei Google und Google Maps stimmen und Kunden Sie direkt anrufen "
+                         "können. Sie bleiben selbst Inhaber des Profils. Gern zeigen wir Ihnen ein Beispiel." % branche)
         schluss = ("Wenn Sie Interesse haben, erreichen Sie uns unter [Telefon / E-Mail des Absenders].\n\n"
                    "Mit freundlichen Grüßen\n[Name, Firma und Anschrift des Absenders – vom Inhaber ergänzen]")
         if einwilligung:
@@ -149,6 +159,7 @@ class SalesAgent(Agent):
         ergebnis = {
             "kontakt_id": kontakt["id"], "firma": kontakt["firma"], "anlass": anlass,
             "vorlage": "nachfassen" if nachfassen else "erstkontakt",
+            "angebot": angebot_art,
             "kanal_empfehlung": kanal, "einwilligung": "ja" if einwilligung else "keine",
             "betreff": betreff, "text": text,
             "status": "ENTWURF – nicht versendet", "sendefertig": False,

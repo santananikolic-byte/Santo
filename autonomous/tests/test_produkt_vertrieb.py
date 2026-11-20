@@ -328,6 +328,22 @@ class TestKontakteUndAngebote(VertriebTest):
         self.assertIn("Eine kurze Antwort genügt", e["text"])
         self.assertEqual(e["status"], "ENTWURF – nicht versendet")
 
+    def test_nachricht_standard_ist_google_profil_ohne_versprechen(self):
+        kid = self.kontakt()
+        aid = self.api("POST", "/api/vertrieb/nachricht", {"kontakt_id": kid})["aufgabe_id"]
+        self.abarbeiten()
+        e = self.aufgabe(aid)["ergebnis"]
+        self.assertEqual(e["angebot"], "google_profil")
+        self.assertIn("Google-Unternehmensprofil", e["text"])
+        self.assertIn("Inhaber", e["text"])
+        for versprechen in ("garantiert", "Platz 1", "ganz oben", "mehr Kunden"):
+            self.assertNotIn(versprechen, e["text"])
+        # Webseiten-Variante bleibt über die Eingabe erreichbar
+        aid = self.kern.aufgaben.anlegen("N", "nachricht_entwurf", "sales", "eigentuemer",
+                                         {"kontakt_id": kid, "angebot": "webseite"})
+        self.abarbeiten()
+        self.assertIn("Webseite", self.aufgabe(aid)["ergebnis"]["text"])
+
     def test_pipeline_auswertung(self):
         kid = self.kontakt()
         self.angebot(kontakt_id=kid, betrag="500")
