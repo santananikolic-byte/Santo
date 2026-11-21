@@ -82,8 +82,8 @@ class TestFreigabeAtomar(KernTest):
         for nr in range(5):
             fid = self._offene_freigabe(nr)
             sup = self.kern.supervisor
-            ja, nein = _gleichzeitig(lambda: sup.entscheiden(fid, True, "eigentuemer"),
-                                     lambda: sup.entscheiden(fid, False, "eigentuemer"))
+            ja, nein = _gleichzeitig(lambda sup=sup, fid=fid: sup.entscheiden(fid, True, "eigentuemer"),
+                                     lambda sup=sup, fid=fid: sup.entscheiden(fid, False, "eigentuemer"))
             erfolge = [e for e in (ja, nein) if e[0] == "ok"]
             fehler = [e for e in (ja, nein) if e[0] == "fehler"]
             self.assertEqual(len(erfolge), 1, (ja, nein))
@@ -109,8 +109,8 @@ class TestGegenbuchungNurEinmal(KernTest):
         _langsam_bei(self.kern.db, "gegenbuchung_zu")
         for _ in range(3):
             bid = f.ausgabe("20", "material", "Baumarkt", "Kauf", "eigentuemer")
-            a, b = _gleichzeitig(lambda: f.gegenbuchung(bid, "Korrektur A", "eigentuemer"),
-                                 lambda: f.gegenbuchung(bid, "Korrektur B", "eigentuemer"))
+            a, b = _gleichzeitig(lambda bid=bid: f.gegenbuchung(bid, "Korrektur A", "eigentuemer"),
+                                 lambda bid=bid: f.gegenbuchung(bid, "Korrektur B", "eigentuemer"))
             self.assertEqual(sorted(x[0] for x in (a, b)), ["fehler", "ok"], (a, b))
             self.assertEqual(self.kern.db.wert("SELECT COUNT(*) FROM real_buchungen WHERE gegenbuchung_zu=?",
                                                (bid,)), 1)
@@ -120,8 +120,8 @@ class TestGegenbuchungNurEinmal(KernTest):
         _langsam_bei(self.kern.db, "gegenbuchung_zu")
         for _ in range(3):
             bid = w.buchen("ausgabe", "1", "test", "Kauf", "eigentuemer")["id"]
-            a, b = _gleichzeitig(lambda: w.gegenbuchung(bid, "Korrektur A", "eigentuemer"),
-                                 lambda: w.gegenbuchung(bid, "Korrektur B", "eigentuemer"))
+            a, b = _gleichzeitig(lambda bid=bid: w.gegenbuchung(bid, "Korrektur A", "eigentuemer"),
+                                 lambda bid=bid: w.gegenbuchung(bid, "Korrektur B", "eigentuemer"))
             self.assertEqual(sorted(x[0] for x in (a, b)), ["fehler", "ok"], (a, b))
             self.assertEqual(self.kern.db.wert("SELECT COUNT(*) FROM wallet_buchungen WHERE gegenbuchung_zu=?",
                                                (bid,)), 1)

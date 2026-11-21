@@ -11,7 +11,6 @@ from unittest import mock
 
 os.environ["AUTONOMOUS_DATEN"] = tempfile.mkdtemp(prefix="autonomous-gp-")  # vor dem Import; je Test eigener Ordner
 
-from autonomous import api  # noqa: E402
 from autonomous import api_vertrieb  # noqa: E402,F401  (registriert die Routen)
 from autonomous.produkte import google_profil, qualitaet, verkaufsseite  # noqa: E402
 from autonomous.tests.hilfe import KernTest  # noqa: E402

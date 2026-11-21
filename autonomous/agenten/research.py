@@ -414,6 +414,7 @@ def zuschlaege_auswerten(bekanntmachungen):
     gewinner, groessen, orte, angebote, werte = (collections.Counter(), collections.Counter(), collections.Counter(),
                                                  [], [])
     nicht_veroeffentlicht = 0
+    angebote_unklar = 0
     for n in bekanntmachungen:
         for name in set(_texte(n.get("winner-name"))):
             gewinner[name] += 1
@@ -424,9 +425,13 @@ def zuschlaege_auswerten(bekanntmachungen):
             orte[ort] += 1
         codes, werte_liste = _liste(n.get("received-submissions-type-code")), _liste(
             n.get("received-submissions-type-val"))
-        for code, wert in zip(codes, werte_liste):
-            if code == "tenders" and re.fullmatch(r"\d{1,4}", wert):
-                angebote.append(int(wert))
+        if len(codes) == len(werte_liste):
+            # Längen oben geprüft (zip(strict=True) gibt es erst ab Python 3.10, der Mac hat 3.9)
+            for code, wert in zip(codes, werte_liste):  # noqa: B905
+                if code == "tenders" and re.fullmatch(r"\d{1,4}", wert):
+                    angebote.append(int(wert))
+        else:
+            angebote_unklar += 1  # Codes und Werte passen nicht zusammen – lieber nicht zählen als falsch zählen
         wert = n.get("total-value")
         if isinstance(wert, (int, float)) and not isinstance(wert, bool) and wert > 1:
             werte.append(float(wert))
@@ -440,6 +445,7 @@ def zuschlaege_auswerten(bekanntmachungen):
         "groessen": {g: groessen[g] for g in GROESSEN if groessen[g]},
         "orte_top": [{"ort": o, "anzahl": a} for o, a in orte.most_common(10)],
         "angebote_je_los": {"median": _median(angebote), "lose_mit_angabe": len(angebote),
+                            "bekanntmachungen_mit_unklarer_angabe": angebote_unklar,
                             "verteilung": {b: verteilung[b] for b in ("1", "2–5", "6–10", "über 10") if verteilung[b]}},
         "werte": {"veroeffentlicht": len(werte), "nicht_veroeffentlicht": nicht_veroeffentlicht,
                   "median_eur": round(statistics.median(werte), 2) if werte else None,

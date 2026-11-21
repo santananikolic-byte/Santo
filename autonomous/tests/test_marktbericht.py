@@ -185,6 +185,20 @@ class TestTeilausfall(MarktTest):
         super().setUp()
         self.einschalten()
 
+    def test_angebotszahl_nur_bei_passenden_listen(self):
+        """Passen Codes und Werte von TED nicht zusammen, wird nicht falsch zugeordnet, sondern nicht gezählt."""
+        from autonomous.agenten.research import zuschlaege_auswerten
+        passend = {"received-submissions-type-code": ["t-sme", "tenders"],
+                   "received-submissions-type-val": ["3", "8"]}
+        # Ein Wert fehlt: die 3 gehört zu „t-sme“ (Angebote von KMU), der Wert für „tenders“ fehlt.
+        # zip() würde 3 fälschlich als Gesamtzahl der Angebote lesen.
+        verrutscht = {"received-submissions-type-code": ["tenders", "t-sme"],
+                      "received-submissions-type-val": ["3"]}
+        e = zuschlaege_auswerten([passend, verrutscht])
+        self.assertEqual(e["angebote_je_los"]["median"], 8)          # nicht 5,5 durch die falsche 3
+        self.assertEqual(e["angebote_je_los"]["lose_mit_angabe"], 1)
+        self.assertEqual(e["angebote_je_los"]["bekanntmachungen_mit_unklarer_angabe"], 1)
+
     def test_zuschlaege_fehlen_bericht_trotzdem(self):
         self.netz.ausfall = {"can"}
         a = self.bericht()
