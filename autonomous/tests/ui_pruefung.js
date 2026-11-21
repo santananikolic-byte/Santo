@@ -210,8 +210,10 @@ async function funktionenPruefen(browser, startUrl) {
   await seite.fill('[data-pruef="wallet-kategorie"]', 'ui-pruefung');
   await seite.fill('[data-pruef="wallet-begruendung"]', 'ungültiger Betrag');
   await seite.click('[data-pruef="wallet-absenden"]');
-  const abgelehnt = await seite.waitForSelector('.meldung.fehler', { timeout: 5000 }).then(() => true, () => false);
-  pruefe(abgelehnt, 'Wallet: ungültiger Betrag wird nicht gemeldet');
+  await seite.waitForTimeout(500);
+  // Der Browser meldet das falsche Format direkt am Feld (pattern) – es wird gar nicht erst abgeschickt
+  const amFeld = await seite.$eval('[data-pruef="wallet-betrag"]', el => el.validity.patternMismatch && document.activeElement === el);
+  pruefe(amFeld, 'Wallet: ungültiger Betrag wird nicht am Feld gemeldet');
   const w2 = await api(seite, 'GET', '/api/wallet');
   pruefe(w2.inhalt.stand_cent === erwartet, 'Wallet: ungültiger Betrag hat trotzdem gebucht');
 
@@ -337,10 +339,13 @@ async function funktionenPruefen(browser, startUrl) {
 //     (Auftrags-Radar mit TESTDATEN aus ui_server.py – kein Internet nötig)
 // ---------------------------------------------------------------------------
 async function meldungMit(seite, muster, sekunden) {
-  return seite.waitForFunction(quelle => {
+  const ok = await seite.waitForFunction(quelle => {
     const re = new RegExp(quelle);
     return Array.from(document.querySelectorAll('.meldung')).some(m => re.test(m.textContent));
   }, muster.source, { timeout: (sekunden || 10) * 1000 }).then(() => true, () => false);
+  // Fehlermeldungen bleiben stehen, bis man sie schließt – danach schließen, damit sie keine weiteren Klicks verdecken
+  await seite.$$eval('.meldung.fehler button', bs => bs.forEach(b => b.click())).catch(() => null);
+  return ok;
 }
 
 async function ausschreibungenApi(seite) {
@@ -354,6 +359,21 @@ async function neueFunktionenPruefen(seite) {
   if (!pruefe(vorher !== null, 'Auftrags-Radar: /api/ausschreibungen antwortet nicht')) return;
   const einst0 = (await api(seite, 'GET', '/api/einstellungen')).inhalt.werte || {};
   pruefe(einst0.internet_recherche_erlaubt === false, 'Einstellungen: Internet-Recherche ist nicht standardmäßig aus');
+
+  // --- CEO-Zentrale: Marktbericht -------------------------------------------------------
+  await bereichOeffnen(seite, 'ceo');
+  pruefe(await seite.isVisible('[data-pruef="marktbericht"]'), 'CEO: Karte „Marktbericht“ fehlt');
+  pruefe(await seite.isVisible('[data-pruef="marktbericht-recherche-aus"]'), 'CEO: Hinweis „Internet-Recherche aus“ mit Weg zum Einschalten fehlt');
+  pruefe(await seite.isVisible('[data-pruef="marktbericht-recherche-einschalten"]'), 'CEO: Knopf „Internet-Recherche einschalten“ fehlt');
+  const mbText = (await seite.textContent('[data-pruef="marktbericht-eintrag"]').catch(() => '')) || '';
+  pruefe(/90 Tage/.test(mbText) && /Ausschreibungen \(EU, TED\)\s*3/.test(mbText), 'CEO: Bericht (TESTDATEN) wird nicht mit Kennzahlen angezeigt: ' + mbText.slice(0, 120));
+  const mbHref = await seite.getAttribute('[data-pruef="marktbericht-ansehen"]', 'href').catch(() => null);
+  const mbStatus = mbHref ? await seite.evaluate(async u => (await fetch(u, { credentials: 'same-origin' })).status, mbHref) : 0;
+  pruefe(mbHref === '/produkte/marktberichte/ui_test_mb/bericht.html' && mbStatus === 200, 'CEO: „Bericht ansehen“ fehlt oder nicht abrufbar (' + mbHref + ', ' + mbStatus + ')');
+  await seite.click('[data-pruef="marktbericht-erstellen"]');
+  pruefe(await meldungMit(seite, /Internet-Recherche ist ausgeschaltet/), 'CEO: „Marktbericht erstellen“ bei ausgeschalteter Recherche ohne Meldung des Backends');
+  const mbAuf = ((await api(seite, 'GET', '/api/aufgaben?rolle=research')).inhalt.aufgaben || []).filter(a => a.typ === 'marktbericht');
+  pruefe(mbAuf.length === 1, 'CEO: Marktbericht-Aufgabe trotz ausgeschalteter Recherche angelegt (' + mbAuf.length + ')');
 
   await bereichOeffnen(seite, 'vertrieb');
   pruefe(await seite.isVisible('[data-pruef="ausschreibungen"]'), 'Vertrieb: Karte „Öffentliche Ausschreibungen“ fehlt');
@@ -376,11 +396,27 @@ async function neueFunktionenPruefen(seite) {
   await seite.click('[data-id="ui_test_1"] summary');
   pruefe(/Frist sehr knapp/.test((await seite.textContent('[data-id="ui_test_1"]')) || ''), 'Vertrieb: Begründung der Punkte nicht aufklappbar');
 
-  // Recherche aus → „Jetzt suchen“ zeigt die Meldung des Backends, es entsteht keine Aufgabe
-  await seite.click('[data-pruef="ausschreibungen-suchen"]');
-  pruefe(await meldungMit(seite, /Internet-Recherche ist ausgeschaltet/), 'Vertrieb: „Jetzt suchen“ bei ausgeschalteter Recherche ohne Meldung');
+  // Recherche aus → kein „Jetzt suchen“ (würde sicher scheitern), sondern „Internet-Recherche einschalten“ mit Bestätigung
+  pruefe(!(await seite.isVisible('[data-pruef="ausschreibungen-suchen"]')), 'Vertrieb: „Jetzt suchen“ trotz ausgeschalteter Recherche angeboten');
+  const ein = '[data-pruef="recherche-einschalten"]';
+  pruefe(await seite.isVisible(ein), 'Vertrieb: Knopf „Internet-Recherche einschalten“ fehlt');
+  await seite.click(ein);
+  pruefe(/Nochmal tippen/.test((await seite.textContent(ein)) || ''), 'Vertrieb: Einschalten ohne Bestätigung (zweites Tippen)');
+  const nochAus = (await api(seite, 'GET', '/api/einstellungen')).inhalt.werte || {};
+  pruefe(nochAus.internet_recherche_erlaubt === false, 'Vertrieb: Recherche schon nach dem ersten Tippen eingeschaltet');
+  await seite.click(ein);
+  const eingeschaltet = await warteAuf(seite, 'Einschalten kommt nicht im Backend an', async () => {
+    const w = (await api(seite, 'GET', '/api/einstellungen')).inhalt.werte || {};
+    return w.internet_recherche_erlaubt === true ? w : null;
+  }, 10);
+  pruefe(!!eingeschaltet, 'Vertrieb: „Internet-Recherche einschalten“ wirkt nicht');
+  const sucheDa = await seite.waitForSelector('[data-pruef="ausschreibungen-suchen"]', { timeout: 10000 }).then(() => true, () => false);
+  pruefe(sucheDa, 'Vertrieb: nach dem Einschalten fehlt „Jetzt suchen“');
+  // Sofort wieder aus (über die API) – die Prüfung soll nie ins Internet; „Jetzt suchen“ wird NICHT angetippt
+  await api(seite, 'POST', '/api/einstellungen', { schluessel: 'internet_recherche_erlaubt', wert: false });
+  await bereichOeffnen(seite, 'vertrieb');
   const akq = (await api(seite, 'GET', '/api/aufgaben?rolle=akquise')).inhalt.aufgaben || [];
-  pruefe(!akq.some(a => a.typ === 'ausschreibungen_suchen'), 'Vertrieb: Suche trotz ausgeschalteter Recherche angelegt');
+  pruefe(!akq.some(a => a.typ === 'ausschreibungen_suchen'), 'Vertrieb: Suche angelegt, obwohl niemand gesucht hat');
 
   // Filter: alle Punktzahlen + abgelaufene
   await seite.selectOption('[data-pruef="ausschreibungen-filter-min"]', '0');
@@ -421,7 +457,10 @@ async function neueFunktionenPruefen(seite) {
 
   // --- Einstellungen: Auftragssuche und Stundensatz --------------------------------------
   await bereichOeffnen(seite, 'einstellungen');
-  pruefe(await seite.isVisible('[data-pruef="auftragssuche"]'), 'Einstellungen: Karte „Auftragssuche und Stundensatz“ fehlt');
+  pruefe(await seite.isVisible('[data-pruef="auftragssuche"]'), 'Einstellungen: Karte „Auftragssuche“ fehlt');
+  const kartenReihe = await seite.$$eval('main .ansicht > section.karte', ks => ks.map(k => k.dataset.pruef || ''));
+  pruefe(kartenReihe[0] === 'stundensatz-karte', 'Einstellungen: Stundensatz ist nicht die erste Karte (' + kartenReihe.slice(0, 3).join(', ') + ')');
+  pruefe(!(await seite.isVisible('[data-schluessel="technik-betrieb"] > [data-pruef="einstellungen-formular"]')), 'Einstellungen: Technik ist nicht eingeklappt');
   const form = '[data-pruef="auftragssuche-formular"]';
   await seite.check(form + ' [data-pruef="recherche-schalter"]');
   await seite.fill(form + ' input[name="region_plz"]', '50, 51, 53');
@@ -442,15 +481,71 @@ async function neueFunktionenPruefen(seite) {
     return w.internet_recherche_erlaubt === false ? w : null;
   }, 10);
   pruefe(!!aus, 'Einstellungen: Internet-Recherche nicht wieder aus');
-  // Ungültige Eingabe: freundliche Meldung, nichts halb gespeichert
+  // Ungültige Eingabe: freundliche Meldung (bleibt stehen, mit „Schließen“), nichts halb gespeichert
   await bereichOeffnen(seite, 'einstellungen');
   await seite.fill(form + ' input[name="region_plz"]', '5, 51');
-  await seite.fill(form + ' input[name="stundensatz"]', '40,00');
+  await seite.fill(form + ' textarea[name="suchbegriffe"]', 'Reinigung, Fenster');
   await seite.click('[data-pruef="auftragssuche-speichern"]');
+  await seite.waitForSelector('.meldung.fehler', { timeout: 10000 }).catch(() => null);
+  pruefe(await seite.isVisible('.meldung.fehler button:has-text("Schließen")'), 'Fehlermeldung: kein „Schließen“ (sie soll stehen bleiben)');
+  await seite.waitForTimeout(9500);
+  pruefe(await seite.isVisible('.meldung.fehler'), 'Fehlermeldung verschwindet von selbst (soll bis zum Schließen bleiben)');
   pruefe(await meldungMit(seite, /Postleitzahl-Bereiche/), 'Einstellungen: ungültiger PLZ-Bereich ohne Meldung');
+  pruefe(!(await seite.isVisible('.meldung.fehler')), 'Fehlermeldung lässt sich nicht schließen');
   const unveraendert = (await api(seite, 'GET', '/api/einstellungen')).inhalt.werte || {};
-  pruefe(unveraendert.stundensatz_cent === 0 && JSON.stringify(unveraendert.region_plz) === '["50","51","53"]',
+  pruefe(JSON.stringify(unveraendert.suchbegriffe) === '["reinigung","treppenhaus","glasreinigung"]' && JSON.stringify(unveraendert.region_plz) === '["50","51","53"]',
     'Einstellungen: bei ungültiger Eingabe wurde trotzdem etwas gespeichert');
+
+  // Stundensatz-Karte: speichern bis ins Backend, danach wieder offen (die Kalkulation unten prüft den offenen Fall)
+  await bereichOeffnen(seite, 'einstellungen');
+  const sf = '[data-pruef="stundensatz-formular"]';
+  await seite.fill(sf + ' input[name="stundensatz"]', '38,50');
+  await seite.click('[data-pruef="stundensatz-formular-speichern"]');
+  const satzGespeichert = await warteAuf(seite, 'Stundensatz kommt nicht im Backend an', async () => {
+    const w = (await api(seite, 'GET', '/api/einstellungen')).inhalt.werte || {};
+    return w.stundensatz_cent === 3850 ? w : null;
+  }, 10);
+  pruefe(!!satzGespeichert, 'Einstellungen: Stundensatz 38,50 € nicht gespeichert');
+  const fokusNach = await seite.evaluate(() => (document.activeElement && document.activeElement.tagName) || '');
+  pruefe(fokusNach !== 'BODY', 'Tastatur: Fokus geht nach dem Speichern verloren (liegt auf ' + fokusNach + ')');
+  await seite.fill(sf + ' input[name="stundensatz"]', '');
+  await seite.click('[data-pruef="stundensatz-formular-speichern"]');
+  const satzOffen = await warteAuf(seite, 'Stundensatz lässt sich nicht wieder auf offen setzen', async () => {
+    const w = (await api(seite, 'GET', '/api/einstellungen')).inhalt.werte || {};
+    return w.stundensatz_cent === 0 ? w : null;
+  }, 10);
+  pruefe(!!satzOffen, 'Einstellungen: Stundensatz nicht wieder offen');
+
+  // KI-Modell: Status ohne Modell; Ollama an einer Adresse, an der sicher nichts läuft → ehrlich „nicht erreichbar“
+  // (die Prüfung hängt nie von einem echten Modell ab)
+  await bereichOeffnen(seite, 'einstellungen');
+  pruefe(await seite.isVisible('[data-pruef="ki-modell"]'), 'Einstellungen: Karte „KI-Modell“ fehlt');
+  pruefe(/Kein Modell/.test((await seite.textContent('[data-pruef="ki-modell"]')) || ''), 'KI-Modell: Status „Kein Modell“ fehlt');
+  pruefe(await seite.isDisabled('[data-pruef="modell-testen"]'), 'KI-Modell: „Modell testen“ ohne Modell nicht gesperrt');
+  const kf0 = '[data-pruef="ki-formular"]';
+  await seite.check(kf0 + ' [data-pruef="anbieter-ollama"]');
+  await seite.fill(kf0 + ' input[name="ollama_adresse"]', 'http://example.com:11434');
+  await seite.click('[data-pruef="ki-speichern"]');
+  pruefe(await meldungMit(seite, /Adresse: nur dieser Rechner/), 'KI-Modell: fremde Adresse ohne Meldung');
+  const kiUnveraendert = (await api(seite, 'GET', '/api/einstellungen')).inhalt.werte || {};
+  pruefe(kiUnveraendert.modell_anbieter === 'keiner', 'KI-Modell: bei ungültiger Adresse trotzdem gespeichert');
+  await seite.fill(kf0 + ' input[name="ollama_adresse"]', 'http://127.0.0.1:9');
+  await seite.click('[data-pruef="ki-speichern"]');
+  const kiGespeichert = await warteAuf(seite, 'KI-Einstellungen kommen nicht im Backend an', async () => {
+    const w = (await api(seite, 'GET', '/api/einstellungen')).inhalt.werte || {};
+    return w.modell_anbieter === 'ollama' && w.ollama_adresse === 'http://127.0.0.1:9' ? w : null;
+  }, 10);
+  pruefe(!!kiGespeichert, 'KI-Modell: Anbieter/Adresse nicht gespeichert');
+  await bereichOeffnen(seite, 'einstellungen');
+  pruefe(/Erreichbar\s*nein/.test((await seite.textContent('[data-pruef="ki-modell"]')) || ''), 'KI-Modell: „nicht erreichbar“ wird nicht angezeigt');
+  await seite.click('[data-pruef="modell-testen"]');
+  const testErgebnis = await seite.waitForFunction(() => {
+    const el = document.querySelector('[data-pruef="modell-test-ergebnis"]');
+    return el && /Kein Ergebnis/.test(el.textContent);
+  }, null, { timeout: 30000 }).then(() => true, () => false);
+  pruefe(testErgebnis, 'KI-Modell: „Modell testen“ zeigt bei nicht erreichbarem Modell kein ehrliches Ergebnis');
+  await api(seite, 'POST', '/api/einstellungen', { schluessel: 'modell_anbieter', wert: 'keiner' });
+  await api(seite, 'POST', '/api/einstellungen', { schluessel: 'ollama_adresse', wert: 'http://127.0.0.1:11434' });
 
   // --- Kalkulation: ohne Stundensatz → OFFEN, mit 35,00 € → 400,40 € -------------------
   await bereichOeffnen(seite, 'vertrieb');
@@ -472,9 +567,11 @@ async function neueFunktionenPruefen(seite) {
   await seite.click('[data-pruef="kalkulation-absenden"]');
   const offen = await seite.waitForFunction(() => {
     const el = document.querySelector('[data-pruef="kalk-preis-monat"]');
-    return el && /OFFEN/.test(el.textContent);
+    return el && /Preis offen/.test(el.textContent);
   }, null, { timeout: 25000 }).then(() => true, () => false);
-  pruefe(offen, 'Kalkulation: ohne Stundensatz wird nicht „OFFEN“ angezeigt');
+  pruefe(offen, 'Kalkulation: ohne Stundensatz wird nicht „Preis offen“ angezeigt');
+  const offenZahl = await seite.$$eval('[data-pruef="kalk-ergebnis"][open]', els => (els[0] ? (els[0].textContent.match(/offen/gi) || []).length : -1));
+  pruefe(offenZahl >= 1 && offenZahl <= 2, 'Kalkulation: „offen“ steht ' + offenZahl + '-mal im Ergebnis (soll einmal deutlich stehen)');
   pruefe(/10 h/.test((await seite.textContent('[data-pruef="kalk-ergebnis"]')) || ''), 'Kalkulation: Stunden (8 h + 2 h Anfahrt = 10 h) fehlen');
   // Die Eingaben bleiben nach dem Neuaufbau stehen; jetzt mit Stundensatz
   if (!(await seite.isVisible(kf + ' input[name="stundensatz"]'))) await seite.click('[data-schluessel="kalkulation-neu"] > summary');
@@ -504,6 +601,42 @@ async function neueFunktionenPruefen(seite) {
       pruefe(/400,40\s*€ \/ Monat/.test((await seite.textContent('[data-pruef="angebot"]')) || ''), 'Dauerauftrag: Liste zeigt die Monatspauschale nicht als „/ Monat“');
     }
   }
+
+  // --- Eingabefehler direkt am Feld (Browser-Prüfung): „vierhundert“ wird gar nicht erst abgeschickt ---
+  await bereichOeffnen(seite, 'vertrieb');
+  if (!(await seite.isVisible(kf + ' [data-feld="flaeche"]'))) await seite.click('[data-schluessel="kalkulation-neu"] > summary');
+  const kalkVorher = ((await api(seite, 'GET', '/api/aufgaben?rolle=finance')).inhalt.aufgaben || []).length;
+  await seite.fill(kf + ' [data-feld="flaeche"]', 'vierhundert');
+  await seite.click('[data-pruef="kalkulation-absenden"]');
+  await seite.waitForTimeout(600);
+  const feldFehler = await seite.$eval(kf + ' [data-feld="flaeche"]', el => ({ falsch: el.validity.patternMismatch, fokus: document.activeElement === el }));
+  pruefe(feldFehler.falsch && feldFehler.fokus, 'Feld-Fehler: „vierhundert“ nicht am Feld gemeldet (' + JSON.stringify(feldFehler) + ')');
+  const kalkNachher = ((await api(seite, 'GET', '/api/aufgaben?rolle=finance')).inhalt.aufgaben || []).length;
+  pruefe(kalkNachher === kalkVorher, 'Feld-Fehler: trotz falscher Fläche wurde gerechnet');
+  await seite.fill(kf + ' [data-feld="flaeche"]', '400');
+
+  // --- Stundensatz direkt in der Kalkulation festlegen (ohne Seitenwechsel) ----------------
+  await bereichOeffnen(seite, 'vertrieb');
+  await seite.click('[data-pruef="stundensatz-festlegen"]');
+  await seite.fill('[data-pruef="stundensatz-kalk"] input[name="stundensatz"]', '35,00');
+  await seite.click('[data-pruef="stundensatz-kalk-speichern"]');
+  const inline = await warteAuf(seite, 'Stundensatz aus der Kalkulation kommt nicht im Backend an', async () => {
+    const w = (await api(seite, 'GET', '/api/einstellungen')).inhalt.werte || {};
+    return w.stundensatz_cent === 3500 ? w : null;
+  }, 10);
+  pruefe(!!inline, 'Kalkulation: „Stundensatz festlegen“ speichert nicht');
+  await seite.waitForSelector('[data-pruef="stundensatz-gesetzt"]', { timeout: 10000 }).catch(() => null);
+  pruefe(await seite.isVisible('[data-pruef="stundensatz-gesetzt"]'), 'Kalkulation: gespeicherter Stundensatz wird nicht angezeigt');
+  await api(seite, 'POST', '/api/einstellungen', { schluessel: 'stundensatz_cent', wert: 0 });
+
+  // --- Sprungleiste: Knopf bringt die Karte nach oben (keine #-Links) ----------------------
+  await bereichOeffnen(seite, 'vertrieb');
+  pruefe(await seite.isVisible('[data-pruef="sprungleiste"]'), 'Vertrieb: Sprungleiste fehlt');
+  await seite.click('[data-sprung-zu="rueckmeldungen"]');
+  await seite.waitForTimeout(400);
+  const lageZiel = await seite.$eval('[data-sprung="rueckmeldungen"]', el => Math.round(el.getBoundingClientRect().top));
+  pruefe(lageZiel >= 0 && lageZiel < 200, 'Vertrieb: Sprungleiste springt nicht zur Karte (oben bei ' + lageZiel + ' px)');
+  pruefe((await seite.evaluate(() => location.hash)) === '#vertrieb', 'Vertrieb: Sprungleiste verändert die Adresse');
 
   // --- Anschreiben mit Auswahl „Reinigung“ -----------------------------------------------
   const kontakte = (await api(seite, 'GET', '/api/kontakte')).inhalt.kontakte || [];
@@ -667,6 +800,9 @@ async function ansichtPruefen(browser, startUrl, g, bilder) {
     if (id === 'dashboard') {
       const betrieb = await seite.textContent('[data-pruef="betrieb"]');
       pruefe(/läuft/.test(betrieb || ''), g.name + ': Dashboard zeigt nicht „läuft“ (sondern: ' + betrieb + ')');
+      pruefe(await seite.isVisible('[data-pruef="dash-vertrieb"]'), g.name + ': Dashboard ohne Vertriebs-Kacheln');
+      pruefe(await seite.isVisible('[data-pruef="naechste-schritte"]'), g.name + ': Dashboard ohne „Nächste Schritte“');
+      pruefe(!/Fortschritt/.test(lage.text), g.name + ': Dashboard zeigt noch „Fortschritt“ in Prozent');
     }
     if (id === 'wallet') {
       const banner = await seite.textContent('[data-pruef="wallet-banner"]');
@@ -703,6 +839,8 @@ async function ansichtPruefen(browser, startUrl, g, bilder) {
     await bereichOeffnen(seite, 'dashboard');
     await seite.click('#mehr-auf');
     await seite.waitForSelector('#mehr-blatt:not([hidden])');
+    pruefe(await seite.evaluate(() => document.querySelector('.app').inert === true && document.getElementById('nav-unten').inert === true),
+      g.name + ': „Mehr“-Blatt sperrt den Hintergrund nicht (Tab läuft in den verdeckten Inhalt)');
     if (bilder) await seite.screenshot({ path: bilder + '/' + g.name + '-mehr.png' });
     await seite.click('#nav-mehr a[data-nav="einstellungen"]');
     const ok = await seite.waitForFunction(() => {
@@ -710,6 +848,7 @@ async function ansichtPruefen(browser, startUrl, g, bilder) {
       return m.dataset.bereich === 'einstellungen' && m.dataset.status === 'fertig' && document.getElementById('mehr-blatt').hidden;
     }, null, { timeout: 15000 }).then(() => true, () => false);
     pruefe(ok, g.name + ': Navigation über „Mehr“ funktioniert nicht');
+    pruefe(await seite.evaluate(() => document.querySelector('.app').inert === false), g.name + ': nach dem Schließen bleibt der Hintergrund gesperrt');
   }
 
   await cspPruefen(seite, g.name);

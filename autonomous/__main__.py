@@ -26,6 +26,9 @@ def _url():
 
 
 def main(argv=None):
+    # Alles, was AUTONOMOUS anlegt (Datenbank, Sicherungen, Exporte, Protokolle, Produkte), ist nur für den
+    # eigenen Benutzer lesbar – nicht für andere Konten auf demselben Rechner.
+    os.umask(0o077)
     argv = list(sys.argv[1:] if argv is None else argv)
     befehl = argv[0] if argv else "start"
 
@@ -41,8 +44,9 @@ def main(argv=None):
         httpd = server.starten(kern)
         with open(pid_datei, "w") as f:
             f.write(str(os.getpid()))
-        print("AUTONOMOUS läuft.")
-        print("Öffnen: %s/?k=%s" % (_url(), server.zugangsschluessel()))
+        server.zugangsschluessel()  # sicherstellen, dass der Schlüssel existiert – aber nie ins Protokoll schreiben
+        print("AUTONOMOUS läuft auf %s" % _url())
+        print("Öffnen: Startlink mit 'python3 -m autonomous link' anzeigen (enthält den geheimen Schlüssel)")
         print("Beenden: Strg+C oder AUTONOMOUS-stoppen.command")
 
         def beenden(*_):

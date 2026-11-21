@@ -197,7 +197,7 @@
   const KONTAKT_STATUS = {
     neu: 'Neu', kontaktiert: 'Kontaktiert', interessiert: 'Interessiert', angebot: 'Angebot', gewonnen: 'Gewonnen', verloren: 'Verloren',
   };
-  const KONTAKT_TON = { neu: 'grau', kontaktiert: 'blau', interessiert: 'akzent', angebot: 'warn', gewonnen: 'ok', verloren: 'grau' };
+  const KONTAKT_TON = { neu: 'grau', kontaktiert: 'blau', interessiert: 'akzent', angebot: 'blau', gewonnen: 'ok', verloren: 'grau' };
   const ANGEBOT_STATUS = {
     entwurf: 'Entwurf', geprueft: 'Geprüft', versendet: 'Versendet', angenommen: 'Angenommen', abgelehnt: 'Abgelehnt',
   };
@@ -208,13 +208,17 @@
   const PRODUKT_TON = { entwurf: 'grau', qualitaet_ok: 'ok', qualitaet_mangel: 'fehler', beispiel: 'akzent' };
   const EBENEN = [['', 'Alle Ebenen'], ['info', 'Info'], ['warnung', 'Warnung'], ['fehler', 'Fehler'], ['kritisch', 'Kritisch'], ['audit', 'Audit (Prüfspur)']];
   const EBENE_TON = { info: 'grau', warnung: 'warn', fehler: 'fehler', kritisch: 'fehler', audit: 'akzent' };
+  function ebeneText(e) {
+    const t = EBENEN.find(x => x[0] === e);
+    return t ? t[1] : e;
+  }
   const CEO_KNOPF = { tagesplan: 'Tagesplan erstellen', kennzahlen: 'Kennzahlen berechnen', chancen_bewerten: 'Geschäftschancen bewerten' };
   const AUSSCHREIBUNG_STATUS = {
     neu: 'Neu', interessant: 'Interessant', abgelehnt: 'Abgelehnt', vorbereitet: 'Mappe vorbereitet',
     abgegeben: 'Angebot abgegeben', gewonnen: 'Gewonnen', verloren: 'Verloren',
   };
   const AUSSCHREIBUNG_TON = {
-    neu: 'grau', interessant: 'akzent', abgelehnt: 'grau', vorbereitet: 'blau', abgegeben: 'warn', gewonnen: 'ok', verloren: 'grau',
+    neu: 'grau', interessant: 'akzent', abgelehnt: 'grau', vorbereitet: 'blau', abgegeben: 'blau', gewonnen: 'ok', verloren: 'grau',
   };
   const AUSSCHREIBUNG_SCHRITT = 20;
   const SUCHLAUF_TEXT = { ok: 'ok', fehler: 'Fehler', gesperrt: 'gesperrt' };
@@ -349,6 +353,7 @@
     ausschreibungAnzahl: AUSSCHREIBUNG_SCHRITT,
     kalkPositionen: 1,
     kalkOffen: null,
+    fokusStelle: null,
   };
 
   function merkeAgenten(liste) {
@@ -378,9 +383,16 @@
   // ===========================================================================
   function meldung(text, art) {
     const box = document.getElementById('meldungen');
-    const el = h('div', { class: 'meldung ' + (art || 'info'), role: art === 'fehler' ? 'alert' : 'status' }, text);
+    let el;
+    if (art === 'fehler') {
+      // Fehler verschwinden nicht von selbst – wer kurz wegsieht, soll sie trotzdem lesen können
+      el = h('div', { class: 'meldung fehler mit-zu', role: 'alert' }, h('span', null, text),
+        h('button', { type: 'button', class: 'knopf zweit klein', onclick: () => el.remove() }, 'Schließen'));
+    } else {
+      el = h('div', { class: 'meldung ' + (art || 'info'), role: 'status' }, text);
+      setTimeout(() => el.remove(), 5500);
+    }
     box.appendChild(el);
-    setTimeout(() => el.remove(), art === 'fehler' ? 9000 : 5500);
     while (box.children.length > 4) box.firstChild.remove();
   }
 
@@ -476,8 +488,16 @@
   function eingabe(name, attrs) {
     return h('input', Object.assign({ name: name, type: 'text', autocomplete: 'off' }, attrs || {}));
   }
+  // Grobe Formatprüfung im Browser: nur Ziffern, Punkt, Komma, Leerzeichen (und €). Die genaue Prüfung macht
+  // betragNormal()/zahlNormal() – das Muster verhindert nur, dass z. B. „vierhundert“ erst nach dem Absenden auffällt.
+  const MUSTER_BETRAG = '[\\d\\s.,€]*\\d[\\d\\s.,€]*';
+  const MUSTER_ZAHL = '[\\d\\s.,]*\\d[\\d\\s.,]*';
   function betragFeld(name, attrs) {
-    return eingabe(name, Object.assign({ inputmode: 'decimal', placeholder: 'z. B. 12,50', maxlength: 20 }, attrs || {}));
+    return eingabe(name, Object.assign({ inputmode: 'decimal', placeholder: 'z. B. 12,50', maxlength: 20,
+      pattern: MUSTER_BETRAG, title: 'Euro-Betrag, z. B. 12,50' }, attrs || {}));
+  }
+  function dezimalFeld(name, attrs) {
+    return eingabe(name, Object.assign({ inputmode: 'decimal', maxlength: 20, pattern: MUSTER_ZAHL, title: 'Zahl, z. B. 12,5' }, attrs || {}));
   }
   function zahlFeld(name, attrs) {
     return eingabe(name, Object.assign({ type: 'number', inputmode: 'numeric', step: '1' }, attrs || {}));
@@ -498,10 +518,36 @@
     return h('button', Object.assign({ type: 'submit', class: 'knopf' }, attrs || {}), text);
   }
 
+  /** Merkt, in welcher Karte gerade gehandelt wird – nach dem Neuaufbau kehrt der Fokus dorthin zurück. */
+  function merkeFokusStelle(el) {
+    const karteEl = el && el.closest ? el.closest('section.karte') : null;
+    if (!karteEl) return;
+    const titel = karteEl.querySelector('h2');
+    zustand.fokusStelle = { pruef: karteEl.dataset.pruef || null, titel: titel ? titel.textContent : null };
+  }
+  function fokusStelleWiederherstellen(main) {
+    const stelle = zustand.fokusStelle;
+    zustand.fokusStelle = null;
+    if (!stelle) return;
+    const aktiv = document.activeElement;
+    if (aktiv && aktiv !== document.body && main.contains(aktiv)) return; // Fokus ist noch an einer sinnvollen Stelle
+    const karten = Array.from(main.querySelectorAll('section.karte'));
+    const treffer = karten.find(k => stelle.pruef && k.dataset.pruef === stelle.pruef)
+      || karten.find(k => { const t = k.querySelector('h2'); return t && stelle.titel && t.textContent === stelle.titel; });
+    const ueberschrift = treffer ? treffer.querySelector('h2') : null;
+    if (ueberschrift) {
+      ueberschrift.setAttribute('tabindex', '-1');
+      ueberschrift.focus({ preventScroll: true });
+    } else {
+      main.focus({ preventScroll: true });
+    }
+  }
+
   function formular(attrs, inhalt, aktion) {
     const form = h('form', Object.assign({ class: 'formular' }, attrs || {}), inhalt);
     form.addEventListener('submit', async (e) => {
       e.preventDefault();
+      merkeFokusStelle(form);
       const knopf = form.querySelector('button[type="submit"]');
       if (knopf) knopf.disabled = true;
       try {
@@ -613,6 +659,7 @@
   function aktionsKnopf(text, klasse, aktion, attrs) {
     const k = h('button', Object.assign({ type: 'button', class: 'knopf ' + (klasse || '') }, attrs || {}), text);
     k.addEventListener('click', async () => {
+      merkeFokusStelle(k);
       k.disabled = true;
       try { await aktion(); } catch (f) { meldung(fehlerText(f), 'fehler'); } finally { k.disabled = false; }
     });
@@ -638,6 +685,7 @@
         return;
       }
       clearTimeout(uhr);
+      merkeFokusStelle(k);
       k.disabled = true;
       try {
         await aktion();
@@ -876,7 +924,8 @@
   // Bereich: Dashboard
   // ===========================================================================
   async function ansichtDashboard(z) {
-    const [d, aus] = await Promise.all([API.get('/api/dashboard'), optional('/api/ausschreibungen?min_punkte=60')]);
+    const [d, aus, k, an, zi] = await Promise.all([API.get('/api/dashboard'), optional('/api/ausschreibungen?min_punkte=60'),
+      optional('/api/kontakte'), optional('/api/angebote'), API.get('/api/ziele')]);
     const s = d.status || {};
     aktualisiereKopfMit(s);
     const freigaben = d.offene_freigaben || [];
@@ -886,59 +935,97 @@
         h('div', { class: 'liste' }, freigaben.map(f => freigabeKarte(f, false)))));
     }
 
-    const orch = s.orchestrator || {};
-    const modell = s.modell || {};
-    const prozent = typeof s.fortschritt_prozent === 'number' ? s.fortschritt_prozent : 0;
-    const betriebOk = s.betrieb === 'laeuft';
-    z.append(h('div', { class: 'raster' },
-      kachel('Betrieb', betriebOk ? 'läuft' : (s.betrieb || 'unbekannt'), betriebOk ? 'ok' : 'fehler',
-        'Datenbank ' + (s.datenbank && s.datenbank.ok ? 'in Ordnung' : 'gestört') + (s.datenbank ? ' · Schema ' + s.datenbank.schema_version : ''), 'betrieb'),
-      kachel('Agenten-Arbeiter', orch.laeuft ? 'aktiv' : 'gestoppt', orch.laeuft ? 'ok' : 'warn',
-        orch.laeuft ? (orch.beschaeftigt + ' von ' + orch.arbeiter + ' beschäftigt · ' + zahl(orch.bearbeitet_seit_start) + ' seit Start erledigt') : 'Aufgaben werden gerade nicht abgearbeitet.'),
-      kachel('Fortschritt', prozent + ' %', '', 'Anteil abgeschlossener Aufgaben (ohne abgebrochene)', null,
-        h('progress', { max: 100, value: Math.max(0, Math.min(100, prozent)), 'aria-label': 'Fortschritt' })),
-      kachel('Offene Freigaben', zahl(s.offene_freigaben), s.offene_freigaben ? 'warn' : '', s.offene_freigaben ? 'Bitte entscheiden' : 'Nichts offen'),
-      kachel('Fehler (24 Std.)', zahl(s.fehler_24h), s.fehler_24h ? 'fehler' : '', 'laut Protokoll'),
-      kachel('Letzte Sicherung', s.letzte_sicherung ? sicherungKurz(s.letzte_sicherung) : 'noch keine', s.letzte_sicherung ? '' : 'warn',
-        s.letzte_sicherung ? sicherungText(s.letzte_sicherung) + ' · täglich, solange das System läuft' : 'täglich, solange das System läuft'),
-      kachel('Modell', (modell.anbieter_info && modell.anbieter_info.name) || modell.anbieter || '—', '',
-        modell.verfuegbar ? (zahl(modell.aufrufe_heute) + ' von ' + zahl(modell.limit_tag) + ' Aufrufen heute') : 'Kernfunktionen arbeiten ohne Modell'),
-      kachel('Laufzeit', dauerText(s.laufzeit_sekunden), '', 'Version ' + (s.version || '?') + ' · ' + zahl(s.agenten) + ' Agentenrollen'),
-      ausschreibungKachel(aus)));
+    // Zuerst eure Aufträge: Kontakte, Angebote, Ausschreibungen, Ziele
+    const kontakte = k.fehlt ? null : (k.kontakte || []);
+    const angebote = an.fehlt ? null : (an.angebote || []);
+    const ziele = zi.ziele || [];
+    const interessiert = kontakte ? kontakte.filter(x => x.status === 'interessiert').length : 0;
+    const offeneAngebote = angebote ? angebote.filter(x => ['entwurf', 'geprueft', 'versendet'].includes(x.status)).length : 0;
+    const aktiveZiele = ziele.filter(x => x.status === 'aktiv').length;
+    z.append(h('div', { class: 'raster', 'data-pruef': 'dash-vertrieb' },
+      kontakte ? kachel('Kontakte', zahl(kontakte.length), '', 'davon interessiert: ' + zahl(interessiert), 'dash-kontakte')
+        : kachel('Kontakte', 'nicht verfügbar', '', 'In dieser Version nicht eingebaut.', 'dash-kontakte'),
+      angebote ? kachel('Offene Angebote', zahl(offeneAngebote), '', 'Entwurf, geprüft oder versendet – noch nicht entschieden', 'dash-angebote')
+        : kachel('Offene Angebote', 'nicht verfügbar', '', 'In dieser Version nicht eingebaut.', 'dash-angebote'),
+      ausschreibungKachel(aus),
+      kachel('Aktive Ziele', zahl(aktiveZiele), '', aktiveZiele ? 'in der CEO-Zentrale' : 'Noch keine Ziele festgelegt', 'dash-ziele')));
 
-    z.append(karte('Aufgaben nach Status', statusChips(s.aufgaben),
-      h('div', { class: 'knopfreihe' }, h('a', { href: '#aufgaben', class: 'knopf zweit klein' }, 'Zu den Aufgaben'))));
+    const schritte = (kontakte || []).filter(x => x.naechster_schritt && !['gewonnen', 'verloren'].includes(x.status))
+      .sort((x, y) => String(y.aktualisiert || '').localeCompare(String(x.aktualisiert || ''))).slice(0, 5);
+    z.append(h('section', { class: 'karte', 'data-pruef': 'naechste-schritte' },
+      h('h2', null, 'Nächste Schritte'),
+      schritte.length
+        ? h('ul', { class: 'liste' }, schritte.map(x => h('li', { class: 'eintrag' },
+          h('div', { class: 'eintrag-kopf' }, h('span', { class: 'eintrag-titel' }, x.firma), tag(KONTAKT_STATUS[x.status] || x.status, KONTAKT_TON[x.status])),
+          h('div', { class: 'text' }, x.naechster_schritt))))
+        : leer(kontakte && kontakte.length ? 'Bei keinem Kontakt ist ein nächster Schritt eingetragen.' : 'Noch keine Kontakte. Im Vertrieb den ersten eintragen.'),
+      h('div', { class: 'knopfreihe' }, h('a', { href: '#vertrieb', class: 'knopf zweit klein' }, 'Zum Vertrieb'))));
 
-    const warnungen = (s.warnungen || []).map(t => h('li', { class: 'eintrag' }, h('span', { class: 'text' }, t)));
-    const protokoll = (d.warnungen_protokoll || []).slice().sort((a, b) => (b.id || 0) - (a.id || 0)).slice(0, 8);
-    z.append(karte('Warnungen',
-      warnungen.length || protokoll.length
-        ? h('ul', { class: 'liste' }, warnungen, protokoll.map(p => h('li', { class: 'eintrag' },
-          h('div', { class: 'eintrag-kopf' }, h('span', { class: 'eintrag-titel' }, p.ereignis), tag(p.ebene, EBENE_TON[p.ebene])),
-          h('div', { class: 'meta' }, zeitText(p.zeit) + ' · ' + p.quelle))))
-        : leer('Keine Warnungen.')));
+    // Echtes Geld zuerst und groß; das simulierte Wallet klein daneben (nie zusammengerechnet)
+    const w = d.wallet || {};
+    const f = d.finanzen || {};
+    z.append(h('div', { class: 'raster zwei' },
+      h('section', { class: 'karte' },
+        h('h2', null, 'Reale Finanzen', tag('REAL', 'ok')),
+        h('div', { class: 'kachel-wert' }, f.saldo || euro(f.saldo_cent)),
+        h('p', { class: 'hilfe' }, 'Saldo aus echten, geprüften Buchungen.'),
+        kv([
+          ['Einnahmen (verifiziert)', euro(f.einnahmen_verifiziert_cent)],
+          ['Offene Forderungen', (f.offene_forderungen || euro(f.offene_forderungen_cent)) + ' (noch kein Geld)'],
+        ]),
+        h('div', { class: 'knopfreihe' }, h('a', { href: '#finanzen', class: 'knopf zweit klein' }, 'Zu den Finanzen'))),
+      h('section', { class: 'karte' },
+        h('h2', null, 'Internes Wallet', tag('SIMULATION', 'sim')),
+        kv([['Simuliertes Guthaben', w.stand || euro(w.stand_cent)]]),
+        h('p', { class: 'hilfe' }, 'Kein echtes Geld. Beeinflusst den Betrieb nicht.'),
+        h('div', { class: 'knopfreihe' }, h('a', { href: '#wallet', class: 'knopf zweit klein' }, 'Zum Wallet')))));
 
     const aktiv = d.aktive_aufgaben || [];
     z.append(karte('Aktive Aufgaben',
       aktiv.length ? h('ul', { class: 'liste' }, aktiv.map(a => aufgabeZeile(a, true))) : leer('Gerade läuft nichts und nichts wartet in der Warteschlange.')));
 
-    // Simulation und Realität getrennt – nie zusammengerechnet
-    const w = d.wallet || {};
-    const f = d.finanzen || {};
-    z.append(h('div', { class: 'raster zwei' },
-      h('section', { class: 'karte' },
-        h('h2', null, 'Internes Wallet', tag('SIMULATION', 'sim')),
-        h('div', { class: 'kachel-wert' }, w.stand || euro(w.stand_cent)),
-        h('p', { class: 'hilfe' }, 'Kein echtes Geld. Beeinflusst den Betrieb nicht.'),
-        h('a', { href: '#wallet', class: 'knopf zweit klein' }, 'Zum Wallet')),
-      h('section', { class: 'karte' },
-        h('h2', null, 'Reale Finanzen', tag('REAL', 'ok')),
-        kv([
-          ['Einnahmen (verifiziert)', euro(f.einnahmen_verifiziert_cent)],
-          ['Saldo', f.saldo || euro(f.saldo_cent)],
-          ['Offene Forderungen', (f.offene_forderungen || euro(f.offene_forderungen_cent)) + ' (noch kein Geld)'],
-        ]),
-        h('a', { href: '#finanzen', class: 'knopf zweit klein' }, 'Zu den Finanzen'))));
+    // Technik: eingeklappt – nur was nicht stimmt, steht zusätzlich oben
+    const orch = s.orchestrator || {};
+    const modell = s.modell || {};
+    const zahlen = s.aufgaben || {};
+    const erledigt = zahlen.abgeschlossen || 0;
+    const gesamt = Object.keys(zahlen).filter(x => x !== 'abgebrochen').reduce((n, x) => n + (zahlen[x] || 0), 0);
+    const betriebOk = s.betrieb === 'laeuft';
+    const kBetrieb = () => kachel('Betrieb', betriebOk ? 'läuft' : (s.betrieb || 'unbekannt'), betriebOk ? 'ok' : 'fehler',
+      'Datenbank ' + (s.datenbank && s.datenbank.ok ? 'in Ordnung' : 'gestört'), 'betrieb');
+    const kFehler = () => kachel('Fehler (24 Std.)', zahl(s.fehler_24h), s.fehler_24h ? 'fehler' : '', 'laut Protokoll');
+    const kSicherung = () => kachel('Letzte Sicherung', s.letzte_sicherung ? sicherungKurz(s.letzte_sicherung) : 'noch keine', s.letzte_sicherung ? '' : 'warn',
+      s.letzte_sicherung ? sicherungText(s.letzte_sicherung) + ' · täglich, solange das System läuft' : 'täglich, solange das System läuft');
+    const probleme = [];
+    if (!betriebOk) probleme.push(kBetrieb());
+    if (s.fehler_24h) probleme.push(kFehler());
+    if (!s.letzte_sicherung) probleme.push(kSicherung());
+    if (probleme.length) z.append(h('div', { class: 'raster', 'data-pruef': 'dash-probleme' }, probleme));
+
+    const warnungen = (s.warnungen || []).map(t => h('li', { class: 'eintrag' }, h('span', { class: 'text' }, t)));
+    const protokoll = (d.warnungen_protokoll || []).slice().sort((a, b) => (b.id || 0) - (a.id || 0)).slice(0, 8);
+    z.append(h('section', { class: 'karte', 'data-pruef': 'dash-technik-karte' },
+      h('h2', null, 'Technik und Sicherung'),
+      aufklapp('Details anzeigen', 'dash-technik', false,
+        h('div', { class: 'raster' },
+          betriebOk ? kBetrieb() : null,
+          kachel('Agenten-Arbeiter', orch.laeuft ? 'aktiv' : 'gestoppt', orch.laeuft ? 'ok' : 'warn',
+            orch.laeuft ? (orch.beschaeftigt + ' von ' + orch.arbeiter + ' beschäftigt · ' + zahl(orch.bearbeitet_seit_start) + ' seit Start erledigt') : 'Aufgaben werden gerade nicht abgearbeitet.'),
+          kachel('Erledigte Agenten-Aufgaben', zahl(erledigt) + ' von ' + zahl(gesamt), '', 'ohne abgebrochene'),
+          s.fehler_24h ? null : kFehler(),
+          s.letzte_sicherung ? kSicherung() : null,
+          kachel('KI-Modell', modell.anbieter === 'ollama' ? 'Ollama' : 'kein Modell', '',
+            modell.verfuegbar ? (zahl(modell.aufrufe_heute) + ' von ' + zahl(modell.limit_tag) + ' Aufrufen heute') : 'Alles läuft nach festen Regeln, ohne KI'),
+          kachel('Laufzeit', dauerText(s.laufzeit_sekunden), '', 'Version ' + (s.version || '?'))),
+        h('h3', null, 'Aufgaben nach Status'),
+        statusChips(s.aufgaben),
+        h('h3', null, 'Warnungen'),
+        warnungen.length || protokoll.length
+          ? h('ul', { class: 'liste' }, warnungen, protokoll.map(p => h('li', { class: 'eintrag' },
+            h('div', { class: 'eintrag-kopf' }, h('span', { class: 'eintrag-titel' }, p.ereignis), tag(ebeneText(p.ebene), EBENE_TON[p.ebene])),
+            h('div', { class: 'meta' }, zeitText(p.zeit) + ' · ' + p.quelle))))
+          : leer('Keine Warnungen.'),
+        h('div', { class: 'knopfreihe' }, h('a', { href: '#aufgaben', class: 'knopf zweit klein' }, 'Zu den Aufgaben')))));
   }
 
   /** Kachel aus echten Daten des Auftrags-Radars: neue passende Ausschreibungen und nächste Frist. */
@@ -965,8 +1052,9 @@
   // ===========================================================================
   async function ansichtCeo(z) {
     await agentenSicher();
-    const [zielDaten, ceo, research, gedaechtnis] = await Promise.all([
+    const [zielDaten, ceo, research, gedaechtnis, mb, einst] = await Promise.all([
       API.get('/api/ziele'), API.get('/api/aufgaben?rolle=ceo'), API.get('/api/aufgaben?rolle=research'), API.get('/api/gedaechtnis'),
+      optional('/api/research/marktberichte'), API.get('/api/einstellungen'),
     ]);
     const ceoAufgaben = ceo.aufgaben || [];
     const eintraege = gedaechtnis.eintraege || [];
@@ -975,6 +1063,7 @@
     z.append(zieleKarte(zielDaten.ziele || []));
     z.append(tagesplanKarte(ceoAufgaben));
     z.append(chancenKarte(research.aufgaben || [], ceoAufgaben));
+    z.append(marktberichtKarte(mb, einst, research.aufgaben || []));
     z.append(kennzahlenKarte(ceoAufgaben));
     z.append(entscheidungenKarte(eintraege.filter(e => e.art === 'entscheidung')));
     z.append(gedaechtnisKarte(eintraege));
@@ -1093,6 +1182,73 @@
           (r.quellen || []).length ? h('details', { class: 'aufklapp klein' }, h('summary', null, 'Quellen ansehen'), wertAnzeige(r.quellen)) : null)))]
         : leer('Die Recherche enthält keine bewerteten Felder.'),
       e.gewichte ? h('details', { class: 'aufklapp klein' }, h('summary', null, 'Gewichtung der Kriterien'), wertAnzeige(e.gewichte)) : null);
+  }
+
+  const MARKT_KENNZAHL = {
+    ausschreibungen_ted_gesamt: 'Ausschreibungen (EU, TED)',
+    ausschreibungen_ausgewertet: 'davon ausgewertet',
+    zuschlaege_ted_gesamt: 'Zuschläge (EU, TED)',
+    zuschlaege_ausgewertet: 'davon ausgewertet',
+    wettbewerber_anzahl: 'Unternehmen mit Zuschlag',
+    angebote_je_los_median: 'Angebote je Los (Median)',
+    angebotsfrist_median_tage: 'Angebotsfrist in Tagen (Median)',
+    gesammelte_ausschreibungen: 'Eure gesammelten Ausschreibungen',
+  };
+  const MARKT_ZEITRAUM = [['30', '30 Tage'], ['90', '90 Tage'], ['180', '180 Tage'], ['365', '1 Jahr'], ['730', '2 Jahre']];
+
+  /** Marktbericht des Research-Agenten aus amtlichen Daten (PDF 0/5.2) – mit Quellen, ohne Schätzungen als Fakten. */
+  function marktberichtKarte(mb, einst, researchAufgaben) {
+    const titel = 'Marktbericht (Research-Agent)';
+    if (!mb || mb.fehlt) return nichtVerfuegbar(titel, 'Der Marktbericht ist in dieser Version des Servers noch nicht eingebaut.');
+    const rechercheAn = !!((einst && einst.werte) || {}).internet_recherche_erlaubt;
+    const berichte = mb.berichte || [];
+    const inArbeitListe = mb.in_arbeit || [];
+    const fehler = researchAufgaben.filter(a => a.typ === 'marktbericht' && a.status === 'fehlgeschlagen')
+      .sort((x, y) => String(y.aktualisiert || '').localeCompare(String(x.aktualisiert || '')))[0];
+    if (inArbeitListe.length) spaeterNeuLaden(5000); // Fortschritt sichtbar, ohne dass jemand neu laden muss
+
+    const form = formular({ 'data-pruef': 'marktbericht-formular' }, [
+      feld('Zeitraum', auswahl('zeitraum_tage', MARKT_ZEITRAUM, '365')),
+      h('div', { class: 'knopfreihe' }, absendeKnopf(inArbeitListe.length ? 'Wird erstellt …' : 'Marktbericht erstellen',
+        { 'data-pruef': 'marktbericht-erstellen', disabled: inArbeitListe.length > 0 })),
+    ], async (w) => {
+      const r = await API.post('/api/research/marktbericht', { zeitraum_tage: w.zeitraum_tage });
+      meldung('Auftrag an den Research-Agenten übergeben (Aufgabe ' + r.aufgabe_id + '). Das kann eine Minute dauern.', 'ok');
+      neuLaden();
+    });
+    const einschalten = rechercheAn ? null : h('div', { 'data-pruef': 'marktbericht-recherche-aus' },
+      h('p', { class: 'hilfe' }, tag('Internet-Recherche aus', 'warn'), ' Der Bericht braucht die öffentlichen Ausschreibungsdaten. Erst einschalten – '
+        + 'dann liest der Research-Agent nur die freigegebenen öffentlichen Quellen (nur lesen).'),
+      h('div', { class: 'knopfreihe' }, sicherheitsKnopf('Internet-Recherche einschalten', 'Wirklich einschalten? Nochmal tippen', 'zweit', async () => {
+        await API.post('/api/einstellungen', { schluessel: 'internet_recherche_erlaubt', wert: true });
+        meldung('Internet-Recherche ist jetzt an.', 'ok');
+        neuLaden();
+      }, { 'data-pruef': 'marktbericht-recherche-einschalten' })));
+
+    const kennzahlen = k => kv(Object.keys(k || {}).map(n => [MARKT_KENNZAHL[n] || schluesselText(n), typeof k[n] === 'number' ? zahl(k[n]) : String(k[n])]));
+    return h('section', { class: 'karte', 'data-pruef': 'marktbericht' },
+      h('h2', null, titel, tag(zahl(berichte.length) + ' Berichte', 'grau')),
+      h('p', { class: 'hilfe' }, 'Der Research-Agent wertet amtliche Daten aus: EU-Ausschreibungen und Zuschläge (TED) und eure gesammelten Ausschreibungen. '
+        + 'Jede Zahl mit Quelle; Annahmen sind gekennzeichnet. Ist ein lokales KI-Modell eingestellt, kommt eine gekennzeichnete, ungeprüfte KI-Zusammenfassung dazu.'),
+      einschalten,
+      form,
+      inArbeitListe.length
+        ? h('p', { 'data-pruef': 'marktbericht-laeuft' }, tag('Marktbericht wird erstellt …', 'blau'), ' Das kann eine Minute dauern – die Liste aktualisiert sich von selbst.')
+        : null,
+      fehler && !inArbeitListe.length ? h('p', { class: 'fehlertext' }, 'Letzter Versuch fehlgeschlagen: ' + (fehler.fehler || 'unbekannt')) : null,
+      berichte.length
+        ? h('ul', { class: 'liste', 'data-pruef': 'marktberichte-liste' }, berichte.slice(0, 5).map(b => {
+          const url = sichererLink(b.bericht_url);
+          return h('li', { class: 'eintrag', 'data-pruef': 'marktbericht-eintrag' },
+            h('div', { class: 'eintrag-kopf' },
+              h('span', { class: 'eintrag-titel' }, 'Marktbericht · ' + (b.zeitraum_tage ? zahl(b.zeitraum_tage) + ' Tage' : 'Zeitraum unbekannt')),
+              b.ki_zusammenfassung_vorhanden ? tag('mit KI-Zusammenfassung (ungeprüft)', 'akzent') : tag('ohne KI', 'grau')),
+            h('div', { class: 'meta' }, 'erstellt ' + zeitText(b.erstellt)),
+            kennzahlen(b.kennzahlen),
+            url ? h('div', { class: 'knopfreihe' },
+              h('a', { class: 'knopf klein', href: url, target: '_blank', rel: 'noopener noreferrer', 'data-pruef': 'marktbericht-ansehen' }, 'Bericht ansehen')) : null);
+        }))
+        : leer(inArbeitListe.length ? 'Der erste Bericht entsteht gerade.' : 'Noch kein Marktbericht. Zeitraum wählen und „Marktbericht erstellen“ antippen.'));
   }
 
   function kennzahlenKarte(ceoAufgaben) {
@@ -1519,7 +1675,7 @@
     const produktAgent = (ag.agenten || []).find(a => a.rolle === 'product');
     const googleDa = !!produktAgent && Object.keys(produktAgent.aufgabentypen || {}).some(t => /google|profil/i.test(t));
     const produkte = p.produkte || [];
-    z.append(h('p', { class: 'einleitung' }, 'Der Product-Agent erstellt Dateien zur Prüfung. Veröffentlichen ist freigabepflichtig – ohne euer Ja geht nichts online.'));
+    z.append(h('p', { class: 'einleitung' }, 'Der Product-Agent erstellt Dateien zur Prüfung. Veröffentlichen braucht euer Ja – ohne euer Ja geht nichts online.'));
     z.append(googleProfilKarte(googleDa, !produkte.length));
     z.append(webseiteKarte(!googleDa && !produkte.length), verkaufsseiteKarte(googleDa));
     z.append(karte(['Erstellte Produkte', tag(String(produkte.length), 'grau')],
@@ -1712,27 +1868,60 @@
       const alt = versand[m[1]];
       if (!alt || String(f.zeit) > String(alt.zeit)) versand[m[1]] = f;
     });
-    z.append(hinweis('AUTONOMOUS versendet nichts selbst – Kundenkontakt nur nach eurer Freigabe. Werbung per E-Mail oder Telefon '
-      + 'braucht in der Regel eine Einwilligung (§ 7 UWG); ohne Einwilligung lieber Brief, Besuch oder Empfehlung. '
-      + 'Nur Firmendaten speichern, die ihr wirklich braucht.'));
-    z.append(aus.fehlt
+    const ausschreibungen = aus.fehlt
       ? nichtVerfuegbar('Öffentliche Ausschreibungen', 'Das Auftrags-Radar ist in dieser Version noch nicht eingebaut.')
-      : ausschreibungenKarte(aus, aufgaben));
+      : ausschreibungenKarte(aus, aufgaben);
     const kontakte = k.fehlt ? [] : (k.kontakte || []);
     const rmListe = rm.fehlt ? null : rmListen(rm);
+    let kontaktTeile;
     if (k.fehlt) {
-      z.append(nichtVerfuegbar('Kontakte und Kundenstatus', 'Die Vertriebs-Schnittstelle für Kontakte ist in dieser Version noch nicht eingebaut.'));
+      kontaktTeile = [nichtVerfuegbar('Kontakte und Kundenstatus', 'Die Vertriebs-Schnittstelle für Kontakte ist in dieser Version noch nicht eingebaut.')];
     } else {
       const stufen = normStufen(k.stufen);
-      z.append(pipelineKarte(kontakte, stufen), kontaktFormKarte(!kontakte.length), kontakteKarte(kontakte, stufen, rmListe));
+      kontaktTeile = [pipelineKarte(kontakte, stufen), kontaktFormKarte(!kontakte.length), kontakteKarte(kontakte, stufen, rmListe)];
     }
-    z.append(kalkulationKarte(einst, aufgaben, kontakte));
-    if (a.fehlt) {
-      z.append(nichtVerfuegbar('Angebote', 'Die Angebots-Schnittstelle ist in dieser Version noch nicht eingebaut.'));
-    } else {
-      z.append(angebotFormKarte(kontakte, p.fehlt ? [] : (p.produkte || [])), angeboteKarte(a.angebote || [], kontakte, versand));
-    }
-    z.append(rueckmeldungenKarte(rm, rmListe, kontakte, a.fehlt ? [] : (a.angebote || []), aufgaben));
+    const angebotTeile = a.fehlt
+      ? [nichtVerfuegbar('Angebote', 'Die Angebots-Schnittstelle ist in dieser Version noch nicht eingebaut.')]
+      : [angebotFormKarte(kontakte, p.fehlt ? [] : (p.produkte || [])), angeboteKarte(a.angebote || [], kontakte, versand)];
+    const kalkulation = kalkulationKarte(einst, aufgaben, kontakte);
+    const rueckmeldungen = rueckmeldungenKarte(rm, rmListe, kontakte, a.fehlt ? [] : (a.angebote || []), aufgaben);
+
+    // Sprungziele für die Sprungleiste (Knöpfe – „#…“ wählt hier den Bereich, nicht die Karte)
+    sprungZiel(kontaktTeile[0], 'kontakte');
+    sprungZiel(kalkulation, 'kalkulation');
+    sprungZiel(angebotTeile[0], 'angebote');
+    sprungZiel(rueckmeldungen, 'rueckmeldungen');
+    sprungZiel(ausschreibungen, 'ausschreibungen');
+    // Ausschreibungen nur dann zuerst, wenn die Recherche an ist oder es schon Treffer gibt
+    const ausVorne = !aus.fehlt && (!!(aus.einstellungen || {}).internet_recherche_erlaubt || (aus.ausschreibungen || []).length > 0);
+    const sprung = [['kontakte', 'Kontakte'], ['kalkulation', 'Preis rechnen'], ['angebote', 'Angebote'], ['rueckmeldungen', 'Rückmeldungen']];
+    if (ausVorne) sprung.unshift(['ausschreibungen', 'Ausschreibungen']); else sprung.push(['ausschreibungen', 'Ausschreibungen']);
+    z.append(sprungleiste(sprung));
+    if (ausVorne) z.append(ausschreibungen);
+    z.append(...kontaktTeile, kalkulation, ...angebotTeile, rueckmeldungen);
+    if (!ausVorne) z.append(ausschreibungen);
+  }
+
+  function sprungZiel(el, id) {
+    if (el) el.dataset.sprung = id;
+    return el;
+  }
+  /** Kurzwahl zu den Karten eines langen Bereichs. */
+  function sprungleiste(ziele) {
+    return h('nav', { class: 'knopfreihe sprungleiste', 'aria-label': 'Springen zu', 'data-pruef': 'sprungleiste' },
+      ziele.map(([id, text]) => h('button', {
+        type: 'button', class: 'knopf zweit klein', 'data-sprung-zu': id,
+        onclick: () => {
+          const ziel = document.querySelector('#inhalt [data-sprung="' + id + '"]');
+          if (!ziel) return;
+          ziel.scrollIntoView({ block: 'start' });
+          const ueberschrift = ziel.querySelector('h2, summary');
+          if (ueberschrift) {
+            if (ueberschrift.tagName === 'H2') ueberschrift.setAttribute('tabindex', '-1');
+            ueberschrift.focus({ preventScroll: true });
+          }
+        },
+      }, text)));
   }
 
   function normStufen(stufen) {
@@ -1766,11 +1955,14 @@
         feld('Ort (optional)', eingabe('ort', { maxlength: 80 }))),
       feld('Woher kennt ihr den Kontakt?', eingabe('quelle', { required: true, maxlength: 200, placeholder: 'z. B. Empfehlung, Messe, Handelsregister' })),
       h('div', { class: 'felder-2' },
-        feld('Einwilligung zu Werbung', auswahl('einwilligung', [['keine', 'keine'], ['ja', 'ja, liegt vor']], 'keine')),
-        feld('Nachweis der Einwilligung', eingabe('einwilligung_nachweis', { maxlength: 300, placeholder: 'nur bei „ja“: wann, wie, von wem' }))),
+        feld('Einwilligung zu Werbung', auswahl('einwilligung', [['keine', 'keine'], ['ja', 'ja, liegt vor']], 'keine'),
+          'Werbung per E-Mail oder Telefon braucht in der Regel eine Einwilligung (§ 7 UWG). Ohne Einwilligung lieber Brief, Besuch oder Empfehlung.'),
+        feld('Nachweis der Einwilligung', eingabe('einwilligung_nachweis', { maxlength: 300 }),
+          'Nur bei „ja“: wann, wie und von wem.')),
       feld('Nächster Schritt (optional)', eingabe('naechster_schritt', { maxlength: 300 })),
-      feld('Notizen (optional)', textfeld('notizen', { maxlength: 2000 })),
-      hinweis('Keine privaten Telefonnummern, keine Profile von Privatpersonen. Nur Firmendaten, die ihr für die Anfrage braucht.', 'warn'),
+      feld('Notizen (optional)', textfeld('notizen', { maxlength: 2000 }),
+        'Nur Firmendaten, die ihr für die Anfrage braucht – keine privaten Telefonnummern, keine Profile von Privatpersonen. '
+        + 'AUTONOMOUS versendet nichts selbst; Kundenkontakt nur nach eurer Freigabe.'),
       h('div', { class: 'knopfreihe' }, absendeKnopf('Kontakt speichern')),
     ], async (w, f) => {
       if (w.einwilligung === 'ja' && !w.einwilligung_nachweis) throw new ApiFehler(0, 'Bei „Einwilligung: ja“ bitte den Nachweis angeben.');
@@ -1982,37 +2174,46 @@
     };
     [filterStatus, filterMin, abgelaufen].forEach(el => el.addEventListener('change', filterNeu));
 
-    const suchen = aktionsKnopf(sucheLaeuft ? 'Suche läuft …' : 'Jetzt suchen', '', async () => {
-      const r = await API.post('/api/ausschreibungen/suchen');
-      if (r && r.hinweis) meldung(r.hinweis, 'info');
-      auftragGemeldet(r, 'den Akquise-Agenten');
-    }, { 'data-pruef': 'ausschreibungen-suchen', disabled: sucheLaeuft });
+    const rechercheAn = !!e.internet_recherche_erlaubt;
+    // Ist die Recherche aus, führt „Suchen“ sicher in eine Fehlermeldung – darum steht dann „Einschalten“ da
+    const hauptKnopf = rechercheAn
+      ? aktionsKnopf(sucheLaeuft ? 'Suche läuft …' : 'Jetzt suchen', '', async () => {
+        const r = await API.post('/api/ausschreibungen/suchen');
+        if (r && r.hinweis) meldung(r.hinweis, 'info');
+        auftragGemeldet(r, 'den Akquise-Agenten');
+      }, { 'data-pruef': 'ausschreibungen-suchen', disabled: sucheLaeuft })
+      : sicherheitsKnopf('Internet-Recherche einschalten', 'Wirklich einschalten? Nochmal tippen', '', async () => {
+        await API.post('/api/einstellungen', { schluessel: 'internet_recherche_erlaubt', wert: true });
+        meldung('Internet-Recherche ist jetzt an. Die Agenten lesen nur die freigegebenen öffentlichen Ausschreibungsseiten.', 'ok');
+        neuLaden();
+      }, { 'data-pruef': 'recherche-einschalten' });
 
-    const rechercheStand = e.internet_recherche_erlaubt
+    const rechercheStand = rechercheAn
       ? h('p', { class: 'hilfe', 'data-pruef': 'recherche-an' }, tag('Internet-Recherche an', 'ok'), ' ',
         e.auftragssuche_taeglich ? 'Die Agenten suchen zusätzlich einmal täglich selbstständig.' : 'Tägliche Suche ist aus – gesucht wird nur auf Knopfdruck.')
-      : h('div', { class: 'hinweisbox warn', 'data-pruef': 'recherche-aus' },
-        'Die Internet-Recherche ist ausgeschaltet. Einschalten unter ', h('a', { href: '#einstellungen' }, 'Einstellungen → Auftragssuche'),
-        '. Erst dann dürfen die Agenten die öffentlichen Ausschreibungsseiten lesen (nur lesen).');
+      : h('p', { class: 'hilfe', 'data-pruef': 'recherche-aus' }, tag('Internet-Recherche aus', 'warn'), ' ',
+        'Erst nach dem Einschalten dürfen die Agenten die öffentlichen Ausschreibungsseiten lesen (nur lesen). Weitere Einstellungen: ',
+        h('a', { href: '#einstellungen' }, 'Einstellungen → Auftragssuche'), '.');
+    const mitListe = rechercheAn || alle.length > 0;
 
     const anzahl = zustand.ausschreibungAnzahl;
     return h('section', { class: 'karte', 'data-pruef': 'ausschreibungen' },
       h('h2', null, 'Öffentliche Ausschreibungen', tag(zahl(liste.length) + ' Treffer', 'grau')),
       h('p', { class: 'hilfe' }, 'Der Akquise-Agent sucht in TED (EU-Amtsblatt), auf service.bund.de und dem Vergabemarktplatz NRW, '
-        + 'bewertet jede Ausschreibung nachvollziehbar mit Punkten und erstellt auf Wunsch eine Bewerbungsmappe.'),
-      hinweis('AUTONOMOUS gibt keine Angebote ab – Abgabe macht ihr selbst auf der Vergabeplattform.', 'warn'),
+        + 'bewertet jede Ausschreibung nachvollziehbar mit Punkten und erstellt auf Wunsch eine Bewerbungsmappe. '
+        + 'AUTONOMOUS gibt keine Angebote ab – Abgabe macht ihr selbst auf der Vergabeplattform.'),
       rechercheStand,
-      h('div', { class: 'knopfreihe' }, suchen),
-      suchlaeufeAnzeige(aus.letzte_suche || []),
-      h('div', { class: 'felder-3 filter' },
+      h('div', { class: 'knopfreihe' }, hauptKnopf),
+      mitListe ? suchlaeufeAnzeige(aus.letzte_suche || []) : null,
+      mitListe ? h('div', { class: 'felder-3 filter' },
         feld('Status', filterStatus),
         feld('Punkte', filterMin),
-        h('label', { class: 'schalter filter-schalter', for: 'filter-abgelaufen' }, abgelaufen, h('span', null, 'Abgelaufene Fristen zeigen'))),
+        h('label', { class: 'schalter filter-schalter', for: 'filter-abgelaufen' }, abgelaufen, h('span', null, 'Abgelaufene Fristen zeigen'))) : null,
       liste.length
         ? h('ul', { class: 'liste', 'data-pruef': 'ausschreibungen-liste' },
           liste.slice(0, anzahl).map(a => ausschreibungZeile(a, stufen, laufendeMappen.has(a.id))))
         : leer(alle.length ? 'Keine Treffer mit diesem Filter.'
-          : 'Noch keine Ausschreibungen gespeichert. ' + (e.internet_recherche_erlaubt ? 'Mit „Jetzt suchen“ starten.' : 'Erst die Internet-Recherche einschalten.')),
+          : 'Noch keine Ausschreibungen gespeichert. ' + (rechercheAn ? 'Mit „Jetzt suchen“ starten.' : 'Mit „Internet-Recherche einschalten“ beginnen.')),
       liste.length > anzahl
         ? h('div', { class: 'knopfreihe' }, h('button', {
           type: 'button', class: 'knopf zweit', 'data-pruef': 'ausschreibungen-mehr',
@@ -2098,11 +2299,11 @@
         h('button', { type: 'button', class: 'knopf zweit klein', 'data-weg': '' }, 'Entfernen')),
       h('div', { class: 'felder-2' },
         feld('Bezeichnung', eingabe('x', { 'data-feld': 'bezeichnung', required: true, maxlength: 80, placeholder: 'z. B. Treppenhaus' })),
-        feld('Fläche in m²', eingabe('x', { 'data-feld': 'flaeche', required: true, inputmode: 'decimal', maxlength: 20, placeholder: 'z. B. 400' }))),
+        feld('Fläche in m²', dezimalFeld('x', { 'data-feld': 'flaeche', required: true, placeholder: 'z. B. 400' }))),
       h('div', { class: 'felder-3' },
-        feld('Leistungswert in m²/h', eingabe('x', { 'data-feld': 'leistung', required: true, inputmode: 'decimal', maxlength: 20, placeholder: 'euer Wert' }),
+        feld('Leistungswert in m²/h', dezimalFeld('x', { 'data-feld': 'leistung', required: true }),
           'Wie viele m² schafft eine Kraft pro Stunde? Euer Erfahrungswert – am besten gemessen.'),
-        feld('Reinigungen', eingabe('x', { 'data-feld': 'anzahl', required: true, inputmode: 'decimal', maxlength: 10, placeholder: 'z. B. 1' })),
+        feld('Reinigungen', dezimalFeld('x', { 'data-feld': 'anzahl', required: true, maxlength: 10, placeholder: 'z. B. 1' })),
         feld('pro', auswahl('x', [['woche', 'Woche'], ['monat', 'Monat']], 'woche', { 'data-feld': 'turnus' }))));
     zeile.querySelector('[data-weg]').addEventListener('click', entfernen);
     return zeile;
@@ -2141,15 +2342,16 @@
         type: 'button', class: 'knopf zweit klein', 'data-pruef': 'kalk-position-plus',
         onclick: () => { const z = zeileNeu(); const erstes = z.querySelector('input'); if (erstes) erstes.focus(); },
       }, 'Position hinzufügen')),
-      h('div', { class: 'felder-3' },
-        feld('Stundensatz in € (netto)', betragFeld('stundensatz', { placeholder: satz ? 'leer = ' + euroEingabe(satz) : 'leer = OFFEN' }),
-          satz ? 'Leer lassen: es gilt der Stundensatz aus den Einstellungen (' + euro(satz) + ').'
-            : 'Noch kein Stundensatz festgelegt – ohne ihn bleibt der Preis OFFEN.'),
-        feld('Material in %', eingabe('material_prozent', { inputmode: 'decimal', maxlength: 10, placeholder: 'z. B. 5' })),
-        feld('Zuschlag (Wagnis/Gewinn) in %', eingabe('zuschlag_prozent', { inputmode: 'decimal', maxlength: 10, placeholder: 'z. B. 10' })),
-        feld('Anfahrten pro Monat', eingabe('anfahrten_pro_monat', { inputmode: 'decimal', maxlength: 10, placeholder: 'z. B. 4' })),
-        feld('Minuten je Anfahrt', eingabe('anfahrt_minuten', { inputmode: 'decimal', maxlength: 10, placeholder: 'z. B. 30' }))),
-      hinweis('Der Finance-Agent rechnet nur mit euren Eingaben – keine angenommenen Werte, keine Normzahlen. Alle Beträge netto.'),
+      feld('Stundensatz für diese Kalkulation in € (optional)', betragFeld('stundensatz', { placeholder: satz ? 'leer = ' + euroEingabe(satz) : '' }),
+        satz ? 'Leer lassen: es gilt euer Stundensatz (' + euro(satz) + ').'
+          : 'Noch kein Stundensatz festgelegt – ohne ihn bleibt der Preis offen.'),
+      h('div', { class: 'felder-2' },
+        feld('Material in % (optional)', dezimalFeld('material_prozent', { maxlength: 10, placeholder: 'z. B. 5' })),
+        feld('Zuschlag (Wagnis/Gewinn) in % (optional)', dezimalFeld('zuschlag_prozent', { maxlength: 10, placeholder: 'z. B. 10' }))),
+      h('div', { class: 'felder-2' },
+        feld('Anfahrten pro Monat (optional)', dezimalFeld('anfahrten_pro_monat', { maxlength: 10, placeholder: 'z. B. 4' })),
+        feld('Minuten je Anfahrt (optional)', dezimalFeld('anfahrt_minuten', { maxlength: 10, placeholder: 'z. B. 30' }))),
+      h('p', { class: 'hilfe' }, 'Der Finance-Agent rechnet nur mit euren Eingaben – keine angenommenen Werte, keine Normzahlen. Alle Beträge netto.'),
       h('div', { class: 'knopfreihe' }, absendeKnopf('Preis berechnen lassen', { 'data-pruef': 'kalkulation-absenden' })),
     ], async (werte) => {
       const zeilenEl = Array.from(positionen.querySelectorAll('[data-position]'));
@@ -2190,10 +2392,41 @@
     return h('section', { class: 'karte', 'data-pruef': 'kalkulation' },
       h('h2', null, 'Preis kalkulieren (Reinigung)'),
       h('p', { class: 'hilfe' }, 'Monatspreis für einen festen Reinigungsauftrag: Fläche ÷ Leistungswert × Reinigungen = Stunden; dazu Stundensatz, Material, Anfahrt und Zuschlag.'),
-      satz ? null : h('p', { 'data-pruef': 'stundensatz-offen' }, tag('Stundensatz: OFFEN', 'warn'), ' ', h('a', { href: '#einstellungen' }, 'in den Einstellungen festlegen')),
+      stundensatzZeile(satz),
       aufklapp('Neue Kalkulation', 'kalkulation-neu', !kalk.length, form),
       kalk.length ? [h('h3', null, 'Letzte Kalkulationen'),
         h('div', { class: 'liste', 'data-pruef': 'kalk-ergebnisse' }, kalk.map((a, i) => kalkAufgabeAnzeige(a, i === 0, kontakte)))] : null);
+  }
+
+  /** Formular „Stundensatz festlegen“ – dieselbe Einstellung wie in den Einstellungen (stundensatz_cent). */
+  function stundensatzFormular(satz, pruef, zu) {
+    return formular({ 'data-pruef': pruef }, [
+      feld('Stundensatz in € (netto)', betragFeld('stundensatz', { value: satz ? euroEingabe(satz) : '' }),
+        'Er muss Lohn, Lohnnebenkosten, Material, Fahrzeuge, Verwaltung und Gewinn decken. Leer oder 0 = offen. '
+        + 'AUTONOMOUS nimmt nie selbst einen an.'),
+      h('div', { class: 'knopfreihe' }, absendeKnopf('Stundensatz speichern', { 'data-pruef': pruef + '-speichern' }), zu ? abbrechenKnopf(zu) : null),
+    ], async (werte) => {
+      const t = String(werte.stundensatz || '').trim();
+      const cent = (t === '' || /^0+([,.]0+)?$/.test(t)) ? 0 : centAus(t, 'Stundensatz');
+      if (cent > 100000) throw new ApiFehler(0, 'Stundensatz: höchstens 1.000,00 €.');
+      if (cent === satz) {
+        meldung('Nichts geändert.', 'info');
+        return;
+      }
+      await API.post('/api/einstellungen', { schluessel: 'stundensatz_cent', wert: cent });
+      meldung(cent ? 'Stundensatz gespeichert: ' + euro(cent) + ' pro Stunde (netto).' : 'Stundensatz ist jetzt offen.', 'ok');
+      neuLaden();
+    });
+  }
+  /** Anzeige des Stundensatzes in der Kalkulation – mit „festlegen“/„ändern“ direkt an Ort und Stelle. */
+  function stundensatzZeile(satz) {
+    const [auf, bereich] = umschaltBereich(satz ? 'Stundensatz ändern' : 'Stundensatz festlegen', satz ? 'zweit klein' : 'klein',
+      zu => stundensatzFormular(satz, 'stundensatz-kalk', zu));
+    auf.setAttribute('data-pruef', 'stundensatz-festlegen');
+    return h('div', { 'data-pruef': satz ? 'stundensatz-gesetzt' : 'stundensatz-offen' },
+      h('p', null, satz ? ['Euer Stundensatz: ', h('strong', null, euro(satz) + ' pro Stunde (netto)')]
+        : [tag('Stundensatz offen', 'warn'), ' Ohne ihn rechnet der Agent nur die Stunden, keinen Preis.']),
+      h('div', { class: 'knopfreihe' }, auf), bereich);
   }
 
   function kalkAufgabeAnzeige(a, offen, kontakte) {
@@ -2208,12 +2441,17 @@
   function kalkErgebnis(e, aufgabeId, kontakte) {
     const offenPreis = typeof e.preis_monat_cent !== 'number';
     const stunden = n => (typeof n === 'number' && isFinite(n) ? n.toLocaleString('de-DE') : '0') + ' h';
+    const stundenKachel = kachel('Stunden pro Monat', stunden(e.stunden_gesamt_monat), '', 'davon Anfahrt ' + stunden(e.anfahrt && e.anfahrt.stunden_monat));
     return h('div', { class: 'kalk-ergebnis' },
-      h('div', { class: 'raster' },
-        kachel('Preis pro Monat (netto)', e.preis_monat || '—', offenPreis ? 'warn' : 'ok', offenPreis ? 'ohne Stundensatz kein Preis' : null, 'kalk-preis-monat'),
-        kachel('Preis pro Jahr (netto)', e.preis_jahr || '—', '', null, 'kalk-preis-jahr'),
-        kachel('Stunden pro Monat', stunden(e.stunden_gesamt_monat), '', 'davon Anfahrt ' + stunden(e.anfahrt && e.anfahrt.stunden_monat)),
-        kachel('Stundensatz', e.stundensatz || '—', offenPreis ? 'warn' : '', e.stundensatz_quelle ? 'Quelle: ' + e.stundensatz_quelle : null)),
+      offenPreis
+        ? [h('div', { class: 'raster' }, stundenKachel),
+          h('div', { class: 'hinweisbox warn', 'data-pruef': 'kalk-preis-monat' },
+            h('strong', null, 'Preis offen'), ' – es fehlt der Stundensatz. Oben „Stundensatz festlegen“ antippen und neu rechnen.')]
+        : h('div', { class: 'raster' },
+          kachel('Preis pro Monat (netto)', e.preis_monat || '—', 'ok', null, 'kalk-preis-monat'),
+          kachel('Preis pro Jahr (netto)', e.preis_jahr || '—', '', null, 'kalk-preis-jahr'),
+          stundenKachel,
+          kachel('Stundensatz', e.stundensatz || '—', '', e.stundensatz_quelle ? 'Quelle: ' + e.stundensatz_quelle : null)),
       (e.warnungen || []).length
         ? h('div', { class: 'hinweisbox warn', 'data-pruef': 'kalk-warnungen' }, h('strong', null, 'Warnungen'),
           h('ul', { class: 'mini-liste' }, e.warnungen.map(t => h('li', null, String(t)))))
@@ -2441,14 +2679,32 @@
   // Bereich: Einstellungen
   // ===========================================================================
   async function ansichtEinstellungen(z) {
-    const e = await API.get('/api/einstellungen');
+    const [e, ms] = await Promise.all([API.get('/api/einstellungen'), optional('/api/modell/status')]);
     zustand.katalog = e.aktionen || {};
-    z.append(einstellungenKarte(e));
+    z.append(h('p', { class: 'einleitung' }, 'Hier legt ihr die wenigen Werte fest, mit denen AUTONOMOUS rechnet und sucht. Technik steht unten eingeklappt.'));
+    z.append(stundensatzKarte(e));
     z.append(auftragssucheKarte(e));
-    z.append(katalogKarte(e.aktionen || {}));
+    z.append(kiModellKarte(e, ms));
     z.append(sicherungKarte(e.sicherungen || []));
-    z.append(await protokollKarte());
-    z.append(modellaufrufeKarte(e.modellaufrufe || []));
+    z.append(h('section', { class: 'karte', 'data-pruef': 'technik' },
+      h('h2', null, 'Technik (nur bei Bedarf)'),
+      h('p', { class: 'hilfe' }, 'Kosten, Betrieb, Berechtigungen und Protokoll. Im Alltag müsst ihr hier nichts ändern.'),
+      aufklapp('Kosten und Betrieb', 'technik-betrieb', false, kostenBetriebFormular(e)),
+      aufklapp('Berechtigungen (Aktionskatalog)', 'technik-katalog', false, katalogInhalt(e.aktionen || {})),
+      aufklapp('Protokoll', 'technik-protokoll', false, await protokollInhalt()),
+      aufklapp('KI-Aufrufe (Protokoll)', 'technik-modellaufrufe', false, modellaufrufeInhalt(e.modellaufrufe || []))));
+  }
+
+  /** Stundensatz als eigene Karte – ohne ihn gibt es keinen Preis. */
+  function stundensatzKarte(e) {
+    const w = e.werte || {};
+    if (!('stundensatz_cent' in w)) return nichtVerfuegbar('Stundensatz für Kalkulationen', 'Diese Einstellung gibt es in dieser Version des Servers noch nicht.');
+    const satz = typeof w.stundensatz_cent === 'number' ? w.stundensatz_cent : 0;
+    return h('section', { class: 'karte', 'data-pruef': 'stundensatz-karte' },
+      h('h2', null, 'Stundensatz für Kalkulationen'),
+      h('p', null, 'Gerade: ', satz ? h('strong', { 'data-pruef': 'stundensatz-wert' }, euro(satz) + ' pro Stunde (netto)')
+        : tag('offen – noch nicht festgelegt', 'warn')),
+      stundensatzFormular(satz, 'stundensatz-formular'));
   }
 
   function centAus(text, name) {
@@ -2465,52 +2721,111 @@
     return n;
   }
 
-  function einstellungenKarte(e) {
+  /** KI-Modell (lokal, optional): Status, Einstellungen und ein echter Probeaufruf. */
+  function kiModellKarte(e, ms) {
     const w = e.werte || {};
-    const anbieter = e.anbieter || {};
-    const modell = e.modell || {};
-    const anbieterGruppe = h('fieldset', { class: 'auswahlgruppe' }, h('legend', null, 'Modell für die Agenten'),
-      Object.keys(anbieter).map(id => {
-        const info = anbieter[id] || {};
-        const waehlbar = id === 'keiner' || id === 'ollama';
-        const radio = h('input', { type: 'radio', name: 'modell_anbieter', value: id, checked: w.modell_anbieter === id, disabled: !waehlbar, id: 'anbieter-' + id });
-        return h('label', { class: 'option' + (waehlbar ? '' : ' gesperrt'), for: 'anbieter-' + id }, radio,
-          h('span', null,
-            h('strong', null, info.name || id),
-            h('span', { class: 'hilfe' }, 'Kosten: ' + (info.kosten || '—')),
-            h('span', { class: 'hilfe' }, info.status || ''),
-            waehlbar ? null : h('span', null, tag('nicht angebunden', 'grau'))));
-      }));
-    const kostenSchalter = h('input', { type: 'checkbox', name: 'kostenpflichtig_erlaubt', checked: !!w.kostenpflichtig_erlaubt, id: 'kostenpflichtig' });
-    const warnung = hinweis('Achtung: Damit sind kostenpflichtige Aktionen grundsätzlich möglich. Jede einzelne braucht trotzdem eure Freigabe. Empfehlung: aus lassen.', 'warn');
-    warnung.hidden = !kostenSchalter.checked;
-    kostenSchalter.addEventListener('change', () => { warnung.hidden = !kostenSchalter.checked; });
-
-    const form = formular({ 'data-pruef': 'einstellungen-formular' }, [
-      anbieterGruppe,
+    if (!ms || ms.fehlt) {
+      return nichtVerfuegbar('KI-Modell (lokal, optional)', 'Die Modell-Schnittstelle gibt es in dieser Version des Servers noch nicht.');
+    }
+    const optionen = [
+      ['keiner', 'Kein Modell', 'Alles läuft nach festen Regeln, ohne KI. Standard.'],
+      ['ollama', 'Ollama auf diesem Rechner', 'Lokal und kostenlos. Ollama muss auf dem Mac installiert sein und ein Modell geladen haben.'],
+    ];
+    const gruppe = h('fieldset', { class: 'auswahlgruppe' }, h('legend', null, 'Welches Modell sollen die Agenten nutzen?'),
+      optionen.map(([id, name, text]) => h('label', { class: 'option', for: 'anbieter-' + id },
+        h('input', { type: 'radio', name: 'modell_anbieter', value: id, checked: w.modell_anbieter === id, id: 'anbieter-' + id, 'data-pruef': 'anbieter-' + id }),
+        h('span', null, h('strong', null, name), h('span', { class: 'hilfe' }, text)))),
+      h('div', { class: 'option gesperrt' }, h('span', null, h('strong', null, 'Externe, bezahlte KI-Dienste'),
+        h('span', { class: 'hilfe' }, 'Nicht angebunden. Nur nach eurer ausdrücklichen Zustimmung und mit Preisangabe.'),
+        h('span', null, tag('nicht angebunden', 'grau')))));
+    const form = formular({ 'data-pruef': 'ki-formular' }, [
+      gruppe,
       h('div', { class: 'felder-2' },
-        feld('Lokales Modell (Ollama)', eingabe('ollama_modell', { value: w.ollama_modell || '', maxlength: 60 }), 'Nur wirksam, wenn Ollama auf diesem Rechner installiert ist.'),
-        feld('Höchstens Modellaufrufe pro Tag', zahlFeld('modell_max_aufrufe_tag', { value: w.modell_max_aufrufe_tag, min: 0, max: 1000 }),
-          'Heute: ' + zahl(modell.aufrufe_heute) + ' Aufrufe.')),
-      h('h3', null, 'Kosten'),
-      h('label', { class: 'schalter', for: 'kostenpflichtig' }, kostenSchalter,
-        h('span', null, h('strong', null, 'Kostenpflichtige Aktionen zulassen'), h('br'), h('span', { class: 'hilfe' }, 'Standard: aus. Kostenpflichtige Dienste sind dann komplett gesperrt.'))),
-      warnung,
-      h('p', { class: 'hilfe' }, 'Ausgabengrenzen legt ihr als Budgets fest – unter „Finanzen“ (real) und „Wallet“ (Simulation).'),
-      h('h3', null, 'Betrieb'),
-      h('div', { class: 'felder-3' },
-        feld('Gleichzeitig arbeitende Agenten', zahlFeld('max_parallel', { value: w.max_parallel, min: 1, max: 8 }), 'Wirkt erst nach einem Neustart.'),
-        feld('Wallet-Warnschwelle in €', betragFeld('wallet_warnschwelle', { value: euro(w.wallet_warnschwelle_cent).replace(/\s*€/, '').replace(/ /g, '') }), 'Warnung, wenn das simulierte Guthaben darunter fällt.'),
-        feld('Sicherungen behalten', zahlFeld('sicherung_behalten', { value: w.sicherung_behalten, min: 1, max: 365 }), 'Anzahl der neuesten Sicherungen.')),
-      h('div', { class: 'knopfreihe' }, absendeKnopf('Einstellungen speichern', { 'data-pruef': 'einstellungen-speichern' })),
+        feld('Modellname', eingabe('ollama_modell', { value: w.ollama_modell || '', maxlength: 60 }), 'z. B. gemma3:4b – so, wie es in Ollama heißt.'),
+        feld('Adresse auf diesem Rechner', eingabe('ollama_adresse', { value: w.ollama_adresse || '', maxlength: 60 }),
+          'Nur dieser Rechner ist erlaubt, z. B. http://127.0.0.1:11434.')),
+      feld('Höchstens KI-Aufrufe pro Tag', zahlFeld('modell_max_aufrufe_tag', { value: w.modell_max_aufrufe_tag, min: 0, max: 1000 })),
+      h('div', { class: 'knopfreihe' }, absendeKnopf('KI-Einstellungen speichern', { 'data-pruef': 'ki-speichern' })),
     ], async (werte) => {
       const neu = {
         modell_anbieter: werte.modell_anbieter || w.modell_anbieter,
         ollama_modell: werte.ollama_modell,
-        modell_max_aufrufe_tag: ganzAus(werte.modell_max_aufrufe_tag, 'Modellaufrufe pro Tag', 0, 1000),
+        ollama_adresse: werte.ollama_adresse,
+        modell_max_aufrufe_tag: ganzAus(werte.modell_max_aufrufe_tag, 'KI-Aufrufe pro Tag', 0, 1000),
+      };
+      if (!/^[A-Za-z0-9:._-]{1,60}$/.test(neu.ollama_modell || '')) throw new ApiFehler(0, 'Modellname: nur Buchstaben, Ziffern und : . _ - (z. B. gemma3:4b).');
+      if (!/^http:\/\/(127\.0\.0\.1|localhost|\[::1\]):\d{1,5}\/?$/.test(neu.ollama_adresse || '')) {
+        throw new ApiFehler(0, 'Adresse: nur dieser Rechner, z. B. http://127.0.0.1:11434.');
+      }
+      const geaendert = Object.keys(neu).filter(k => JSON.stringify(neu[k]) !== JSON.stringify(w[k]));
+      if (!geaendert.length) {
+        meldung('Nichts geändert.', 'info');
+        return;
+      }
+      for (const k of geaendert) {
+        await API.post('/api/einstellungen', { schluessel: k, wert: neu[k] });
+      }
+      meldung('KI-Einstellungen gespeichert.', 'ok');
+      neuLaden();
+    });
+
+    const ergebnis = h('div', { 'data-pruef': 'modell-test-ergebnis', 'aria-live': 'polite' });
+    const testen = aktionsKnopf('Modell testen', 'zweit', async () => {
+      ersetze(ergebnis, h('p', { class: 'hilfe' }, 'Frage an das Modell läuft … (kann bis zu einer Minute dauern)'));
+      const r = await API.post('/api/modell/testen');
+      if (r && r.ok && r.antwort) {
+        ersetze(ergebnis, h('div', { class: 'hinweisbox' },
+          h('div', null, tag(r.antwort.kennzeichnung || 'KI-Entwurf – ungeprüft', 'warn')),
+          h('p', { class: 'text' }, 'Antwort: ', h('strong', null, String(r.antwort.text || ''))),
+          h('div', { class: 'meta' }, 'Dauer: ' + zahl(r.dauer_ms) + ' ms · ' + (r.antwort.quelle || ''))));
+      } else {
+        ersetze(ergebnis, h('p', { class: 'fehlertext' }, 'Kein Ergebnis: ' + ((r && r.meldung) || 'unbekannt')));
+      }
+    }, { 'data-pruef': 'modell-testen', disabled: ms.anbieter === 'keiner' || !ms.anbieter });
+
+    const janein = (b, ja, nein) => tag(b ? ja : nein, b ? 'ok' : 'warn');
+    const installiert = Array.isArray(ms.installierte_modelle) ? ms.installierte_modelle : [];
+    return h('section', { class: 'karte', 'data-pruef': 'ki-modell' },
+      h('h2', null, 'KI-Modell (lokal, optional)'),
+      h('p', { class: 'hilfe' }, 'KI-Ausgaben sind ungeprüfte Entwürfe und werden immer so gekennzeichnet. Ohne Modell läuft alles weiter. '
+        + 'Ein externer, bezahlter KI-Dienst ist nicht angebunden.'),
+      kv([
+        ['Gerade eingestellt', ms.anbieter === 'ollama' ? 'Ollama' + (ms.modell ? ' · ' + ms.modell : '') : 'Kein Modell'],
+        ms.anbieter === 'ollama' ? ['Erreichbar', janein(ms.erreichbar, 'ja', 'nein')] : null,
+        ms.anbieter === 'ollama' ? ['Modell geladen', janein(ms.modell_vorhanden, 'ja', 'nein')] : null,
+        installiert.length ? ['Auf diesem Rechner geladen', installiert.join(', ')] : null,
+        ['KI-Aufrufe heute', zahl(ms.aufrufe_heute) + ' von ' + zahl(ms.limit_tag)],
+        ['Hinweis', ms.hinweis],
+      ]),
+      h('div', { class: 'knopfreihe' }, testen),
+      ms.anbieter === 'keiner' || !ms.anbieter ? h('p', { class: 'hilfe' }, '„Modell testen“ geht, sobald ihr unten „Ollama“ wählt und speichert.') : null,
+      ergebnis,
+      h('div', { class: 'trenner' }),
+      form);
+  }
+
+  /** Kosten und Betrieb (eingeklappt unter „Technik“). */
+  function kostenBetriebFormular(e) {
+    const w = e.werte || {};
+    const kostenSchalter = h('input', { type: 'checkbox', name: 'kostenpflichtig_erlaubt', checked: !!w.kostenpflichtig_erlaubt, id: 'kostenpflichtig' });
+    const warnung = hinweis('Achtung: Damit sind kostenpflichtige Aktionen grundsätzlich möglich. Jede einzelne braucht trotzdem eure Freigabe. Empfehlung: aus lassen.', 'warn');
+    warnung.hidden = !kostenSchalter.checked;
+    kostenSchalter.addEventListener('change', () => { warnung.hidden = !kostenSchalter.checked; });
+    return formular({ 'data-pruef': 'einstellungen-formular' }, [
+      h('label', { class: 'schalter', for: 'kostenpflichtig' }, kostenSchalter,
+        h('span', null, h('strong', null, 'Kostenpflichtige Aktionen zulassen'), h('br'), h('span', { class: 'hilfe' }, 'Standard: aus. Kostenpflichtige Dienste sind dann komplett gesperrt.'))),
+      warnung,
+      h('p', { class: 'hilfe' }, 'Ausgabengrenzen legt ihr als Budgets fest – unter „Finanzen“ (real) und „Wallet“ (Simulation).'),
+      h('div', { class: 'felder-3' },
+        feld('Gleichzeitig arbeitende Agenten', zahlFeld('max_parallel', { value: w.max_parallel, min: 1, max: 8 }), 'Wirkt erst nach einem Neustart.'),
+        feld('Warnen, wenn das simulierte Guthaben unter … € fällt', betragFeld('wallet_warnschwelle', { value: euroEingabe(w.wallet_warnschwelle_cent) })),
+        feld('Sicherungen behalten', zahlFeld('sicherung_behalten', { value: w.sicherung_behalten, min: 1, max: 365 }), 'Anzahl der neuesten Sicherungen.')),
+      h('div', { class: 'knopfreihe' }, absendeKnopf('Speichern', { 'data-pruef': 'einstellungen-speichern' })),
+    ], async (werte) => {
+      const neu = {
         kostenpflichtig_erlaubt: !!werte.kostenpflichtig_erlaubt,
         max_parallel: ganzAus(werte.max_parallel, 'Gleichzeitig arbeitende Agenten', 1, 8),
-        wallet_warnschwelle_cent: werte.wallet_warnschwelle === '0' ? 0 : centAus(werte.wallet_warnschwelle, 'Wallet-Warnschwelle'),
+        wallet_warnschwelle_cent: /^0+([,.]0+)?$/.test(String(werte.wallet_warnschwelle || '').trim()) ? 0 : centAus(werte.wallet_warnschwelle, 'Warnschwelle'),
         sicherung_behalten: ganzAus(werte.sicherung_behalten, 'Sicherungen behalten', 1, 365),
       };
       const geaendert = Object.keys(neu).filter(k => JSON.stringify(neu[k]) !== JSON.stringify(w[k]));
@@ -2524,21 +2839,16 @@
       meldung('Gespeichert: ' + geaendert.length + ' Einstellung(en).' + (geaendert.includes('max_parallel') ? ' Die Anzahl der Agenten wirkt nach einem Neustart.' : ''), 'ok');
       neuLaden();
     });
-    return karte('Modellzugang, Kosten und Betrieb',
-      kv([['Modell gerade', (modell.anbieter_info && modell.anbieter_info.name) || modell.anbieter], ['Aufrufe heute', zahl(modell.aufrufe_heute) + ' von ' + zahl(modell.limit_tag)]]),
-      h('div', { class: 'trenner' }),
-      form);
   }
 
-  /** Auftragssuche (öffentliche Ausschreibungen) und Stundensatz – alles bleibt in eurer Hand. */
+  /** Auftragssuche (öffentliche Ausschreibungen) – alles bleibt in eurer Hand. */
   function auftragssucheKarte(e) {
     const w = e.werte || {};
     if (!('internet_recherche_erlaubt' in w)) {
-      return nichtVerfuegbar('Auftragssuche und Stundensatz', 'Diese Einstellungen gibt es in dieser Version des Servers noch nicht.');
+      return nichtVerfuegbar('Auftragssuche', 'Diese Einstellungen gibt es in dieser Version des Servers noch nicht.');
     }
     const recherche = h('input', { type: 'checkbox', name: 'internet_recherche_erlaubt', checked: !!w.internet_recherche_erlaubt, id: 'recherche-schalter', 'data-pruef': 'recherche-schalter' });
     const taeglich = h('input', { type: 'checkbox', name: 'auftragssuche_taeglich', checked: !!w.auftragssuche_taeglich, id: 'taeglich-schalter', 'data-pruef': 'taeglich-schalter' });
-    const satz = typeof w.stundensatz_cent === 'number' ? w.stundensatz_cent : 0;
     const liste = x => (Array.isArray(x) ? x.join(', ') : '');
     const form = formular({ 'data-pruef': 'auftragssuche-formular' }, [
       h('label', { class: 'schalter', for: 'recherche-schalter' }, recherche,
@@ -2551,20 +2861,14 @@
       h('div', { class: 'felder-2' },
         feld('Region: Postleitzahl-Bereiche', eingabe('region_plz', { value: liste(w.region_plz), maxlength: 400, inputmode: 'numeric' }),
           'Die ersten zwei Ziffern, mit Komma getrennt. Nur eine Näherung für „ca. 100 km um Leverkusen“ – keine genaue Entfernung.'),
-        feld('Region für EU-Ausschreibungen (NUTS-Codes)', eingabe('region_nuts', { value: liste(w.region_nuts), maxlength: 200 }),
+        feld('EU-Regionen (Kürzel) für EU-Ausschreibungen', eingabe('region_nuts', { value: liste(w.region_nuts), maxlength: 200 }),
           'DEA steht für ganz Nordrhein-Westfalen.')),
       feld('Suchbegriffe', textfeld('suchbegriffe', { rows: 5, value: liste(w.suchbegriffe), maxlength: 1500 }),
         'Mit Komma getrennt. Kommt ein Begriff im Titel vor, gibt es Punkte. Für EU-Ausschreibungen sucht der Agent fest nach Reinigungsleistungen.'),
       feld('Ausschlussbegriffe', textfeld('ausschlussbegriffe', { rows: 4, value: liste(w.ausschlussbegriffe), maxlength: 1500 }),
         'Kommt ein Begriff vor, gibt es starken Abzug – z. B. Straßenreinigung oder Kanal.'),
-      h('h3', null, 'Stundensatz für Kalkulationen'),
-      h('p', null, 'Gerade: ', satz ? h('strong', { 'data-pruef': 'stundensatz-wert' }, euro(satz) + ' pro Stunde (netto)')
-        : tag('OFFEN – noch nicht festgelegt', 'warn')),
-      feld('Stundensatz in € (netto)', betragFeld('stundensatz', { value: satz ? euroEingabe(satz) : '', placeholder: 'leer oder 0 = offen' }),
-        'Er muss Lohn, Lohnnebenkosten, Material, Fahrzeuge, Verwaltung und Gewinn decken. AUTONOMOUS nimmt nie selbst einen an.'),
       h('div', { class: 'knopfreihe' }, absendeKnopf('Auftragssuche speichern', { 'data-pruef': 'auftragssuche-speichern' })),
     ], async (werte) => {
-      const satzText = String(werte.stundensatz || '').trim();
       const neu = {
         internet_recherche_erlaubt: !!werte.internet_recherche_erlaubt,
         auftragssuche_taeglich: !!werte.auftragssuche_taeglich,
@@ -2572,7 +2876,6 @@
         region_nuts: listeAus(werte.region_nuts, false).map(x => x.toUpperCase()),
         suchbegriffe: listeAus(werte.suchbegriffe, true),
         ausschlussbegriffe: listeAus(werte.ausschlussbegriffe, true),
-        stundensatz_cent: (satzText === '' || /^0+([,.]0+)?$/.test(satzText)) ? 0 : centAus(satzText, 'Stundensatz'),
       };
       // Dieselben Regeln wie im Backend – so wird nichts nur halb gespeichert
       const pruefListe = (eintraege, muster, name, min, max) => {
@@ -2581,10 +2884,9 @@
         if (falsch.length) throw new ApiFehler(0, name + ': ungültig – ' + falsch.slice(0, 3).join(', '));
       };
       pruefListe(neu.region_plz, /^\d{2}$/, 'Postleitzahl-Bereiche (je zwei Ziffern)', 1, 60);
-      pruefListe(neu.region_nuts, /^DE[A-Z0-9]{0,3}$/, 'NUTS-Codes (z. B. DEA)', 1, 40);
+      pruefListe(neu.region_nuts, /^DE[A-Z0-9]{0,3}$/, 'EU-Regionen (Kürzel, z. B. DEA)', 1, 40);
       pruefListe(neu.suchbegriffe, /^[a-zäöüß0-9 -]{2,40}$/, 'Suchbegriffe (Buchstaben, Ziffern, Leerzeichen, Bindestrich)', 1, 40);
       pruefListe(neu.ausschlussbegriffe, /^[a-zäöüß0-9 -]{2,40}$/, 'Ausschlussbegriffe (Buchstaben, Ziffern, Leerzeichen, Bindestrich)', 0, 40);
-      if (neu.stundensatz_cent > 100000) throw new ApiFehler(0, 'Stundensatz: höchstens 1.000,00 €.');
       const geaendert = Object.keys(neu).filter(k => JSON.stringify(neu[k]) !== JSON.stringify(w[k]));
       if (!geaendert.length) {
         meldung('Nichts geändert.', 'info');
@@ -2598,23 +2900,22 @@
       neuLaden();
     });
     return h('section', { class: 'karte', 'data-pruef': 'auftragssuche' },
-      h('h2', null, 'Auftragssuche und Stundensatz'),
+      h('h2', null, 'Auftragssuche'),
       kv([
         ['Internet-Recherche', w.internet_recherche_erlaubt ? 'an' : 'aus'],
         ['Tägliche Suche', w.auftragssuche_taeglich ? 'an' : 'aus'],
-        ['Stundensatz', satz ? euro(satz) : 'OFFEN'],
       ]),
       h('div', { class: 'trenner' }),
       form);
   }
 
-  function katalogKarte(aktionen) {
+  function katalogInhalt(aktionen) {
     const gruppen = { auto: [], freigabe: [], verboten: [] };
     Object.keys(aktionen).forEach(name => {
       const a = aktionen[name];
       (gruppen[a.klasse] || (gruppen[a.klasse] = [])).push([name, a.beschreibung]);
     });
-    return karte('Berechtigungen (Aktionskatalog)',
+    return h('div', null,
       h('p', { class: 'hilfe' }, 'Nur zur Ansicht. Die Regeln stehen im Code; unbekannte Aktionen gelten immer als verboten.'),
       Object.keys(gruppen).filter(k => gruppen[k].length).map(k =>
         h('details', { class: 'aufklapp', 'data-schluessel': 'katalog-' + k },
@@ -2637,7 +2938,7 @@
           meldung('Export gespeichert im Ordner autonomous/daten/export/: ' + r.datei, 'ok');
         })),
       h('p', { class: 'hilfe' }, 'Herunterladen über die Oberfläche: ', tag('noch nicht verfügbar', 'grau'), ' Die Dateien liegen im Ordner autonomous/daten/.'),
-      h('p', { class: 'hilfe' }, 'Wiederherstellen: ', tag('in der Oberfläche noch nicht verfügbar', 'grau'), ' Nur bei gestopptem System im Terminal: python3 -m autonomous wiederherstellen DATEINAME'),
+      h('p', { class: 'hilfe' }, 'Wiederherstellen: ', tag('in der Oberfläche noch nicht verfügbar', 'grau'), ' Nur bei gestopptem System – die Anleitung steht in autonomous/README.md im Startordner.'),
       h('h3', null, 'Vorhandene Sicherungen'),
       sicherungen.length
         ? h('ul', { class: 'liste' }, sicherungen.map(s => h('li', { class: 'eintrag' },
@@ -2646,7 +2947,7 @@
         : leer('Noch keine Sicherung vorhanden.'));
   }
 
-  async function protokollKarte() {
+  async function protokollInhalt() {
     const huelle = h('div');
     const filter = auswahl('ebene', EBENEN, zustand.protokollEbene);
     let anzahl = 20;
@@ -2656,7 +2957,7 @@
       const zeichne = () => {
         ersetze(huelle, eintraege.length
           ? [h('ul', { class: 'liste' }, eintraege.slice(0, anzahl).map(p => h('li', { class: 'eintrag' },
-            h('div', { class: 'eintrag-kopf' }, h('span', { class: 'eintrag-titel' }, p.ereignis), tag(p.ebene, EBENE_TON[p.ebene])),
+            h('div', { class: 'eintrag-kopf' }, h('span', { class: 'eintrag-titel' }, p.ereignis), tag(ebeneText(p.ebene), EBENE_TON[p.ebene])),
             h('div', { class: 'meta' }, zeitText(p.zeit) + ' · ' + p.quelle),
             p.details ? h('details', { class: 'aufklapp klein' }, h('summary', null, 'Details'), wertAnzeige(alsWert(p.details))) : null))),
           eintraege.length > anzahl ? h('div', { class: 'knopfreihe' }, h('button', {
@@ -2672,12 +2973,12 @@
       try { await laden(); } catch (f) { meldung(fehlerText(f), 'fehler'); }
     });
     await laden();
-    return karte('Protokoll', h('p', { class: 'hilfe' }, 'Fehler und kritische Aktionen – ohne Passwörter oder Schlüssel.'),
+    return h('div', null, h('p', { class: 'hilfe' }, 'Fehler und kritische Aktionen – ohne Passwörter oder Schlüssel.'),
       h('div', { class: 'filter' }, feld('Ebene', filter)), huelle);
   }
 
-  function modellaufrufeKarte(aufrufe) {
-    return karte('Modellaufrufe',
+  function modellaufrufeInhalt(aufrufe) {
+    return h('div', null,
       aufrufe.length
         ? h('ul', { class: 'liste' }, aufrufe.map(m => h('li', { class: 'eintrag' },
           h('div', { class: 'eintrag-kopf' }, h('span', { class: 'eintrag-titel' }, m.anbieter + ' · ' + m.modell), tag(m.ergebnis, m.ergebnis === 'ok' ? 'ok' : 'warn')),
@@ -2729,6 +3030,7 @@
     const blatt = document.getElementById('mehr-blatt');
     mehrKnopf.addEventListener('click', () => {
       blatt.hidden = false;
+      hintergrundSperren(true);
       mehrKnopf.setAttribute('aria-expanded', 'true');
       const aktiv = blatt.querySelector('[aria-current="page"]') || blatt.querySelector('a');
       if (aktiv) aktiv.focus();
@@ -2739,10 +3041,16 @@
     document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !blatt.hidden) schliesseMehr(true); });
   }
 
+  /** Solange das „Mehr“-Blatt offen ist, bleibt Tab im Blatt (der Rest der Seite ist gesperrt). */
+  function hintergrundSperren(an) {
+    document.querySelectorAll('.app, #nav-unten').forEach(el => { el.inert = !!an; });
+  }
+
   function schliesseMehr(fokusZurueck) {
     const blatt = document.getElementById('mehr-blatt');
     if (blatt.hidden) return;
     blatt.hidden = true;
+    hintergrundSperren(false);
     const k = document.getElementById('mehr-auf');
     k.setAttribute('aria-expanded', 'false');
     if (fokusZurueck) k.focus();
@@ -2854,6 +3162,7 @@
         const gleich = Array.from(ziel.querySelectorAll('form')).flatMap(f => Array.from(f.elements).filter(el => el.name && feldSchluessel(f, el) === fokus));
         if (gleich[0]) gleich[0].focus();
       }
+      if (still) fokusStelleWiederherstellen(main);
       main.dataset.bereich = bereich.id;
       main.dataset.status = 'fertig';
     } catch (f) {

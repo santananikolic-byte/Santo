@@ -9,6 +9,7 @@
 """
 
 import re
+import sqlite3
 
 from .db import jetzt, neue_id
 
@@ -57,14 +58,21 @@ class Wallet:
         if self.db.wert("SELECT COUNT(*) FROM wallet_buchungen") == 0:
             self._buche(STARTWERT_CENT, "start", "startwert", "Virtueller Teststartwert (SIMULATION)", "system")
 
-    def _buche(self, betrag_cent, kategorie, art, begruendung, akteur, gegenbuchung_zu=None):
+    def _buche(self, betrag_cent, kategorie, art, begruendung, akteur, gegenbuchung_zu=None, pruefung=None):
         bid = neue_id("w_")
         with self.db.transaktion() as con:
+            if pruefung:  # Prüfung in derselben Transaktion wie das Schreiben – kein Wettlauf möglich
+                pruefung(con)
             nr = (con.execute("SELECT COALESCE(MAX(nr),0)+1 FROM wallet_buchungen").fetchone()[0])
-            con.execute("INSERT INTO wallet_buchungen (id, nr, zeit, betrag_cent, kategorie, art, begruendung,"
-                        " gegenbuchung_zu, akteur) VALUES (?,?,?,?,?,?,?,?,?)",
-                        (bid, nr, jetzt(), int(betrag_cent), kategorie[:60], art, begruendung[:500],
-                         gegenbuchung_zu, akteur))
+            try:
+                con.execute("INSERT INTO wallet_buchungen (id, nr, zeit, betrag_cent, kategorie, art, begruendung,"
+                            " gegenbuchung_zu, akteur) VALUES (?,?,?,?,?,?,?,?,?)",
+                            (bid, nr, jetzt(), int(betrag_cent), kategorie[:60], art, begruendung[:500],
+                             gegenbuchung_zu, akteur))
+            except sqlite3.IntegrityError as fehler:
+                if gegenbuchung_zu and "gegenbuchung_zu" in str(fehler):
+                    raise ValueError("Diese Buchung wurde bereits gegengebucht.")
+                raise
         self.protokoll.audit("wallet", "Simulierte Buchung", {"id": bid, "art": art, "betrag_cent": betrag_cent,
                                                                "akteur": akteur, "kennzeichen": KENNZEICHEN})
         return bid
@@ -95,12 +103,14 @@ class Wallet:
             raise KeyError("Buchung nicht gefunden.")
         if alt["art"] == "gegenbuchung":
             raise ValueError("Eine Gegenbuchung kann nicht erneut gegengebucht werden.")
-        if self.db.eins("SELECT id FROM wallet_buchungen WHERE gegenbuchung_zu=?", (buchung_id,)):
-            raise ValueError("Diese Buchung wurde bereits gegengebucht.")
         if not str(begruendung).strip():
             raise ValueError("Begründung ist Pflicht.")
+
+        def noch_nicht_gegengebucht(con):
+            if con.execute("SELECT 1 FROM wallet_buchungen WHERE gegenbuchung_zu=?", (buchung_id,)).fetchone():
+                raise ValueError("Diese Buchung wurde bereits gegengebucht.")
         bid = self._buche(-alt["betrag_cent"], alt["kategorie"], "gegenbuchung", begruendung.strip(), akteur,
-                          gegenbuchung_zu=buchung_id)
+                          gegenbuchung_zu=buchung_id, pruefung=noch_nicht_gegengebucht)
         return {"id": bid, "stand_cent": self.stand_cent(), "kennzeichen": KENNZEICHEN}
 
     def stand_cent(self):

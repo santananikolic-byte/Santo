@@ -2,11 +2,15 @@
 # Doppelklick: beendet AUTONOMOUS sauber (Aufgaben bleiben gespeichert).
 cd "$(dirname "$0")" || exit 1
 PID_DATEI="autonomous/daten/autonomous.pid"
-if [ -f "$PID_DATEI" ] && kill -0 "$(cat "$PID_DATEI")" 2>/dev/null; then
-    kill -TERM "$(cat "$PID_DATEI")"
+PID="$(cat "$PID_DATEI" 2>/dev/null)"
+case "$PID" in ''|*[!0-9]*) PID="" ;; esac
+# Nur beenden, wenn die Nummer wirklich zu AUTONOMOUS gehört – nach einem Absturz kann sie inzwischen
+# zu einem ganz anderen Programm gehören.
+if [ -n "$PID" ] && kill -0 "$PID" 2>/dev/null && ps -p "$PID" -o command= 2>/dev/null | grep -q -- "-m autonomous"; then
+    kill -TERM "$PID"
     for _ in $(seq 1 20); do
         sleep 0.5
-        kill -0 "$(cat "$PID_DATEI" 2>/dev/null)" 2>/dev/null || break
+        kill -0 "$PID" 2>/dev/null || break
     done
     echo "AUTONOMOUS beendet."
 else

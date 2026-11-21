@@ -210,7 +210,7 @@ class TestMigration(KernTest):
             db_modul.MIGRATIONEN = voll
         neu = db_modul.Datenbank(pfad)
         try:
-            self.assertEqual(neu.schema_version(), 3)
+            self.assertEqual(neu.schema_version(), len(db_modul.MIGRATIONEN))  # 2 → aktueller Stand
             self.assertEqual(neu.wert("SELECT firma FROM kontakte WHERE id='k_alt'"), "Bestandskunde GmbH")
             self.assertEqual(neu.wert("SELECT titel FROM ziele WHERE id='z_alt'"), "Altes Ziel")
             neu.ausfuehren("INSERT INTO rueckmeldungen (id, zeit, kontakt_id, angebot_art, kanal, reaktion, "

@@ -168,14 +168,18 @@ class Supervisor:
             self.protokoll.audit("supervisor", "Freigabe durch Nicht-Eigentümer blockiert",
                                  {"akteur": akteur, "freigabe": freigabe_id})
             raise PermissionError("Nur der Eigentümer kann Freigaben erteilen oder ablehnen.")
-        f = self.db.eins("SELECT * FROM freigaben WHERE id=?", (freigabe_id,))
-        if not f:
-            raise KeyError("Freigabe nicht gefunden.")
-        if f["status"] != "offen":
-            raise ValueError("Freigabe ist bereits entschieden (%s)." % f["status"])
         neu = "erteilt" if ja else "abgelehnt"
-        self.db.ausfuehren("UPDATE freigaben SET status=?, entschieden_zeit=?, entschieden_von=?, notiz=? "
-                           "WHERE id=? AND status='offen'", (neu, jetzt(), akteur, str(notiz)[:500], freigabe_id))
+        # Lesen, Prüfen und Schreiben in EINER Transaktion: kommen Ja und Nein gleichzeitig an (z. B. Mac und
+        # iPhone), gewinnt genau eine Entscheidung; die andere bekommt „bereits entschieden“ statt einer falschen
+        # Bestätigung – und es bleibt kein unbemerktes Ja für einen späteren Versuch liegen.
+        with self.db.transaktion() as con:
+            f = con.execute("SELECT * FROM freigaben WHERE id=?", (freigabe_id,)).fetchone()
+            if not f:
+                raise KeyError("Freigabe nicht gefunden.")
+            if f["status"] != "offen":
+                raise ValueError("Freigabe ist bereits entschieden (%s)." % f["status"])
+            con.execute("UPDATE freigaben SET status=?, entschieden_zeit=?, entschieden_von=?, notiz=? "
+                        "WHERE id=? AND status='offen'", (neu, jetzt(), akteur, str(notiz)[:500], freigabe_id))
         self.protokoll.audit("supervisor", "Freigabe " + neu, {"freigabe": freigabe_id, "aktion": f["aktion"],
                                                                "ziel": f["ziel"]})
         return neu

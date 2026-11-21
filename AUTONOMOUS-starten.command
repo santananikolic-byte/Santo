@@ -30,7 +30,9 @@ port_belegt() {
     curl -s -o /dev/null --max-time 2 "http://127.0.0.1:$PORT/" 2>/dev/null
 }
 
+umask 077  # Datenordner und Protokoll nur für den eigenen Benutzer lesbar
 mkdir -p autonomous/daten
+chmod -R go-rwx autonomous/daten 2>/dev/null  # auch Dateien älterer Fassungen nachträglich schützen
 if ! ist_autonomous; then
     if port_belegt; then
         ende_mit_fehler "Port $PORT ist von einem anderen Programm belegt. Entweder das Programm beenden oder

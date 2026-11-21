@@ -32,7 +32,7 @@ def freier_port():
 
 
 def testdaten_anlegen(daten):
-    """Erkennbare TESTDATEN für das Auftrags-Radar – ohne Internet, mit dem echten Datenbank-Schema.
+    """Erkennbare TESTDATEN für Auftrags-Radar und Marktbericht – ohne Internet, mit dem echten Datenbank-Schema.
 
     Die Tabellen entstehen über die echten Migrationen (autonomous.db.Datenbank); eingefügt wird direkt per
     sqlite3. Fristen relativ zu heute, damit die Prüfung an jedem Tag gleich läuft."""
@@ -83,9 +83,24 @@ def testdaten_anlegen(daten):
                 ("evergabe_nrw", "fehler", 0, 0, 0, "TESTDATEN – Quelle nicht erreichbar (simuliert für die UI-Prüfung)")):
             con.execute("INSERT INTO suchlaeufe (zeit, quelle, ergebnis, gefunden, neu, passend, meldung) "
                         "VALUES (?,?,?,?,?,?,?)", (jetzt, quelle, ergebnis, gefunden, neu, passend, meldung))
+        # Ein erkennbarer TESTDATEN-Marktbericht (echtes Schema der Tabelle „aufgaben“, Ergebnis wie vom
+        # Research-Agenten) – so lässt sich die Berichtsliste ohne Internet prüfen.
+        ergebnis = {"zeitraum_tage": 90, "bericht_url": "/produkte/marktberichte/ui_test_mb/bericht.html",
+                    "kennzahlen": {"ausschreibungen_ted_gesamt": 3, "zuschlaege_ted_gesamt": 1, "wettbewerber_anzahl": 1},
+                    "ki_zusammenfassung": None, "hinweis": "TESTDATEN – nur für die UI-Prüfung"}
+        con.execute("INSERT INTO aufgaben (id, titel, typ, ersteller, verantwortlich, status, prioritaet, erstellt,"
+                    " aktualisiert, gestartet, beendet, eingabe, ergebnis, versuche) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    ("ui_test_mb", "TESTDATEN – Marktbericht (UI-Prüfung)", "marktbericht", "eigentuemer", "research",
+                     "abgeschlossen", 3, jetzt, jetzt, jetzt, jetzt, json.dumps({"zeitraum_tage": 90}),
+                     json.dumps(ergebnis, ensure_ascii=False), 1))
         con.commit()
     finally:
         con.close()
+    bericht = os.path.join(daten, "produkte", "marktberichte", "ui_test_mb")
+    os.makedirs(bericht, exist_ok=True)
+    with open(os.path.join(bericht, "bericht.html"), "w", encoding="utf-8") as f:
+        f.write("<!doctype html><html lang=\"de\"><meta charset=\"utf-8\"><title>TESTDATEN</title>"
+                "<p>TESTDATEN – Marktbericht nur für die UI-Prüfung.</p></html>")
 
 
 def main():

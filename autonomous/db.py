@@ -8,6 +8,7 @@
 """
 
 import datetime
+import json
 import sqlite3
 import threading
 import uuid
@@ -304,6 +305,31 @@ MIGRATIONEN = [
 ]
 
 
+def _migration_gegenbuchung_einmal(con):
+    """4 – Jede Buchung darf höchstens EINMAL gegengebucht werden (Sicherheitsprüfung, Befund 7).
+
+    Ein eindeutiger Teil-Index lässt die Datenbank selbst eine zweite Gegenbuchung ablehnen. Hat eine ältere
+    Datenbank durch den früheren Wettlauf schon Dubletten, lässt sich der Index nicht anlegen – und die Buchungen
+    sind unveränderbar. Dann bricht die Migration NICHT ab (sonst startet das System nicht), sondern meldet die
+    Dubletten im Protokoll; neue Dubletten verhindert weiterhin die Prüfung im Code (in derselben Transaktion)."""
+    for tabelle, index in (("real_buchungen", "real_gegen_einmal"), ("wallet_buchungen", "wallet_gegen_einmal")):
+        dubletten = [z[0] for z in con.execute(
+            "SELECT gegenbuchung_zu FROM %s WHERE gegenbuchung_zu IS NOT NULL GROUP BY gegenbuchung_zu "
+            "HAVING COUNT(*) > 1" % tabelle).fetchall()]
+        if dubletten:
+            con.execute("INSERT INTO protokoll (zeit, ebene, quelle, ereignis, details) VALUES (?,?,?,?,?)",
+                        (jetzt(), "warnung", "migration",
+                         "Doppelte Gegenbuchungen in %s gefunden – Schutz-Index nicht angelegt, die Prüfung im "
+                         "Code verhindert weitere Dubletten" % tabelle,
+                         json.dumps({"tabelle": tabelle, "gegenbuchung_zu": dubletten[:50]}, ensure_ascii=False)))
+            continue
+        con.execute("CREATE UNIQUE INDEX IF NOT EXISTS %s ON %s(gegenbuchung_zu) WHERE gegenbuchung_zu IS NOT NULL"
+                    % (index, tabelle))
+
+
+MIGRATIONEN.append(_migration_gegenbuchung_einmal)
+
+
 def jetzt():
     return datetime.datetime.now().astimezone().isoformat(timespec="seconds")
 
@@ -341,8 +367,11 @@ class Datenbank:
                     continue
                 self._con.execute("BEGIN IMMEDIATE")
                 try:
-                    for befehl in _teile_sql(sql):
-                        self._con.execute(befehl)
+                    if callable(sql):  # Migration mit Bedingungen (Python-Schritt)
+                        sql(self._con)
+                    else:
+                        for befehl in _teile_sql(sql):
+                            self._con.execute(befehl)
                     self._con.execute("INSERT INTO schema_version VALUES (?, ?)", (nummer, jetzt()))
                     self._con.execute("COMMIT")
                 except Exception:

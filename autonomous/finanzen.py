@@ -10,6 +10,7 @@
 """
 
 import datetime
+import sqlite3
 
 from .db import jetzt, neue_id
 from .wallet import betrag_in_cent, euro
@@ -32,16 +33,23 @@ class Finanzen:
             raise PermissionError("Reale Finanzen bucht nur der Eigentümer.")
 
     def _buche(self, art, cent, kategorie, gegenpartei, begruendung, akteur, datum=None, beleg=None,
-               zahlungsnachweis=None, verifiziert_von=None, forderung_id=None, gegenbuchung_zu=None):
+               zahlungsnachweis=None, verifiziert_von=None, forderung_id=None, gegenbuchung_zu=None, pruefung=None):
         bid = neue_id("r_")
         with self.db.transaktion() as con:
+            if pruefung:  # Prüfung in derselben Transaktion wie das Schreiben – kein Wettlauf möglich
+                pruefung(con)
             nr = con.execute("SELECT COALESCE(MAX(nr),0)+1 FROM real_buchungen").fetchone()[0]
-            con.execute(
-                "INSERT INTO real_buchungen (id, nr, zeit, datum, art, betrag_cent, kategorie, gegenpartei, beleg,"
-                " zahlungsnachweis, verifiziert_von, forderung_id, gegenbuchung_zu, begruendung, akteur)"
-                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                (bid, nr, jetzt(), _datum(datum), art, cent, kategorie[:60], gegenpartei[:200], beleg,
-                 zahlungsnachweis, verifiziert_von, forderung_id, gegenbuchung_zu, begruendung[:500], akteur))
+            try:
+                con.execute(
+                    "INSERT INTO real_buchungen (id, nr, zeit, datum, art, betrag_cent, kategorie, gegenpartei, beleg,"
+                    " zahlungsnachweis, verifiziert_von, forderung_id, gegenbuchung_zu, begruendung, akteur)"
+                    " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    (bid, nr, jetzt(), _datum(datum), art, cent, kategorie[:60], gegenpartei[:200], beleg,
+                     zahlungsnachweis, verifiziert_von, forderung_id, gegenbuchung_zu, begruendung[:500], akteur))
+            except sqlite3.IntegrityError as fehler:
+                if gegenbuchung_zu and "gegenbuchung_zu" in str(fehler):
+                    raise ValueError("Diese Buchung wurde bereits gegengebucht.")
+                raise
             if forderung_id:
                 n = con.execute("UPDATE forderungen SET status='bezahlt', buchung_id=? WHERE id=? AND status='offen'",
                                 (bid, forderung_id)).rowcount
@@ -71,11 +79,14 @@ class Finanzen:
         alt = self.db.eins("SELECT * FROM real_buchungen WHERE id=?", (buchung_id,))
         if not alt:
             raise KeyError("Buchung nicht gefunden.")
-        if alt["art"] == "gegenbuchung" or self.db.eins(
-                "SELECT id FROM real_buchungen WHERE gegenbuchung_zu=?", (buchung_id,)):
+        if alt["art"] == "gegenbuchung":
             raise ValueError("Bereits gegengebucht oder selbst eine Gegenbuchung.")
+
+        def noch_nicht_gegengebucht(con):
+            if con.execute("SELECT 1 FROM real_buchungen WHERE gegenbuchung_zu=?", (buchung_id,)).fetchone():
+                raise ValueError("Bereits gegengebucht oder selbst eine Gegenbuchung.")
         return self._buche("gegenbuchung", -alt["betrag_cent"], alt["kategorie"], alt["gegenpartei"], begruendung,
-                           akteur, gegenbuchung_zu=buchung_id)
+                           akteur, gegenbuchung_zu=buchung_id, pruefung=noch_nicht_gegengebucht)
 
     # ---- Forderungen (offen ≠ Einnahme) --------------------------------
     def forderung_anlegen(self, kunde, betrag, akteur, faellig=None, rechnung_ref=None, notiz=None):

@@ -207,11 +207,26 @@ def _html_zeilen(schnipsel):
 
 
 def bund_parsen(daten):
-    roh = daten if isinstance(daten, bytes) else str(daten).encode("utf-8")
-    if b"<!DOCTYPE" in roh[:2048].upper() or b"<!ENTITY" in roh.upper():
+    # Erst streng als UTF-8 lesen (der Feed ist UTF-8). Andere Kodierungen (z. B. UTF-16) werden abgelehnt –
+    # sonst ließe sich eine DTD an der Prüfung vorbei schmuggeln, weil diese dann nur auf die Rohbytes schaut.
+    if isinstance(daten, bytes):
+        try:
+            text = daten.decode("utf-8")
+        except UnicodeDecodeError:
+            raise QuellenFehler("service.bund.de: Antwort ist kein gültiges UTF-8 – abgelehnt")
+    else:
+        text = str(daten)
+    text = text.lstrip("﻿")
+    # Steuerzeichen sind in XML 1.0 verboten. Nullbytes ließen sonst UTF-16 (ohne BOM) als „gültiges UTF-8“
+    # durch – der Parser würde es dann selbst als UTF-16 erkennen und eine versteckte DTD auswerten.
+    if re.search(r"[\x00-\x08\x0b\x0c\x0e-\x1f]", text):
+        raise QuellenFehler("service.bund.de: Antwort enthält Steuerzeichen – abgelehnt")
+    oben = text.upper()
+    if "<!DOCTYPE" in oben or "<!ENTITY" in oben:
         raise QuellenFehler("service.bund.de: Antwort enthält DTD/Entitäten – abgelehnt")
     try:
-        wurzel = ET.fromstring(roh)
+        # Als Text übergeben: der Parser ignoriert dann eine abweichende Kodierungsangabe im XML-Kopf.
+        wurzel = ET.fromstring(text)
     except ET.ParseError:
         raise QuellenFehler("service.bund.de: Antwort ist kein gültiger RSS-Feed")
     ergebnis = []

@@ -37,7 +37,9 @@ except ImportError:
     pass
 
 MAX_KOERPER = 512 * 1024
-PRODUKT_CSP = "default-src 'none'; style-src 'unsafe-inline'; img-src data:; frame-ancestors 'self'"
+# Erzeugte Seiten: keine Skripte, kein Netz, keine Formulare, eigene (abgeschottete) Herkunft
+PRODUKT_CSP = ("default-src 'none'; style-src 'unsafe-inline'; img-src data:; frame-ancestors 'self'; "
+               "sandbox; form-action 'none'; base-uri 'none'")
 CSP = ("default-src 'self'; style-src 'self'; script-src 'self'; img-src 'self' data:; connect-src 'self'; "
        "frame-src 'self'; frame-ancestors 'self'; base-uri 'none'; form-action 'none'")
 
@@ -52,19 +54,37 @@ def zugangsschluessel():
         return f.read().strip()
 
 
-def erlaubte_hosts(port):
+def _hostnamen():
     namen = {"127.0.0.1", "localhost", "[::1]"}
     extra = os.environ.get("AUTONOMOUS_ERLAUBTE_HOSTS", "")
-    namen |= {h.strip() for h in extra.split(",") if h.strip()}
-    return {n for n in namen} | {"%s:%d" % (n, port) for n in namen}
+    # Hostnamen sind nicht groß/klein-sensitiv; verglichen wird immer klein (z. B. „DEIN-MAC.local“).
+    namen |= {h.strip().lower() for h in extra.split(",") if h.strip()}
+    return namen
+
+
+def erlaubte_hosts(port):
+    namen = _hostnamen()
+    return set(namen) | {"%s:%d" % (n, port) for n in namen}
+
+
+def erlaubte_herkuenfte(port):
+    """Exakt erlaubte Herkunft (Origin) für POST: Schema http, erlaubter Host UND genau dieser Port.
+    Ohne Port nur, wenn der Server wirklich auf Port 80 läuft (dann lassen Browser den Port weg)."""
+    namen = _hostnamen()
+    herkuenfte = {"http://%s:%d" % (n, port) for n in namen}
+    if port == 80:
+        herkuenfte |= {"http://%s" % n for n in namen}
+    return herkuenfte
 
 
 class Handler(BaseHTTPRequestHandler):
     server_version = "AUTONOMOUS"
     sys_version = ""
+    timeout = 20  # Sekunden je Verbindung: halboffene Anfragen können den Server nicht blockieren
     kern = None
     schluessel = ""
     hosts = set()
+    herkuenfte = set()
 
     def log_message(self, fmt, *args):  # keine Zugriffe mit Schlüsseln ins Terminal
         pass
@@ -96,6 +116,10 @@ class Handler(BaseHTTPRequestHandler):
     def _host_ok(self):
         return (self.headers.get("Host") or "").lower() in self.hosts
 
+    def _schluessel_passt(self, wert):
+        # compare_digest vergleicht zeitkonstant, wirft aber bei Nicht-ASCII-Text – darum vorher prüfen
+        return bool(wert) and wert.isascii() and hmac.compare_digest(wert, self.schluessel)
+
     def _zugang_ok(self):
         kopf = self.headers.get("X-Zugang", "")
         cookie = ""
@@ -103,13 +127,13 @@ class Handler(BaseHTTPRequestHandler):
             name, _, wert = teil.strip().partition("=")
             if name == "autonomous_zugang":
                 cookie = wert
-        return any(w and hmac.compare_digest(w, self.schluessel) for w in (kopf, cookie))
+        return any(self._schluessel_passt(w) for w in (kopf, cookie))
 
     def _herkunft_ok(self):
         herkunft = self.headers.get("Origin")
         if not herkunft:
             return True  # z. B. Kommandozeile mit Schlüssel
-        return urlparse(herkunft).netloc.lower() in self.hosts
+        return herkunft.strip().lower() in self.herkuenfte
 
     # ---- Methoden ----
     def do_HEAD(self):
@@ -137,7 +161,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self._fehler(405, "Methode nicht erlaubt")
             # Anmeldung über Link mit ?k=SCHLUESSEL: Cookie setzen, Schlüssel aus der Adresse entfernen
             if "k" in query:
-                if hmac.compare_digest(query["k"], self.schluessel):
+                if self._schluessel_passt(query["k"]):
                     return self._senden(303, b"", extra={
                         "Location": "/", "Set-Cookie": "autonomous_zugang=%s; Path=/; HttpOnly; SameSite=Strict; "
                                                        "Max-Age=31536000" % self.schluessel})
@@ -152,14 +176,18 @@ class Handler(BaseHTTPRequestHandler):
         if methode == "POST":
             if not self._herkunft_ok():
                 return self._fehler(403, "Fremde Herkunft")
-            if "application/json" not in (self.headers.get("Content-Type") or ""):
+            if self.headers.get_content_type() != "application/json":
                 return self._fehler(415, "Nur JSON")
-            laenge = int(self.headers.get("Content-Length") or 0)
-            if laenge > MAX_KOERPER:
+            angabe = self.headers.get("Content-Length")
+            try:
+                laenge = int(angabe) if angabe is not None else 0
+            except ValueError:
+                return self._fehler(400, "Ungültige Längenangabe")
+            if laenge < 0 or laenge > MAX_KOERPER:
                 return self._fehler(413, "Anfrage zu groß")
             try:
                 body = json.loads(self.rfile.read(laenge).decode("utf-8") or "{}") if laenge else {}
-            except (ValueError, UnicodeDecodeError):
+            except (ValueError, UnicodeDecodeError, RecursionError):
                 return self._fehler(400, "Ungültiges JSON")
             if not isinstance(body, dict):
                 return self._fehler(400, "JSON-Objekt erwartet")
@@ -216,6 +244,7 @@ def starten(kern, host=None, port=None):
     Handler.kern = kern
     Handler.schluessel = zugangsschluessel()
     Handler.hosts = erlaubte_hosts(port)
+    Handler.herkuenfte = erlaubte_herkuenfte(port)
     server = ThreadingHTTPServer((host, port), Handler)
     server.daemon_threads = True
     return server

@@ -11,6 +11,7 @@
   --panel-2: #1a1f26;
   --line: #242b34;
   --line-2: #323c48;
+  --feld-rand: #627080;      /* Rand von Eingabefeldern: 3,52:1 gegen Karte (Bedienelemente brauchen 3:1) */
   --text: #f3f6f9;
   --muted: #a7b3bf;
   --dim: #8592a0;
@@ -405,7 +406,7 @@ main {
 .kachel.ton-real { border-color: rgba(58, 210, 159, 0.35); }
 @media (max-width: 699px) {
   .kachel { padding: 12px; }
-  .kachel-titel { font-size: 11px; letter-spacing: 0.05em; }
+  .kachel-titel { font-size: 12px; letter-spacing: 0.05em; }
   .kachel-wert { font-size: 20px; }
   .kachel-zusatz { font-size: 12px; }
 }
@@ -611,7 +612,7 @@ input, select, textarea {
   min-height: 44px;
   padding: 10px 12px;
   background: var(--bg-2);
-  border: 1px solid var(--line-2);
+  border: 1px solid var(--feld-rand);
   border-radius: var(--radius-s);
   color: var(--text);
   font: inherit;
@@ -627,7 +628,10 @@ select {
   background-size: 5px 5px, 5px 5px;
   background-repeat: no-repeat;
 }
-input::placeholder, textarea::placeholder { color: #66727f; }
+input::placeholder, textarea::placeholder { color: var(--dim); }
+/* Eingabefehler direkt am Feld: der Browser prüft Pflichtfelder und Formate (pattern), wir zeigen sie rot */
+input:user-invalid, select:user-invalid, textarea:user-invalid,
+input[aria-invalid="true"], select[aria-invalid="true"], textarea[aria-invalid="true"] { border-color: var(--err); border-width: 2px; }
 input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); outline-offset: 0; border-color: transparent; }
 input[type="checkbox"], input[type="radio"] {
   width: 22px;
@@ -648,7 +652,7 @@ input:disabled, select:disabled, textarea:disabled { opacity: 0.55; }
   min-height: 44px;
   padding: 10px 12px;
   background: var(--bg-2);
-  border: 1px solid var(--line-2);
+  border: 1px solid var(--feld-rand);
   border-radius: var(--radius-s);
   cursor: pointer;
 }
@@ -663,7 +667,7 @@ fieldset.auswahlgruppe legend { padding: 0; margin-bottom: 6px; color: var(--mut
   min-height: 44px;
   padding: 12px;
   background: var(--bg-2);
-  border: 1px solid var(--line-2);
+  border: 1px solid var(--feld-rand);
   border-radius: var(--radius-s);
   cursor: pointer;
 }
@@ -709,7 +713,7 @@ fieldset.auswahlgruppe legend { padding: 0; margin-bottom: 6px; color: var(--mut
 .karte.empfohlen { border-color: rgba(44, 201, 236, 0.55); box-shadow: 0 0 0 1px rgba(44, 201, 236, 0.14) inset; }
 .empfehlung-kopf { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin: 0 0 6px; }
 .dateiliste { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
-.dateiliste a { display: inline-flex; align-items: center; min-height: 40px; overflow-wrap: anywhere; }
+.dateiliste a { display: inline-flex; align-items: center; min-height: 44px; overflow-wrap: anywhere; }
 fieldset.formular-satz { margin: 0; padding: 0; border: 0; min-width: 0; display: grid; gap: 12px; }
 fieldset.formular-satz:disabled { opacity: 0.55; }
 fieldset.formular-satz:disabled .knopf { cursor: not-allowed; }
@@ -757,6 +761,9 @@ progress.ueber::-moz-progress-bar { background: var(--err); }
 .meldung.ok { border-left-color: var(--ok); }
 .meldung.warn { border-left-color: var(--warn); }
 .meldung.fehler { border-left-color: var(--err); }
+.meldung.mit-zu { display: flex; align-items: flex-start; gap: 12px; }
+.meldung.mit-zu > span { flex: 1; min-width: 0; padding-top: 10px; }
+.meldung.mit-zu > .knopf { flex-shrink: 0; }
 @media (min-width: 900px) {
   .meldungen { left: auto; right: 24px; bottom: 24px; width: 420px; }
 }
@@ -806,3 +813,12 @@ progress.ueber::-moz-progress-bar { background: var(--err); }
 .kalk-ergebnis .raster { margin-bottom: 0; }
 .rechenweg { margin: 0; padding-left: 22px; display: grid; gap: 4px; font-size: 14px; overflow-wrap: anywhere; }
 .kachel .kachel-link { margin-top: 8px; }
+
+/* Sprungleiste (Vertrieb): Karten nicht unter der festen Kopfzeile verstecken */
+.karte { scroll-margin-top: calc(var(--kopf-h) + 12px); }
+.sprungleiste { margin: 0 0 16px; }
+/* Überschrift, auf die der Fokus nach dem Speichern zurückkehrt */
+.karte h2[tabindex="-1"]:focus { outline: none; }
+.karte h2[tabindex="-1"]:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; border-radius: 4px; }
+/* Technik-Teil des Dashboards */
+.aufklapp.technik > .raster { margin-top: 12px; }
