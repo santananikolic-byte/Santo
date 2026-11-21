@@ -6,8 +6,9 @@ Status-Begriffe (Strict Execution Protocol): **GEPLANT · IMPLEMENTIERT · ERFOL
 FEHLGESCHLAGEN · NICHT VERIFIZIERT**. „Getestet“ heißt: automatische Tests in der Entwicklungsumgebung (Linux,
 Python 3.13). **Auf dem Mac ist nichts verifiziert** – das gilt für jede Zeile unten.
 
-Letzter vollständiger Lauf: Kompilieren fehlerfrei · **175 von 175 Unit-Tests bestanden** · **190 von 190
-Oberflächen-Prüfungen bestanden** (iPhone 390 px und Desktop 1280 px) · fehlgeschlagen: keine.
+Letzter vollständiger Lauf (21.11.2026): Kompilieren fehlerfrei · **232 von 232 Unit-Tests bestanden unter Python 3.13
+und unter Python 3.9** (wie auf dem Mac vorinstalliert) · Prüfwerkzeug `ruff` (Fehlerregeln): keine Fehler ·
+Oberflächen-Prüfung: wird nach Abschluss der laufenden Oberflächen-Arbeit eingetragen · fehlgeschlagen: keine.
 
 ---
 
@@ -53,8 +54,8 @@ Oberflächen-Prüfungen bestanden** (iPhone 390 px und Desktop 1280 px) · fehlg
 |---|---|
 | Implementiert | CEO, Research, Product und Supervisor (dazu Sales, Finance, Learning). Rechte unveränderlich im Code; zentrale Prüfung jeder Aktion mit Risikoklasse AUTO/FREIGABE/VERBOTEN; ein Ja gilt für genau eine Ausführung; ein Nein ist bindend, auch für andere Agenten (`berechtigungen.py`, `agenten/`). |
 | Tests | `test_sicherheit.py` (Freigaben, Rechte, Parallelität), `test_kern.py` (Übergabe CEO → andere Rolle) – **ERFOLGREICH GETESTET**. |
-| Nicht fertig | **Research-Agent untersucht Märkte nicht selbst** – er wertet nur die Marktanalyse aus, die während der Entwicklung erstellt wurde. **Kein Agent nutzt ein KI-Modell** (alle regelbasiert). Lokale Modellschicht (Ollama): IMPLEMENTIERT, NICHT VERIFIZIERT. → **Entscheidung des Eigentümers offen** (Varianten A/B/C). |
-| Probleme/Risiken | Ohne Modell keine KI-Texte oder -Analysen. |
+| Nachgeliefert (21.11.2026) | **Lokale KI-Schicht** (`autonomous/ki/`, `modell.py`): austauschbar (keiner/Ollama, nur lokal), Ausgabe immer „KI-Entwurf – ungeprüft“, kann keine Aktion auslösen, Tageslimit und Protokoll – ERFOLGREICH GETESTET und mit **echtem Ollama 0.40.17 + Modell gemma3:1b ERFOLGREICH AUSGEFÜHRT** (Status, Probeaufruf, Marktbericht mit KI-Zusammenfassung über den laufenden Server). **Research-Agent untersucht Märkte selbst** (`marktbericht`): Nachfrage, Wettbewerber (Zuschläge), Auftraggeber, Anforderungen aus amtlichen EU-Daten (TED) – ERFOLGREICH AUSGEFÜHRT, z. B. 365 Tage NRW: 473 Ausschreibungen, 269 Zuschläge, 275 Unternehmen mit Zuschlag. |
+| Probleme/Risiken | Ein kleines Modell macht inhaltliche Fehler (im echten Lauf beobachtet) – deshalb stehen Zahlen immer gezählt mit Quelle daneben, KI-Text ist nur gekennzeichneter Zusatz. Auf dem Mac NICHT VERIFIZIERT. |
 | Dateien | `berechtigungen.py`, `agenten/__init__.py`, `ceo.py`, `research.py`, `product.py`, `sales.py`, `finance.py`, `learning.py`, `modell.py` |
 | Nächster Schritt | Phase 5 |
 | Kosten/Zugänge | Keine |
@@ -77,18 +78,20 @@ Oberflächen-Prüfungen bestanden** (iPhone 390 px und Desktop 1280 px) · fehlg
 |---|---|
 | Implementiert | Finance-, Sales-, Learning-Agent. **Auftrags-Radar** (vorgezogen, vom Eigentümer akzeptiert): Akquise-Agent liest öffentliche Ausschreibungen (TED, service.bund.de, Vergabemarktplatz NRW) – nur nach Einschalten, nur diese Quellen, nur lesen; Bewertung 0–100 mit Begründung; Bewerbungsmappe; tägliche Suche. **Reinigungs-Kalkulation** (Stundensatz bleibt OFFEN, bis ihr ihn festlegt) und Angebot Dauerauftrag. Kennzahlen (CEO, Learning). Lasttest. Zahlungsanbieter **nur als Konzept** (`docs/ZAHLUNGEN.md`, PDF 7). Bedrohungsmodell ergänzt (PDF 11). Oberfläche für alle neuen Funktionen. |
 | Tests | `test_auftraege.py` 26, `test_netz.py` 5, `test_kalkulation.py` 22 – **ERFOLGREICH GETESTET**. Echter Suchlauf am 21.11.2026 **ERFOLGREICH AUSGEFÜHRT**: 287 gefunden (TED 38, service.bund.de 236, Vergabemarktplatz NRW 13), 58 als passend gewertet (teils dieselbe Ausschreibung in zwei Quellen), 0 Dubletten beim zweiten Lauf, 0 Abrufe bei ausgeschalteter Recherche. Oberfläche 190/190. Lasttest: 600 Aufgaben mit 4 Arbeitern in rund 1 s. |
-| Nicht fertig | Zusammenführung gleicher Ausschreibungen aus zwei Quellen: NICHT IMPLEMENTIERT. Hausverwaltungen automatisch finden: NICHT IMPLEMENTIERT (keine verlässliche, erlaubte Quelle). |
+| Nachgeliefert (21.11.2026) | **Sicherheitsprüfung** mit den Skills `securitymaxxing:audit/injection/api` (unabhängiger Prüfer, nur lesend): 0 kritisch, 0 hoch, 1 mittel, 7 niedrig – alle **behoben** mit `securitymaxxing:fix` und je einem Test (`tests/test_haertung.py`), Prüfskripte danach ohne Befund. **HawkScan** (DAST): NICHT AUSGEFÜHRT – Programm `hawk`, StackHawk-Konto/Schlüssel und Docker fehlen. **3 Code-Fehler** mit `ruff` gefunden und behoben (u. a. falsche Zuordnung von Angebotszahlen im Marktbericht, Test beweist: vorher 5,5 statt 8). **Mac-Lauffähigkeit**: alle Tests, echter Suchlauf und Oberfläche unter Python 3.9; Startskript prüft Python-Version und belegten Port (4 Fälle ERFOLGREICH AUSGEFÜHRT). |
+| Nicht fertig | Zusammenführung gleicher Ausschreibungen aus zwei Quellen: NICHT IMPLEMENTIERT. Hausverwaltungen automatisch finden: NICHT IMPLEMENTIERT (keine verlässliche, erlaubte Quelle). Safari mit der neuen Sicherheitsrichtlinie für erzeugte Seiten: NICHT VERIFIZIERT. |
 | Probleme/Risiken | Fremdseiten können ihr Format ändern → die Suche dieser Quelle schlägt dann fehl (wird angezeigt, andere Quellen laufen weiter). Vergabemarktplatz NRW: nur die 20 neuesten Einträge der Startseite. |
 | Dateien | `netz.py`, `auftraege/*`, `agenten/akquise.py`, `api_auftraege.py`, `produkte/kalkulation.py`, `server.py`, `db.py` (Migration 2 und 3), `ui/*`, `docs/ZAHLUNGEN.md`, `docs/BEDROHUNGSMODELL.md` |
 | Nächster Schritt | Entscheidung A/B/C (KI-Modell und eigene Marktrecherche); danach erster echter Start auf dem Mac |
-| Kosten/Zugänge | Keine Kosten. Für die Tests in der Entwicklungsumgebung wurden 4 Ausschreibungsseiten freigegeben (vom Eigentümer bestätigt). |
+| Kosten/Zugänge | Keine Kosten. Für die Tests in der Entwicklungsumgebung wurden freigegeben (jeweils vom Eigentümer bestätigt): 4 Ausschreibungsseiten sowie ollama.com, github.com, registry.ollama.ai und der Modell-Downloadspeicher (für das echte KI-Modell). |
 
 ---
 
 ## Abweichungen vom ursprünglichen Auftrag (offen gelegt)
 
 1. **Backend ohne FastAPI** – laut PDF zulässig („gleichwertig schlanke Lösung“), gewählt für „läuft ohne Installation“.
-2. **Agenten ohne KI-Modell** und **Research-Agent ohne eigene Recherche** – Entscheidung offen.
+2. ~~Agenten ohne KI-Modell / Research-Agent ohne eigene Recherche~~ – **erledigt** am 21.11.2026 (lokales Modell, echte Marktuntersuchung aus amtlichen Daten; siehe Phase 4).
 3. **Reihenfolge:** Auftrags-Radar und Kalkulation wurden vor dem Abschluss von Phase 5 (echte Rückmeldungen) gebaut.
 4. **Hausverwaltungen automatisch finden** wurde angekündigt, aber nicht umgesetzt.
 5. **Berichte je Phase** wurden erst nachträglich in diesem Format erstellt, nicht nach jeder Phase.
+6. **HawkScan** (dynamischer Sicherheitstest) konnte nicht laufen (Programm, Konto und Docker fehlen); ersetzt durch eine unabhängige Prüfung gegen den laufenden Server mit den Skills `securitymaxxing`.
