@@ -5,6 +5,7 @@ Darf KEINE realen Buchungen anlegen (das kann nur der Eigentümer). Simulierte W
 SIMULATION, erwartete Werte als ERWARTET gekennzeichnet."""
 
 from . import Agent
+from ..produkte import kalkulation
 from ..wallet import betrag_in_cent, euro
 
 
@@ -18,6 +19,10 @@ class FinanceAgent(Agent):
         "liquiditaet": "Liquiditätsvorschau (Eingabe optional: tage)",
         "wirtschaftlichkeit": "Deckungsbeitrag eines Angebots (Eingabe: preis, stunden, stundensatz, kosten)",
         "simulation_buchen": "Simulierte Buchung im internen Wallet (Eingabe: art, betrag, kategorie, begruendung)",
+        "kalkulation_reinigung": "Monatspreis für einen Reinigungs-Dauerauftrag berechnen (Eingabe: positionen = "
+                                 "[{bezeichnung, flaeche_m2, leistungswert_m2_h, reinigungen_pro_monat ODER "
+                                 "reinigungen_pro_woche}], stundensatz?, material_prozent?, anfahrten_pro_monat?, "
+                                 "anfahrt_minuten?, zuschlag_prozent?) – ohne Stundensatz bleibt der Preis OFFEN",
     }
 
     def aufgabe_finanzbericht(self, aufgabe, k):
@@ -56,6 +61,12 @@ class FinanceAgent(Agent):
                 ergebnis["lohnt_sich"] = db / stunden >= soll
         ergebnis["hinweis"] = "Rechnung nur mit den eingegebenen Werten; keine angenommenen Zahlen."
         return ergebnis
+
+    def aufgabe_kalkulation_reinigung(self, aufgabe, k):
+        """Rechnet nur mit den Eingaben des Inhabers; Stundensatz aus Eingabe oder Einstellung, sonst OFFEN."""
+        self.darf(k, "interne_auswertung", "kalkulation_reinigung", aufgabe)
+        d = kalkulation.eingabe_pruefen(aufgabe["eingabe"])
+        return kalkulation.berechnen(d, k.einstellungen.hole("stundensatz_cent"))
 
     def aufgabe_simulation_buchen(self, aufgabe, k):
         e = aufgabe["eingabe"]
