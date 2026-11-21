@@ -6,9 +6,16 @@ Status-Begriffe (Strict Execution Protocol): **GEPLANT · IMPLEMENTIERT · ERFOL
 FEHLGESCHLAGEN · NICHT VERIFIZIERT**. „Getestet“ heißt: automatische Tests in der Entwicklungsumgebung (Linux,
 Python 3.13). **Auf dem Mac ist nichts verifiziert** – das gilt für jede Zeile unten.
 
-Letzter vollständiger Lauf (21.11.2026): Kompilieren fehlerfrei · **232 von 232 Unit-Tests bestanden unter Python 3.13
-und unter Python 3.9** (wie auf dem Mac vorinstalliert) · Prüfwerkzeug `ruff` (Fehlerregeln): keine Fehler ·
-Oberflächen-Prüfung: wird nach Abschluss der laufenden Oberflächen-Arbeit eingetragen · fehlgeschlagen: keine.
+Letzter vollständiger Lauf (21.11.2026): Kompilieren fehlerfrei · **233 von 233 Unit-Tests bestanden unter Python 3.13
+und unter Python 3.9** (wie auf dem Mac vorinstalliert), 0 Warnungen über hängende Prozesse · Prüfwerkzeug `ruff`
+(Fehlerregeln): keine Fehler · **234 von 234 Oberflächen-Prüfungen bestanden unter Python 3.13 und 3.9** (iPhone 390 px
+und Desktop 1280 px) · fehlgeschlagen: keine.
+
+**Echter Gesamtlauf über den laufenden Server** (21.11.2026, echte Internet-Recherche, echtes lokales KI-Modell
+Ollama 0.40.17/gemma3:1b): Ausschreibungssuche (3 Quellen ok, 289 gefunden, 59 passend) → Bewerbungsmappe für die
+beste Ausschreibung → Marktbericht mit KI-Zusammenfassung (42 Ausschreibungen, 17 Zuschläge, 23 Wettbewerber) →
+Geschäftschancen bewerten → Tagesplan: **6 von 6 Aufgaben abgeschlossen, 0 fehlgeschlagen**, KI-Kosten 0 €.
+**ERFOLGREICH AUSGEFÜHRT** – in der Entwicklungsumgebung, nicht auf dem Mac.
 
 ---
 
@@ -78,7 +85,7 @@ Oberflächen-Prüfung: wird nach Abschluss der laufenden Oberflächen-Arbeit ein
 |---|---|
 | Implementiert | Finance-, Sales-, Learning-Agent. **Auftrags-Radar** (vorgezogen, vom Eigentümer akzeptiert): Akquise-Agent liest öffentliche Ausschreibungen (TED, service.bund.de, Vergabemarktplatz NRW) – nur nach Einschalten, nur diese Quellen, nur lesen; Bewertung 0–100 mit Begründung; Bewerbungsmappe; tägliche Suche. **Reinigungs-Kalkulation** (Stundensatz bleibt OFFEN, bis ihr ihn festlegt) und Angebot Dauerauftrag. Kennzahlen (CEO, Learning). Lasttest. Zahlungsanbieter **nur als Konzept** (`docs/ZAHLUNGEN.md`, PDF 7). Bedrohungsmodell ergänzt (PDF 11). Oberfläche für alle neuen Funktionen. |
 | Tests | `test_auftraege.py` 26, `test_netz.py` 5, `test_kalkulation.py` 22 – **ERFOLGREICH GETESTET**. Echter Suchlauf am 21.11.2026 **ERFOLGREICH AUSGEFÜHRT**: 287 gefunden (TED 38, service.bund.de 236, Vergabemarktplatz NRW 13), 58 als passend gewertet (teils dieselbe Ausschreibung in zwei Quellen), 0 Dubletten beim zweiten Lauf, 0 Abrufe bei ausgeschalteter Recherche. Oberfläche 190/190. Lasttest: 600 Aufgaben mit 4 Arbeitern in rund 1 s. |
-| Nachgeliefert (21.11.2026) | **Sicherheitsprüfung** mit den Skills `securitymaxxing:audit/injection/api` (unabhängiger Prüfer, nur lesend): 0 kritisch, 0 hoch, 1 mittel, 7 niedrig – alle **behoben** mit `securitymaxxing:fix` und je einem Test (`tests/test_haertung.py`), Prüfskripte danach ohne Befund. **HawkScan** (DAST): NICHT AUSGEFÜHRT – Programm `hawk`, StackHawk-Konto/Schlüssel und Docker fehlen. **3 Code-Fehler** mit `ruff` gefunden und behoben (u. a. falsche Zuordnung von Angebotszahlen im Marktbericht, Test beweist: vorher 5,5 statt 8). **Mac-Lauffähigkeit**: alle Tests, echter Suchlauf und Oberfläche unter Python 3.9; Startskript prüft Python-Version und belegten Port (4 Fälle ERFOLGREICH AUSGEFÜHRT). |
+| Nachgeliefert (21.11.2026) | **Sicherheitsprüfung** mit den Skills `securitymaxxing:audit/injection/api` (unabhängiger Prüfer, nur lesend): 0 kritisch, 0 hoch, 1 mittel, 7 niedrig – alle **behoben** mit `securitymaxxing:fix` und je einem Test (`tests/test_haertung.py`), Prüfskripte danach ohne Befund. **HawkScan** (DAST): NICHT AUSGEFÜHRT – Programm `hawk`, StackHawk-Konto/Schlüssel und Docker fehlen. **3 Code-Fehler** mit `ruff` gefunden und behoben (u. a. falsche Zuordnung von Angebotszahlen im Marktbericht, Test beweist: vorher 5,5 statt 8). **2 weitere Fehler** behoben: doppelt definierte Funktion `_zahl` ließ „Geschäftschancen bewerten“ abbrechen (gefunden von der Oberflächen-Prüfung, jetzt mit Unit-Test); Testhilfsprozesse wurden nicht abgewartet (Warnung unter Python 3.9, jetzt 0). **Oberfläche**: Marktbericht (CEO-Zentrale), KI-Modell mit „Modell testen“ (Einstellungen, echt mit gemma3:1b geprüft) und die 10 wichtigsten Punkte des Design-Reviews umgesetzt (Skills `ui-consistency`, `ui-design-review`). **Mac-Lauffähigkeit**: alle Tests, echter Suchlauf und Oberfläche unter Python 3.9; Startskript prüft Python-Version und belegten Port (4 Fälle ERFOLGREICH AUSGEFÜHRT). |
 | Nicht fertig | Zusammenführung gleicher Ausschreibungen aus zwei Quellen: NICHT IMPLEMENTIERT. Hausverwaltungen automatisch finden: NICHT IMPLEMENTIERT (keine verlässliche, erlaubte Quelle). Safari mit der neuen Sicherheitsrichtlinie für erzeugte Seiten: NICHT VERIFIZIERT. |
 | Probleme/Risiken | Fremdseiten können ihr Format ändern → die Suche dieser Quelle schlägt dann fehl (wird angezeigt, andere Quellen laufen weiter). Vergabemarktplatz NRW: nur die 20 neuesten Einträge der Startseite. |
 | Dateien | `netz.py`, `auftraege/*`, `agenten/akquise.py`, `api_auftraege.py`, `produkte/kalkulation.py`, `server.py`, `db.py` (Migration 2 und 3), `ui/*`, `docs/ZAHLUNGEN.md`, `docs/BEDROHUNGSMODELL.md` |
