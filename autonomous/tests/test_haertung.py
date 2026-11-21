@@ -373,6 +373,13 @@ class TestStartOhneSchluesselAusgabe(unittest.TestCase):
 
 
 # ---------------------------------------------------------------- Zusatz: Stopp-Skript
+def _sauber_beenden(prozess):
+    """Hilfsprozess beenden UND abwarten – sonst bleibt er als „läuft noch“ übrig (ResourceWarning)."""
+    if prozess.poll() is None:
+        prozess.kill()
+    prozess.wait(timeout=10)
+
+
 class TestStoppSkript(unittest.TestCase):
     def _skript_in(self, ordner):
         ziel = os.path.join(ordner, "AUTONOMOUS-stoppen.command")
@@ -390,7 +397,7 @@ class TestStoppSkript(unittest.TestCase):
         self.addCleanup(shutil.rmtree, ordner, True)
         skript = self._skript_in(ordner)
         fremd = subprocess.Popen(["sleep", "30"])
-        self.addCleanup(fremd.kill)
+        self.addCleanup(_sauber_beenden, fremd)
         self._pid_eintragen(ordner, fremd.pid)
         subprocess.run(["bash", skript], capture_output=True, timeout=30)
         self.assertIsNone(fremd.poll(), "fremder Prozess darf nicht beendet werden")
@@ -401,7 +408,7 @@ class TestStoppSkript(unittest.TestCase):
         self.addCleanup(shutil.rmtree, ordner, True)
         skript = self._skript_in(ordner)
         eigen = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)", "-m", "autonomous"])
-        self.addCleanup(eigen.kill)
+        self.addCleanup(_sauber_beenden, eigen)
         self._pid_eintragen(ordner, eigen.pid)
         subprocess.run(["bash", skript], capture_output=True, timeout=30)
         self.assertIsNotNone(eigen.wait(timeout=10))
