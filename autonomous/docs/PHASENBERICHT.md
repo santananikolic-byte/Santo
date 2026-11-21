@@ -13,7 +13,7 @@ Stand: 20.11.2026. Bedeutung: **Getestet** = automatische Tests laufen grün in 
 | 4 Erste Agenten | erledigt, getestet | CEO, Research, Product, Sales, Finance, Learning + Supervisor |
 | 5 Erstes Produkt und Vertrieb | erledigt, getestet | `tests/test_produkt_vertrieb.py`, `tests/test_google_profil.py`, `beispiele/` |
 | Oberfläche (Abschnitt 10) | erledigt, im Browser geprüft | `tests/ui_pruefung.js` (142 Prüfungen, iPhone- und Desktop-Breite) |
-| 6 Erweiterung | teilweise | Finance, Sales, Learning vorhanden; Lasttest vorhanden; Kennzahlen über CEO-Agent |
+| 6 Erweiterung | teilweise; Auftrags-Radar und Reinigungs-Kalkulation (vorgezogen, vom Eigentümer akzeptiert) ohne Oberfläche | `tests/test_auftraege.py`, `tests/test_kalkulation.py`, `tests/test_last.py` |
 
 Gesamtergebnis der automatischen Tests: siehe Abschnitt „Tests“ am Ende (echte Zahlen des letzten Laufs).
 
@@ -130,3 +130,35 @@ Fehlgeschlagene Tests: **keine** im letzten Lauf. Während der Entwicklung gefun
 Freigabe hätte bei exakt gleichzeitigen Zugriffen doppelt verbraucht werden können; „1.000“ wurde als 1 € gelesen;
 Fehlerzähler 24 h ungenau; Abbruch einer laufenden Aufgabe erzeugte eine falsche Fehlermeldung im Protokoll;
 Beträge ohne Tausenderpunkt.
+
+---
+
+## Stand nach dem Strict Execution Protocol (21.11.2026)
+
+Begriffe: GEPLANT · IMPLEMENTIERT · ERFOLGREICH AUSGEFÜHRT · ERFOLGREICH GETESTET · FEHLGESCHLAGEN · NICHT VERIFIZIERT.
+„Getestet“ heißt: automatische Tests in der Entwicklungsumgebung (Linux). **Auf dem Mac ist nichts verifiziert.**
+
+| Baustein | Status | Nachweis |
+|---|---|---|
+| Kern: Datenbank (Migration 1+2), Aufgaben, Neustart-Wiederherstellung, Orchestrator | ERFOLGREICH GETESTET | `test_kern.py`, `test_last.py` |
+| Supervisor, Freigaben, Rechte, Server-Schutz | ERFOLGREICH GETESTET | `test_sicherheit.py` |
+| Wallet (SIMULATION) und reale Finanzen getrennt | ERFOLGREICH GETESTET | `test_finanzen.py` |
+| Google-Profil-Paket, Webseite, Verkaufsseite, Angebote, Kontakte | ERFOLGREICH GETESTET | `test_google_profil.py`, `test_produkt_vertrieb.py` |
+| Reinigungs-Kalkulation, Angebot Dauerauftrag, Anschreiben „reinigung“ | ERFOLGREICH GETESTET | `test_kalkulation.py` |
+| Auftrags-Radar (TED, service.bund.de, Vergabemarktplatz NRW) | ERFOLGREICH GETESTET und ERFOLGREICH AUSGEFÜHRT (echter Lauf 21.11.2026: 287 gefunden, 58 mit ≥ 60 Punkten, 0 Dubletten beim zweiten Lauf, 0 Abrufe bei ausgeschalteter Recherche) | `test_auftraege.py`, Live-Lauf |
+| Weboberfläche (9 Bereiche) | ERFOLGREICH GETESTET | `ui_pruefung.js`: 142/142 |
+| Oberfläche für Auftrags-Radar und Kalkulation | GEPLANT (nicht begonnen) | – |
+| Start/Stopp per Doppelklick | ERFOLGREICH AUSGEFÜHRT (Linux) / NICHT VERIFIZIERT (Mac) | – |
+| Lokales Modell (Ollama) in der Modellschicht | IMPLEMENTIERT, NICHT VERIFIZIERT (kein Ollama in der Testumgebung) | – |
+| Agenten nutzen ein KI-Modell | NICHT IMPLEMENTIERT – alle Agenten arbeiten regelbasiert (deterministisch) | – |
+| Research-Agent recherchiert selbst Märkte im Internet | NICHT IMPLEMENTIERT – die Marktanalyse wurde während der Entwicklung erstellt und liegt als Datei vor; der Agent wertet sie nur aus | – |
+| Hausverwaltungen automatisch finden | NICHT IMPLEMENTIERT – keine verlässliche, erlaubte Quelle gefunden | – |
+| Laufzeit-Abhängigkeit zu Anthropic/Claude/OpenAI | keine (geprüft: keine fremden Pakete, kein Anbieter angebunden) | `compileall`, Import-Prüfung |
+
+### Abweichungen vom ursprünglichen Auftrag (offen gelegt)
+
+1. **Backend ohne FastAPI** (Python-Standardbibliothek). Der Auftrag erlaubt „FastAPI oder eine gleichwertig schlanke Lösung“; gewählt, damit es ohne Installation läuft. Eigentümer-Entscheidung, ob das so bleiben soll.
+2. **Agenten ohne KI-Modell** (regelbasiert). Der Auftrag verlangt, dass Kernfunktionen ohne Modell laufen – das ist erfüllt; KI-Fähigkeiten der Agenten (Texte, Analysen) fehlen aber.
+3. **Research-Agent ohne eigene Internet-Recherche** (siehe Tabelle).
+4. **Reihenfolge:** Auftrags-Radar und Kalkulation sind Erweiterungen (Phase 6), gebaut bevor Phase 5 mit echten Kundenrückmeldungen abgeschlossen ist.
+5. **Hausverwaltungen automatisch finden** wurde angekündigt, aber nicht umgesetzt (keine erlaubte Quelle).
