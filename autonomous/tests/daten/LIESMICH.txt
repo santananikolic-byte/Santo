@@ -1,0 +1,3 @@
+Echte, öffentliche Antworten der drei Quellen vom 21.11.2026 (TED-Schnittstelle, RSS von service.bund.de,
+Startseite des Vergabemarktplatzes NRW). Nur für Tests – die Agenten laden im Betrieb immer frisch.
+Bei TED wurden die Sprach-Links entfernt (Platz).

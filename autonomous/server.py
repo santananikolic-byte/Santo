@@ -10,6 +10,7 @@ Schutz:
 5. Strikte Content-Security-Policy, keine fremden Skripte.
 """
 
+import datetime
 import hmac
 import json
 import mimetypes
@@ -24,6 +25,10 @@ from . import api, konfig, sicherung
 
 try:  # Vertriebs- und Produkt-Routen (eigenes Modul)
     from . import api_vertrieb  # noqa: F401
+except ImportError:
+    pass
+try:  # Auftrags-Radar: öffentliche Ausschreibungen (eigenes Modul)
+    from . import api_auftraege  # noqa: F401
 except ImportError:
     pass
 
@@ -225,8 +230,42 @@ def taegliche_sicherung(kern, stopp):
         stopp.wait(3600)
 
 
+AUFTRAGSSUCHE_ABSTAND_STUNDEN = 20
+
+
+def auftragssuche_anstossen(kern):
+    """Legt höchstens alle 20 Stunden eine Suche nach Ausschreibungen an – nur wenn der Eigentümer
+    die Internet-Recherche UND die tägliche Suche eingeschaltet hat. Gibt die Aufgaben-ID oder None zurück."""
+    e = kern.einstellungen.alle()
+    if not (e.get("internet_recherche_erlaubt") and e.get("auftragssuche_taeglich")):
+        return None
+    if kern.register.hole("akquise") is None:
+        return None
+    grenze = (datetime.datetime.now().astimezone()
+              - datetime.timedelta(hours=AUFTRAGSSUCHE_ABSTAND_STUNDEN)).isoformat(timespec="seconds")
+    if kern.db.eins("SELECT id FROM aufgaben WHERE typ='ausschreibungen_suchen' AND "
+                    "(erstellt >= ? OR status IN ('geplant','bereit','laufend'))", (grenze,)):
+        return None
+    if kern.db.eins("SELECT id FROM suchlaeufe WHERE zeit >= ?", (grenze,)):
+        return None
+    aid = kern.aufgaben.anlegen("Tägliche Suche nach Ausschreibungen", "ausschreibungen_suchen", "akquise",
+                                "zeitplan", {}, 3, max_versuche=2)
+    kern.protokoll.info("zeitplan", "Tägliche Ausschreibungssuche angelegt", {"aufgabe": aid})
+    return aid
+
+
+def taegliche_auftragssuche(kern, stopp):
+    """Prüft einmal pro Stunde, ob die tägliche Ausschreibungssuche fällig ist."""
+    while not stopp.is_set():
+        try:
+            auftragssuche_anstossen(kern)
+        except Exception as fehler:
+            kern.protokoll.fehler("zeitplan", "Ausschreibungssuche konnte nicht angelegt werden", str(fehler))
+        stopp.wait(3600)
+
+
 def hintergrund(kern):
     stopp = threading.Event()
-    t = threading.Thread(target=taegliche_sicherung, args=(kern, stopp), daemon=True)
-    t.start()
+    for ziel in (taegliche_sicherung, taegliche_auftragssuche):
+        threading.Thread(target=ziel, args=(kern, stopp), daemon=True).start()
     return stopp

@@ -4,7 +4,10 @@
 Arbeitet deterministisch aus echten Daten. Erfindet keine Ergebnisse: alles im Plan stammt aus
 der Datenbank; Empfehlungen werden als VORSCHLAG gespeichert, Entscheidungen trifft der Eigentümer."""
 
+import datetime
+
 from . import Agent
+from ..auftraege import PASSEND_AB, datum_deutsch, tage_bis
 from ..wallet import euro
 
 
@@ -57,6 +60,25 @@ class CeoAgent(Agent):
             if a["id"] != aufgabe["id"]:
                 punkte.append({"prio": min(5, a["prioritaet"] + 1), "art": "Aufgabe",
                                "text": "%s (%s)" % (a["titel"], a["verantwortlich"]), "bezug": a["id"]})
+        # Ausschreibungen: Fristen der vorgemerkten oder vorbereiteten (aus der Datenbank, nichts geschätzt)
+        heute = aufgabe["erstellt"][:10]
+        for a in k.db.alle("SELECT id, titel, vergabestelle, frist, status FROM ausschreibungen WHERE status IN "
+                           "('interessant','vorbereitet') AND frist IS NOT NULL AND substr(frist,1,10) >= ? "
+                           "ORDER BY frist LIMIT 20", (heute,)):
+            tage = tage_bis(a["frist"], datetime.date.fromisoformat(heute))
+            if tage is None or tage > 14:
+                continue
+            punkte.append({"prio": 1 if tage <= 3 else 2, "art": "Ausschreibung",
+                           "text": "Frist in %d Tag(en) (%s): %s%s – %s" % (
+                               tage, datum_deutsch(a["frist"]), a["titel"][:120],
+                               " · " + a["vergabestelle"][:60] if a["vergabestelle"] else "",
+                               "Mappe liegt bereit" if a["status"] == "vorbereitet" else "Mappe vorbereiten"),
+                           "bezug": a["id"]})
+        neue = k.db.wert("SELECT COUNT(*) FROM ausschreibungen WHERE status='neu' AND punkte >= ? AND "
+                         "(frist IS NULL OR substr(frist,1,10) >= ?)", (PASSEND_AB, heute))
+        if neue:
+            punkte.append({"prio": 3, "art": "Ausschreibung", "text": "%d neue passende Ausschreibung(en) ansehen und "
+                           "als interessant oder abgelehnt markieren" % neue, "bezug": None})
         for kt in k.db.alle("SELECT id, firma, naechster_schritt FROM kontakte WHERE naechster_schritt IS NOT NULL "
                             "AND naechster_schritt != '' AND status NOT IN ('gewonnen','verloren') LIMIT 20"):
             punkte.append({"prio": 3, "art": "Vertrieb", "text": "%s: %s" % (kt["firma"], kt["naechster_schritt"]),
