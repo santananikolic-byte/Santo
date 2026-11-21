@@ -20,6 +20,14 @@ class AnbieterFehler(Exception):
     pass
 
 
+class _KeineUmleitung(urllib.request.HTTPRedirectHandler):
+    """Ollama leitet nie um. Eine Umleitung würde Anfragen (mit Marktdaten) an einen anderen Ort schicken –
+    darum wird sie nicht befolgt, sondern als Fehler behandelt."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
 def lokale_adresse_ok(adresse):
     """Nur http://127.0.0.1|localhost|[::1]:PORT – ohne Pfad, Anfrage, Benutzer oder Passwort."""
     if not isinstance(adresse, str) or len(adresse) > 60:
@@ -69,8 +77,8 @@ class OllamaAnbieter(Anbieter):
 
     @staticmethod
     def _oeffner():
-        # Kein Proxy: das Modell läuft auf diesem Rechner, Daten verlassen ihn nicht
-        return urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        # Kein Proxy und keine Umleitung: das Modell läuft auf diesem Rechner, Daten verlassen ihn nicht
+        return urllib.request.build_opener(urllib.request.ProxyHandler({}), _KeineUmleitung())
 
     def _lesen(self, anfrage, zeitlimit):
         with self._oeffner().open(anfrage, timeout=zeitlimit) as a:

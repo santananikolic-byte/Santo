@@ -12,7 +12,10 @@ GRUNDREGELN = (
 
 
 def _daten(objekt):
-    return "<daten>\n%s\n</daten>" % json.dumps(objekt, ensure_ascii=False, indent=1)[:12000]
+    # Spitze Klammern in Fremddaten werden maskiert (gültiges JSON bleibt) – ein „</daten>“ in einem
+    # Firmennamen kann die Datenmarkierung so nicht beenden.
+    text = json.dumps(objekt, ensure_ascii=False, indent=1)[:12000]
+    return "<daten>\n%s\n</daten>" % text.replace("<", "\\u003c").replace(">", "\\u003e")
 
 
 def marktbericht_zusammenfassung(kennzahlen):

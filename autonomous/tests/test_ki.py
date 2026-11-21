@@ -148,14 +148,18 @@ class TestHaertung(KiTest):
     """Befunde der Sicherheitsprüfung (securitymaxxing:llm) – Kontrollen im Code, nicht im Prompt."""
 
     def test_keine_umleitung_weg_vom_lokalen_modell(self):
+        """Ein Dienst auf dem Modell-Port darf Anfragen nicht woandershin umleiten (ein zweiter Server
+        zeichnet jeden Zugriff auf – er darf keinen sehen)."""
         from autonomous.modell import ModellNichtVerfuegbar
-        with ErsatzOllama(umleiten="http://angreifer.example/abgreifen") as o:
+        with ErsatzOllama() as ziel, ErsatzOllama(umleiten=None) as o:
+            o.umleiten = ziel.adresse + "/api/tags"
             self.ollama_einstellen(o.adresse)
             st = self.kern.modell.pruefen()
             with self.assertRaises(ModellNichtVerfuegbar):
                 self.kern.modell.frage("geheimer Marktbericht", "research")
         self.assertIs(st["erreichbar"], False)
-        self.assertEqual(len(o.anfragen), 2)  # je ein Versuch, keiner folgt der Umleitung
+        self.assertEqual(ziel.anfragen, [])   # niemand ist der Umleitung gefolgt
+        self.assertEqual(len(o.anfragen), 2)
 
     def test_daten_koennen_die_markierung_nicht_verlassen(self):
         from autonomous.ki import vorlagen

@@ -1,3 +1,7 @@
 Echte, öffentliche Antworten der drei Quellen vom 21.11.2026 (TED-Schnittstelle, RSS von service.bund.de,
 Startseite des Vergabemarktplatzes NRW). Nur für Tests – die Agenten laden im Betrieb immer frisch.
 Bei TED wurden die Sprach-Links entfernt (Platz).
+
+ted_markt_cn.json / ted_markt_can.json: echte TED-Antworten vom 21.11.2026 für den Marktbericht
+(Ausschreibungen bzw. Zuschläge Reinigung NRW, je 60 Bekanntmachungen der ersten Seite; Gesamtzahlen 473 und 269
+unverändert aus der Antwort). Sprach-Links entfernt, Titel nur deutsch/englisch (Platz).

@@ -26,6 +26,7 @@ from ..db import jetzt, neue_id
 from ..ki import vorlagen
 from ..modell import ModellNichtVerfuegbar
 from ..produkte import datei_schreiben, esc, sicherer_pfad
+from ..protokoll import sieht_nach_geheimnis_aus
 
 STANDARD_GEWICHTE = {"nachfrage": 2, "kundenproblem": 2, "erreichbarkeit": 3, "wettbewerb": 1,
                      "differenzierung": 1, "entwicklungsaufwand": 2, "direkte_kosten": 1, "verkaufspreis": 2,
@@ -181,11 +182,11 @@ class ResearchAgent(Agent):
             "nachfrage": _nicht_verfuegbar("Ausschreibungen", fehler.get("ausschreibungen")) if cn_gesamt is None
             else dict(nachfrage_auswerten(cn), beleg="gezählt",
                       grundlage="Ausgewertet: %d von %d EU-weiten Ausschreibungen laut TED im Zeitraum %s bis %s "
-                                "(Abfrage siehe Quellen)." % (len(cn), cn_gesamt, start.isoformat(), heute.isoformat())),
+                                "(Abfrage siehe Quellen)." % (len(cn), cn_gesamt, _datum_de(start.isoformat()), _datum_de(heute.isoformat()))),
             "wettbewerber": _nicht_verfuegbar("Zuschläge", fehler.get("zuschlaege")) if can_gesamt is None
             else dict(zuschlaege_auswerten(can), verfuegbar=True, beleg="gezählt",
                       grundlage="Ausgewertet: %d von %d Zuschlagsbekanntmachungen laut TED im Zeitraum %s bis %s."
-                                % (len(can), can_gesamt, start.isoformat(), heute.isoformat())),
+                                % (len(can), can_gesamt, _datum_de(start.isoformat()), _datum_de(heute.isoformat()))),
             "zielgruppen": dict(zielgruppen_auswerten(cn + can), beleg="gezählt",
                                 grundlage="Auftraggeber aus %d ausgewerteten TED-Bekanntmachungen (je Bekanntmachung "
                                           "einmal gezählt)." % len(cn + can)),
@@ -194,7 +195,7 @@ class ResearchAgent(Agent):
                                             "einmal gezählt)." % len(cn)),
             "gesammelt": dict(gesammelt_auswerten(k, start), beleg="gezählt",
                               grundlage="Vom Akquise-Agenten gesammelte Ausschreibungen (TED, service.bund.de, "
-                                        "Vergabemarktplatz NRW), gefunden seit %s." % start.isoformat()),
+                                        "Vergabemarktplatz NRW), gefunden seit %s." % _datum_de(start.isoformat())),
         }
         w = abschnitte["wettbewerber"]
         kennzahlen = {
@@ -274,6 +275,11 @@ class ResearchAgent(Agent):
                                               aufgabe_id=aufgabe["id"], max_zeichen=2000)
         except ModellNichtVerfuegbar as f:
             return None, "KI-Zusammenfassung nicht möglich: %s – der Bericht ist ohne sie vollständig." % f
+        if sieht_nach_geheimnis_aus(g["text"]):
+            # Lieber ohne Zusammenfassung als ein abgelehnter Bericht: Modelltext ist nicht vertrauenswürdig
+            k.protokoll.warnung("research", "KI-Zusammenfassung verworfen (Muster wie Passwort/Schlüssel)")
+            return None, ("KI-Zusammenfassung verworfen: Der Text enthielt ein Muster wie ein Passwort oder einen "
+                          "Schlüssel. Der Bericht ist ohne sie vollständig.")
         return g, "KI-Zusammenfassung vom lokalen Modell – ungeprüft, nur als Lesehilfe."
 
 
@@ -510,6 +516,8 @@ _CSS = (
     ".annahme{background:#fffbeb;border:1px solid #fcd34d;border-radius:12px;padding:12px 16px}"
     ".ki{background:#f5f3ff;border:2px dashed #7c3aed;border-radius:12px;padding:12px 16px}"
     ".quelle{font-size:.88rem;word-break:break-all}.tabelle{overflow-x:auto}"
+    "@media (max-width:520px){.wrap{padding:16px}th,td{padding:6px 4px}.balken{min-width:36px}"
+    ".kachel b{font-size:1.3rem}}"
     "@media print{.kopf{background:none;color:#000}}"
 )
 
@@ -526,6 +534,25 @@ def _tabelle(zeilen, kopf_links, kopf_rechts="Anzahl", mit_balken=True):
         teile.append('<tr><td>%s</td><td class="zahl">%s</td>%s</tr>' % (esc(name), esc(zahl), balken))
     teile.append("</tbody></table></div>")
     return "".join(teile)
+
+
+def _zahl(wert):
+    """Deutsche Schreibweise: 8.0 → „8“, 31.5 → „31,5“, None → „–“."""
+    if wert is None:
+        return "–"
+    if isinstance(wert, float):
+        return ("%d" % wert) if wert == int(wert) else ("%.1f" % wert).replace(".", ",")
+    return str(wert)
+
+
+def _datum_de(iso):
+    s = str(iso or "")
+    return "%s.%s.%s" % (s[8:10], s[5:7], s[0:4]) if re.match(r"\d{4}-\d{2}-\d{2}", s) else s
+
+
+def _monat_de(jjjj_mm):
+    s = str(jjjj_mm)
+    return "%s/%s" % (s[5:7], s[0:4]) if re.match(r"\d{4}-\d{2}$", s) else s
 
 
 def _euro(wert):
@@ -547,8 +574,9 @@ def bericht_html(d):
          '<title>Marktbericht Reinigung – %s</title><style>%s</style></head><body>' % (esc(d["bis"]), _CSS),
          '<div class="kopf"><div class="wrap"><div class="leise" style="color:#cbd5e1">AUTONOMOUS · Research-Agent'
          '</div><h1>Marktbericht Reinigung (öffentliche Auftraggeber)</h1><div>Zeitraum %s bis %s · Region %s · '
-         'abgerufen %s</div></div></div><div class="wrap">'
-         % (esc(d["von"]), esc(d["bis"]), esc(", ".join(d["region_nuts"])), esc(d["abgerufen"][:16].replace("T", " ")))]
+         'abgerufen %s um %s Uhr</div></div></div><div class="wrap">'
+         % (esc(_datum_de(d["von"])), esc(_datum_de(d["bis"])), esc(", ".join(d["region_nuts"])),
+            esc(_datum_de(d["abgerufen"][:10])), esc(d["abgerufen"][11:16]))]
     t.append('<p class="leise">Alle Zahlen sind aus amtlichen Daten <b>gezählt</b> und mit Quelle belegt. '
              'Deutungen stehen getrennt unter „Annahmen“. Keine Rechts- oder Steuerberatung.</p>')
     t.append('<div class="kacheln">')
@@ -558,8 +586,7 @@ def bericht_html(d):
                         ("Angebote je Los (Median)", kz.get("angebote_je_los_median")),
                         ("Angebotsfrist (Median, Tage)", kz.get("angebotsfrist_median_tage")),
                         ("Gesammelte Ausschreibungen", kz.get("gesammelte_ausschreibungen"))):
-        t.append('<div class="kachel"><span class="leise">%s</span><b>%s</b></div>'
-                 % (esc(titel), esc("–" if wert is None else wert)))
+        t.append('<div class="kachel"><span class="leise">%s</span><b>%s</b></div>' % (esc(titel), esc(_zahl(wert))))
     t.append("</div>")
     if d.get("ki_zusammenfassung"):
         ki = d["ki_zusammenfassung"]
@@ -571,12 +598,12 @@ def bericht_html(d):
     n = ab["nachfrage"]
     t.append("<h2>1. Nachfrage</h2>%s<p class=\"leise\">%s</p>" % (_beleg(n), esc(n.get("grundlage") or n.get("meldung"))))
     if n.get("beleg") == "gezählt":
-        t.append("<h3>Ausschreibungen je Monat</h3>" + _tabelle(list(n["nach_monat"].items()), "Monat"))
+        t.append("<h3>Ausschreibungen je Monat</h3>" + _tabelle(
+            [(_monat_de(m), a) for m, a in n["nach_monat"].items()], "Monat"))
         t.append("<h3>Nach Regierungsbezirk</h3>" + _tabelle(list(n["nach_region"].items()), "Region"))
         t.append("<h3>Verfahrensart</h3>" + _tabelle(list(n["verfahren"].items()), "Verfahren"))
         t.append('<p>Angebotsfrist im Median: <b>%s Tage</b> (aus %d Ausschreibungen mit Frist).</p>'
-                 % (esc(n.get("angebotsfrist_median_tage") if n.get("angebotsfrist_median_tage") is not None else "–"),
-                    n.get("angebotsfrist_anzahl", 0)))
+                 % (esc(_zahl(n.get("angebotsfrist_median_tage"))), n.get("angebotsfrist_anzahl", 0)))
 
     w = ab["wettbewerber"]
     t.append("<h2>2. Wettbewerber (Zuschläge)</h2>%s<p class=\"leise\">%s</p>"
@@ -589,7 +616,7 @@ def bericht_html(d):
              for g, a in w["groessen"].items()], "Größe"))
         al = w["angebote_je_los"]
         t.append("<h3>Angebote je Los</h3><p>Median: <b>%s</b> (aus %d Losen mit Angabe).</p>"
-                 % (esc("–" if al["median"] is None else al["median"]), al["lose_mit_angabe"]) +
+                 % (esc(_zahl(al["median"])), al["lose_mit_angabe"]) +
                  _tabelle(list(al["verteilung"].items()), "Angebote je Los", "Lose"))
         wt = w["werte"]
         t.append("<h3>Auftragswerte</h3><p>Veröffentlicht: <b>%d</b> · nicht veröffentlicht (Platzhalter oder "
@@ -622,7 +649,8 @@ def bericht_html(d):
     for q in d["quellen"]:
         b = q.get("bewertung") or {}
         t.append('<div class="quelle"><p><b>%s</b><br>%s<br>Abgerufen: %s · Quellenbewertung: %s</p><ul>%s</ul>%s</div>'
-                 % (esc(q["titel"]), esc(q["url"]), esc(q["abgerufen"][:16].replace("T", " ")), esc(b.get("stufe", "–")),
+                 % (esc(q["titel"]), esc(q["url"]), esc("%s um %s Uhr" % (_datum_de(q["abgerufen"][:10]),
+                                                                        q["abgerufen"][11:16])), esc(b.get("stufe", "–")),
                     "".join("<li>Abfrage: <code>%s</code></li>" % esc(x) for x in q.get("abfragen") or []),
                     '<p class="leise">Fehler: %s</p>' % esc("; ".join(q["fehler"].values())) if q.get("fehler") else ""))
     t.append('<p class="leise">Erstellt von AUTONOMOUS (lokal). Bericht-ID %s.</p></div></body></html>'
