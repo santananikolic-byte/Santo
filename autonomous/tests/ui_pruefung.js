@@ -40,6 +40,7 @@ const OPTIONALE_ROUTEN = /\/api\/(produkte|kontakte|angebote|vertrieb|rueckmeldu
 // Nur genau diese Kombination aus Status und Route – alles andere bleibt ein Fehler.
 const ERWARTETE_ABLEHNUNGEN = [
   { status: 400, route: /\/api\/ausschreibungen\/suchen$/, grund: 'Suche bei ausgeschalteter Internet-Recherche' },
+  { status: 400, route: /\/api\/research\/marktbericht$/, grund: 'Marktbericht bei ausgeschalteter Internet-Recherche' },
 ];
 
 const fehler = [];
@@ -506,8 +507,13 @@ async function neueFunktionenPruefen(seite) {
     return w.stundensatz_cent === 3850 ? w : null;
   }, 10);
   pruefe(!!satzGespeichert, 'Einstellungen: Stundensatz 38,50 € nicht gespeichert');
-  const fokusNach = await seite.evaluate(() => (document.activeElement && document.activeElement.tagName) || '');
-  pruefe(fokusNach !== 'BODY', 'Tastatur: Fokus geht nach dem Speichern verloren (liegt auf ' + fokusNach + ')');
+  // Nach dem Neuaufbau soll der Fokus in der Karte stehen, in der gespeichert wurde – nicht auf der ganzen Seite
+  const fokusOk = await seite.waitForFunction(() => {
+    const a = document.activeElement;
+    return a && a !== document.body && !!a.closest('[data-pruef="stundensatz-karte"]');
+  }, null, { timeout: 5000 }).then(() => true, () => false);
+  const fokusNach = await seite.evaluate(() => (document.activeElement && (document.activeElement.tagName + ' ' + (document.activeElement.textContent || '').slice(0, 40))) || '');
+  pruefe(fokusOk, 'Tastatur: Fokus geht nach dem Speichern verloren (liegt auf ' + fokusNach + ')');
   await seite.fill(sf + ' input[name="stundensatz"]', '');
   await seite.click('[data-pruef="stundensatz-formular-speichern"]');
   const satzOffen = await warteAuf(seite, 'Stundensatz lässt sich nicht wieder auf offen setzen', async () => {
@@ -570,8 +576,14 @@ async function neueFunktionenPruefen(seite) {
     return el && /Preis offen/.test(el.textContent);
   }, null, { timeout: 25000 }).then(() => true, () => false);
   pruefe(offen, 'Kalkulation: ohne Stundensatz wird nicht „Preis offen“ angezeigt');
-  const offenZahl = await seite.$$eval('[data-pruef="kalk-ergebnis"][open]', els => (els[0] ? (els[0].textContent.match(/offen/gi) || []).length : -1));
-  pruefe(offenZahl >= 1 && offenZahl <= 2, 'Kalkulation: „offen“ steht ' + offenZahl + '-mal im Ergebnis (soll einmal deutlich stehen)');
+  // Was die Oberfläche selbst zeigt (ohne den Rechenweg und die Hinweise des Agenten): „offen“ genau einmal
+  const offenZahl = await seite.$$eval('[data-pruef="kalk-ergebnis"][open]', els => {
+    if (!els[0]) return -1;
+    const kopie = els[0].querySelector('.kalk-ergebnis').cloneNode(true);
+    kopie.querySelectorAll('.rechenweg, [data-pruef="kalk-warnungen"], details, h4').forEach(x => x.remove());
+    return (kopie.textContent.match(/offen/gi) || []).length;
+  });
+  pruefe(offenZahl === 1, 'Kalkulation: „offen“ steht ' + offenZahl + '-mal in der Anzeige (soll einmal deutlich stehen)');
   pruefe(/10 h/.test((await seite.textContent('[data-pruef="kalk-ergebnis"]')) || ''), 'Kalkulation: Stunden (8 h + 2 h Anfahrt = 10 h) fehlen');
   // Die Eingaben bleiben nach dem Neuaufbau stehen; jetzt mit Stundensatz
   if (!(await seite.isVisible(kf + ' input[name="stundensatz"]'))) await seite.click('[data-schluessel="kalkulation-neu"] > summary');
@@ -606,6 +618,9 @@ async function neueFunktionenPruefen(seite) {
   await bereichOeffnen(seite, 'vertrieb');
   if (!(await seite.isVisible(kf + ' [data-feld="flaeche"]'))) await seite.click('[data-schluessel="kalkulation-neu"] > summary');
   const kalkVorher = ((await api(seite, 'GET', '/api/aufgaben?rolle=finance')).inhalt.aufgaben || []).length;
+  await seite.fill(kf + ' [data-feld="bezeichnung"]', 'Treppenhaus');
+  await seite.fill(kf + ' [data-feld="leistung"]', '200');
+  await seite.fill(kf + ' [data-feld="anzahl"]', '4');
   await seite.fill(kf + ' [data-feld="flaeche"]', 'vierhundert');
   await seite.click('[data-pruef="kalkulation-absenden"]');
   await seite.waitForTimeout(600);
@@ -632,9 +647,9 @@ async function neueFunktionenPruefen(seite) {
   // --- Sprungleiste: Knopf bringt die Karte nach oben (keine #-Links) ----------------------
   await bereichOeffnen(seite, 'vertrieb');
   pruefe(await seite.isVisible('[data-pruef="sprungleiste"]'), 'Vertrieb: Sprungleiste fehlt');
-  await seite.click('[data-sprung-zu="rueckmeldungen"]');
+  await seite.click('[data-sprung-zu="kalkulation"]');
   await seite.waitForTimeout(400);
-  const lageZiel = await seite.$eval('[data-sprung="rueckmeldungen"]', el => Math.round(el.getBoundingClientRect().top));
+  const lageZiel = await seite.$eval('[data-sprung="kalkulation"]', el => Math.round(el.getBoundingClientRect().top));
   pruefe(lageZiel >= 0 && lageZiel < 200, 'Vertrieb: Sprungleiste springt nicht zur Karte (oben bei ' + lageZiel + ' px)');
   pruefe((await seite.evaluate(() => location.hash)) === '#vertrieb', 'Vertrieb: Sprungleiste verändert die Adresse');
 

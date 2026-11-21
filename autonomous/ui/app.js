@@ -1227,10 +1227,11 @@
 
     const kennzahlen = k => kv(Object.keys(k || {}).map(n => [MARKT_KENNZAHL[n] || schluesselText(n), typeof k[n] === 'number' ? zahl(k[n]) : String(k[n])]));
     return h('section', { class: 'karte', 'data-pruef': 'marktbericht' },
-      h('h2', null, titel, tag(zahl(berichte.length) + ' Berichte', 'grau')),
+      h('h2', null, titel, tag(zahl(berichte.length) + (berichte.length === 1 ? ' Bericht' : ' Berichte'), 'grau')),
       h('p', { class: 'hilfe' }, 'Der Research-Agent wertet amtliche Daten aus: EU-Ausschreibungen und Zuschläge (TED) und eure gesammelten Ausschreibungen. '
         + 'Jede Zahl mit Quelle; Annahmen sind gekennzeichnet. Ist ein lokales KI-Modell eingestellt, kommt eine gekennzeichnete, ungeprüfte KI-Zusammenfassung dazu.'),
       einschalten,
+      einschalten ? h('div', { class: 'trenner' }) : null,
       form,
       inArbeitListe.length
         ? h('p', { 'data-pruef': 'marktbericht-laeuft' }, tag('Marktbericht wird erstellt …', 'blau'), ' Das kann eine Minute dauern – die Liste aktualisiert sich von selbst.')
