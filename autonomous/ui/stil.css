@@ -786,3 +786,23 @@ progress.ueber::-moz-progress-bar { background: var(--err); }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
 }
+
+/* Vertrieb: Auftrags-Radar, Kalkulation, Rückmeldungen */
+.frist-zeile { margin: 8px 0 4px; }
+.frist-zeile .tag { white-space: normal; }
+.filter-schalter { align-items: center; align-self: end; }
+.positionen { display: grid; gap: 10px; }
+.positionszeile {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-s);
+  min-width: 0;
+}
+.positionszeile-kopf { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-weight: 650; }
+.kalk-ergebnis { display: grid; gap: 10px; margin-top: 8px; min-width: 0; }
+.kalk-ergebnis .raster { margin-bottom: 0; }
+.rechenweg { margin: 0; padding-left: 22px; display: grid; gap: 4px; font-size: 14px; overflow-wrap: anywhere; }
+.kachel .kachel-link { margin-top: 8px; }

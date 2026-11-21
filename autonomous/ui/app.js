@@ -209,6 +209,33 @@
   const EBENEN = [['', 'Alle Ebenen'], ['info', 'Info'], ['warnung', 'Warnung'], ['fehler', 'Fehler'], ['kritisch', 'Kritisch'], ['audit', 'Audit (Prüfspur)']];
   const EBENE_TON = { info: 'grau', warnung: 'warn', fehler: 'fehler', kritisch: 'fehler', audit: 'akzent' };
   const CEO_KNOPF = { tagesplan: 'Tagesplan erstellen', kennzahlen: 'Kennzahlen berechnen', chancen_bewerten: 'Geschäftschancen bewerten' };
+  const AUSSCHREIBUNG_STATUS = {
+    neu: 'Neu', interessant: 'Interessant', abgelehnt: 'Abgelehnt', vorbereitet: 'Mappe vorbereitet',
+    abgegeben: 'Angebot abgegeben', gewonnen: 'Gewonnen', verloren: 'Verloren',
+  };
+  const AUSSCHREIBUNG_TON = {
+    neu: 'grau', interessant: 'akzent', abgelehnt: 'grau', vorbereitet: 'blau', abgegeben: 'warn', gewonnen: 'ok', verloren: 'grau',
+  };
+  const AUSSCHREIBUNG_SCHRITT = 20;
+  const SUCHLAUF_TEXT = { ok: 'ok', fehler: 'Fehler', gesperrt: 'gesperrt' };
+  const SUCHLAUF_TON = { ok: 'ok', fehler: 'fehler', gesperrt: 'warn' };
+  const NACHRICHT_ANGEBOT = [
+    ['google_profil', 'Google-Profil-Paket (Standard)'], ['webseite', 'Webseite'], ['reinigung', 'Reinigung (fester Auftrag)'],
+  ];
+  // Anzeigetexte für Rückmeldungen – maßgeblich sind die Listen, die das Backend liefert
+  const REAKTION_TEXT = { interessiert: 'interessiert', neutral: 'neutral / unentschieden', abgelehnt: 'abgelehnt', keine_antwort: 'keine Antwort' };
+  const REAKTION_TON = { interessiert: 'ok', neutral: 'grau', abgelehnt: 'fehler', keine_antwort: 'grau' };
+  const GRUND_BEI = ['abgelehnt', 'neutral']; // laut Backend: nur bei diesen Reaktionen ist ein Grund erlaubt
+  const GRUND_TEXT = {
+    preis: 'Preis zu hoch', kein_bedarf: 'kein Bedarf', spaeter: 'später wieder melden', hat_anbieter: 'hat schon einen Anbieter',
+    vertrauen: 'kennt uns noch nicht / Vertrauen fehlt', leistung_unklar: 'Leistung unklar', sonstiges: 'Sonstiges',
+  };
+  const KANAL_TEXT = {
+    gespraech: 'persönliches Gespräch', telefon: 'Telefon', brief: 'Brief', email: 'E-Mail', vor_ort: 'vor Ort', sonstiges: 'Sonstiges',
+  };
+  const ANGEBOTSART_TEXT = {
+    google_profil: 'Google-Profil-Paket', webseite: 'Webseiten-Paket', reinigung: 'Reinigung (fester Auftrag)', sonstiges: 'Sonstiges',
+  };
 
   const SCHLUESSEL_TEXT = {
     einnahmen_verifiziert: 'Einnahmen (verifiziert, REAL)',
@@ -318,6 +345,10 @@
     filter: { status: '', rolle: '' },
     protokollEbene: '',
     gedaechtnisArt: '',
+    ausschreibungFilter: { status: '', min: '60', alle: false },
+    ausschreibungAnzahl: AUSSCHREIBUNG_SCHRITT,
+    kalkPositionen: 1,
+    kalkOffen: null,
   };
 
   function merkeAgenten(liste) {
@@ -521,6 +552,62 @@
   }
   function zeilen(text) {
     return String(text || '').split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+  }
+  /** Zahl wie „400“, „12,5“ oder „1.000“ (Tausenderpunkt) in eine eindeutige Form „1000“ / „12.5“ bringen. */
+  function zahlNormal(text) {
+    const t = String(text || '').replace(/\s/g, '');
+    if (/^\d{1,3}(\.\d{3})+(,\d+)?$/.test(t)) return t.replace(/\./g, '').replace(',', '.');
+    if (/^\d+(,\d+)?$/.test(t)) return t.replace(',', '.');
+    if (/^\d+\.\d+$/.test(t)) return t;
+    return null;
+  }
+  function zahlPflicht(text, name) {
+    const n = zahlNormal(text);
+    if (n === null) throw new ApiFehler(0, (name || 'Zahl') + ': bitte eine Zahl eingeben, z. B. 12,5.');
+    return n;
+  }
+  /** Liste aus Text: getrennt durch Komma, Semikolon oder Zeilenumbruch; doppelte Einträge entfallen. */
+  function listeAus(text, klein) {
+    const teile = String(text || '').split(/[,;\n]+/).map(x => x.trim()).filter(Boolean).map(x => klein ? x.toLowerCase() : x);
+    return teile.filter((x, i) => teile.indexOf(x) === i);
+  }
+  /** Cent als Eingabetext „35,00“. */
+  function euroEingabe(cent) {
+    return typeof cent === 'number' && isFinite(cent) ? (cent / 100).toFixed(2).replace('.', ',') : '';
+  }
+  /** Frist „2026-12-08 12:00“ als „08.12.2026, 12:00 Uhr“. */
+  function fristText(frist) {
+    const m = /^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}):(\d{2}))?/.exec(String(frist || ''));
+    if (!m) return String(frist || '—');
+    return m[3] + '.' + m[2] + '.' + m[1] + (m[4] ? ', ' + m[4] + ':' + m[5] + ' Uhr' : '');
+  }
+  function tageText(t) {
+    if (typeof t !== 'number' || !isFinite(t)) return '';
+    if (t < 0) return 'abgelaufen';
+    if (t === 0) return 'heute';
+    return t === 1 ? 'noch 1 Tag' : 'noch ' + t + ' Tage';
+  }
+  /** Auswahlliste aus Backend-Werten: Texte, [id, text] oder {id, name}. */
+  function wahlListe(liste, texte) {
+    if (!Array.isArray(liste)) return [];
+    return liste.map(x => {
+      if (Array.isArray(x)) return [String(x[0]), String(x[1] !== undefined && x[1] !== null ? x[1] : x[0])];
+      if (x && typeof x === 'object') {
+        const id = x.id || x.wert || x.name;
+        return [String(id), String(x.text || x.titel || x.name || (texte && texte[id]) || id)];
+      }
+      return [String(x), (texte && texte[x]) || String(x).replace(/_/g, ' ')];
+    }).filter(o => o[0] && o[0] !== 'undefined');
+  }
+  /** Auf das Ende einer Aufgabe warten (für kurze Aufträge wie eine Kalkulation). */
+  async function aufgabeAbwarten(id, sekunden) {
+    const ende = Date.now() + (sekunden || 15) * 1000;
+    while (Date.now() < ende) {
+      const a = await API.get('/api/aufgaben/' + enc(id));
+      if (ENDSTATUS.includes(a.status) || a.status === 'wartet_auf_freigabe') return a;
+      await new Promise(r => setTimeout(r, 500));
+    }
+    return null;
   }
 
   function aktionsKnopf(text, klasse, aktion, attrs) {
@@ -789,7 +876,7 @@
   // Bereich: Dashboard
   // ===========================================================================
   async function ansichtDashboard(z) {
-    const d = await API.get('/api/dashboard');
+    const [d, aus] = await Promise.all([API.get('/api/dashboard'), optional('/api/ausschreibungen?min_punkte=60')]);
     const s = d.status || {};
     aktualisiereKopfMit(s);
     const freigaben = d.offene_freigaben || [];
@@ -816,7 +903,8 @@
         s.letzte_sicherung ? sicherungText(s.letzte_sicherung) + ' · täglich, solange das System läuft' : 'täglich, solange das System läuft'),
       kachel('Modell', (modell.anbieter_info && modell.anbieter_info.name) || modell.anbieter || '—', '',
         modell.verfuegbar ? (zahl(modell.aufrufe_heute) + ' von ' + zahl(modell.limit_tag) + ' Aufrufen heute') : 'Kernfunktionen arbeiten ohne Modell'),
-      kachel('Laufzeit', dauerText(s.laufzeit_sekunden), '', 'Version ' + (s.version || '?') + ' · ' + zahl(s.agenten) + ' Agentenrollen')));
+      kachel('Laufzeit', dauerText(s.laufzeit_sekunden), '', 'Version ' + (s.version || '?') + ' · ' + zahl(s.agenten) + ' Agentenrollen'),
+      ausschreibungKachel(aus)));
 
     z.append(karte('Aufgaben nach Status', statusChips(s.aufgaben),
       h('div', { class: 'knopfreihe' }, h('a', { href: '#aufgaben', class: 'knopf zweit klein' }, 'Zu den Aufgaben'))));
@@ -851,6 +939,25 @@
           ['Offene Forderungen', (f.offene_forderungen || euro(f.offene_forderungen_cent)) + ' (noch kein Geld)'],
         ]),
         h('a', { href: '#finanzen', class: 'knopf zweit klein' }, 'Zu den Finanzen'))));
+  }
+
+  /** Kachel aus echten Daten des Auftrags-Radars: neue passende Ausschreibungen und nächste Frist. */
+  function ausschreibungKachel(aus) {
+    if (!aus || aus.fehlt) return kachel('Ausschreibungen', 'nicht verfügbar', '', 'Das Auftrags-Radar ist in dieser Version nicht eingebaut.', 'ausschreibungen-kachel');
+    const liste = aus.ausschreibungen || [];
+    const neu = liste.filter(a => a.status === 'neu').length;
+    const offen = liste.filter(a => ['neu', 'interessant', 'vorbereitet'].includes(a.status) && a.frist
+      && typeof a.tage_bis_frist === 'number' && a.tage_bis_frist >= 0)
+      .sort((x, y) => String(x.frist).localeCompare(String(y.frist)));
+    const naechste = offen[0];
+    const recherche = !!(aus.einstellungen && aus.einstellungen.internet_recherche_erlaubt);
+    const zusatz = 'neu und passend (ab 60 Punkten) · '
+      + (naechste ? 'nächste Frist ' + fristText(naechste.frist) + ' (' + tageText(naechste.tage_bis_frist) + ')' : 'keine offene Frist')
+      + (recherche ? '' : ' · Internet-Recherche aus');
+    const ton = naechste && naechste.tage_bis_frist <= 3 ? 'fehler' : (neu ? 'warn' : '');
+    const k = kachel('Ausschreibungen', zahl(neu), ton, zusatz, 'ausschreibungen-kachel');
+    k.append(h('a', { href: '#vertrieb', class: 'knopf zweit klein kachel-link' }, 'Ansehen'));
+    return k;
   }
 
   // ===========================================================================
@@ -1592,9 +1699,11 @@
   };
 
   async function ansichtVertrieb(z) {
-    const [k, a, p, fg] = await Promise.all([
+    const [k, a, p, fg, aus, rm, einst, auf] = await Promise.all([
       optional('/api/kontakte'), optional('/api/angebote'), optional('/api/produkte'), API.get('/api/freigaben'),
+      optional(ausschreibungsPfad()), optional('/api/rueckmeldungen'), API.get('/api/einstellungen'), API.get('/api/aufgaben'),
     ]);
+    const aufgaben = auf.aufgaben || [];
     // Neueste Freigabe je Angebot (Ziel „angebot:<id>“), damit der Versand-Stand sichtbar ist
     const versand = {};
     (fg.freigaben || []).forEach(f => {
@@ -1606,18 +1715,24 @@
     z.append(hinweis('AUTONOMOUS versendet nichts selbst – Kundenkontakt nur nach eurer Freigabe. Werbung per E-Mail oder Telefon '
       + 'braucht in der Regel eine Einwilligung (§ 7 UWG); ohne Einwilligung lieber Brief, Besuch oder Empfehlung. '
       + 'Nur Firmendaten speichern, die ihr wirklich braucht.'));
+    z.append(aus.fehlt
+      ? nichtVerfuegbar('Öffentliche Ausschreibungen', 'Das Auftrags-Radar ist in dieser Version noch nicht eingebaut.')
+      : ausschreibungenKarte(aus, aufgaben));
     const kontakte = k.fehlt ? [] : (k.kontakte || []);
+    const rmListe = rm.fehlt ? null : rmListen(rm);
     if (k.fehlt) {
       z.append(nichtVerfuegbar('Kontakte und Kundenstatus', 'Die Vertriebs-Schnittstelle für Kontakte ist in dieser Version noch nicht eingebaut.'));
     } else {
       const stufen = normStufen(k.stufen);
-      z.append(pipelineKarte(kontakte, stufen), kontaktFormKarte(!kontakte.length), kontakteKarte(kontakte, stufen));
+      z.append(pipelineKarte(kontakte, stufen), kontaktFormKarte(!kontakte.length), kontakteKarte(kontakte, stufen, rmListe));
     }
+    z.append(kalkulationKarte(einst, aufgaben, kontakte));
     if (a.fehlt) {
       z.append(nichtVerfuegbar('Angebote', 'Die Angebots-Schnittstelle ist in dieser Version noch nicht eingebaut.'));
     } else {
       z.append(angebotFormKarte(kontakte, p.fehlt ? [] : (p.produkte || [])), angeboteKarte(a.angebote || [], kontakte, versand));
     }
+    z.append(rueckmeldungenKarte(rm, rmListe, kontakte, a.fehlt ? [] : (a.angebote || []), aufgaben));
   }
 
   function normStufen(stufen) {
@@ -1667,12 +1782,12 @@
     return h('section', { class: 'karte' }, aufklapp('Neuen Kontakt anlegen', 'kontakt-neu', offen, form));
   }
 
-  function kontakteKarte(kontakte, stufen) {
+  function kontakteKarte(kontakte, stufen, rmListe) {
     return karte('Kontakte',
-      kontakte.length ? h('ul', { class: 'liste' }, kontakte.map(kt => kontaktZeile(kt, stufen))) : leer('Noch keine Kontakte.'));
+      kontakte.length ? h('ul', { class: 'liste' }, kontakte.map(kt => kontaktZeile(kt, stufen, rmListe))) : leer('Noch keine Kontakte.'));
   }
 
-  function kontaktZeile(kt, stufen) {
+  function kontaktZeile(kt, stufen, rmListe) {
     const stufeText = (stufen.find(s => s[0] === kt.status) || [kt.status, KONTAKT_STATUS[kt.status] || kt.status])[1];
     const statusTeile = umschaltBereich('Status ändern', 'zweit klein', zu => formular(null, [
       h('div', { class: 'felder-2' },
@@ -1684,14 +1799,19 @@
       meldung('Status gespeichert.', 'ok');
       neuLaden();
     }));
-    const nachrichtTeile = umschaltBereich('Nachricht entwerfen', 'zweit klein', zu => formular(null, [
-      feld('Anlass', eingabe('anlass', { required: true, maxlength: 300, placeholder: 'z. B. Nachfassen nach dem Besuch am Montag' })),
+    const nachrichtTeile = umschaltBereich('Nachricht entwerfen', 'zweit klein', zu => formular({ 'data-pruef': 'nachricht-formular' }, [
+      h('div', { class: 'felder-2' },
+        feld('Worum geht es?', auswahl('angebot', NACHRICHT_ANGEBOT, 'google_profil')),
+        feld('Anlass', eingabe('anlass', { required: true, maxlength: 200, placeholder: 'z. B. Nachfassen nach dem Besuch am Montag' }))),
       h('p', { class: 'hilfe' }, 'Der Sales-Agent erstellt nur einen Entwurf. Versendet wird nichts ohne eure Freigabe.'),
-      h('div', { class: 'knopfreihe' }, absendeKnopf('Entwurf erstellen lassen'), abbrechenKnopf(zu)),
+      h('div', { class: 'knopfreihe' }, absendeKnopf('Entwurf erstellen lassen', { 'data-pruef': 'nachricht-absenden' }), abbrechenKnopf(zu)),
     ], async (w) => {
-      const r = await API.post('/api/vertrieb/nachricht', { kontakt_id: kt.id, anlass: w.anlass });
+      const r = await API.post('/api/vertrieb/nachricht', { kontakt_id: kt.id, anlass: w.anlass, angebot: w.angebot });
       auftragGemeldet(r, 'den Sales-Agenten');
     }));
+    const rueckTeile = rmListe
+      ? umschaltBereich('Rückmeldung erfassen', 'zweit klein', zu => rueckmeldungForm(rmListe, {}, kt, 'kontakt-rueckmeldung-formular', zu))
+      : [null, null];
     return h('li', { class: 'eintrag' },
       h('div', { class: 'eintrag-kopf' }, h('span', { class: 'eintrag-titel' }, kt.firma), tag(stufeText, KONTAKT_TON[kt.status])),
       h('div', { class: 'meta' },
@@ -1704,7 +1824,7 @@
         : [tag('keine Einwilligung', 'warn'), ' nur Brief, Besuch oder Empfehlung']),
       kt.naechster_schritt ? h('p', null, h('strong', null, 'Nächster Schritt: '), kt.naechster_schritt) : null,
       kt.notizen ? h('p', { class: 'text hilfe' }, kt.notizen) : null,
-      h('div', { class: 'knopfreihe' }, statusTeile[0], nachrichtTeile[0], statusTeile[1], nachrichtTeile[1]));
+      h('div', { class: 'knopfreihe' }, statusTeile[0], nachrichtTeile[0], rueckTeile[0], statusTeile[1], nachrichtTeile[1], rueckTeile[1]));
   }
 
   function angebotFormKarte(kontakte, produkte) {
@@ -1746,12 +1866,24 @@
   function angebotInhalt(inhalt) {
     inhalt = alsWert(inhalt);
     if (!inhalt || typeof inhalt !== 'object' || Array.isArray(inhalt)) return wertAnzeige(inhalt);
+    const monatlich = inhalt.art === 'reinigung_dauerauftrag' || inhalt.abrechnung === 'monatlich';
+    const positionen = Array.isArray(inhalt.positionen) && inhalt.positionen.length
+      ? h('ul', { class: 'mini-liste' }, inhalt.positionen.map(p => h('li', null,
+        [p.bezeichnung, typeof p.flaeche_m2 === 'number' ? p.flaeche_m2.toLocaleString('de-DE') + ' m²' : null, p.turnus].filter(Boolean).join(' · '))))
+      : null;
     return kv([
       ['Nr.', inhalt.nr],
       ['Datum', inhalt.datum ? tagText(inhalt.datum) : null],
+      ['Art', monatlich ? 'Reinigung, fester Auftrag (monatliche Pauschale)' : null],
       ['Position', inhalt.position],
+      ['Leistungsverzeichnis', positionen],
+      ['Objekt', inhalt.objekt],
       ['Leistungen', Array.isArray(inhalt.leistungen) && inhalt.leistungen.length ? wertAnzeige(inhalt.leistungen) : null],
-      ['Betrag', typeof inhalt.betrag_cent === 'number' ? euro(inhalt.betrag_cent) : null],
+      ['Betrag', typeof inhalt.betrag_cent === 'number' ? euro(inhalt.betrag_cent) + (monatlich ? ' pro Monat (netto)' : '') : null],
+      ['Preis stammt', inhalt.preis_quelle],
+      ['Vertragsbeginn', inhalt.vertragsbeginn],
+      ['Laufzeit', inhalt.laufzeit],
+      ['Kündigungsfrist', inhalt.kuendigungsfrist],
       ['Lieferzeit', inhalt.lieferzeit],
       ['Gültig bis', inhalt.gueltig_bis],
       ['Hinweis zum Preis', inhalt.preis_hinweis],
@@ -1775,7 +1907,7 @@
     })) : [null, null];
     return h('li', { class: 'eintrag', 'data-pruef': 'angebot' },
       h('div', { class: 'eintrag-kopf' }, h('span', { class: 'eintrag-titel' }, (an.inhalt && an.inhalt.titel) || an.titel || an.id),
-        h('span', { class: 'chips' }, betragCent !== null ? h('span', { class: 'betrag' }, euro(betragCent)) : null, tag(ANGEBOT_STATUS[an.status] || an.status, ANGEBOT_TON[an.status]))),
+        h('span', { class: 'chips' }, betragCent !== null ? h('span', { class: 'betrag' }, euro(betragCent) + (an.abrechnung === 'monatlich' ? ' / Monat' : '')) : null, tag(ANGEBOT_STATUS[an.status] || an.status, ANGEBOT_TON[an.status]))),
       h('div', { class: 'meta' },
         an.kontakt_id ? h('span', null, 'für ' + (an.kontakt_firma || firmen[an.kontakt_id] || an.kontakt_id)) : null,
         an.erstellt ? h('span', null, 'erstellt ' + zeitText(an.erstellt)) : null),
@@ -1800,6 +1932,457 @@
     if (f.status === 'offen') return h('p', null, tag('Versand wartet auf eure Freigabe', 'warn'));
     if (f.status === 'abgelehnt') return h('p', null, tag('Versand abgelehnt (endgültig)', 'fehler'), ' ', h('span', { class: 'hilfe' }, 'am ' + zeitText(f.entschieden_zeit)));
     return h('p', null, tag('Versand erlaubt', 'ok'), ' ', h('span', { class: 'hilfe' }, 'Was danach passiert ist, steht in der Aufgabe unter „Aufgaben“.'));
+  }
+
+  // ===========================================================================
+  // Vertrieb: Auftrags-Radar (öffentliche Ausschreibungen)
+  // ===========================================================================
+  function ausschreibungsPfad() {
+    const f = zustand.ausschreibungFilter;
+    const q = [];
+    if (f.status) q.push('status=' + enc(f.status));
+    if (f.min && f.min !== '0') q.push('min_punkte=' + enc(f.min));
+    if (f.alle) q.push('alle=1');
+    return '/api/ausschreibungen' + (q.length ? '?' + q.join('&') : '');
+  }
+
+  function punkteTag(p) {
+    const n = typeof p === 'number' ? p : 0;
+    return tag(zahl(n) + ' Punkte', n >= 80 ? 'ok' : n >= 60 ? 'akzent' : 'grau');
+  }
+
+  function fristTag(a) {
+    if (!a.frist) return tag('Frist nicht angegeben', 'grau');
+    const t = a.tage_bis_frist;
+    const ton = typeof t !== 'number' || t < 0 ? 'grau' : t <= 3 ? 'fehler' : t <= 7 ? 'warn' : 'akzent';
+    return h('span', { class: 'tag ' + ton, 'data-pruef': 'frist', 'data-tage': typeof t === 'number' ? String(t) : '' },
+      'Frist ' + fristText(a.frist) + (typeof t === 'number' ? ' – ' + tageText(t) : ''));
+  }
+
+  function ausschreibungenKarte(aus, aufgaben) {
+    const f = zustand.ausschreibungFilter;
+    const alle = aus.ausschreibungen || [];
+    const liste = f.status ? alle : alle.filter(a => a.status !== 'abgelehnt');
+    const e = aus.einstellungen || {};
+    const stufen = Array.isArray(aus.stufen) && aus.stufen.length ? aus.stufen : Object.keys(AUSSCHREIBUNG_STATUS);
+    const laufendeMappen = new Set(aufgaben
+      .filter(a => a.typ === 'ausschreibung_vorbereiten' && !ENDSTATUS.includes(a.status))
+      .map(a => a.eingabe && a.eingabe.ausschreibung_id).filter(Boolean));
+    const sucheLaeuft = aufgaben.some(a => a.typ === 'ausschreibungen_suchen' && !ENDSTATUS.includes(a.status));
+
+    const filterStatus = auswahl('filter_status', [['', 'Offen (ohne abgelehnte)']].concat(stufen.map(s => [s, AUSSCHREIBUNG_STATUS[s] || s])),
+      f.status, { 'data-pruef': 'ausschreibungen-filter-status' });
+    const filterMin = auswahl('filter_min', [['0', 'alle Punktzahlen'], ['40', 'ab 40 Punkten'], ['60', 'ab 60 Punkten (passend)'], ['80', 'ab 80 Punkten']],
+      f.min, { 'data-pruef': 'ausschreibungen-filter-min' });
+    const abgelaufen = h('input', { type: 'checkbox', id: 'filter-abgelaufen', checked: !!f.alle, 'data-pruef': 'ausschreibungen-filter-alle' });
+    const filterNeu = () => {
+      zustand.ausschreibungFilter = { status: filterStatus.value, min: filterMin.value, alle: abgelaufen.checked };
+      zustand.ausschreibungAnzahl = AUSSCHREIBUNG_SCHRITT;
+      neuLaden();
+    };
+    [filterStatus, filterMin, abgelaufen].forEach(el => el.addEventListener('change', filterNeu));
+
+    const suchen = aktionsKnopf(sucheLaeuft ? 'Suche läuft …' : 'Jetzt suchen', '', async () => {
+      const r = await API.post('/api/ausschreibungen/suchen');
+      if (r && r.hinweis) meldung(r.hinweis, 'info');
+      auftragGemeldet(r, 'den Akquise-Agenten');
+    }, { 'data-pruef': 'ausschreibungen-suchen', disabled: sucheLaeuft });
+
+    const rechercheStand = e.internet_recherche_erlaubt
+      ? h('p', { class: 'hilfe', 'data-pruef': 'recherche-an' }, tag('Internet-Recherche an', 'ok'), ' ',
+        e.auftragssuche_taeglich ? 'Die Agenten suchen zusätzlich einmal täglich selbstständig.' : 'Tägliche Suche ist aus – gesucht wird nur auf Knopfdruck.')
+      : h('div', { class: 'hinweisbox warn', 'data-pruef': 'recherche-aus' },
+        'Die Internet-Recherche ist ausgeschaltet. Einschalten unter ', h('a', { href: '#einstellungen' }, 'Einstellungen → Auftragssuche'),
+        '. Erst dann dürfen die Agenten die öffentlichen Ausschreibungsseiten lesen (nur lesen).');
+
+    const anzahl = zustand.ausschreibungAnzahl;
+    return h('section', { class: 'karte', 'data-pruef': 'ausschreibungen' },
+      h('h2', null, 'Öffentliche Ausschreibungen', tag(zahl(liste.length) + ' Treffer', 'grau')),
+      h('p', { class: 'hilfe' }, 'Der Akquise-Agent sucht in TED (EU-Amtsblatt), auf service.bund.de und dem Vergabemarktplatz NRW, '
+        + 'bewertet jede Ausschreibung nachvollziehbar mit Punkten und erstellt auf Wunsch eine Bewerbungsmappe.'),
+      hinweis('AUTONOMOUS gibt keine Angebote ab – Abgabe macht ihr selbst auf der Vergabeplattform.', 'warn'),
+      rechercheStand,
+      h('div', { class: 'knopfreihe' }, suchen),
+      suchlaeufeAnzeige(aus.letzte_suche || []),
+      h('div', { class: 'felder-3 filter' },
+        feld('Status', filterStatus),
+        feld('Punkte', filterMin),
+        h('label', { class: 'schalter filter-schalter', for: 'filter-abgelaufen' }, abgelaufen, h('span', null, 'Abgelaufene Fristen zeigen'))),
+      liste.length
+        ? h('ul', { class: 'liste', 'data-pruef': 'ausschreibungen-liste' },
+          liste.slice(0, anzahl).map(a => ausschreibungZeile(a, stufen, laufendeMappen.has(a.id))))
+        : leer(alle.length ? 'Keine Treffer mit diesem Filter.'
+          : 'Noch keine Ausschreibungen gespeichert. ' + (e.internet_recherche_erlaubt ? 'Mit „Jetzt suchen“ starten.' : 'Erst die Internet-Recherche einschalten.')),
+      liste.length > anzahl
+        ? h('div', { class: 'knopfreihe' }, h('button', {
+          type: 'button', class: 'knopf zweit', 'data-pruef': 'ausschreibungen-mehr',
+          onclick: () => { zustand.ausschreibungAnzahl += AUSSCHREIBUNG_SCHRITT; neuLaden(); },
+        }, 'Weitere anzeigen (' + zahl(liste.length - anzahl) + ')'))
+        : null);
+  }
+
+  function suchlaeufeAnzeige(laeufe) {
+    if (!laeufe.length) return h('p', { class: 'hilfe', 'data-pruef': 'suchlaeufe' }, 'Noch keine Suche gelaufen.');
+    return h('div', { 'data-pruef': 'suchlaeufe' },
+      h('h3', null, 'Letzte Suche je Quelle'),
+      h('ul', { class: 'liste' }, laeufe.map(s => h('li', { class: 'eintrag' },
+        h('div', { class: 'eintrag-kopf' }, h('span', { class: 'eintrag-titel' }, s.quelle_name || s.quelle),
+          tag(SUCHLAUF_TEXT[s.ergebnis] || s.ergebnis, SUCHLAUF_TON[s.ergebnis] || 'grau')),
+        h('div', { class: 'meta' },
+          h('span', null, zeitText(s.zeit)),
+          h('span', null, 'gefunden ' + zahl(s.gefunden)),
+          h('span', null, 'neu ' + zahl(s.neu)),
+          h('span', null, 'passend ' + zahl(s.passend))),
+        s.meldung ? h('p', { class: 'hilfe text' }, s.meldung) : null))));
+  }
+
+  function ausschreibungZeile(a, stufen, mappeLaeuft) {
+    const link = sichererLink(a.link);
+    const mappe = sichererLink(a.unterlagen_url);
+    const statusSetzen = async (status, notiz, mitNotiz) => {
+      const daten = { status: status };
+      if (mitNotiz) daten.notiz = notiz || '';
+      const r = await API.post('/api/ausschreibungen/' + enc(a.id) + '/status', daten);
+      meldung('Status gespeichert: ' + (AUSSCHREIBUNG_STATUS[status] || status) + '.', 'ok');
+      if (r && r.hinweis) meldung(r.hinweis, 'warn');
+      neuLaden();
+    };
+    const wechsel = stufen.filter(s => s !== a.status);
+    const statusTeile = umschaltBereich('Status ändern', 'zweit klein', zu => formular(null, [
+      h('div', { class: 'felder-2' },
+        feld('Neuer Status', auswahl('status', wechsel.map(s => [s, AUSSCHREIBUNG_STATUS[s] || s]), wechsel[0])),
+        feld('Notiz (optional)', eingabe('notiz', { maxlength: 1000, value: a.notiz || '' }))),
+      h('p', { class: 'hilfe' }, '„Angebot abgegeben“ nur wählen, wenn ihr selbst auf der Vergabeplattform abgegeben habt. „Gewonnen“ ist noch keine Einnahme.'),
+      h('div', { class: 'knopfreihe' }, absendeKnopf('Speichern'), abbrechenKnopf(zu)),
+    ], async (w) => { await statusSetzen(w.status, w.notiz, true); }));
+    const endgueltig = ['abgelehnt', 'gewonnen', 'verloren'].includes(a.status);
+    return h('li', { class: 'eintrag', 'data-pruef': 'ausschreibung', 'data-id': a.id },
+      h('div', { class: 'eintrag-kopf' }, h('span', { class: 'eintrag-titel' }, a.titel),
+        h('span', { class: 'chips' }, punkteTag(a.punkte), tag(AUSSCHREIBUNG_STATUS[a.status] || a.status, AUSSCHREIBUNG_TON[a.status]))),
+      h('p', { class: 'frist-zeile' }, fristTag(a)),
+      h('div', { class: 'meta' },
+        h('span', null, a.quelle_name || a.quelle),
+        a.vergabestelle ? h('span', null, a.vergabestelle) : null,
+        a.ort || a.plz ? h('span', null, [a.plz, a.ort].filter(Boolean).join(' ')) : null,
+        a.region ? h('span', null, 'Region ' + a.region) : null,
+        a.verfahren ? h('span', null, a.verfahren) : null,
+        a.veroeffentlicht ? h('span', null, 'veröffentlicht ' + tagText(a.veroeffentlicht)) : null),
+      (a.begruendung || []).length
+        ? h('details', { class: 'aufklapp klein', 'data-schluessel': 'begruendung-' + a.id },
+          h('summary', null, 'Warum ' + zahl(a.punkte) + ' Punkte?'),
+          h('ul', { class: 'mini-liste' }, a.begruendung.map(b => h('li', null, String(b)))))
+        : null,
+      a.notiz ? h('p', { class: 'hilfe text' }, 'Notiz: ' + a.notiz) : null,
+      h('div', { class: 'knopfreihe' },
+        link ? h('a', { class: 'knopf zweit klein', href: link, target: '_blank', rel: 'noopener noreferrer' }, 'Bekanntmachung öffnen') : null,
+        mappe ? h('a', { class: 'knopf klein', href: mappe, target: '_blank', rel: 'noopener noreferrer', 'data-pruef': 'mappe-ansehen' }, 'Bewerbungsmappe ansehen') : null,
+        !mappe && mappeLaeuft ? tag('Mappe wird erstellt …', 'blau') : null,
+        !mappe && !mappeLaeuft && !endgueltig
+          ? aktionsKnopf('Bewerbungsmappe erstellen', 'klein', async () => {
+            const r = await API.post('/api/ausschreibungen/' + enc(a.id) + '/vorbereiten');
+            auftragGemeldet(r, 'den Akquise-Agenten');
+          }, { 'data-pruef': 'mappe-erstellen' })
+          : null,
+        a.status === 'neu' ? aktionsKnopf('Interessant', 'zweit klein', () => statusSetzen('interessant'), { 'data-pruef': 'ausschreibung-interessant' }) : null,
+        a.status === 'neu' ? sicherheitsKnopf('Ablehnen', 'Wirklich ablehnen? Nochmal tippen', 'zweit klein', () => statusSetzen('abgelehnt'), { 'data-pruef': 'ausschreibung-ablehnen' }) : null,
+        statusTeile[0], statusTeile[1]));
+  }
+
+  // ===========================================================================
+  // Vertrieb: Preis kalkulieren (Reinigung, fester Auftrag)
+  // ===========================================================================
+  function positionZeile(entfernen) {
+    const zeile = h('div', { class: 'positionszeile', 'data-position': '' },
+      h('div', { class: 'positionszeile-kopf' },
+        h('span', { class: 'positionszeile-titel' }, 'Position'),
+        h('button', { type: 'button', class: 'knopf zweit klein', 'data-weg': '' }, 'Entfernen')),
+      h('div', { class: 'felder-2' },
+        feld('Bezeichnung', eingabe('x', { 'data-feld': 'bezeichnung', required: true, maxlength: 80, placeholder: 'z. B. Treppenhaus' })),
+        feld('Fläche in m²', eingabe('x', { 'data-feld': 'flaeche', required: true, inputmode: 'decimal', maxlength: 20, placeholder: 'z. B. 400' }))),
+      h('div', { class: 'felder-3' },
+        feld('Leistungswert in m²/h', eingabe('x', { 'data-feld': 'leistung', required: true, inputmode: 'decimal', maxlength: 20, placeholder: 'euer Wert' }),
+          'Wie viele m² schafft eine Kraft pro Stunde? Euer Erfahrungswert – am besten gemessen.'),
+        feld('Reinigungen', eingabe('x', { 'data-feld': 'anzahl', required: true, inputmode: 'decimal', maxlength: 10, placeholder: 'z. B. 1' })),
+        feld('pro', auswahl('x', [['woche', 'Woche'], ['monat', 'Monat']], 'woche', { 'data-feld': 'turnus' }))));
+    zeile.querySelector('[data-weg]').addEventListener('click', entfernen);
+    return zeile;
+  }
+
+  function kalkulationKarte(einst, aufgaben, kontakte) {
+    const w = (einst && einst.werte) || {};
+    const satz = typeof w.stundensatz_cent === 'number' ? w.stundensatz_cent : 0;
+    // Die gerade gerechnete Kalkulation steht immer oben (gleiche Sekunde = gleicher Zeitstempel)
+    const kalk = aufgaben.filter(a => a.typ === 'kalkulation_reinigung')
+      .sort((x, y) => (y.id === zustand.kalkOffen) - (x.id === zustand.kalkOffen) || String(y.erstellt).localeCompare(String(x.erstellt)))
+      .slice(0, 3);
+
+    const positionen = h('div', { class: 'positionen', 'data-pruef': 'kalk-positionen' });
+    // Namen immer lückenlos (pos-0-…, pos-1-…), damit ungespeicherte Eingaben ein Neuaufbauen überstehen
+    const nummerieren = () => {
+      const zeilenEl = Array.from(positionen.querySelectorAll('[data-position]'));
+      zeilenEl.forEach((z, i) => {
+        z.querySelector('.positionszeile-titel').textContent = 'Position ' + (i + 1);
+        z.querySelector('[data-weg]').hidden = zeilenEl.length === 1;
+        z.querySelectorAll('[data-feld]').forEach(el => { el.name = 'pos-' + i + '-' + el.dataset.feld; });
+      });
+      zustand.kalkPositionen = zeilenEl.length;
+    };
+    const zeileNeu = () => {
+      const zeile = positionZeile(() => { zeile.remove(); nummerieren(); });
+      positionen.append(zeile);
+      nummerieren();
+      return zeile;
+    };
+    for (let i = 0; i < Math.max(1, Math.min(zustand.kalkPositionen, 20)); i++) zeileNeu();
+
+    const form = formular({ 'data-pruef': 'kalkulation-formular' }, [
+      positionen,
+      h('div', { class: 'knopfreihe' }, h('button', {
+        type: 'button', class: 'knopf zweit klein', 'data-pruef': 'kalk-position-plus',
+        onclick: () => { const z = zeileNeu(); const erstes = z.querySelector('input'); if (erstes) erstes.focus(); },
+      }, 'Position hinzufügen')),
+      h('div', { class: 'felder-3' },
+        feld('Stundensatz in € (netto)', betragFeld('stundensatz', { placeholder: satz ? 'leer = ' + euroEingabe(satz) : 'leer = OFFEN' }),
+          satz ? 'Leer lassen: es gilt der Stundensatz aus den Einstellungen (' + euro(satz) + ').'
+            : 'Noch kein Stundensatz festgelegt – ohne ihn bleibt der Preis OFFEN.'),
+        feld('Material in %', eingabe('material_prozent', { inputmode: 'decimal', maxlength: 10, placeholder: 'z. B. 5' })),
+        feld('Zuschlag (Wagnis/Gewinn) in %', eingabe('zuschlag_prozent', { inputmode: 'decimal', maxlength: 10, placeholder: 'z. B. 10' })),
+        feld('Anfahrten pro Monat', eingabe('anfahrten_pro_monat', { inputmode: 'decimal', maxlength: 10, placeholder: 'z. B. 4' })),
+        feld('Minuten je Anfahrt', eingabe('anfahrt_minuten', { inputmode: 'decimal', maxlength: 10, placeholder: 'z. B. 30' }))),
+      hinweis('Der Finance-Agent rechnet nur mit euren Eingaben – keine angenommenen Werte, keine Normzahlen. Alle Beträge netto.'),
+      h('div', { class: 'knopfreihe' }, absendeKnopf('Preis berechnen lassen', { 'data-pruef': 'kalkulation-absenden' })),
+    ], async (werte) => {
+      const zeilenEl = Array.from(positionen.querySelectorAll('[data-position]'));
+      const pos = zeilenEl.map((z, i) => {
+        const g = name => String(z.querySelector('[data-feld="' + name + '"]').value || '').trim();
+        const p = {
+          bezeichnung: g('bezeichnung'),
+          flaeche_m2: zahlPflicht(g('flaeche'), 'Fläche (Position ' + (i + 1) + ')'),
+          leistungswert_m2_h: zahlPflicht(g('leistung'), 'Leistungswert (Position ' + (i + 1) + ')'),
+        };
+        const anzahl = zahlPflicht(g('anzahl'), 'Reinigungen (Position ' + (i + 1) + ')');
+        if (g('turnus') === 'monat') p.reinigungen_pro_monat = anzahl;
+        else p.reinigungen_pro_woche = anzahl;
+        return p;
+      });
+      const daten = { positionen: pos };
+      if (werte.stundensatz) daten.stundensatz = betragPflicht(werte.stundensatz, 'Stundensatz');
+      [['material_prozent', 'Material in %'], ['zuschlag_prozent', 'Zuschlag in %'], ['anfahrten_pro_monat', 'Anfahrten pro Monat'], ['anfahrt_minuten', 'Minuten je Anfahrt']]
+        .forEach(([k, name]) => { if (werte[k]) daten[k] = zahlPflicht(werte[k], name); });
+      const r = await API.post('/api/kalkulation/reinigung', daten);
+      meldung('Der Finance-Agent rechnet …', 'info');
+      const fertig = await aufgabeAbwarten(r.aufgabe_id, 20);
+      if (!fertig) {
+        meldung('Die Rechnung dauert länger – das Ergebnis erscheint gleich hier und unter „Aufgaben“.', 'warn');
+        spaeterNeuLaden(2000);
+        return;
+      }
+      if (fertig.status !== 'abgeschlossen') {
+        meldung('Kalkulation nicht möglich: ' + (fertig.fehler || AUFGABEN_STATUS[fertig.status] || fertig.status), 'fehler');
+        neuLaden();
+        return;
+      }
+      meldung('Kalkulation fertig.', 'ok');
+      zustand.kalkOffen = r.aufgabe_id;
+      neuLaden();
+    });
+
+    return h('section', { class: 'karte', 'data-pruef': 'kalkulation' },
+      h('h2', null, 'Preis kalkulieren (Reinigung)'),
+      h('p', { class: 'hilfe' }, 'Monatspreis für einen festen Reinigungsauftrag: Fläche ÷ Leistungswert × Reinigungen = Stunden; dazu Stundensatz, Material, Anfahrt und Zuschlag.'),
+      satz ? null : h('p', { 'data-pruef': 'stundensatz-offen' }, tag('Stundensatz: OFFEN', 'warn'), ' ', h('a', { href: '#einstellungen' }, 'in den Einstellungen festlegen')),
+      aufklapp('Neue Kalkulation', 'kalkulation-neu', !kalk.length, form),
+      kalk.length ? [h('h3', null, 'Letzte Kalkulationen'),
+        h('div', { class: 'liste', 'data-pruef': 'kalk-ergebnisse' }, kalk.map((a, i) => kalkAufgabeAnzeige(a, i === 0, kontakte)))] : null);
+  }
+
+  function kalkAufgabeAnzeige(a, offen, kontakte) {
+    let inhalt;
+    if (a.status === 'abgeschlossen' && a.ergebnis && typeof a.ergebnis === 'object') inhalt = kalkErgebnis(a.ergebnis, a.id, kontakte);
+    else if (ENDSTATUS.includes(a.status)) inhalt = h('p', { class: 'fehlertext' }, (AUFGABEN_STATUS[a.status] || a.status) + (a.fehler ? ': ' + a.fehler : ''));
+    else inhalt = h('p', { class: 'hilfe' }, 'Wird gerade gerechnet …');
+    return h('details', { class: 'aufklapp', 'data-schluessel': 'kalk-' + a.id, open: offen || zustand.kalkOffen === a.id, 'data-pruef': 'kalk-ergebnis' },
+      h('summary', null, zeitText(a.erstellt) + ' · ' + String(a.titel || '').replace(/^Reinigung kalkulieren:\s*/, '')), inhalt);
+  }
+
+  function kalkErgebnis(e, aufgabeId, kontakte) {
+    const offenPreis = typeof e.preis_monat_cent !== 'number';
+    const stunden = n => (typeof n === 'number' && isFinite(n) ? n.toLocaleString('de-DE') : '0') + ' h';
+    return h('div', { class: 'kalk-ergebnis' },
+      h('div', { class: 'raster' },
+        kachel('Preis pro Monat (netto)', e.preis_monat || '—', offenPreis ? 'warn' : 'ok', offenPreis ? 'ohne Stundensatz kein Preis' : null, 'kalk-preis-monat'),
+        kachel('Preis pro Jahr (netto)', e.preis_jahr || '—', '', null, 'kalk-preis-jahr'),
+        kachel('Stunden pro Monat', stunden(e.stunden_gesamt_monat), '', 'davon Anfahrt ' + stunden(e.anfahrt && e.anfahrt.stunden_monat)),
+        kachel('Stundensatz', e.stundensatz || '—', offenPreis ? 'warn' : '', e.stundensatz_quelle ? 'Quelle: ' + e.stundensatz_quelle : null)),
+      (e.warnungen || []).length
+        ? h('div', { class: 'hinweisbox warn', 'data-pruef': 'kalk-warnungen' }, h('strong', null, 'Warnungen'),
+          h('ul', { class: 'mini-liste' }, e.warnungen.map(t => h('li', null, String(t)))))
+        : null,
+      h('h4', null, 'Rechenweg'),
+      h('ol', { class: 'rechenweg' }, (e.rechenweg || []).map(t => h('li', null, String(t)))),
+      (e.hinweise || []).length
+        ? h('details', { class: 'aufklapp klein', 'data-schluessel': 'kalk-hinweise-' + aufgabeId },
+          h('summary', null, 'Hinweise (' + e.hinweise.length + ')'), h('ul', { class: 'mini-liste' }, e.hinweise.map(t => h('li', null, String(t)))))
+        : null,
+      (e.quellen || []).length
+        ? h('details', { class: 'aufklapp klein', 'data-schluessel': 'kalk-quellen-' + aufgabeId },
+          h('summary', null, 'Quellen'), h('ul', { class: 'mini-liste' }, e.quellen.map(t => h('li', null, String(t)))))
+        : null,
+      dauerauftragTeil(e, aufgabeId, kontakte));
+  }
+
+  function dauerauftragTeil(e, aufgabeId, kontakte) {
+    const offenPreis = typeof e.preis_monat_cent !== 'number';
+    const teile = umschaltBereich('Angebot Dauerauftrag daraus erstellen', 'klein', zu => formular({ 'data-pruef': 'dauerauftrag-formular' }, [
+      h('div', { class: 'felder-2' },
+        feld('Kontakt (optional)', auswahl('kontakt_id', [['', '— ohne Kontakt —']].concat(kontakte.map(k => [k.id, k.firma])), '')),
+        feld('Objekt (optional)', eingabe('objekt', { maxlength: 200, placeholder: 'z. B. Musterstraße 5, Leverkusen' }))),
+      offenPreis
+        ? feld('Monatspreis in € (netto)', betragFeld('betrag', { required: true }),
+          'Die Kalkulation hat keinen Preis (Stundensatz OFFEN). Entweder hier selbst festlegen – oder erst den Stundensatz festlegen und neu rechnen.')
+        : h('p', null, 'Preis aus der Kalkulation: ', h('strong', null, (e.preis_monat || '') + ' pro Monat (netto)')),
+      h('div', { class: 'felder-3' },
+        feld('Vertragsbeginn (optional)', eingabe('vertragsbeginn', { maxlength: 60, placeholder: 'z. B. 01.01.2027' })),
+        feld('Laufzeit (optional)', eingabe('laufzeit', { maxlength: 80, placeholder: 'z. B. 12 Monate' })),
+        feld('Kündigungsfrist (optional)', eingabe('kuendigungsfrist', { maxlength: 80, placeholder: 'z. B. 3 Monate' }))),
+      h('p', { class: 'hilfe' }, 'Der Sales-Agent erstellt einen ENTWURF. Offene Punkte bleiben gelb markiert. Ein Angebot ist keine Einnahme.'),
+      h('div', { class: 'knopfreihe' }, absendeKnopf('Angebotsentwurf erstellen lassen', { 'data-pruef': 'dauerauftrag-absenden' }), abbrechenKnopf(zu)),
+    ], async (w) => {
+      const daten = ohneLeere({
+        art: 'reinigung_dauerauftrag', kalkulation_aufgabe_id: aufgabeId, kontakt_id: w.kontakt_id, objekt: w.objekt,
+        vertragsbeginn: w.vertragsbeginn, laufzeit: w.laufzeit, kuendigungsfrist: w.kuendigungsfrist,
+      });
+      if (offenPreis) daten.betrag = betragPflicht(w.betrag, 'Monatspreis');
+      const r = await API.post('/api/angebote', daten);
+      auftragGemeldet(r, 'den Sales-Agenten');
+    }));
+    teile[0].dataset.pruef = 'dauerauftrag-oeffnen';
+    return h('div', { class: 'knopfreihe' }, teile[0], teile[1]);
+  }
+
+  // ===========================================================================
+  // Vertrieb: Rückmeldungen (Reaktionen messen)
+  // ===========================================================================
+  function rmListen(rm) {
+    const mitStandard = (liste, texte) => {
+      const l = wahlListe(liste, texte);
+      return l.length ? l : Object.entries(texte);
+    };
+    return {
+      reaktionen: mitStandard(rm.reaktionen, REAKTION_TEXT),
+      gruende: mitStandard(rm.gruende, GRUND_TEXT),
+      kanaele: mitStandard(rm.kanaele, KANAL_TEXT),
+      arten: mitStandard(rm.angebot_arten, ANGEBOTSART_TEXT),
+    };
+  }
+
+  function rueckmeldungForm(listen, quellen, kontakt, pruef, zu) {
+    const erstes = l => (l.length ? l[0][0] : '');
+    const reaktion = auswahl('reaktion', listen.reaktionen, erstes(listen.reaktionen));
+    const grund = auswahl('grund', [['', '— kein Grund angegeben —']].concat(listen.gruende), '');
+    const grundPruefen = () => {
+      const erlaubt = GRUND_BEI.includes(reaktion.value);
+      grund.disabled = !erlaubt;
+      if (!erlaubt) grund.value = '';
+    };
+    reaktion.addEventListener('change', grundPruefen);
+    grundPruefen();
+    return formular({ 'data-pruef': pruef }, [
+      kontakt ? h('p', { class: 'hilfe' }, 'Rückmeldung von ', h('strong', null, kontakt.firma)) : h('div', { class: 'felder-2' },
+        feld('Kontakt (optional)', auswahl('kontakt_id', [['', '— ohne Kontakt —']].concat((quellen.kontakte || []).map(k => [k.id, k.firma])), '')),
+        feld('Angebot (optional)', auswahl('angebot_id', [['', '— ohne Angebot —']].concat((quellen.angebote || []).map(a =>
+          [a.id, ((a.inhalt && a.inhalt.titel) || a.titel || a.id) + (a.kontakt_firma ? ' – ' + a.kontakt_firma : '')])), ''))),
+      h('div', { class: 'felder-2' },
+        feld('Worum ging es?', auswahl('angebot_art', listen.arten, erstes(listen.arten))),
+        feld('Wie wart ihr in Kontakt?', auswahl('kanal', listen.kanaele, erstes(listen.kanaele))),
+        feld('Reaktion', reaktion),
+        feld('Grund (optional)', grund, 'Ein Grund passt nur zu „abgelehnt“ oder „neutral“.')),
+      feld('Notiz (optional)', textfeld('notiz', { maxlength: 1000, rows: 2 }), 'Keine privaten Daten eintragen.'),
+      h('div', { class: 'knopfreihe' }, absendeKnopf('Rückmeldung speichern', { 'data-pruef': pruef + '-absenden' }), zu ? abbrechenKnopf(zu) : null),
+    ], async (w, f) => {
+      const daten = ohneLeere(Object.assign({}, w, kontakt ? { kontakt_id: kontakt.id } : {}));
+      await API.post('/api/rueckmeldungen', daten);
+      if (!zu) { f.reset(); grundPruefen(); }
+      meldung('Rückmeldung gespeichert.', 'ok');
+      neuLaden();
+    });
+  }
+
+  function rueckmeldungZeile(r, listen) {
+    const text = (liste, id) => { const o = liste.find(x => x[0] === id); return o ? o[1] : String(id || ''); };
+    return h('li', { class: 'eintrag', 'data-pruef': 'rueckmeldung' },
+      h('div', { class: 'eintrag-kopf' }, h('span', { class: 'eintrag-titel' }, r.kontakt_firma || 'ohne Kontakt'),
+        tag(text(listen.reaktionen, r.reaktion), REAKTION_TON[r.reaktion] || 'grau')),
+      h('div', { class: 'meta' },
+        r.angebot_art ? h('span', null, text(listen.arten, r.angebot_art)) : null,
+        r.kanal ? h('span', null, text(listen.kanaele, r.kanal)) : null,
+        r.grund ? h('span', null, 'Grund: ' + text(listen.gruende, r.grund)) : null,
+        h('span', null, zeitText(r.zeit || r.erfasst || r.erstellt))),
+      r.notiz ? h('p', { class: 'hilfe text' }, r.notiz) : null);
+  }
+
+  function rueckmeldungenKarte(rm, listen, kontakte, angebote, aufgaben) {
+    if (!rm || rm.fehlt || !listen) {
+      const k = nichtVerfuegbar('Rückmeldungen', 'Das Erfassen und Auswerten von Kundenreaktionen ist im Backend noch nicht eingebaut.');
+      k.dataset.pruef = 'rueckmeldungen-nicht-verfuegbar';
+      return k;
+    }
+    const liste = rm.rueckmeldungen || [];
+    const auswertungen = aufgaben.filter(a => /rueckmeld/.test(String(a.typ || '')))
+      .sort((x, y) => String(y.erstellt).localeCompare(String(x.erstellt)));
+    const letzte = auswertungen.find(a => a.status === 'abgeschlossen' && a.ergebnis);
+    const laeuft = auswertungen.some(a => !ENDSTATUS.includes(a.status));
+    return h('section', { class: 'karte', 'data-pruef': 'rueckmeldungen' },
+      h('h2', null, 'Rückmeldungen', tag(zahl(liste.length), 'grau')),
+      h('p', { class: 'hilfe' }, 'Wie haben Interessenten reagiert? AUTONOMOUS zählt Reaktionen und Gründe aus euren Einträgen und macht daraus Vorschläge – Preise oder Angebote ändert es nicht selbst.'),
+      aufklapp('Rückmeldung erfassen', 'rueckmeldung-neu', false, rueckmeldungForm(listen, { kontakte, angebote }, null, 'rueckmeldung-formular')),
+      liste.length
+        ? h('ul', { class: 'liste', 'data-pruef': 'rueckmeldungen-liste' }, liste.slice(0, 20).map(r => rueckmeldungZeile(r, listen)))
+        : leer('Noch keine Rückmeldungen erfasst.'),
+      h('div', { class: 'knopfreihe' }, aktionsKnopf(laeuft ? 'Auswertung läuft …' : 'Rückmeldungen auswerten', 'zweit', async () => {
+        const r = await API.post('/api/rueckmeldungen/auswerten');
+        meldung('Auswertung gestartet …', 'info');
+        const fertig = r && r.aufgabe_id ? await aufgabeAbwarten(r.aufgabe_id, 20) : null;
+        if (fertig && fertig.status === 'abgeschlossen') meldung('Auswertung fertig.', 'ok');
+        else if (fertig) meldung('Auswertung: ' + (fertig.fehler || AUFGABEN_STATUS[fertig.status] || fertig.status), 'fehler');
+        neuLaden();
+      }, { 'data-pruef': 'rueckmeldungen-auswerten', disabled: laeuft })),
+      letzte
+        ? h('details', { class: 'aufklapp', 'data-schluessel': 'rueckmeldungen-auswertung', 'data-pruef': 'rueckmeldungen-auswertung' },
+          h('summary', null, 'Letzte Auswertung · ' + zeitText(letzte.beendet || letzte.aktualisiert)), auswertungAnzeige(letzte.ergebnis, listen))
+        : null);
+  }
+
+  /** Ergebnis der Rückmeldungs-Auswertung lesbar zeigen (unbekannte Form: allgemeine Anzeige). */
+  function auswertungAnzeige(e, listen) {
+    e = alsWert(e);
+    if (!e || typeof e !== 'object' || !('je_angebot' in e)) return wertAnzeige(e);
+    const text = (liste, id) => { const o = liste.find(x => x[0] === id); return o ? o[1] : String(id); };
+    const je = e.je_angebot || {};
+    return h('div', { class: 'kalk-ergebnis' },
+      e.hinweis ? h('p', { class: 'hilfe' }, e.hinweis) : null,
+      (e.vorschlaege || []).length
+        ? h('div', { class: 'hinweisbox' }, h('strong', null, 'Vorschläge (ungeprüft – ihr entscheidet)'),
+          h('ul', { class: 'mini-liste' }, e.vorschlaege.map(v => h('li', null, typeof v === 'string' ? v : wertAnzeige(v)))))
+        : h('p', { class: 'hilfe' }, 'Noch keine Vorschläge.'),
+      kv([['Rückmeldungen gesamt', zahl(e.gesamt)]]),
+      Object.keys(je).length
+        ? h('ul', { class: 'liste' }, Object.entries(je).map(([art, d]) => h('li', { class: 'eintrag' },
+          h('div', { class: 'eintrag-kopf' }, h('span', { class: 'eintrag-titel' }, text(listen.arten, art)), tag(zahl(d.anzahl) + ' Rückmeldungen', 'grau')),
+          h('div', { class: 'chips' }, Object.entries(d.reaktionen || {}).filter(r => r[1]).map(([r, n]) =>
+            h('span', { class: 'chip' }, tag(text(listen.reaktionen, r), REAKTION_TON[r] || 'grau'), h('strong', null, zahl(n))))),
+          gruendePaare(d.gruende).length
+            ? h('p', { class: 'hilfe' }, 'Gründe: ' + gruendePaare(d.gruende).map(([g, n]) => text(listen.gruende, g) + ' ' + n + '×').join(', '))
+            : null,
+          typeof d.quote_interessiert_prozent === 'number' ? h('p', { class: 'hilfe' }, 'Anteil interessiert: ' + zahl(d.quote_interessiert_prozent) + ' %') : null,
+          d.hinweis ? h('p', { class: 'hilfe' }, d.hinweis) : null)))
+        : null);
+  }
+  /** Gründe als Paare [grund, anzahl] – das Backend liefert eine Liste von Paaren (oder ein Objekt). */
+  function gruendePaare(g) {
+    if (Array.isArray(g)) return g.filter(x => Array.isArray(x) && x.length >= 2);
+    if (g && typeof g === 'object') return Object.entries(g);
+    return [];
   }
 
   // ===========================================================================
@@ -1861,6 +2444,7 @@
     const e = await API.get('/api/einstellungen');
     zustand.katalog = e.aktionen || {};
     z.append(einstellungenKarte(e));
+    z.append(auftragssucheKarte(e));
     z.append(katalogKarte(e.aktionen || {}));
     z.append(sicherungKarte(e.sicherungen || []));
     z.append(await protokollKarte());
@@ -1942,6 +2526,84 @@
     });
     return karte('Modellzugang, Kosten und Betrieb',
       kv([['Modell gerade', (modell.anbieter_info && modell.anbieter_info.name) || modell.anbieter], ['Aufrufe heute', zahl(modell.aufrufe_heute) + ' von ' + zahl(modell.limit_tag)]]),
+      h('div', { class: 'trenner' }),
+      form);
+  }
+
+  /** Auftragssuche (öffentliche Ausschreibungen) und Stundensatz – alles bleibt in eurer Hand. */
+  function auftragssucheKarte(e) {
+    const w = e.werte || {};
+    if (!('internet_recherche_erlaubt' in w)) {
+      return nichtVerfuegbar('Auftragssuche und Stundensatz', 'Diese Einstellungen gibt es in dieser Version des Servers noch nicht.');
+    }
+    const recherche = h('input', { type: 'checkbox', name: 'internet_recherche_erlaubt', checked: !!w.internet_recherche_erlaubt, id: 'recherche-schalter', 'data-pruef': 'recherche-schalter' });
+    const taeglich = h('input', { type: 'checkbox', name: 'auftragssuche_taeglich', checked: !!w.auftragssuche_taeglich, id: 'taeglich-schalter', 'data-pruef': 'taeglich-schalter' });
+    const satz = typeof w.stundensatz_cent === 'number' ? w.stundensatz_cent : 0;
+    const liste = x => (Array.isArray(x) ? x.join(', ') : '');
+    const form = formular({ 'data-pruef': 'auftragssuche-formular' }, [
+      h('label', { class: 'schalter', for: 'recherche-schalter' }, recherche,
+        h('span', null, h('strong', null, 'Internet-Recherche erlauben'), h('br'),
+          h('span', { class: 'hilfe' }, 'Die Agenten dürfen dann nur die freigegebenen öffentlichen Ausschreibungsseiten lesen: TED (EU-Amtsblatt), '
+            + 'service.bund.de und den Vergabemarktplatz NRW. Nur lesen – nichts senden, nirgends anmelden, nichts abgeben. Standard: aus.'))),
+      h('label', { class: 'schalter', for: 'taeglich-schalter' }, taeglich,
+        h('span', null, h('strong', null, 'Einmal täglich selbstständig suchen'), h('br'),
+          h('span', { class: 'hilfe' }, 'Höchstens einmal am Tag, solange AUTONOMOUS läuft – und nur, wenn die Internet-Recherche erlaubt ist.'))),
+      h('div', { class: 'felder-2' },
+        feld('Region: Postleitzahl-Bereiche', eingabe('region_plz', { value: liste(w.region_plz), maxlength: 400, inputmode: 'numeric' }),
+          'Die ersten zwei Ziffern, mit Komma getrennt. Nur eine Näherung für „ca. 100 km um Leverkusen“ – keine genaue Entfernung.'),
+        feld('Region für EU-Ausschreibungen (NUTS-Codes)', eingabe('region_nuts', { value: liste(w.region_nuts), maxlength: 200 }),
+          'DEA steht für ganz Nordrhein-Westfalen.')),
+      feld('Suchbegriffe', textfeld('suchbegriffe', { rows: 5, value: liste(w.suchbegriffe), maxlength: 1500 }),
+        'Mit Komma getrennt. Kommt ein Begriff im Titel vor, gibt es Punkte. Für EU-Ausschreibungen sucht der Agent fest nach Reinigungsleistungen.'),
+      feld('Ausschlussbegriffe', textfeld('ausschlussbegriffe', { rows: 4, value: liste(w.ausschlussbegriffe), maxlength: 1500 }),
+        'Kommt ein Begriff vor, gibt es starken Abzug – z. B. Straßenreinigung oder Kanal.'),
+      h('h3', null, 'Stundensatz für Kalkulationen'),
+      h('p', null, 'Gerade: ', satz ? h('strong', { 'data-pruef': 'stundensatz-wert' }, euro(satz) + ' pro Stunde (netto)')
+        : tag('OFFEN – noch nicht festgelegt', 'warn')),
+      feld('Stundensatz in € (netto)', betragFeld('stundensatz', { value: satz ? euroEingabe(satz) : '', placeholder: 'leer oder 0 = offen' }),
+        'Er muss Lohn, Lohnnebenkosten, Material, Fahrzeuge, Verwaltung und Gewinn decken. AUTONOMOUS nimmt nie selbst einen an.'),
+      h('div', { class: 'knopfreihe' }, absendeKnopf('Auftragssuche speichern', { 'data-pruef': 'auftragssuche-speichern' })),
+    ], async (werte) => {
+      const satzText = String(werte.stundensatz || '').trim();
+      const neu = {
+        internet_recherche_erlaubt: !!werte.internet_recherche_erlaubt,
+        auftragssuche_taeglich: !!werte.auftragssuche_taeglich,
+        region_plz: listeAus(werte.region_plz, false),
+        region_nuts: listeAus(werte.region_nuts, false).map(x => x.toUpperCase()),
+        suchbegriffe: listeAus(werte.suchbegriffe, true),
+        ausschlussbegriffe: listeAus(werte.ausschlussbegriffe, true),
+        stundensatz_cent: (satzText === '' || /^0+([,.]0+)?$/.test(satzText)) ? 0 : centAus(satzText, 'Stundensatz'),
+      };
+      // Dieselben Regeln wie im Backend – so wird nichts nur halb gespeichert
+      const pruefListe = (eintraege, muster, name, min, max) => {
+        if (eintraege.length < min || eintraege.length > max) throw new ApiFehler(0, name + ': ' + min + ' bis ' + max + ' Einträge erlaubt.');
+        const falsch = eintraege.filter(x => !muster.test(x));
+        if (falsch.length) throw new ApiFehler(0, name + ': ungültig – ' + falsch.slice(0, 3).join(', '));
+      };
+      pruefListe(neu.region_plz, /^\d{2}$/, 'Postleitzahl-Bereiche (je zwei Ziffern)', 1, 60);
+      pruefListe(neu.region_nuts, /^DE[A-Z0-9]{0,3}$/, 'NUTS-Codes (z. B. DEA)', 1, 40);
+      pruefListe(neu.suchbegriffe, /^[a-zäöüß0-9 -]{2,40}$/, 'Suchbegriffe (Buchstaben, Ziffern, Leerzeichen, Bindestrich)', 1, 40);
+      pruefListe(neu.ausschlussbegriffe, /^[a-zäöüß0-9 -]{2,40}$/, 'Ausschlussbegriffe (Buchstaben, Ziffern, Leerzeichen, Bindestrich)', 0, 40);
+      if (neu.stundensatz_cent > 100000) throw new ApiFehler(0, 'Stundensatz: höchstens 1.000,00 €.');
+      const geaendert = Object.keys(neu).filter(k => JSON.stringify(neu[k]) !== JSON.stringify(w[k]));
+      if (!geaendert.length) {
+        meldung('Nichts geändert.', 'info');
+        return;
+      }
+      for (const k of geaendert) {
+        await API.post('/api/einstellungen', { schluessel: k, wert: neu[k] });
+      }
+      meldung('Gespeichert: ' + geaendert.length + ' Einstellung(en).'
+        + (geaendert.includes('internet_recherche_erlaubt') ? (neu.internet_recherche_erlaubt ? ' Internet-Recherche ist jetzt an.' : ' Internet-Recherche ist jetzt aus.') : ''), 'ok');
+      neuLaden();
+    });
+    return h('section', { class: 'karte', 'data-pruef': 'auftragssuche' },
+      h('h2', null, 'Auftragssuche und Stundensatz'),
+      kv([
+        ['Internet-Recherche', w.internet_recherche_erlaubt ? 'an' : 'aus'],
+        ['Tägliche Suche', w.auftragssuche_taeglich ? 'an' : 'aus'],
+        ['Stundensatz', satz ? euro(satz) : 'OFFEN'],
+      ]),
       h('div', { class: 'trenner' }),
       form);
   }
@@ -2162,12 +2824,7 @@
     markiereNavigation(bereich.id);
     document.getElementById('seitentitel').textContent = bereich.titel;
     document.title = bereich.titel + ' · AUTONOMOUS';
-    let offeneDetails = new Set();
-    let eingaben = {};
-    if (still) {
-      offeneDetails = new Set(Array.from(main.querySelectorAll('details[data-schluessel]')).filter(d => d.open).map(d => d.dataset.schluessel));
-      eingaben = eingabenMerken(main);
-    } else {
+    if (!still) {
       main.dataset.bereich = bereich.id;
       main.dataset.status = 'laedt';
       main.replaceChildren(h('p', { class: 'laedt', role: 'status' }, 'Lädt …'));
@@ -2177,13 +2834,26 @@
     try {
       await bereich.render(ziel);
       if (nr !== zustand.renderNr || !zustand.angemeldet) return;
+      let fokus = null;
       if (still) {
+        // Erst JETZT merken (nicht vor dem Laden): Eingaben, die während des Ladens gemacht wurden, gehen nicht verloren
+        const offeneDetails = new Set(Array.from(main.querySelectorAll('details[data-schluessel]')).filter(d => d.open).map(d => d.dataset.schluessel));
+        const eingaben = eingabenMerken(main);
+        const aktiv = document.activeElement;
+        if (aktiv && main.contains(aktiv) && aktiv.form && aktiv.name && !aktiv.form.closest('.inline-form')) {
+          fokus = feldSchluessel(aktiv.form, aktiv);
+        }
         ziel.querySelectorAll('details[data-schluessel]').forEach(d => {
           if (offeneDetails.has(d.dataset.schluessel)) d.open = true;
         });
         eingabenZurueck(ziel, eingaben);
       }
       main.replaceChildren(ziel);
+      if (fokus) {
+        // Wer gerade tippt, behält das Feld
+        const gleich = Array.from(ziel.querySelectorAll('form')).flatMap(f => Array.from(f.elements).filter(el => el.name && feldSchluessel(f, el) === fokus));
+        if (gleich[0]) gleich[0].focus();
+      }
       main.dataset.bereich = bereich.id;
       main.dataset.status = 'fertig';
     } catch (f) {

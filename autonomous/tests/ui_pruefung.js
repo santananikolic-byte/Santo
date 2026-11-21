@@ -35,7 +35,12 @@ const GROESSEN = [
 ];
 // Routen, die (noch) fehlen dürfen: Die Oberfläche zeigt dann „noch nicht verfügbar“. Der Browser meldet
 // die 404/405 trotzdem in der Konsole – das zählt als Hinweis, nicht als Fehler.
-const OPTIONALE_ROUTEN = /\/api\/(produkte|kontakte|angebote|vertrieb)(\/|\?|$)/;
+const OPTIONALE_ROUTEN = /\/api\/(produkte|kontakte|angebote|vertrieb|rueckmeldungen)(\/|\?|$)/;
+// Gewollte Ablehnungen des Backends, die die Oberfläche als Meldung zeigt (der Browser protokolliert sie trotzdem).
+// Nur genau diese Kombination aus Status und Route – alles andere bleibt ein Fehler.
+const ERWARTETE_ABLEHNUNGEN = [
+  { status: 400, route: /\/api\/ausschreibungen\/suchen$/, grund: 'Suche bei ausgeschalteter Internet-Recherche' },
+];
 
 const fehler = [];
 const hinweise = new Set();
@@ -53,7 +58,11 @@ function euroAusText(text) {
 }
 
 async function bereichOeffnen(seite, id) {
-  await seite.evaluate(ziel => { location.hash = ziel; }, id);
+  // Immer frisch aufbauen – auch wenn der Bereich schon offen ist (sonst würde ein alter Stand geprüft)
+  await seite.evaluate(ziel => {
+    if (location.hash === '#' + ziel) window.dispatchEvent(new HashChangeEvent('hashchange'));
+    else location.hash = ziel;
+  }, id);
   await seite.waitForFunction(ziel => {
     const m = document.querySelector('main');
     return m && m.dataset.bereich === ziel && ['fertig', 'fehler', 'anmeldung'].includes(m.dataset.status);
@@ -93,6 +102,11 @@ function beobachten(seite, name) {
     const ort = (m.location() && m.location().url) || '';
     if (/Failed to load resource/.test(m.text()) && OPTIONALE_ROUTEN.test(ort)) {
       hinweise.add('Optionale Route fehlt noch: ' + m.text().replace(/^.*status of /, '') + ' ' + ort.replace(/^https?:\/\/[^/]+/, ''));
+      return;
+    }
+    const erwartet = ERWARTETE_ABLEHNUNGEN.find(e => new RegExp('status of ' + e.status + '\\b').test(m.text()) && e.route.test(ort));
+    if (erwartet) {
+      hinweise.add('Erwartete Ablehnung (als Meldung angezeigt): ' + erwartet.grund);
       return;
     }
     konsole.push(m.text() + (ort ? ' [' + ort + ']' : ''));
@@ -311,9 +325,245 @@ async function funktionenPruefen(browser, startUrl) {
     hinweise.add('Google-Profil-Paket: Product-Agent kann es noch nicht – Formular gesperrt und gekennzeichnet');
   }
 
+  await neueFunktionenPruefen(seite);
+
   await cspPruefen(seite, 'funktionen');
   konsoleOk();
   await kontext.close();
+}
+
+// ---------------------------------------------------------------------------
+// 1b. Neue Funktionen: Auftrags-Radar, Einstellungen, Kalkulation, Dauerauftrag, Anschreiben, Rückmeldungen
+//     (Auftrags-Radar mit TESTDATEN aus ui_server.py – kein Internet nötig)
+// ---------------------------------------------------------------------------
+async function meldungMit(seite, muster, sekunden) {
+  return seite.waitForFunction(quelle => {
+    const re = new RegExp(quelle);
+    return Array.from(document.querySelectorAll('.meldung')).some(m => re.test(m.textContent));
+  }, muster.source, { timeout: (sekunden || 10) * 1000 }).then(() => true, () => false);
+}
+
+async function ausschreibungenApi(seite) {
+  const r = await api(seite, 'GET', '/api/ausschreibungen?alle=1');
+  return r.status === 200 ? (r.inhalt.ausschreibungen || []) : null;
+}
+
+async function neueFunktionenPruefen(seite) {
+  // --- Auftrags-Radar (Vertrieb) ---------------------------------------------------------
+  const vorher = await ausschreibungenApi(seite);
+  if (!pruefe(vorher !== null, 'Auftrags-Radar: /api/ausschreibungen antwortet nicht')) return;
+  const einst0 = (await api(seite, 'GET', '/api/einstellungen')).inhalt.werte || {};
+  pruefe(einst0.internet_recherche_erlaubt === false, 'Einstellungen: Internet-Recherche ist nicht standardmäßig aus');
+
+  await bereichOeffnen(seite, 'vertrieb');
+  pruefe(await seite.isVisible('[data-pruef="ausschreibungen"]'), 'Vertrieb: Karte „Öffentliche Ausschreibungen“ fehlt');
+  const karteText = (await seite.textContent('[data-pruef="ausschreibungen"]')) || '';
+  pruefe(/AUTONOMOUS gibt keine Angebote ab/.test(karteText), 'Vertrieb: Hinweis „AUTONOMOUS gibt keine Angebote ab“ fehlt');
+  pruefe(await seite.isVisible('[data-pruef="recherche-aus"] a[href="#einstellungen"]'), 'Vertrieb: Hinweis „Recherche aus – wo einschalten“ fehlt');
+  const ids = await seite.$$eval('[data-pruef="ausschreibung"]', els => els.map(e => e.dataset.id));
+  pruefe(ids.join(',') === 'ui_test_1,ui_test_2,ui_test_3',
+    'Vertrieb: Standardliste (ab 60 Punkten, ohne abgelaufene, nach Punkten) falsch: ' + ids.join(','));
+  const frist1 = await seite.getAttribute('[data-id="ui_test_1"] [data-pruef="frist"]', 'class');
+  pruefe(/\bfehler\b/.test(frist1 || ''), 'Vertrieb: Frist ≤ 3 Tage ist nicht rot markiert (' + frist1 + ')');
+  const frist2 = await seite.getAttribute('[data-id="ui_test_2"] [data-pruef="frist"]', 'class');
+  pruefe(!/\bfehler\b/.test(frist2 || ''), 'Vertrieb: Frist in 10 Tagen fälschlich rot');
+  const link = await seite.$eval('[data-id="ui_test_1"] a[target="_blank"]', a => ({ href: a.getAttribute('href'), rel: a.getAttribute('rel') }))
+    .catch(() => null);
+  pruefe(link && /^https:\/\/example\.invalid\/testdaten\/TEST-1$/.test(link.href) && link.rel === 'noopener noreferrer',
+    'Vertrieb: Link zur Bekanntmachung fehlt oder ist unsicher: ' + JSON.stringify(link));
+  pruefe(/Vergabemarktplatz NRW[\s\S]*Fehler/.test((await seite.textContent('[data-pruef="suchlaeufe"]')) || ''),
+    'Vertrieb: Suchlauf-Stand je Quelle (Fehler) wird nicht angezeigt');
+  await seite.click('[data-id="ui_test_1"] summary');
+  pruefe(/Frist sehr knapp/.test((await seite.textContent('[data-id="ui_test_1"]')) || ''), 'Vertrieb: Begründung der Punkte nicht aufklappbar');
+
+  // Recherche aus → „Jetzt suchen“ zeigt die Meldung des Backends, es entsteht keine Aufgabe
+  await seite.click('[data-pruef="ausschreibungen-suchen"]');
+  pruefe(await meldungMit(seite, /Internet-Recherche ist ausgeschaltet/), 'Vertrieb: „Jetzt suchen“ bei ausgeschalteter Recherche ohne Meldung');
+  const akq = (await api(seite, 'GET', '/api/aufgaben?rolle=akquise')).inhalt.aufgaben || [];
+  pruefe(!akq.some(a => a.typ === 'ausschreibungen_suchen'), 'Vertrieb: Suche trotz ausgeschalteter Recherche angelegt');
+
+  // Filter: alle Punktzahlen + abgelaufene
+  await seite.selectOption('[data-pruef="ausschreibungen-filter-min"]', '0');
+  await seite.waitForSelector('[data-id="ui_test_4"]', { timeout: 10000 }).catch(() => null);
+  pruefe(await seite.isVisible('[data-id="ui_test_4"]'), 'Vertrieb: Filter „alle Punktzahlen“ zeigt niedrige Treffer nicht');
+  pruefe(!(await seite.isVisible('[data-id="ui_test_5"]')), 'Vertrieb: abgelaufene Ausschreibung ohne Filter sichtbar');
+  await seite.check('[data-pruef="ausschreibungen-filter-alle"]');
+  await seite.waitForSelector('[data-id="ui_test_5"]', { timeout: 10000 }).catch(() => null);
+  pruefe(await seite.isVisible('[data-id="ui_test_5"]'), 'Vertrieb: Filter „Abgelaufene zeigen“ wirkt nicht');
+  await seite.uncheck('[data-pruef="ausschreibungen-filter-alle"]');
+  await seite.waitForSelector('[data-id="ui_test_5"]', { state: 'detached', timeout: 10000 }).catch(() => null);
+  await seite.selectOption('[data-pruef="ausschreibungen-filter-min"]', '60');
+  await seite.waitForSelector('[data-id="ui_test_4"]', { state: 'detached', timeout: 10000 }).catch(() => null);
+
+  // Status „Interessant“ bis ins Backend
+  await seite.click('[data-id="ui_test_3"] [data-pruef="ausschreibung-interessant"]');
+  const interessant = await warteAuf(seite, 'Status „interessant“ kommt nicht im Backend an', async () => {
+    const l = await ausschreibungenApi(seite);
+    return l && l.find(a => a.id === 'ui_test_3' && a.status === 'interessant');
+  }, 10);
+  pruefe(!!interessant, 'Vertrieb: Status „Interessant“ nicht gespeichert');
+
+  // Bewerbungsmappe erstellen → Link erscheint, Datei ist abrufbar
+  await bereichOeffnen(seite, 'vertrieb');
+  await seite.click('[data-id="ui_test_1"] [data-pruef="mappe-erstellen"]');
+  const mitMappe = await warteAuf(seite, 'Bewerbungsmappe entsteht nicht', async () => {
+    const l = await ausschreibungenApi(seite);
+    return l && l.find(a => a.id === 'ui_test_1' && a.unterlagen_url);
+  }, 20);
+  if (mitMappe) {
+    await bereichOeffnen(seite, 'vertrieb');
+    const href = await seite.getAttribute('[data-id="ui_test_1"] [data-pruef="mappe-ansehen"]', 'href').catch(() => null);
+    pruefe(href === mitMappe.unterlagen_url, 'Vertrieb: Link „Bewerbungsmappe ansehen“ fehlt (' + href + ')');
+    const datei = await seite.evaluate(async u => (await fetch(u, { credentials: 'same-origin' })).status, mitMappe.unterlagen_url);
+    pruefe(datei === 200, 'Vertrieb: Bewerbungsmappe nicht abrufbar (' + datei + ')');
+    pruefe(mitMappe.status === 'vorbereitet', 'Vertrieb: Status nach der Mappe ist nicht „vorbereitet“ (' + mitMappe.status + ')');
+  }
+
+  // --- Einstellungen: Auftragssuche und Stundensatz --------------------------------------
+  await bereichOeffnen(seite, 'einstellungen');
+  pruefe(await seite.isVisible('[data-pruef="auftragssuche"]'), 'Einstellungen: Karte „Auftragssuche und Stundensatz“ fehlt');
+  const form = '[data-pruef="auftragssuche-formular"]';
+  await seite.check(form + ' [data-pruef="recherche-schalter"]');
+  await seite.fill(form + ' input[name="region_plz"]', '50, 51, 53');
+  await seite.fill(form + ' textarea[name="suchbegriffe"]', 'Reinigung, Treppenhaus, Glasreinigung');
+  await seite.click('[data-pruef="auftragssuche-speichern"]');
+  const gespeichert = await warteAuf(seite, 'Einstellungen der Auftragssuche kommen nicht im Backend an', async () => {
+    const w = (await api(seite, 'GET', '/api/einstellungen')).inhalt.werte || {};
+    return w.internet_recherche_erlaubt === true && JSON.stringify(w.region_plz) === '["50","51","53"]'
+      && JSON.stringify(w.suchbegriffe) === '["reinigung","treppenhaus","glasreinigung"]' ? w : null;
+  }, 10);
+  pruefe(!!gespeichert, 'Einstellungen: Recherche/Region/Suchbegriffe nicht (als Listen) gespeichert');
+  // Wieder ausschalten – die Prüfung soll nie ins Internet
+  await bereichOeffnen(seite, 'einstellungen');
+  await seite.uncheck(form + ' [data-pruef="recherche-schalter"]');
+  await seite.click('[data-pruef="auftragssuche-speichern"]');
+  const aus = await warteAuf(seite, 'Internet-Recherche lässt sich nicht wieder ausschalten', async () => {
+    const w = (await api(seite, 'GET', '/api/einstellungen')).inhalt.werte || {};
+    return w.internet_recherche_erlaubt === false ? w : null;
+  }, 10);
+  pruefe(!!aus, 'Einstellungen: Internet-Recherche nicht wieder aus');
+  // Ungültige Eingabe: freundliche Meldung, nichts halb gespeichert
+  await bereichOeffnen(seite, 'einstellungen');
+  await seite.fill(form + ' input[name="region_plz"]', '5, 51');
+  await seite.fill(form + ' input[name="stundensatz"]', '40,00');
+  await seite.click('[data-pruef="auftragssuche-speichern"]');
+  pruefe(await meldungMit(seite, /Postleitzahl-Bereiche/), 'Einstellungen: ungültiger PLZ-Bereich ohne Meldung');
+  const unveraendert = (await api(seite, 'GET', '/api/einstellungen')).inhalt.werte || {};
+  pruefe(unveraendert.stundensatz_cent === 0 && JSON.stringify(unveraendert.region_plz) === '["50","51","53"]',
+    'Einstellungen: bei ungültiger Eingabe wurde trotzdem etwas gespeichert');
+
+  // --- Kalkulation: ohne Stundensatz → OFFEN, mit 35,00 € → 400,40 € -------------------
+  await bereichOeffnen(seite, 'vertrieb');
+  const kf = '[data-pruef="kalkulation-formular"]';
+  if (!(await seite.isVisible(kf + ' [data-feld="bezeichnung"]'))) await seite.click('[data-schluessel="kalkulation-neu"] > summary');
+  await seite.click('[data-pruef="kalk-position-plus"]');
+  pruefe((await seite.$$(kf + ' [data-position]')).length === 2, 'Kalkulation: „Position hinzufügen“ wirkt nicht');
+  await seite.click(kf + ' [data-position]:nth-child(2) [data-weg]');
+  pruefe((await seite.$$(kf + ' [data-position]')).length === 1, 'Kalkulation: „Entfernen“ wirkt nicht');
+  await seite.fill(kf + ' [data-feld="bezeichnung"]', 'Treppenhaus');
+  await seite.fill(kf + ' [data-feld="flaeche"]', '400');
+  await seite.fill(kf + ' [data-feld="leistung"]', '200');
+  await seite.fill(kf + ' [data-feld="anzahl"]', '4');
+  await seite.selectOption(kf + ' [data-feld="turnus"]', 'monat');
+  await seite.fill(kf + ' input[name="material_prozent"]', '5');
+  await seite.fill(kf + ' input[name="zuschlag_prozent"]', '10');
+  await seite.fill(kf + ' input[name="anfahrten_pro_monat"]', '4');
+  await seite.fill(kf + ' input[name="anfahrt_minuten"]', '30');
+  await seite.click('[data-pruef="kalkulation-absenden"]');
+  const offen = await seite.waitForFunction(() => {
+    const el = document.querySelector('[data-pruef="kalk-preis-monat"]');
+    return el && /OFFEN/.test(el.textContent);
+  }, null, { timeout: 25000 }).then(() => true, () => false);
+  pruefe(offen, 'Kalkulation: ohne Stundensatz wird nicht „OFFEN“ angezeigt');
+  pruefe(/10 h/.test((await seite.textContent('[data-pruef="kalk-ergebnis"]')) || ''), 'Kalkulation: Stunden (8 h + 2 h Anfahrt = 10 h) fehlen');
+  // Die Eingaben bleiben nach dem Neuaufbau stehen; jetzt mit Stundensatz
+  if (!(await seite.isVisible(kf + ' input[name="stundensatz"]'))) await seite.click('[data-schluessel="kalkulation-neu"] > summary');
+  pruefe((await seite.inputValue(kf + ' [data-feld="flaeche"]')) === '400', 'Kalkulation: Eingaben gehen beim Neuaufbau verloren');
+  await seite.fill(kf + ' input[name="stundensatz"]', '35,00');
+  await seite.click('[data-pruef="kalkulation-absenden"]');
+  const preis = await seite.waitForFunction(() => {
+    const el = document.querySelector('[data-pruef="kalk-preis-monat"]');
+    return el && /400,40/.test(el.textContent);
+  }, null, { timeout: 25000 }).then(() => true, () => false);
+  pruefe(preis, 'Kalkulation: mit 35,00 € wird nicht 400,40 € pro Monat angezeigt');
+  pruefe(/4\.804,80/.test((await seite.textContent('[data-pruef="kalk-preis-jahr"]')) || ''), 'Kalkulation: Jahrespreis 4.804,80 € fehlt');
+
+  // --- Angebot Dauerauftrag aus der Kalkulation ------------------------------------------
+  if (preis) {
+    await seite.click('[data-pruef="dauerauftrag-oeffnen"]');
+    await seite.fill('[data-pruef="dauerauftrag-formular"] input[name="laufzeit"]', '12 Monate');
+    await seite.click('[data-pruef="dauerauftrag-absenden"]');
+    const angebot = await warteAuf(seite, 'Angebot Dauerauftrag entsteht nicht', async () => {
+      const r = await api(seite, 'GET', '/api/angebote');
+      return (r.inhalt.angebote || []).find(a => a.abrechnung === 'monatlich' && a.betrag_cent === 40040) || null;
+    }, 20);
+    pruefe(!!angebot, 'Dauerauftrag: Angebot aus der Kalkulation fehlt im Backend');
+    if (angebot) {
+      pruefe(angebot.inhalt && angebot.inhalt.laufzeit === '12 Monate', 'Dauerauftrag: Laufzeit nicht übernommen');
+      await bereichOeffnen(seite, 'vertrieb');
+      pruefe(/400,40\s*€ \/ Monat/.test((await seite.textContent('[data-pruef="angebot"]')) || ''), 'Dauerauftrag: Liste zeigt die Monatspauschale nicht als „/ Monat“');
+    }
+  }
+
+  // --- Anschreiben mit Auswahl „Reinigung“ -----------------------------------------------
+  const kontakte = (await api(seite, 'GET', '/api/kontakte')).inhalt.kontakte || [];
+  if (kontakte.length) {
+    await bereichOeffnen(seite, 'vertrieb');
+    await seite.click('main button:has-text("Nachricht entwerfen")');
+    await seite.selectOption('[data-pruef="nachricht-formular"] select[name="angebot"]', 'reinigung');
+    await seite.fill('[data-pruef="nachricht-formular"] input[name="anlass"]', 'Erstkontakt Hausverwaltung');
+    await seite.click('[data-pruef="nachricht-absenden"]');
+    const entwurf = await warteAuf(seite, 'Anschreiben „Reinigung“ entsteht nicht', async () => {
+      const l = (await api(seite, 'GET', '/api/aufgaben?rolle=sales')).inhalt.aufgaben || [];
+      return l.find(a => a.typ === 'nachricht_entwurf' && a.eingabe && a.eingabe.angebot === 'reinigung' && a.status === 'abgeschlossen') || null;
+    }, 20);
+    pruefe(!!entwurf, 'Anschreiben: Auswahl „Reinigung“ kommt nicht im Backend an');
+  } else {
+    hinweise.add('Anschreiben-Auswahl nicht geprüft: kein Kontakt vorhanden');
+  }
+
+  // --- Rückmeldungen ----------------------------------------------------------------------
+  const rm = await api(seite, 'GET', '/api/rueckmeldungen');
+  await bereichOeffnen(seite, 'vertrieb');
+  if (rm.status === 200) {
+    const rf = '[data-pruef="rueckmeldung-formular"]';
+    if (!(await seite.isVisible(rf + ' select[name="reaktion"]'))) await seite.click('[data-schluessel="rueckmeldung-neu"] > summary');
+    await seite.selectOption(rf + ' select[name="reaktion"]', 'interessiert');
+    pruefe(await seite.isDisabled(rf + ' select[name="grund"]'), 'Rückmeldungen: Grund bei „interessiert“ nicht gesperrt');
+    await seite.selectOption(rf + ' select[name="reaktion"]', 'abgelehnt');
+    pruefe(!(await seite.isDisabled(rf + ' select[name="grund"]')), 'Rückmeldungen: Grund bei „abgelehnt“ gesperrt');
+    await seite.selectOption(rf + ' select[name="grund"]', 'preis');
+    const reaktion = 'abgelehnt';
+    await seite.fill(rf + ' textarea[name="notiz"]', 'UI-Prüfung Rückmeldung');
+    await seite.click('[data-pruef="rueckmeldung-formular-absenden"]');
+    const neu = await warteAuf(seite, 'Rückmeldung kommt nicht im Backend an', async () => {
+      const r = await api(seite, 'GET', '/api/rueckmeldungen');
+      return (r.inhalt.rueckmeldungen || []).find(x => x.notiz === 'UI-Prüfung Rückmeldung') || null;
+    }, 10);
+    const meldungenJetzt = await seite.$$eval('.meldung', ms => ms.map(m => m.textContent).join(' | '));
+    pruefe(!!neu && neu.reaktion === reaktion && neu.grund === 'preis',
+      'Rückmeldungen: Eintrag nicht oder falsch gespeichert (Meldungen: ' + meldungenJetzt + ')');
+    await bereichOeffnen(seite, 'vertrieb');
+    await seite.click('[data-pruef="rueckmeldungen-auswerten"]');
+    const ausw = await seite.waitForSelector('[data-pruef="rueckmeldungen-auswertung"]', { timeout: 25000 }).then(() => true, () => false);
+    pruefe(ausw, 'Rückmeldungen: Auswertung wird nicht angezeigt');
+    if (ausw) {
+      await seite.click('[data-pruef="rueckmeldungen-auswertung"] > summary');
+      const t = (await seite.textContent('[data-pruef="rueckmeldungen-auswertung"]')) || '';
+      pruefe(/Rückmeldungen gesamt/.test(t) && /Preis zu hoch 1×/.test(t), 'Rückmeldungen: Auswertung nicht lesbar aufbereitet');
+    }
+  } else {
+    pruefe(await seite.isVisible('[data-pruef="rueckmeldungen-nicht-verfuegbar"]'),
+      'Rückmeldungen: Route fehlt (' + rm.status + '), aber kein „noch nicht verfügbar“');
+    hinweise.add('Rückmeldungen: Route antwortet ' + rm.status + ' – Bereich ist als „noch nicht verfügbar“ markiert');
+  }
+
+  // --- Dashboard: Kachel „Ausschreibungen“ aus echten Daten -------------------------------
+  await bereichOeffnen(seite, 'dashboard');
+  const passend = await api(seite, 'GET', '/api/ausschreibungen?min_punkte=60');
+  const erwartet = (passend.inhalt.ausschreibungen || []).filter(a => a.status === 'neu').length;
+  const wert = ((await seite.textContent('[data-pruef="ausschreibungen-kachel"]')) || '').trim();
+  pruefe(wert === String(erwartet), 'Dashboard: Kachel „Ausschreibungen“ zeigt ' + wert + ' statt ' + erwartet);
 }
 
 async function freigabeAblauf(seite) {
@@ -421,6 +671,13 @@ async function ansichtPruefen(browser, startUrl, g, bilder) {
     if (id === 'wallet') {
       const banner = await seite.textContent('[data-pruef="wallet-banner"]');
       pruefe(/SIMULATION/.test(banner || '') && /kein echtes Geld/.test(banner || ''), g.name + ': Wallet ist nicht deutlich als SIMULATION gekennzeichnet');
+    }
+    if (id === 'vertrieb') {
+      pruefe(await seite.isVisible('[data-pruef="ausschreibungen"]'), g.name + ': Vertrieb ohne Auftrags-Radar');
+      pruefe(await seite.isVisible('[data-pruef="kalkulation"]'), g.name + ': Vertrieb ohne Kalkulation');
+    }
+    if (id === 'einstellungen') {
+      pruefe(await seite.isVisible('[data-pruef="auftragssuche"]'), g.name + ': Einstellungen ohne Auftragssuche');
     }
     if (id === 'finanzen') {
       const banner = await seite.textContent('[data-pruef="finanzen-banner"]');
