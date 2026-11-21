@@ -8,6 +8,27 @@ import datetime
 from . import Agent
 
 
+# Rückmeldungen echter Interessenten (Werte wie in der Datenbank, Migration 3)
+ANGEBOT_ARTEN = ("google_profil", "webseite", "reinigung", "sonstiges")
+KANAELE = ("gespraech", "telefon", "brief", "email", "vor_ort", "sonstiges")
+REAKTIONEN = ("interessiert", "neutral", "abgelehnt", "keine_antwort")
+GRUENDE = ("preis", "kein_bedarf", "spaeter", "hat_anbieter", "vertrauen", "leistung_unklar", "sonstiges")
+GRUND_BEI = ("abgelehnt", "neutral")          # nur bei diesen Reaktionen ist ein Grund erlaubt
+SCHWELLE = 5                                   # erst ab so vielen Rückmeldungen je Angebot aussagekräftig
+ANGEBOT_NAMEN = {"google_profil": "Google-Profil-Paket", "webseite": "Webseiten-Paket",
+                 "reinigung": "Reinigung (Dauerauftrag)", "sonstiges": "Sonstiges"}
+# Was ein häufiger Grund nahelegt – nur Vorschläge, Entscheidung beim Inhaber
+GRUND_VORSCHLAG = {
+    "preis": "Preis oder Leistungsumfang prüfen – Entscheidung Inhaber.",
+    "leistung_unklar": "Leistungsbeschreibung und Verkaufsseite verständlicher machen.",
+    "kein_bedarf": "Zielgruppe prüfen: Viele Angesprochene haben keinen Bedarf.",
+    "hat_anbieter": "Unterschied zum bisherigen Anbieter klarer zeigen oder später erneut nachfragen.",
+    "vertrauen": "Vertrauen stärken: Ablauf, Ansprechpartner und echte Beispiele zeigen – keine erfundenen "
+                 "Referenzen.",
+    "spaeter": "Wiedervorlage planen: Termin für die erneute Nachfrage beim Kontakt eintragen.",
+}
+
+
 def _sekunden(a, b):
     try:
         return (datetime.datetime.fromisoformat(b) - datetime.datetime.fromisoformat(a)).total_seconds()
@@ -20,7 +41,57 @@ class LearningAgent(Agent):
     name = "Learning-Agent"
     beschreibung = "Analysiert Qualität, Fehler und Zeitaufwand; schlägt Verbesserungen vor (ohne sie umzusetzen)."
     rechte = frozenset({"interne_auswertung", "gedaechtnis_vorschlag"})
-    aufgabentypen = {"auswertung": "Aufgaben je Rolle auswerten und Verbesserungen vorschlagen"}
+    aufgabentypen = {
+        "auswertung": "Aufgaben je Rolle auswerten und Verbesserungen vorschlagen",
+        "rueckmeldungen_auswerten": "Rückmeldungen echter Interessenten je Angebot auswerten und Verbesserungen "
+                                    "vorschlagen (ändert nichts selbst)",
+    }
+
+    def aufgabe_rueckmeldungen_auswerten(self, aufgabe, k):
+        """Zählt nur, was der Eigentümer erfasst hat. Vorschläge erst ab SCHWELLE Rückmeldungen je Angebot."""
+        self.darf(k, "interne_auswertung", "rueckmeldungen", aufgabe)
+        zeilen = k.db.alle("SELECT angebot_art, reaktion, grund FROM rueckmeldungen")
+        if not zeilen:
+            return {"gesamt": 0, "je_angebot": {}, "vorschlaege": [],
+                    "hinweis": "Keine Rückmeldungen erfasst – es gibt noch nichts auszuwerten. Rückmeldungen trägt "
+                               "der Inhaber nach echten Gesprächen ein."}
+        je_angebot = {}
+        for z in zeilen:
+            e = je_angebot.setdefault(z["angebot_art"], {"anzahl": 0, "reaktionen": {r: 0 for r in REAKTIONEN},
+                                                         "gruende": {}})
+            e["anzahl"] += 1
+            e["reaktionen"][z["reaktion"]] += 1
+            if z["grund"]:
+                e["gruende"][z["grund"]] = e["gruende"].get(z["grund"], 0) + 1
+        vorschlaege = []
+        for art in sorted(je_angebot, key=lambda a: ANGEBOT_ARTEN.index(a) if a in ANGEBOT_ARTEN else 99):
+            e = je_angebot[art]
+            n = e["anzahl"]
+            gruende = sorted(e["gruende"].items(), key=lambda x: (-x[1], GRUENDE.index(x[0])))
+            e["gruende"] = [[g, anzahl] for g, anzahl in gruende]
+            e["quote_interessiert_prozent"] = round(100 * e["reaktionen"]["interessiert"] / n)
+            e["aussagekraeftig"] = n >= SCHWELLE
+            if n < SCHWELLE:
+                e["hinweis"] = "Erst %d von %d Rückmeldungen – noch nicht aussagekräftig." % (n, SCHWELLE)
+                continue
+            name = ANGEBOT_NAMEN.get(art, art)
+            for i, (g, anzahl) in enumerate(gruende):
+                # „häufig“ = mindestens 2-mal und mindestens ein Viertel aller Rückmeldungen zu diesem Angebot
+                if anzahl >= 2 and 4 * anzahl >= n and g in GRUND_VORSCHLAG:
+                    rang = "häufigster Grund" if i == 0 else "häufiger Grund"
+                    vorschlaege.append("%s: %s „%s“ (%d von %d Rückmeldungen) – %s"
+                                       % (name, rang, g, anzahl, n, GRUND_VORSCHLAG[g]))
+            ohne = e["reaktionen"]["keine_antwort"]
+            if 2 * ohne >= n:
+                vorschlaege.append("%s: %d von %d ohne Antwort – Ansprache oder Kanal prüfen (z. B. persönlich "
+                                   "statt Brief)." % (name, ohne, n))
+        if vorschlaege:
+            self.darf(k, "gedaechtnis_vorschlag", "rueckmeldungen", aufgabe)
+            k.gedaechtnis.merken("vorschlag", "Rückmeldungen", "\n".join(vorschlaege),
+                                 "learning:rueckmeldungen_auswerten", self.rolle, aufgabe["id"])
+        return {"gesamt": len(zeilen), "je_angebot": je_angebot, "vorschlaege": vorschlaege,
+                "hinweis": "Aussagekräftig erst ab %d Rückmeldungen je Angebot. Nur Vorschläge – Preise, Texte und "
+                           "Regeln ändert der Agent nie selbst." % SCHWELLE}
 
     def aufgabe_auswertung(self, aufgabe, k):
         self.darf(k, "interne_auswertung", "auswertung", aufgabe)

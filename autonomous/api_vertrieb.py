@@ -7,7 +7,13 @@ Ausnahme: Statusänderungen, die der Eigentümer selbst entscheidet (Kontaktstat
 """
 
 import json
+import re
 
+from .agenten.learning import ANGEBOT_ARTEN as RM_ARTEN
+from .agenten.learning import GRUENDE as RM_GRUENDE
+from .agenten.learning import GRUND_BEI as RM_GRUND_BEI
+from .agenten.learning import KANAELE as RM_KANAELE
+from .agenten.learning import REAKTIONEN as RM_REAKTIONEN
 from .api import EIGENTUEMER, ApiFehler, ganzzahl, route, text
 from .db import jetzt, neue_id
 from .produkte import datei_schreiben, produkt_hole, produkte_liste, sicherer_pfad
@@ -279,3 +285,74 @@ def r_auswertung(kern, a):
     aid = kern.aufgaben.anlegen("Vertriebs-Pipeline auswerten", "pipeline_auswertung", "sales", EIGENTUEMER, {}, 3)
     return {"aufgabe_id": aid}
 
+
+
+# ---------------------------------------------------------------- Rückmeldungen (PDF 2.3: Reaktionen messen)
+_EMAIL = re.compile(r"[\w.+-]+@[\w-]+\.[\w.-]+")
+_TELEFON = re.compile(r"(?<![\w.])(?:\+|0)\d[\d /()\-]{5,}\d")
+
+
+def _personendaten_in_notiz(notiz):
+    """Datensparsamkeit: E-Mail-Adressen und Telefonnummern gehören in den Kontakt, nicht in die Notiz."""
+    if _EMAIL.search(notiz):
+        return True
+    return any(len(re.sub(r"\D", "", t)) >= 7 for t in _TELEFON.findall(notiz))
+
+
+@route("GET", "/api/rueckmeldungen")
+def r_rueckmeldungen(kern, a):
+    zeilen = kern.db.alle(
+        "SELECT r.*, k.firma AS kontakt_firma, an.titel AS angebot_titel FROM rueckmeldungen r "
+        "LEFT JOIN kontakte k ON k.id = r.kontakt_id LEFT JOIN angebote an ON an.id = r.angebot_id "
+        "ORDER BY r.zeit DESC, r.rowid DESC LIMIT 500")
+    return {"rueckmeldungen": zeilen, "reaktionen": list(RM_REAKTIONEN), "gruende": list(RM_GRUENDE),
+            "kanaele": list(RM_KANAELE), "angebot_arten": list(RM_ARTEN)}
+
+
+@route("POST", "/api/rueckmeldungen")
+def r_rueckmeldung_anlegen(kern, a):
+    """Erfasst eine echte Rückmeldung. Nur der Eigentümer erfasst – Agenten erfinden keine Rückmeldungen."""
+    b = a["body"]
+    art = text(b, "angebot_art", laenge=20)
+    kanal = text(b, "kanal", laenge=20)
+    reaktion = text(b, "reaktion", laenge=20)
+    if art not in RM_ARTEN:
+        raise ApiFehler(400, "angebot_art muss eines von %s sein" % ", ".join(RM_ARTEN))
+    if kanal not in RM_KANAELE:
+        raise ApiFehler(400, "kanal muss eines von %s sein" % ", ".join(RM_KANAELE))
+    if reaktion not in RM_REAKTIONEN:
+        raise ApiFehler(400, "reaktion muss eines von %s sein" % ", ".join(RM_REAKTIONEN))
+    grund = text(b, "grund", False, 20)
+    if grund is not None:
+        if grund not in RM_GRUENDE:
+            raise ApiFehler(400, "grund muss eines von %s sein" % ", ".join(RM_GRUENDE))
+        if reaktion not in RM_GRUND_BEI:
+            raise ApiFehler(400, "Ein Grund passt nur zu den Reaktionen abgelehnt oder neutral.")
+    notiz = text(b, "notiz", False, 2000)
+    if notiz and _personendaten_in_notiz(notiz):
+        raise ApiFehler(400, "Bitte keine E-Mail-Adressen oder Telefonnummern in die Notiz schreiben – die gehören "
+                             "in den Kontakt (Datensparsamkeit).")
+    kontakt_id = text(b, "kontakt_id", False, 64)
+    angebot_id = text(b, "angebot_id", False, 64)
+    if kontakt_id and not kern.db.eins("SELECT id FROM kontakte WHERE id=?", (kontakt_id,)):
+        raise ApiFehler(404, "Kontakt nicht gefunden")
+    if angebot_id:
+        ang = kern.db.eins("SELECT id, kontakt_id FROM angebote WHERE id=?", (angebot_id,))
+        if not ang:
+            raise ApiFehler(404, "Angebot nicht gefunden")
+        if kontakt_id and ang["kontakt_id"] and ang["kontakt_id"] != kontakt_id:
+            raise ApiFehler(400, "Das Angebot gehört zu einem anderen Kontakt.")
+        kontakt_id = kontakt_id or ang["kontakt_id"]
+    rid = neue_id("rm_")
+    kern.db.ausfuehren("INSERT INTO rueckmeldungen (id, zeit, kontakt_id, angebot_id, angebot_art, kanal, reaktion, "
+                       "grund, notiz, erfasst_von) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                       (rid, jetzt(), kontakt_id, angebot_id, art, kanal, reaktion, grund, notiz, EIGENTUEMER))
+    # Protokoll ohne Notiztext (Datensparsamkeit)
+    kern.protokoll.audit("vertrieb", "Rückmeldung erfasst", {"id": rid, "angebot_art": art, "reaktion": reaktion})
+    return {"id": rid}
+
+
+@route("POST", "/api/rueckmeldungen/auswerten")
+def r_rueckmeldungen_auswerten(kern, a):
+    aid = kern.aufgaben.anlegen("Rückmeldungen auswerten", "rueckmeldungen_auswerten", "learning", EIGENTUEMER, {}, 3)
+    return {"aufgabe_id": aid}

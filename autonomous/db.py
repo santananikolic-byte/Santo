@@ -283,6 +283,24 @@ MIGRATIONEN = [
         aufgabe_id TEXT
     );
     """,
+    # 3 – Rückmeldungen echter Interessenten (PDF 2.3: „Miss Reaktionen und verbessere das Angebot“)
+    """
+    CREATE TABLE rueckmeldungen (
+        id TEXT PRIMARY KEY,
+        zeit TEXT NOT NULL,
+        kontakt_id TEXT,
+        angebot_id TEXT,
+        angebot_art TEXT NOT NULL CHECK (angebot_art IN ('google_profil','webseite','reinigung','sonstiges')),
+        kanal TEXT NOT NULL CHECK (kanal IN ('gespraech','telefon','brief','email','vor_ort','sonstiges')),
+        reaktion TEXT NOT NULL CHECK (reaktion IN ('interessiert','neutral','abgelehnt','keine_antwort')),
+        grund TEXT CHECK (grund IS NULL OR grund IN ('preis','kein_bedarf','spaeter','hat_anbieter','vertrauen',
+                                                     'leistung_unklar','sonstiges')),
+        notiz TEXT CHECK (notiz IS NULL OR length(notiz) <= 2000),
+        erfasst_von TEXT NOT NULL,
+        CHECK (grund IS NULL OR reaktion IN ('abgelehnt','neutral'))
+    );
+    CREATE INDEX rueckmeldungen_art ON rueckmeldungen(angebot_art, zeit);
+    """,
 ]
 
 
