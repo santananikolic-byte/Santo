@@ -145,7 +145,7 @@ Begriffe: GEPLANT · IMPLEMENTIERT · ERFOLGREICH AUSGEFÜHRT · ERFOLGREICH GET
 | Wallet (SIMULATION) und reale Finanzen getrennt | ERFOLGREICH GETESTET | `test_finanzen.py` |
 | Google-Profil-Paket, Webseite, Verkaufsseite, Angebote, Kontakte | ERFOLGREICH GETESTET | `test_google_profil.py`, `test_produkt_vertrieb.py` |
 | Reinigungs-Kalkulation, Angebot Dauerauftrag, Anschreiben „reinigung“ | ERFOLGREICH GETESTET | `test_kalkulation.py` |
-| Auftrags-Radar (TED, service.bund.de, Vergabemarktplatz NRW) | ERFOLGREICH GETESTET und ERFOLGREICH AUSGEFÜHRT (echter Lauf 21.11.2026: 287 gefunden, 58 mit ≥ 60 Punkten, 0 Dubletten beim zweiten Lauf, 0 Abrufe bei ausgeschalteter Recherche) | `test_auftraege.py`, Live-Lauf |
+| Auftrags-Radar (TED, service.bund.de, Vergabemarktplatz NRW) | ERFOLGREICH GETESTET und ERFOLGREICH AUSGEFÜHRT (echter Lauf 21.11.2026: 287 gefunden, 58 als passend gewertet (≥ 60 Punkte; teils dieselbe Ausschreibung in zwei Quellen, Zusammenführung NICHT IMPLEMENTIERT), 0 Dubletten beim zweiten Lauf, 0 Abrufe bei ausgeschalteter Recherche) | `test_auftraege.py`, Live-Lauf |
 | Weboberfläche (9 Bereiche) | ERFOLGREICH GETESTET | `ui_pruefung.js`: 142/142 |
 | Oberfläche für Auftrags-Radar und Kalkulation | GEPLANT (nicht begonnen) | – |
 | Start/Stopp per Doppelklick | ERFOLGREICH AUSGEFÜHRT (Linux) / NICHT VERIFIZIERT (Mac) | – |
