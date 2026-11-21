@@ -83,6 +83,23 @@ Preis: Die Recherche schlägt 199–349 € netto vor, die Anbieterpreise dazu s
 Nachprüfung in der Marktanalyse). Erst selbst prüfen, dann festlegen. Auf Verkaufsseite und Angebot steht nur ein
 Preis, den ihr eingebt.
 
+## KI-Modell (optional, lokal auf dem Mac, kostenlos)
+
+AUTONOMOUS läuft ohne KI vollständig. Mit einem **lokalen** Modell schreiben die Agenten zusätzlich Zusammenfassungen
+(z. B. im Marktbericht). Es wird **kein** externer KI-Dienst genutzt – nichts geht an Anthropic, OpenAI oder andere.
+
+1. Ollama von **ollama.com** herunterladen (Download für macOS) und wie ein normales Programm installieren.
+2. Im Terminal ein Modell laden, z. B. `ollama pull gemma3:4b` (Mac mit 8 GB Arbeitsspeicher; mit 16 GB oder mehr
+   geht auch ein größeres Modell). Das sind einige Gigabyte Download.
+3. In AUTONOMOUS: **Einstellungen → KI-Modell** → Anbieter „ollama“, Modellname wie geladen → **Modell testen**.
+
+Wichtig: Jede KI-Ausgabe ist als **„KI-Entwurf – ungeprüft“** gekennzeichnet. Ein kleines Modell macht Fehler – Zahlen
+und Fakten stehen deshalb immer gezählt und mit Quelle daneben, die KI-Zusammenfassung ist nur ein Zusatz. Die KI kann
+keine Aktion auslösen, nichts versenden und keine Rechte ändern.
+
+Echt geprüft in der Entwicklungsumgebung (21.11.2026) mit **Ollama 0.40.17 und dem Modell gemma3:1b**: Status,
+Probeaufruf und ein Marktbericht mit KI-Zusammenfassung über den laufenden Server. Auf dem Mac: noch nicht verifiziert.
+
 ## Prüfen, ob alles funktioniert
 
 ```
