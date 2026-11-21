@@ -41,4 +41,19 @@ STANDARD_EINSTELLUNGEN = {
     "max_parallel": 2,                    # begrenzte Parallelität der Agenten
     "wallet_warnschwelle_cent": 300,      # Warnung, wenn simuliertes Guthaben darunter fällt
     "sicherung_behalten": 14,
+    # Auftragssuche (Weg 1): Agenten lesen öffentliche Ausschreibungen – nur nach einmaligem Einschalten
+    "internet_recherche_erlaubt": False,  # Eigentümer schaltet die Recherche einmal bewusst ein
+    "auftragssuche_taeglich": False,      # Agenten suchen dann selbstständig einmal am Tag
+    # Region: Postleitzahl-Bereiche (2-stellig) als Näherung für „ca. 100 km um Leverkusen“ – ANNAHME, änderbar
+    "region_plz": ["40", "41", "42", "44", "45", "46", "47", "50", "51", "52", "53", "57", "58", "59"],
+    # Region für EU-Ausschreibungen (NUTS-Codes; DEA = Nordrhein-Westfalen)
+    "region_nuts": ["DEA"],
+    "suchbegriffe": ["reinigung", "gebäudereinigung", "unterhaltsreinigung", "glasreinigung", "fensterreinigung",
+                     "treppenhaus", "grundreinigung", "bauendreinigung", "baureinigung", "sonderreinigung"],
+    "ausschlussbegriffe": ["straßenreinigung", "straßenkehr", "kanal", "biotonne", "behälter", "tank", "abwasser",
+                           "entwässerung", "fahrzeug", "kehrmaschine"],
+    "stundensatz_cent": 0,                # 0 = OFFEN (noch nicht festgelegt) – wird nie erfunden
 }
+
+# Öffentliche Quellen, die Agenten lesen dürfen (nur lesen, nur https, nur diese Hosts)
+ERLAUBTE_QUELLEN_HOSTS = ("api.ted.europa.eu", "ted.europa.eu", "www.service.bund.de", "www.evergabe.nrw.de")

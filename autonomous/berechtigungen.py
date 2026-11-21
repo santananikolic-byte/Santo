@@ -33,6 +33,8 @@ AKTIONEN = {
     "wallet_simulation": (AUTO, "Simulierte Buchung im internen Wallet"),
     "entwurf_erstellen": (AUTO, "Entwurf (Nachricht, Angebot) lokal erstellen – wird nicht versendet"),
     "lokales_modell": (AUTO, "Lokales, kostenloses Modell abfragen (im Tageslimit)"),
+    "web_lesen": (AUTO, "Öffentliche Ausschreibungsseiten lesen – nur freigegebene Quellen, nur lesen, nur wenn "
+                        "die Internet-Recherche in den Einstellungen eingeschaltet ist"),
     # Freigabe erforderlich
     "externe_nachricht": (FREIGABE, "Nachricht an Externe senden (E-Mail, Brief, Messenger)"),
     "veroeffentlichung": (FREIGABE, "Inhalt veröffentlichen"),
@@ -91,7 +93,7 @@ class Supervisor:
 
     # ---- Kernprüfung -------------------------------------------------
     def pruefe(self, agent, aktion, ziel, *, kosten_cent=0, datenumfang="keine personenbezogenen Daten",
-               folgen="", nutzlast=None, aufgabe_id=None, datei_pfad=None):
+               folgen="", nutzlast=None, aufgabe_id=None, datei_pfad=None, url=None):
         klasse = risikoklasse(aktion)
         rechte = self._rollen_rechte(agent)
         details = {"agent": agent, "aktion": aktion, "ziel": str(ziel)[:200], "kosten_cent": kosten_cent}
@@ -102,6 +104,14 @@ class Supervisor:
             return self._blockiert(details, "Rolle %s hat das Recht '%s' nicht" % (agent, aktion))
         if datei_pfad is not None and not pfad_erlaubt(datei_pfad):
             return self._blockiert(details, "Dateipfad außerhalb des freigegebenen Bereichs")
+        if aktion == "web_lesen":
+            if not self.einstellungen.hole("internet_recherche_erlaubt"):
+                return self._blockiert(details, "Internet-Recherche ist ausgeschaltet (Einstellungen → einmal "
+                                                "einschalten)")
+            if url is None or not url_erlaubt(url):
+                return self._blockiert(details, "Adresse ist keine freigegebene öffentliche Quelle")
+        elif url is not None and not url_erlaubt(url):
+            return self._blockiert(details, "Adresse ist keine freigegebene öffentliche Quelle")
         if kosten_cent and kosten_cent > 0 and not self.einstellungen.hole("kostenpflichtig_erlaubt"):
             return self._blockiert(details, "Kostenpflichtige Aktionen sind gesperrt (Einstellungen)")
 
@@ -199,6 +209,18 @@ class Supervisor:
         if sieht_nach_geheimnis_aus(text):
             maengel.append("Ergebnis enthält vermutlich ein Geheimnis (Passwort/Schlüssel/Seed)")
         return maengel
+
+
+def url_erlaubt(url):
+    """Nur https, nur die Hosts aus konfig.ERLAUBTE_QUELLEN_HOSTS, kein Benutzer/Passwort, Standard-Port."""
+    from urllib.parse import urlsplit
+    try:
+        teile = urlsplit(str(url))
+        port = teile.port
+    except ValueError:
+        return False
+    return (teile.scheme == "https" and (teile.hostname or "").lower() in konfig.ERLAUBTE_QUELLEN_HOSTS
+            and not teile.username and not teile.password and port in (None, 443))
 
 
 def erlaubte_wurzeln():

@@ -243,6 +243,46 @@ MIGRATIONEN = [
         erstellt TEXT NOT NULL
     );
     """,
+    # 2 – Auftragssuche: öffentliche Ausschreibungen und Suchläufe
+    """
+    CREATE TABLE ausschreibungen (
+        id TEXT PRIMARY KEY,
+        quelle TEXT NOT NULL CHECK (quelle IN ('ted','service_bund','evergabe_nrw')),
+        extern_id TEXT NOT NULL,
+        titel TEXT NOT NULL,
+        vergabestelle TEXT,
+        ort TEXT,
+        plz TEXT,
+        region TEXT,
+        frist TEXT,
+        veroeffentlicht TEXT,
+        verfahren TEXT,
+        link TEXT NOT NULL,
+        cpv TEXT NOT NULL DEFAULT '[]',
+        punkte INTEGER NOT NULL DEFAULT 0 CHECK (punkte BETWEEN 0 AND 100),
+        begruendung TEXT NOT NULL DEFAULT '[]',
+        status TEXT NOT NULL DEFAULT 'neu' CHECK (status IN ('neu','interessant','abgelehnt','vorbereitet',
+                                                            'abgegeben','gewonnen','verloren')),
+        notiz TEXT,
+        unterlagen TEXT,
+        gefunden TEXT NOT NULL,
+        aktualisiert TEXT NOT NULL,
+        UNIQUE (quelle, extern_id)
+    );
+    CREATE INDEX ausschreibungen_frist ON ausschreibungen(status, frist);
+
+    CREATE TABLE suchlaeufe (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        zeit TEXT NOT NULL,
+        quelle TEXT NOT NULL,
+        ergebnis TEXT NOT NULL CHECK (ergebnis IN ('ok','fehler','gesperrt')),
+        gefunden INTEGER NOT NULL DEFAULT 0,
+        neu INTEGER NOT NULL DEFAULT 0,
+        passend INTEGER NOT NULL DEFAULT 0,
+        meldung TEXT,
+        aufgabe_id TEXT
+    );
+    """,
 ]
 
 

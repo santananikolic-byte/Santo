@@ -34,6 +34,11 @@ class Zweitagent(Testagent):
     rolle = "zweiter"
 
 
+class Leseagent(Testagent):
+    rolle = "leser"
+    rechte = frozenset({"web_lesen"})
+
+
 class TestFreigaben(KernTest):
     def setUp(self):
         super().setUp()
@@ -94,6 +99,33 @@ class TestFreigaben(KernTest):
         self.assertEqual(ergebnisse.count("erlaubt"), 1, ergebnisse)
         # die übrigen haben genau EINE neue Anfrage erzeugt bzw. warten darauf – keine Doppelanfragen
         self.assertEqual(len(self.kern.supervisor.liste("offen")), 1)
+
+    def test_internet_lesen_nur_eingeschaltet_und_nur_freigegebene_quellen(self):
+        self.kern.register.registrieren(Leseagent())
+        gut = "https://api.ted.europa.eu/v3/notices/search"
+        e = self.kern.supervisor.pruefe("leser", "web_lesen", "ted", url=gut)
+        self.assertEqual(e.ergebnis, "verboten")  # Standard: ausgeschaltet
+        self.assertIn("ausgeschaltet", e.grund)
+        self.kern.einstellungen.setze("internet_recherche_erlaubt", True, "eigentuemer")
+        self.assertEqual(self.kern.supervisor.pruefe("leser", "web_lesen", "ted", url=gut).ergebnis, "erlaubt")
+        for boese in ("http://api.ted.europa.eu/x", "https://angreifer.example/", "https://api.ted.europa.eu:8443/",
+                      "https://user:pw@www.service.bund.de/", "https://www.service.bund.de.angreifer.example/",
+                      "file:///etc/passwd", None):
+            self.assertEqual(self.kern.supervisor.pruefe("leser", "web_lesen", "x", url=boese).ergebnis, "verboten",
+                             boese)
+        # Rolle ohne das Recht darf auch bei eingeschalteter Recherche nicht lesen
+        self.assertEqual(self.kern.supervisor.pruefe("ceo", "web_lesen", "ted", url=gut).ergebnis, "verboten")
+
+    def test_neue_einstellungen_werden_geprueft(self):
+        e = self.kern.einstellungen
+        self.assertIs(e.hole("internet_recherche_erlaubt"), False)
+        self.assertEqual(e.hole("stundensatz_cent"), 0)
+        e.setze("region_plz", ["50", "51"], "eigentuemer")
+        for schluessel, falsch in (("region_plz", ["5"]), ("region_plz", "50"), ("region_nuts", ["XX1"]),
+                                   ("suchbegriffe", ["<script>"]), ("suchbegriffe", []),
+                                   ("stundensatz_cent", -1), ("stundensatz_cent", True)):
+            with self.assertRaises(ValueError, msg=schluessel):
+                e.setze(schluessel, falsch, "eigentuemer")
 
     def test_kostenpflichtig_standardmaessig_gesperrt(self):
         aid = self._aufgabe("zahlen", {})
