@@ -89,9 +89,9 @@ def erzeugen(a, einstellungen, erstellt_am):
         frist_text, knapp = "Frist: %s – noch %d Tag(e) (Stand %s)" % (
             datum_deutsch(a["frist"]), tage, datum_deutsch(erstellt_am[:10])), tage < 7
     satz = einstellungen.get("stundensatz_cent") or 0
-    stundensatz = ("<strong>%s</strong> pro Stunde (aus den Einstellungen)" % _e(euro(satz))) if satz > 0 else \
-        '<span class="offen"><strong>OFFEN – bitte in den Einstellungen festlegen.</strong> Ohne festen Stundensatz ' \
-        'kein Angebotspreis.</span>'
+    stundensatz = ("<p>Unser Stundensatz: <strong>%s</strong> pro Stunde (aus den Einstellungen)</p>" % _e(euro(satz))) \
+        if satz > 0 else ('<p>Unser Stundensatz:</p><p class="offen"><strong>OFFEN – bitte in den Einstellungen '
+                          'festlegen.</strong> Ohne festen Stundensatz kein Angebotspreis.</p>')
     zeilen = [
         ("Titel", _e(a.get("titel"))),
         ("Vergabestelle", _e(a.get("vergabestelle") or "nicht angegeben")),
@@ -147,7 +147,7 @@ Einschätzung aus unserem Wissenspaket „Öffentliche Aufträge in NRW“ (Stan
 <ul class="check">%(nachweise)s</ul>
 
 <h2>Kalkulation – Grundlage</h2>
-<p>Unser Stundensatz: %(stundensatz)s</p>
+%(stundensatz)s
 <p>Untergrenze für jeden Preis sind die Löhne: Mindestlohn in der Gebäudereinigung 2026 –
 Lohngruppe 1 (Innen- und Unterhaltsreinigung) <strong>15,00 €</strong> pro Stunde, Lohngruppe 6 (Glas- und
 Fassadenreinigung) <strong>18,40 €</strong> pro Stunde%(q1)s. <strong>Stand 2026: Die Verordnung läuft am 01.01.2027
