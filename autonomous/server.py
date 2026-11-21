@@ -31,6 +31,10 @@ try:  # Auftrags-Radar: öffentliche Ausschreibungen (eigenes Modul)
     from . import api_auftraege  # noqa: F401
 except ImportError:
     pass
+try:  # Marktbericht (Research-Agent) und lokales Modell (eigenes Modul)
+    from . import api_research  # noqa: F401
+except ImportError:
+    pass
 
 MAX_KOERPER = 512 * 1024
 PRODUKT_CSP = "default-src 'none'; style-src 'unsafe-inline'; img-src data:; frame-ancestors 'self'"

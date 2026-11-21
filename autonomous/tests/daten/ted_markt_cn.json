@@ -1,0 +1,2901 @@
+{
+"notices": [
+{
+"place-of-performance": [
+"DEA23",
+"DEU",
+"DEA23",
+"DEA23",
+"DEA27",
+"DEU",
+"DEU",
+"DEU"
+],
+"notice-type": "cn-standard",
+"procedure-type": "restricted",
+"publication-number": "773097-2025",
+"classification-cpv": [
+"90911100",
+"90911200",
+"90911100",
+"90911200"
+],
+"publication-date": "2025-11-21+01:00",
+"buyer-name": {
+"deu": [
+"Bundeswehr-Dienstleistungszentrum Köln"
+]
+},
+"buyer-legal-type": [
+"cga"
+],
+"notice-title": {
+"deu": "Deutschland – Reinigung von Unterkünften – Unterhaltsreinigung (ohne Glas) LKK + Stommeln",
+"eng": "Germany – Accommodation cleaning services – Unterhaltsreinigung (ohne Glas) LKK + Stommeln"
+},
+"buyer-city": {
+"mul": [
+"Köln"
+]
+}
+},
+{
+"place-of-performance": [
+"DEA11",
+"DEU",
+"DEA11",
+"DEA11",
+"DEU",
+"DEU"
+],
+"notice-type": "cn-standard",
+"procedure-type": "restricted",
+"publication-number": "774735-2025",
+"classification-cpv": [
+"90911100",
+"90911200",
+"90911100",
+"90911200"
+],
+"publication-date": "2025-11-21+01:00",
+"buyer-name": {
+"deu": [
+"Bundeswehr-Dienstleistungszentrum Köln"
+]
+},
+"buyer-legal-type": [
+"cga"
+],
+"notice-title": {
+"deu": "Deutschland – Reinigung von Unterkünften – Unterhaltsreinigung (ohne Glas) KarrC DDorf L-B-S",
+"eng": "Germany – Accommodation cleaning services – Unterhaltsreinigung (ohne Glas) KarrC DDorf L-B-S"
+},
+"buyer-city": {
+"mul": [
+"Köln"
+]
+}
+},
+{
+"place-of-performance": [
+"DEA11",
+"DEU",
+"DEA11",
+"DEA11",
+"DEA11",
+"DEA11",
+"DEA11",
+"DEA11",
+"DEU",
+"DEU",
+"DEU",
+"DEU",
+"DEU",
+"DEU"
+],
+"deadline-receipt-tender-date-lot": [
+"2025-12-22+01:00",
+"2025-12-22+01:00",
+"2025-12-22+01:00",
+"2025-12-22+01:00",
+"2025-12-22+01:00",
+"2025-12-22+01:00"
+],
+"notice-type": "cn-standard",
+"procedure-type": "open",
+"publication-number": "778940-2025",
+"classification-cpv": [
+"90911200",
+"90900000",
+"90910000",
+"90911200",
+"90911200",
+"90911200",
+"90911200",
+"90911200",
+"90911200"
+],
+"publication-date": "2025-11-24+01:00",
+"buyer-name": {
+"deu": [
+"Landeshauptstadt Düsseldorf, Der Oberbürgermeister, Amt für Recht, Vergabe und Versicherungen, Zentrale Vergabestelle"
+]
+},
+"buyer-legal-type": [
+"la"
+],
+"notice-title": {
+"deu": "Deutschland – Gebäudereinigung – Gebäudeunterhaltsreinigung ab 01.03.2026 in 6 Losen",
+"eng": "Germany – Building-cleaning services – Gebäudeunterhaltsreinigung ab 01.03.2026 in 6 Losen"
+},
+"buyer-city": {
+"mul": [
+"Düsseldorf"
+]
+}
+},
+{
+"place-of-performance": [
+"DEA1E",
+"DEA1F",
+"DEA18",
+"DEU",
+"DEU",
+"DEU",
+"DEA1E",
+"DEA1F",
+"DEA18",
+"DEA1E",
+"DEA1F",
+"DEA18",
+"DEA1E",
+"DEA1F",
+"DEA18",
+"DEU",
+"DEU",
+"DEU",
+"DEU",
+"DEU",
+"DEU",
+"DEU",
+"DEU",
+"DEU"
+],
+"deadline-receipt-tender-date-lot": [
+"2025-12-10+01:00",
+"2025-12-10+01:00",
+"2025-12-10+01:00"
+],
+"notice-type": "cn-standard",
+"procedure-type": "open",
+"publication-number": "779888-2025",
+"classification-cpv": [
+"90910000",
+"90911000",
+"90911100",
+"90911200",
+"90910000",
+"90910000",
+"90910000",
+"90911000",
+"90911100",
+"90911200",
+"90911000",
+"90911100",
+"90911200",
+"90911000",
+"90911100",
+"90911200"
+],
+"publication-date": "2025-11-25+01:00",
+"buyer-name": {
+"deu": [
+"Bezirksregierung Düsseldorf"
+]
+},
+"buyer-legal-type": [
+"ra"
+],
+"notice-title": {
+"deu": "Deutschland – Reinigungsdienste – Reinigungsdienstleistungen in den Zentralen Unterbringungseinrichtungen",
+"eng": "Germany – Cleaning services – Reinigungsdienstleistungen in den Zentralen Unterbringungseinrichtungen"
+},
+"buyer-city": {
+"mul": [
+"Düsseldorf"
+]
+}
+},
+{
+"place-of-performance": [
+"DEA33",
+"DEA38",
+"DEA33",
+"DEU",
+"DEU",
+"DEU",
+"DEA33",
+"DEA38",
+"DEA33",
+"DEA33",
+"DEA38",
+"DEA33",
+"DEU",
+"DEU",
+"DEU",
+"DEU",
+"DEU",
+"DEU"
+],
+"deadline-receipt-tender-date-lot": [
+"2026-01-05+01:00",
+"2026-01-05+01:00"
+],
+"notice-type": "cn-standard",
+"procedure-type": "open",
+"publication-number": "787340-2025",
+"classification-cpv": [
+"90911200",
+"90910000",
+"90911000",
+"90911100",
+"90911300",
+"90919200",
+"90911200",
+"90911200",
+"90910000",
+"90911000",
+"90911100",
+"90911300",
+"90919200",
+"90910000",
+"90911000",
+"90911100",
+"90911300",
+"90919200"
+],
+"publication-date": "2025-11-27+01:00",
+"buyer-name": {
+"deu": [
+"Institut der Feuerwehr NRW"
+]
+},
+"buyer-legal-type": [
+"body-pl-ra"
+],
+"notice-title": {
+"deu": "Deutschland – Gebäudereinigung – Unterhalts- und Glasreinigung",
+"eng": "Germany – Building-cleaning services – Unterhalts- und Glasreinigung"
+},
+"buyer-city": {
+"mul": [
+"Münster"
+]
+}
+},
+{
+"place-of-performance": [
+"DEA11",
+"DEU",
+"DEA11",
+"DEA11",
+"DEU",
+"DEU"
+],
+"notice-type": "cn-standard",
+"procedure-type": "restricted",
+"publication-number": "792423-2025",
+"classification-cpv": [
+"90911200",
+"90911100",
+"90911200",
+"90911100"
+],
+"publication-date": "2025-11-28+01:00",
+"buyer-name": {
+"deu": [
+"Bundeswehr-Dienstleistungszentrum Köln"
+]
+},
+"buyer-legal-type": [
+"cga"
+],
+"notice-title": {
+"deu": "Deutschland – Gebäudereinigung – 6002951588-Unterhaltsreinigung (ohne Glas) WRS DDorf",
+"eng": "Germany – Building-cleaning services – 6002951588-Unterhaltsreinigung (ohne Glas) WRS DDorf"
+},
+"buyer-city": {
+"mul": [
+"Köln"
+]
+}
+},
+{
+"place-of-performance": [
+"DEA53",
+"DEU",
+"DEA53",
+"DEA53",
+"DEA53",
+"DEA53",
+"DEA53",
+"DEA53",
+"DEA53",
+"DEA53",
+"DEA53",
+"DEU",
+"DEU",
+"DEU",
+"DEU",
+"DEU",
+"DEU",
+"DEU",
+"DEU",
+"DEU"
+],
+"deadline-receipt-tender-date-lot": [
+"2026-01-19+01:00",
+"2026-01-19+01:00",
+"2026-01-19+01:00",
+"2026-01-19+01:00",
+"2026-01-19+01:00",
+"2026-01-19+01:00",
+"2026-01-19+01:00",
+"2026-01-19+01:00",
+"2026-01-19+01:00"
+],
+"notice-type": "cn-standard",
+"procedure-type": "open",
+"publication-number": "795588-2025",
+"classification-cpv": [
+"90900000",
+"90911300",
+"90900000",
+"90900000",
+"90900000",
+"90900000",
+"90900000",
+"90900000",
+"90900000",
+"90900000",
+"90900000",
+"90911300",
+"90911300",
+"90911300",
+"90911300",
+"90911300",
+"90911300",
+"90911300",
+"90911300",
+"90911300"
+],
+"publication-date": "2025-12-01+01:00",
+"buyer-name": {
+"deu": [
+"Stadt Hagen - FB für Informationstechnologie und Zentrale Dienste"
+]
+},
+"buyer-legal-type": [
+"la"
+],
+"notice-title": {
+"deu": "Deutschland – Reinigungs- und Hygienedienste – Glas- und Rahmenreinigung",
+"eng": "Germany – Cleaning and sanitation services – Glas- und Rahmenreinigung"
+},
+"buyer-city": {
+"mul": [
+"Hagen"
+]
+}
+},
+{
+"place-of-performance": [
+"DEA51",
+"DEU",
+"DEA51",
+"DEA51",
+"DEA51",
+"DEU",
+"DEU",
+"DEU"
+],
+"deadline-receipt-tender-date-lot": [
+"2025-12-12+01:00",
+"2025-12-12+01:00",
+"2025-12-12+01:00"
+],
+"notice-type": "cn-standard",
+"procedure-type": "open",
+"publication-number": "801096-2025",
+"classification-cpv": [
+"90611000",
+"90612000",
+"90914000",
+"90000000",
+"77314000",
+"90620000",
+"90630000",
+"90611000",
+"90611000",
+"90620000",
+"90612000",
+"90914000",
+"90000000",
+"77314000",
+"90630000"
+],
+"publication-date": "2025-12-03+01:00",
+"buyer-name": {
+"deu": [
+"Ruhr-Universität Bochum (RUB)"
+]
+},
+"buyer-legal-type": [
+"body-pl-ra"
+],
+"notice-title": {
+"deu": "Deutschland – Straßenreinigung – RV Außenanlagenpflege",
+"eng": "Germany – Street-cleaning services – RV Außenanlagenpflege"
+},
+"buyer-city": {
+"mul": [
+"Bochum"
+]
+}
+},
+{
+"place-of-performance": [
+"DEA12",
+"DEA13",
+"DEA1C",
+"DEA1C",
+"DEA56",
+"DEA51",
+"DEA53",
+"DEU",
+"DEU",
+"DEU",
+"DEU",
+"DEU",
+"DEU",
+"DEU",
+"DEA12",
+"DEA1C",
+"DEA13",
+"DEA56",
+"DEA51",
+"DEA53",
+"DEU",
+"DEU",
+"DEU",
+"DEU",
+"DEU",
+"DEU"
+],
+"deadline-receipt-tender-date-lot": [
+"2026-01-14+01:00",
+"2026-01-14+01:00",
+"2026-01-14+01:00",
+"2026-01-14+01:00"
+],
+"notice-type": "cn-standard",
+"procedure-type": "open",
+"publication-number": "801435-2025",
+"classification-cpv": [
+"90910000",
+"90900000",
+"90910000",
+"90910000",
+"90910000",
+"90910000",
+"90900000",
+"90900000",
+"90900000",
+"90900000"
+],
+"publication-date": "2025-12-03+01:00",
+"buyer-name": {
+"deu": [
+"Ruhrverband, Abteilung Zentrale Dienste, Einkauf"
+]
+},
+"buyer-legal-type": [
+"body-pl-la"
+],
+"notice-title": {
+"deu": "Deutschland – Reinigungsdienste – Unterhalts- und Glasreinigung für den Regionalbereich West",
+"eng": "Germany – Cleaning services – Unterhalts- und Glasreinigung für den Regionalbereich West"
+},
+"buyer-city": {
+"mul": [
+"Essen"
+]
+}
+},
+{
+"place-of-performance": [
+"DEA1E",
+"DEU",
+"DEA1E",
+"DEA1E",
+"DEA1E",
+"DEU",
+"DEU",
+"DEU"
+],
+"deadline-receipt-tender-date-lot": [
+"2026-02-18+01:00",
+"2026-02-18+02:00",
+"2026-02-18+02:00"
+],
+"notice-type": "cn-standard",
+"procedure-type": "open",
+"publication-number": "803302-2025",
+"classification-cpv": [
+"90911200",
+"90911000",
+"90910000",
+"90910000",
+"90911000",
+"90919300",
+"90919200",
+"90919000",
+"90919300",
+"90919200",
+"90919000",
+"90911300"
+],
+"publication-date": "2025-12-03+01:00",
+"buyer-name": {
+"deu": [
+"Gemeinde Niederkrüchten"
+]
+},
+"buyer-legal-type": [
+"la"
+],
+"notice-title": {
+"deu": "Deutschland – Gebäudereinigung – Niederkrüchten - Gebäudereinigung",
+"eng": "Germany – Building-cleaning services – Niederkrüchten - Gebäudereinigung"
+},
+"buyer-city": {
+"mul": [
+"Niederkrüchten"
+]
+}
+},
+{
+"place-of-performance": [
+"DEA1E",
+"DEA1F",
+"DEA12",
+"DEU",
+"DEU",
+"DEU",
+"DEA1E",
+"DEA1F",
+"DEA12",
+"DEU",
+"DEU",
+"DEU"
+],
+"deadline-receipt-tender-date-lot": [
+"2026-01-13+01:00"
+],
+"notice-type": "cn-standard",
+"procedure-type": "open",
+"publication-number": "807817-2025",
+"classification-cpv": [
+"90911200",
+"90910000",
+"90911100",
+"90911200",
+"90910000",
+"90911100"
+],
+"publication-date": "2025-12-05+01:00",
+"buyer-name": {
+"deu": [
+"Bau- und Liegenschaftsbetrieb NRW Zentrale"
+]
+},
+"buyer-legal-type": [
+"pub-undert"
+],
+"notice-title": {
+"deu": "Deutschland – Gebäudereinigung – BLB /Z /NL Duisburg/Infrastrukturelle Gebäudedienstleistungen/Unterhaltsreinigung/Los 1.2_100-25-00141",
+"eng": "Germany – Building-cleaning services – BLB /Z /NL Duisburg/Infrastrukturelle Gebäudedienstleistungen/Unterhaltsreinigung/Los 1.2_100-25-00141"
+},
+"buyer-city": {
+"mul": [
+"Düsseldorf"
+]
+}
+},
+{
+"place-of-performance": [
+"DEA1A",
+"DEU",
+"DEA1A",
+"DEU"
+],
+"deadline-receipt-tender-date-lot": [
+"2026-01-12+01:00"
+],
+"notice-type": "cn-standard",
+"procedure-type": "open",
+"publication-number": "810703-2025",
+"classification-cpv": [
+"90913200",
+"90913200"
+],
+"publication-date": "2025-12-05+01:00",
+"buyer-name": {
+"deu": [
+"Stadt Wuppertal"
+]
+},
+"buyer-legal-type": [
+"la"
+],
+"notice-title": {
+"deu": "Deutschland – Behälterreinigung – Badewassertechnik, Reinigung Schwallwasserbehälter",
+"eng": "Germany – Reservoir cleaning services – Badewassertechnik, Reinigung Schwallwasserbehälter"
+},
+"buyer-city": {
+"mul": [
+"Wuppertal"
+]
+}
+},
+{
+"place-of-performance": [
+"DEA2C",
+"DEU",
+"DEA2C",
+"DEA2C",
+"DEU",
+"DEU"
+],
+"deadline-receipt-tender-date-lot": [
+"2026-01-15+01:00",
+"2026-01-15+01:00"
+],
+"notice-type": "cn-standard",
+"procedure-type": "open",
+"publication-number": "811246-2025",
+"classification-cpv": [
+"90911100",
+"90911000",
+"90911200",
+"90911300",
+"90911100",
+"90911100",
+"90911000",
+"90911200",
+"90911300",
+"90911000",
+"90911200",
+"90911300"
+],
+"publication-date": "2025-12-08+01:00",
+"buyer-name": {
+"deu": [
+"Bezirksregierung Köln"
+]
+},
+"buyer-legal-type": [
+"ra"
+],
+"notice-title": {
+"deu": "Deutschland – Reinigung von Unterkünften – ZUE Sankt Augustin Reinigungsdienstleistungen",
+"eng": "Germany – Accommodation cleaning services – ZUE Sankt Augustin Reinigungsdienstleistungen"
+},
+"buyer-city": {
+"mul": [
+"Köln"
+]
+}
+},
+{
+"place-of-performance": [
+"DEA34",
+"DEU",
+"DEA34",
+"DEA34",
+"DEU",
+"DEU"
+],
+"deadline-receipt-tender-date-lot": [
+"2026-02-04+01:00",
+"2026-02-04+02:00"
+],
+"notice-type": "cn-standard",
+"procedure-type": "open",
+"publication-number": "812213-2025",
+"classification-cpv": [
+"90911200",
+"90911000",
+"90910000",
+"90910000",
+"90919300",
+"90919000",
+"90919300",
+"90919000"
+],
+"publication-date": "2025-12-08+01:00",
+"buyer-name": {
+"deu": [
+"Gemeinde Heek"
+]
+},
+"buyer-legal-type": [
+"la"
+],
+"notice-title": {
+"deu": "Deutschland – Gebäudereinigung – Heek Geäudereinigung",
+"eng": "Germany – Building-cleaning services – Heek Geäudereinigung"
+},
+"buyer-city": {
+"mul": [
+"Heek"
+]
+}
+},
+{
+"place-of-performance": [
+"DEA1E",
+"DEA1F",
+"DEA18",
+"DEU",
+"DEU",
+"DEU",
+"DEA1E",
+"DEA1F",
+"DEA18",
+"DEA1E",
+"DEA1F",
+"DEA18",
+"DEA1E",
+"DEA1F",
+"DEA18",
+"DEU",
+"DEU",
+"DEU",
+"DEU",
+"DEU",
+"DEU",
+"DEU",
+"DEU",
+"DEU"
+],
+"deadline-receipt-tender-date-lot": [
+"2025-12-16+01:00",
+"2025-12-16+01:00",
+"2025-12-16+01:00"
+],
+"notice-type": "cn-standard",
+"procedure-type": "open",
+"publication-number": "819480-2025",
+"classification-cpv": [
+"90910000",
+"90911000",
+"90911100",
+"90911200",
+"90910000",
+"90910000",
+"90910000",
+"90911000",
+"90911100",
+"90911200",
+"90911000",
+"90911100",
+"90911200",
+"90911000",
+"90911100",
+"90911200"
+],
+"publication-date": "2025-12-10+01:00",
+"buyer-name": {
+"deu": [
+"Bezirksregierung Düsseldorf"
+]
+},
+"buyer-legal-type": [
+"ra"
+],
+"notice-title": {
+"deu": "Deutschland – Reinigungsdienste – Reinigungsdienstleistungen in den Zentralen Unterbringungseinrichtungen",
+"eng": "Germany – Cleaning services – Reinigungsdienstleistungen in den Zentralen Unterbringungseinrichtungen"
+},
+"buyer-city": {
+"mul": [
+"Düsseldorf"
+]
+}
+},
+{
+"place-of-performance": [
+"DEA52",
+"DEU",
+"DEA52",
+"DEA52",
+"DEU",
+"DEU"
+],
+"deadline-receipt-tender-date-lot": [
+"2026-01-22+01:00",
+"2026-01-22+01:00"
+],
+"notice-type": "cn-standard",
+"procedure-type": "open",
+"publication-number": "822391-2025",
+"classification-cpv": [
+"90911200",
+"90900000",
+"90910000",
+"90911000",
+"90911300",
+"90919200",
+"90900000",
+"90911300",
+"90910000",
+"90911200",
+"90919200"
+],
+"publication-date": "2025-12-11+01:00",
+"buyer-name": {
+"deu": [
+"Fraunhofer Gesellschaft zur Förderung der angewandten Forschung e.V."
+]
+},
+"buyer-legal-type": [
+"pub-undert"
+],
+"notice-title": {
+"deu": "Deutschland – Gebäudereinigung – Ausschreibung Gebäudereinigung - Fraunhofer-Institut (IML)",
+"eng": "Germany – Building-cleaning services – Ausschreibung Gebäudereinigung - Fraunhofer-Institut (IML)"
+},
+"buyer-city": {
+"deu": [
+"München"
+]
+}
+},
+{
+"place-of-performance": [
+"DEA34",
+"DEU",
+"DEA34",
+"DEA34",
+"DEA34",
+"DEA34",
+"DEA34",
+"DEA34",
+"DEA34",
+"DEA34",
+"DEU",
+"DEU",
+"DEU",
+"DEU",
+"DEU",
+"DEU",
+"DEU",
+"DEU"
+],
+"deadline-receipt-tender-date-lot": [
+"2026-01-29+01:00",
+"2026-01-29+01:00",
+"2026-01-29+01:00",
+"2026-01-29+01:00",
+"2026-01-29+01:00",
+"2026-01-29+01:00",
+"2026-01-29+01:00",
+"2026-01-29+01:00"
+],
+"notice-type": "cn-standard",
+"procedure-type": "open",
+"publication-number": "822974-2025",
+"classification-cpv": [
+"90911200",
+"90911200",
+"90911200",
+"90911200",
+"90911200",
+"90911200",
+"90911200",
+"90911200",
+"90911200"
+],
+"publication-date": "2025-12-11+01:00",
+"buyer-name": {
+"deu": [
+"Stadt Borken"
+]
+},
+"buyer-legal-type": [
+"la"
+],
+"notice-title": {
+"deu": "Deutschland – Gebäudereinigung – Gebäudereinigung",
+"eng": "Germany – Building-cleaning services – Gebäudereinigung"
+},
+"buyer-city": {
+"mul": [
+"Borken"
+]
+}
+},
+{
+"place-of-performance": [
+"DEA54",
+"DEU",
+"DEA5B",
+"DEA38",
+"DEA42",
+"DEU",
+"DEU",
+"DEU"
+],
+"deadline-receipt-tender-date-lot": [
+"2026-01-13+01:00",
+"2026-01-13+01:00",
+"2026-01-13+01:00"
+],
+"notice-type": "cn-standard",
+"procedure-type": "open",
+"publication-number": "823078-2025",
+"classification-cpv": [
+"90911200",
+"90911200",
+"90911200",
+"90911200"
+],
+"publication-date": "2025-12-11+01:00",
+"buyer-name": {
+"deu": [
+"Landschaftsverband Westfalen-Lippe"
+]
+},
+"buyer-legal-type": [
+"la"
+],
+"notice-title": {
+"deu": "Deutschland – Gebäudereinigung – Unterhaltsreinigung - LWL-Tageskliniken SO, WAF u. Rheda-Wiedenbrück",
+"eng": "Germany – Building-cleaning services – Unterhaltsreinigung - LWL-Tageskliniken SO, WAF u. Rheda-Wiedenbrück"
+},
+"buyer-city": {
+"mul": [
+"Münster"
+]
+}
+},
+{
+"place-of-performance": [
+"DEA1D",
+"DEU",
+"DEA1D",
+"DEA1D",
+"DEA1D",
+"DEU",
+"DEU",
+"DEU"
+],
+"deadline-receipt-tender-date-lot": [
+"2026-01-14+01:00",
+"2026-01-14+01:00",
+"2026-01-14+01:00"
+],
+"notice-type": "cn-standard",
+"procedure-type": "open",
+"publication-number": "831718-2025",
+"classification-cpv": [
+"90900000",
+"90910000",
+"90911000",
+"90911200",
+"90900000",
+"90900000",
+"90900000",
+"90910000",
+"90911000",
+"90911200",
+"90910000",
+"90911000",
+"90911200",
+"90910000",
+"90911000",
+"90911200"
+],
+"publication-date": "2025-12-15+01:00",
+"buyer-name": {
+"deu": [
+"Stadtbetriebe Grevenbroich"
+]
+},
+"buyer-legal-type": [
+"body-pl-la"
+],
+"notice-title": {
+"deu": "Deutschland – Reinigungs- und Hygienedienste – Gebäudereinigungsausschreibung für die Stadtbetriebe Grevenbroich",
+"eng": "Germany – Cleaning and sanitation services – Gebäudereinigungsausschreibung für die Stadtbetriebe Grevenbroich"
+},
+"buyer-city": {
+"mul": [
+"Grevenbroich"
+]
+}
+},
+{
+"place-of-performance": [
+"DEA23",
+"DEU"
+],
+"deadline-receipt-tender-date-lot": [
+"2026-02-23+01:00"
+],
+"notice-type": "cn-standard",
+"procedure-type": "open",
+"publication-number": "833455-2025",
+"classification-cpv": [
+"90911000",
+"90911200",
+"90911300",
+"90911000",
+"90911200",
+"90911300"
+],
+"publication-date": "2025-12-16+01:00",
+"buyer-name": {
+"deu": [
+"Generalzolldirektion Zentrale Beschaffungsstelle der Bundesfinanzverwaltung"
+]
+},
+"buyer-legal-type": [
+"cga"
+],
+"notice-title": {
+"deu": "Deutschland – Wohnungs-, Gebäude- und Fensterreinigung – Unterhaltsreinigung Flughafen Köln/Bonn",
+"eng": "Germany – Accommodation, building and window cleaning services – Unterhaltsreinigung Flughafen Köln/Bonn"
+},
+"buyer-city": {
+"mul": [
+"Freiburg"
+]
+}
+},
+{
+"place-of-performance": [
+"DEA1F",
+"DEU",
+"DEA1F",
+"DEA1F",
+"DEA1F",
+"DEA1F",
+"DEU",
+"DEU",
+"DEU",
+"DEU"
+],
+"deadline-receipt-tender-date-lot": [
+"2026-01-14+01:00",
+"2026-01-14+01:00",
+"2026-01-14+01:00",
+"2026-01-14+01:00"
+],
+"notice-type": "cn-standard",
+"procedure-type": "open",
+"publication-number": "834726-2025",
+"classification-cpv": [
+"90911300",
+"90910000",
+"90910000",
+"90910000",
+"90910000"
+],
+"publication-date": "2025-12-16+01:00",
+"buyer-name": {
+"deu": [
+"Stadt Moers"
+]
+},
+"buyer-legal-type": [
+"la"
+],
+"notice-title": {
+"deu": "Deutschland – Fensterreinigung – Glasreinigung",
+"eng": "Germany – Window-cleaning services – Glasreinigung"
+},
+"buyer-city": {
+"mul": [
+"Moers"
+]
+}
+},
+{
+"place-of-performance": [
+"DEA1E",
+"DEU"
+],
+"deadline-receipt-tender-date-lot": [
+"2026-01-27+01:00"
+],
+"notice-type": "cn-standard",
+"procedure-type": "open",
+"publication-number": "839300-2025",
+"classification-cpv": [
+"90911000",
+"90911000"
+],
+"publication-date": "2025-12-17+01:00",
+"buyer-name": {
+"deu": [
+"Stadt Viersen"
+]
+},
+"buyer-legal-type": [
+"la"
+],
+"notice-title": {
+"deu": "Deutschland – Wohnungs-, Gebäude- und Fensterreinigung – Unterhalts-, Grund und Glasreinigung der städt. Gebäude",
+"eng": "Germany – Accommodation, building and window cleaning services – Unterhalts-, Grund und Glasreinigung der städt. Gebäude"
+},
+"buyer-city": {
+"mul": [
+"Viersen"
+]
+}
+},
+{
+"place-of-performance": [
+"DEA13",
+"DEU",
+"DEA13",
+"DEU"
+],
+"deadline-receipt-tender-date-lot": [
+"2026-01-22+01:00"
+],
+"notice-type": "cn-standard",
+"procedure-type": "open",
+"publication-number": "840470-2025",
+"classification-cpv": [
+"90911200",
+"90910000",
+"90911300",
+"90911200",
+"90910000",
+"90911300"
+],
+"publication-date": "2025-12-17+01:00",
+"buyer-name": {
+"deu": [
+"148 - 397 TIN, Neubau Tiegelschule, hier: Bauendreinigung"
+]
+},
+"buyer-legal-type": [
+"la"
+],
+"notice-title": {
+"deu": "Deutschland – Gebäudereinigung – 148 - 397 TIN Neubau Tiegelschule, Tiegelstr. 29,45141 Essen, hier: Bauendreinigung",
+"eng": "Germany – Building-cleaning services – 148 - 397 TIN Neubau Tiegelschule, Tiegelstr. 29,45141 Essen, hier: Bauendreinigung"
+},
+"buyer-city": {
+"mul": [
+"Essen"
+]
+}
+},
+{
+"place-of-performance": [
+"DEA37",
+"DEU",
+"DEA37",
+"DEA37",
+"DEA37",
+"DEA37",
+"DEU",
+"DEU",
+"DEU",
+"DEU"
+],
+"notice-type": "cn-standard",
+"procedure-type": "restricted",
+"publication-number": "843413-2025",
+"classification-cpv": [
+"90900000",
+"90910000",
+"90911000",
+"90911200",
+"90911200",
+"90911200",
+"90911200",
+"90911200"
+],
+"publication-date": "2025-12-18+01:00",
+"buyer-name": {
+"deu": [
+"Kreis Steinfurt"
+]
+},
+"buyer-legal-type": [
+"la"
+],
+"notice-title": {
+"deu": "Deutschland – Reinigungs- und Hygienedienste – Reinigungsdienstleistungen in den Liegenschaften des Kreis Steinfurt",
+"eng": "Germany – Cleaning and sanitation services – Reinigungsdienstleistungen in den Liegenschaften des Kreis Steinfurt"
+},
+"buyer-city": {
+"mul": [
+"Steinfurt"
+]
+}
+},
+{
+"place-of-performance": [
+"DEA36",
+"DEU",
+"DEA36",
+"DEA36",
+"DEU",
+"DEU"
+],
+"deadline-receipt-tender-date-lot": [
+"2026-01-22+01:00",
+"2026-01-22+01:00"
+],
+"notice-type": "cn-standard",
+"procedure-type": "open",
+"publication-number": "845066-2025",
+"classification-cpv": [
+"90911200",
+"90911300",
+"90911200",
+"90911300"
+],
+"publication-date": "2025-12-18+01:00",
+"buyer-name": {
+"deu": [
+"Deutsche Rentenversicherung Knappschaft-Bahn-See"
+]
+},
+"buyer-legal-type": [
+"body-pl-cga"
+],
+"notice-title": {
+"deu": "Deutschland – Gebäudereinigung – Unterhalts- und Glasreinigung für die Liegenschaften in Castrop-Rauxel",
+"eng": "Germany – Building-cleaning services – Unterhalts- und Glasreinigung für die Liegenschaften in Castrop-Rauxel"
+},
+"buyer-city": {
+"mul": [
+"Bochum"
+]
+}
+},
+{
+"place-of-performance": [
+"DEA22",
+"DEU",
+"DEA22",
+"DEU"
+],
+"deadline-receipt-tender-date-lot": [
+"2026-01-22+01:00"
+],
+"notice-type": "cn-standard",
+"procedure-type": "open",
+"publication-number": "850088-2025",
+"classification-cpv": [
+"90911200",
+"90910000",
+"90911100",
+"90911200",
+"90910000",
+"90911100"
+],
+"publication-date": "2025-12-22+01:00",
+"buyer-name": {
+"deu": [
+"Bau- und Liegenschaftsbetrieb NRW Zentrale"
+]
+},
+"buyer-legal-type": [
+"pub-undert"
+],
+"notice-title": {
+"deu": "Deutschland – Gebäudereinigung – BLB /Z /NL Köln/Infrastrukturelle Gebäudedienstleistungen/Unterhaltsreinigung/Los 1.18_100-25-00148",
+"eng": "Germany – Building-cleaning services – BLB /Z /NL Köln/Infrastrukturelle Gebäudedienstleistungen/Unterhaltsreinigung/Los 1.18_100-25-00148"
+},
+"buyer-city": {
+"mul": [
+"Düsseldorf"
+]
+}
+},
+{
+"place-of-performance": [
+"DE713",
+"DEU",
+"DEA2D",
+"DEA2D",
+"DEE03",
+"DE803",
+"DEB12",
+"DEB21",
+"DEU",
+"DEU",
+"DEU",
+"DEU",
+"DEU",
+"DEU"
+],
+"deadline-receipt-tender-date-lot": [
+"2026-01-26+01:00",
+"2026-01-26+01:00",
+"2026-01-26+01:00",
+"2026-01-26+01:00",
+"2026-01-26+01:00",
+"2026-01-26+01:00"
+],
+"notice-type": "cn-standard",
+"procedure-type": "open",
+"publication-number": "853340-2025",
+"classification-cpv": [
+"98341140",
+"90620000",
+"71356300",
+"77314000",
+"90911200",
+"90611000",
+"71356300",
+"98341140",
+"98341140",
+"90911200",
+"90620000",
+"90620000",
+"77314000",
+"90620000",
+"90911200",
+"90620000",
+"90911200",
+"90620000",
+"90911300",
+"90611000"
+],
+"publication-date": "2025-12-22+01:00",
+"buyer-name": {
+"deu": [
+"Deutscher Wetterdienst"
+]
+},
+"buyer-legal-type": [
+"cga"
+],
+"notice-title": {
+"deu": "Deutschland – Hausmeisterdienste – Gelände- und Sensorpflege an der Wetterstation Aachen, Hausmeisterservice inklusive Leerstandsreinigung an den Wetterstationen Aachen und Magdeburg, Reinigung inklusive Glas- und Rahmenreinigung am Radar-Standort Rostock-Warnemünde, Winterdienst und die Straßenreinigung an der Wetterstation Nürburg-Barweiler sowie Winterdienst an der Wetterstation Trier des Deutschen Wetterdienstes (DWD)",
+"eng": "Germany – Caretaker services – Gelände- und Sensorpflege an der Wetterstation Aachen, Hausmeisterservice inklusive Leerstandsreinigung an den Wetterstationen Aachen und Magdeburg, Reinigung inklusive Glas- und Rahmenreinigung am Radar-Standort Rostock-Warnemünde, Winterdienst und die Straßenreinigung an der Wetterstation Nürburg-Barweiler sowie Winterdienst an der Wetterstation Trier des Deutschen Wetterdienstes (DWD)"
+},
+"buyer-city": {
+"mul": [
+"Offenbach am Main"
+]
+}
+},
+{
+"place-of-performance": [
+"DEA22",
+"DEU",
+"DEA22",
+"DEU"
+],
+"notice-type": "cn-standard",
+"procedure-type": "restricted",
+"publication-number": "853966-2025",
+"classification-cpv": [
+"90911200",
+"90911200"
+],
+"publication-date": "2025-12-22+01:00",
+"buyer-name": {
+"deu": [
+"Xecuro GmbH"
+]
+},
+"buyer-legal-type": [
+"pub-undert"
+],
+"notice-title": {
+"deu": "Deutschland – Gebäudereinigung – Unterhaltsreinigung, ECA-2025-002",
+"eng": "Germany – Building-cleaning services – Unterhaltsreinigung, ECA-2025-002"
+},
+"buyer-city": {
+"mul": [
+"Berlin"
+]
+}
+},
+{
+"place-of-performance": [
+"DEA19",
+"DEU",
+"DEA19",
+"DEU"
+],
+"deadline-receipt-tender-date-lot": [
+"2026-01-22+01:00"
+],
+"notice-type": "cn-standard",
+"procedure-type": "open",
+"publication-number": "855702-2025",
+"classification-cpv": [
+"90911200",
+"90911200"
+],
+"publication-date": "2025-12-23+01:00",
+"buyer-name": {
+"deu": [
+"Stadt Solingen"
+]
+},
+"buyer-legal-type": [
+"la"
+],
+"notice-title": {
+"deu": "Deutschland – Gebäudereinigung – Unterhaltsreinigung Notunterkunft",
+"eng": "Germany – Building-cleaning services – Unterhaltsreinigung Notunterkunft"
+},
+"buyer-city": {
+"mul": [
+"Solingen"
+]
+}
+},
+{
+"place-of-performance": [
+"DEA1A",
+"DEU",
+"DEA1A",
+"DEU"
+],
+"deadline-receipt-tender-date-lot": [
+"2026-01-23+01:00"
+],
+"notice-type": "cn-standard",
+"procedure-type": "open",
+"publication-number": "855827-2025",
+"classification-cpv": [
+"90911200",
+"90911200",
+"90911200",
+"90911200"
+],
+"publication-date": "2025-12-23+01:00",
+"buyer-name": {
+"deu": [
+"Stadt Wuppertal"
+]
+},
+"buyer-legal-type": [
+"la"
+],
+"notice-title": {
+"deu": "Deutschland – Gebäudereinigung – Unterhalts-, Grund- und Sonderreinigung und Küchenhilfdienste Wuppertal-Uellendahl- Rahmenvereinbarung",
+"eng": "Germany – Building-cleaning services – Unterhalts-, Grund- und Sonderreinigung und Küchenhilfdienste Wuppertal-Uellendahl- Rahmenvereinbarung"
+},
+"buyer-city": {
+"mul": [
+"Wuppertal"
+]
+}
+},
+{
+"place-of-performance": [
+"DEA1A",
+"DEU",
+"DEA1A",
+"DEU"
+],
+"deadline-receipt-tender-date-lot": [
+"2026-01-22+01:00"
+],
+"notice-type": "cn-standard",
+"procedure-type": "open",
+"publication-number": "856143-2025",
+"classification-cpv": [
+"90911200",
+"90911200",
+"90911200",
+"90911200"
+],
+"publication-date": "2025-12-23+01:00",
+"buyer-name": {
+"deu": [
+"Stadt Wuppertal"
+]
+},
+"buyer-legal-type": [
+"la"
+],
+"notice-title": {
+"deu": "Deutschland – Gebäudereinigung – Unterhalts-, Grund- und Sonderreinigung und Küchenhilfdienste Wuppertal-Oberbarmen - Rahmenvereinbarung",
+"eng": "Germany – Building-cleaning services – Unterhalts-, Grund- und Sonderreinigung und Küchenhilfdienste Wuppertal-Oberbarmen - Rahmenvereinbarung"
+},
+"buyer-city": {
+"mul": [
+"Wuppertal"
+]
+}
+},
+{
+"place-of-performance": [
+"DEA1A",
+"DEU",
+"DEA1A",
+"DEU"
+],
+"deadline-receipt-tender-date-lot": [
+"2026-01-22+01:00"
+],
+"notice-type": "cn-standard",
+"procedure-type": "open",
+"publication-number": "856400-2025",
+"classification-cpv": [
+"90911200",
+"90911200"
+],
+"publication-date": "2025-12-23+01:00",
+"buyer-name": {
+"deu": [
+"Stadt Wuppertal"
+]
+},
+"buyer-legal-type": [
+"la"
+],
+"notice-title": {
+"deu": "Deutschland – Gebäudereinigung – Unterhalts-, Grund- und Sonderreinigung und Küchenhilfdienste Wuppertal-Wichlinghausen - Rahmenvereinbarung",
+"eng": "Germany – Building-cleaning services – Unterhalts-, Grund- und Sonderreinigung und Küchenhilfdienste Wuppertal-Wichlinghausen - Rahmenvereinbarung"
+},
+"buyer-city": {
+"mul": [
+"Wuppertal"
+]
+}
+},
+{
+"place-of-performance": [
+"DE713",
+"DEU",
+"DEA2D",
+"DEA2D",
+"DEE03",
+"DE803",
+"DEB12",
+"DEB21",
+"DEU",
+"DEU",
+"DEU",
+"DEU",
+"DEU",
+"DEU"
+],
+"deadline-receipt-tender-date-lot": [
+"2026-01-26+01:00",
+"2026-01-26+01:00",
+"2026-01-26+01:00",
+"2026-01-26+01:00",
+"2026-01-26+01:00",
+"2026-01-26+01:00"
+],
+"notice-type": "cn-standard",
+"procedure-type": "open",
+"publication-number": "859349-2025",
+"classification-cpv": [
+"98341140",
+"90620000",
+"71356300",
+"77314000",
+"90911200",
+"90611000",
+"71356300",
+"98341140",
+"98341140",
+"90911200",
+"90620000",
+"90620000",
+"77314000",
+"90620000",
+"90911200",
+"90620000",
+"90620000",
+"90911300",
+"90611000"
+],
+"publication-date": "2025-12-23+01:00",
+"buyer-name": {
+"deu": [
+"Deutscher Wetterdienst"
+]
+},
+"buyer-legal-type": [
+"cga"
+],
+"notice-title": {
+"deu": "Deutschland – Hausmeisterdienste – Gelände- u. Sensorpflege a. d. Wetterstation Aachen, Hausmeisterservice inkl. Leerstandsreinigung a. d. Wetterstation Aachen, Hausmeisterservice a. d. Wetterstation Magdeburg, Reinigung inkl. Glas- u. Rahmenreinigung am Radar Rostock-Warnemünde, Winterdienst und Straßenreinigung a. d. Wetterstation Nürburg-Barweiler sowie Winterdienst a. d. Wetterstation Trier des Deutschen Wetterdienstes (DWD)",
+"eng": "Germany – Caretaker services – Gelände- u. Sensorpflege a. d. Wetterstation Aachen, Hausmeisterservice inkl. Leerstandsreinigung a. d. Wetterstation Aachen, Hausmeisterservice a. d. Wetterstation Magdeburg, Reinigung inkl. Glas- u. Rahmenreinigung am Radar Rostock-Warnemünde, Winterdienst und Straßenreinigung a. d. Wetterstation Nürburg-Barweiler sowie Winterdienst a. d. Wetterstation Trier des Deutschen Wetterdienstes (DWD)"
+},
+"buyer-city": {
+"mul": [
+"Offenbach am Main"
+]
+}
+},
+{
+"place-of-performance": [
+"DEA23",
+"DEU",
+"DEA23",
+"DEA23",
+"DEA23",
+"DEA23",
+"DEA23",
+"DEA23",
+"DEU",
+"DEU",
+"DEU",
+"DEU",
+"DEU",
+"DEU"
+],
+"deadline-receipt-tender-date-lot": [
+"2026-01-27+01:00",
+"2026-01-27+01:00",
+"2026-01-27+01:00",
+"2026-01-27+01:00",
+"2026-01-27+01:00",
+"2026-01-27+01:00"
+],
+"notice-type": "cn-standard",
+"procedure-type": "open",
+"publication-number": "861068-2025",
+"classification-cpv": [
+"90911200",
+"90911200",
+"90911200",
+"90911200",
+"90911200",
+"90911200",
+"90911200",
+"90911200"
+],
+"publication-date": "2025-12-24+01:00",
+"buyer-name": {
+"deu": [
+"Amt für Recht, Vergabe und Versicherungen"
+]
+},
+"buyer-legal-type": [
+"la"
+],
+"notice-title": {
+"deu": "Deutschland – Gebäudereinigung – AZ 25622 Paket 29 Gebäudereinigung in 24 Objekten",
+"eng": "Germany – Building-cleaning services – AZ 25622 Paket 29 Gebäudereinigung in 24 Objekten"
+},
+"buyer-city": {
+"mul": [
+"Köln"
+]
+}
+},
+{
+"place-of-performance": [
+"DEA38",
+"DEU",
+"DEA38",
+"DEA38",
+"DEA38",
+"DEA38",
+"DEU",
+"DEU",
+"DEU",
+"DEU"
+],
+"deadline-receipt-tender-date-lot": [
+"2026-02-04+01:00",
+"2026-02-04+01:00",
+"2026-02-04+01:00",
+"2026-02-04+01:00"
+],
+"notice-type": "cn-standard",
+"procedure-type": "open",
+"publication-number": "2073-2026",
+"classification-cpv": [
+"90911200",
+"90919300",
+"90911200",
+"90911200",
+"90911200",
+"90911200"
+],
+"publication-date": "2026-01-05+01:00",
+"buyer-name": {
+"deu": [
+"Kreis Warendorf - Der Landrat"
+]
+},
+"buyer-legal-type": [
+"la"
+],
+"notice-title": {
+"deu": "Deutschland – Gebäudereinigung – Unterhaltsreinigung von Verwaltungsgebäuden des Kreises Warendorf im Zeitraum vom 01.04.2026 bis 31.03.2026",
+"eng": "Germany – Building-cleaning services – Unterhaltsreinigung von Verwaltungsgebäuden des Kreises Warendorf im Zeitraum vom 01.04.2026 bis 31.03.2026"
+},
+"buyer-city": {
+"mul": [
+"Warendorf"
+]
+}
+},
+{
+"place-of-performance": [
+"DEA54",
+"DEU",
+"DEA54",
+"DEU"
+],
+"deadline-receipt-tender-date-lot": [
+"2026-02-05+01:00"
+],
+"notice-type": "cn-standard",
+"procedure-type": "open",
+"publication-number": "3644-2026",
+"classification-cpv": [
+"90910000",
+"90910000"
+],
+"publication-date": "2026-01-06+01:00",
+"buyer-name": {
+"deu": [
+"MHB Hamm Betriebsführungsgesellschaft mbH"
+]
+},
+"buyer-legal-type": [
+"pub-undert"
+],
+"notice-title": {
+"deu": "Deutschland – Reinigungsdienste – Vergabe von Anlagen-, Industrie- und Kauenreinigung in der MVA Hamm",
+"eng": "Germany – Cleaning services – Vergabe von Anlagen-, Industrie- und Kauenreinigung in der MVA Hamm"
+},
+"buyer-city": {
+"mul": [
+"Hamm"
+]
+}
+},
+{
+"place-of-performance": [
+"DEA51",
+"DEU",
+"DEA36",
+"DEA32",
+"DEA36",
+"DEA5C",
+"DEU",
+"DEU",
+"DEU",
+"DEU"
+],
+"deadline-receipt-tender-date-lot": [
+"2026-01-22+01:00",
+"2026-01-22+01:00",
+"2026-01-22+01:00"
+],
+"notice-type": "cn-standard",
+"procedure-type": "open",
+"publication-number": "4642-2026",
+"classification-cpv": [
+"90900000",
+"90911200",
+"90900000",
+"90900000",
+"90900000",
+"90911200",
+"90911200",
+"90911200"
+],
+"publication-date": "2026-01-06+01:00",
+"buyer-name": {
+"deu": [
+"Die Autobahn GmbH des Bundes - NL Westfalen"
+]
+},
+"buyer-legal-type": [
+"pub-undert"
+],
+"notice-title": {
+"deu": "Deutschland – Reinigungs- und Hygienedienste – Reinigung der PWC-Anlagen entlang BAB im UB der AM Dorsten (Los 1), AM Gelsenkirchen + Recklinghausen (Los 2) und AM Kamen (Los 3) in 2026-27",
+"eng": "Germany – Cleaning and sanitation services – Reinigung der PWC-Anlagen entlang BAB im UB der AM Dorsten (Los 1), AM Gelsenkirchen + Recklinghausen (Los 2) und AM Kamen (Los 3) in 2026-27"
+},
+"buyer-city": {
+"mul": [
+"Hamm"
+]
+}
+},
+{
+"place-of-performance": [
+"DEA23",
+"DEU",
+"DEA23",
+"DEA23",
+"DEA23",
+"DEA23",
+"DEA23",
+"DEU",
+"DEU",
+"DEU",
+"DEU",
+"DEU"
+],
+"deadline-receipt-tender-date-lot": [
+"2026-02-13+01:00",
+"2026-02-13+01:00",
+"2026-02-13+01:00",
+"2026-02-13+01:00",
+"2026-02-13+01:00"
+],
+"notice-type": "cn-standard",
+"procedure-type": "open",
+"publication-number": "8849-2026",
+"classification-cpv": [
+"90911200",
+"90911200",
+"90911200",
+"90911200",
+"90911200",
+"90911200"
+],
+"publication-date": "2026-01-08+01:00",
+"buyer-name": {
+"deu": [
+"Deutsche Sporthochschule Köln"
+]
+},
+"buyer-legal-type": [
+"body-pl-ra"
+],
+"notice-title": {
+"deu": "Deutschland – Gebäudereinigung – Unterhaltsreinigung DSHS",
+"eng": "Germany – Building-cleaning services – Unterhaltsreinigung DSHS"
+},
+"buyer-city": {
+"mul": [
+"Köln"
+]
+}
+},
+{
+"place-of-performance": [
+"DEA22",
+"DEU",
+"DEE02",
+"DEE02",
+"DEE03",
+"DEU",
+"DEU",
+"DEU"
+],
+"deadline-receipt-tender-date-lot": [
+"2026-02-24+01:00",
+"2026-02-24+01:00",
+"2026-02-24+01:00"
+],
+"notice-type": "cn-standard",
+"procedure-type": "open",
+"publication-number": "10813-2026",
+"classification-cpv": [
+"90911200",
+"90911300",
+"90911200",
+"90911200",
+"90911300",
+"90911300"
+],
+"publication-date": "2026-01-08+01:00",
+"buyer-name": {
+"deu": [
+"Bundesanstalt für Immobilienaufgaben"
+]
+},
+"buyer-legal-type": [
+"body-pl-cga"
+],
+"notice-title": {
+"deu": "Deutschland – Gebäudereinigung – Offenes Verfahren (EU-weit) zur Vergabe von Gebäudereinigungsleistungen (Unterhalts-, Grund- und Glasreinigungsleistungen) für den Behördenpark Halle, BStU Halle sowie BStU Magdeburg, Bundesanstalt für Immobilienaufgaben, Direktion Magdeburg",
+"eng": "Germany – Building-cleaning services – Offenes Verfahren (EU-weit) zur Vergabe von Gebäudereinigungsleistungen (Unterhalts-, Grund- und Glasreinigungsleistungen) für den Behördenpark Halle, BStU Halle sowie BStU Magdeburg, Bundesanstalt für Immobilienaufgaben, Direktion Magdeburg"
+},
+"buyer-city": {
+"mul": [
+"Bonn"
+]
+}
+},
+{
+"place-of-performance": [
+"DEA22",
+"DEU",
+"DEE02",
+"DEE02",
+"DEE03",
+"DEU",
+"DEU",
+"DEU"
+],
+"deadline-receipt-tender-date-lot": [
+"2026-02-24+01:00",
+"2026-02-24+01:00",
+"2026-02-24+01:00"
+],
+"notice-type": "cn-standard",
+"procedure-type": "open",
+"publication-number": "14688-2026",
+"classification-cpv": [
+"90911200",
+"90911300",
+"90911200",
+"90911200",
+"90911300",
+"90911300"
+],
+"publication-date": "2026-01-09+01:00",
+"buyer-name": {
+"deu": [
+"Bundesanstalt für Immobilienaufgaben"
+]
+},
+"buyer-legal-type": [
+"body-pl-cga"
+],
+"notice-title": {
+"deu": "Deutschland – Gebäudereinigung – Offenes Verfahren (EU-weit) zur Vergabe von Gebäudereinigungsleistungen (Unterhalts-, Grund- und Glasreinigungsleistungen) für den Behördenpark Halle, BStU Halle sowie BStU Magdeburg, Bundesanstalt für Immobilienaufgaben, Direktion Magdeburg (VOEK 501-25)",
+"eng": "Germany – Building-cleaning services – Offenes Verfahren (EU-weit) zur Vergabe von Gebäudereinigungsleistungen (Unterhalts-, Grund- und Glasreinigungsleistungen) für den Behördenpark Halle, BStU Halle sowie BStU Magdeburg, Bundesanstalt für Immobilienaufgaben, Direktion Magdeburg (VOEK 501-25)"
+},
+"buyer-city": {
+"mul": [
+"Bonn"
+]
+}
+},
+{
+"place-of-performance": [
+"DEA51",
+"DEU",
+"DEA36",
+"DEA32",
+"DEA36",
+"DEA5C",
+"DEU",
+"DEU",
+"DEU",
+"DEU"
+],
+"deadline-receipt-tender-date-lot": [
+"2026-02-05+01:00",
+"2026-02-05+01:00",
+"2026-02-05+01:00"
+],
+"notice-type": "cn-standard",
+"procedure-type": "open",
+"publication-number": "17666-2026",
+"classification-cpv": [
+"90900000",
+"90911200",
+"90900000",
+"90900000",
+"90900000",
+"90911200",
+"90911200",
+"90911200"
+],
+"publication-date": "2026-01-12+01:00",
+"buyer-name": {
+"deu": [
+"Die Autobahn GmbH des Bundes - NL Westfalen"
+]
+},
+"buyer-legal-type": [
+"pub-undert"
+],
+"notice-title": {
+"deu": "Deutschland – Reinigungs- und Hygienedienste – Reinigung der PWC-Anlagen entlang BAB im UB der AM Dorsten (Los 1), AM Gelsenkirchen + Recklinghausen (Los 2) und AM Kamen (Los 3) in 2026-27",
+"eng": "Germany – Cleaning and sanitation services – Reinigung der PWC-Anlagen entlang BAB im UB der AM Dorsten (Los 1), AM Gelsenkirchen + Recklinghausen (Los 2) und AM Kamen (Los 3) in 2026-27"
+},
+"buyer-city": {
+"mul": [
+"Hamm"
+]
+}
+},
+{
+"place-of-performance": [
+"DEA14",
+"DEU",
+"DEA14",
+"DEA14",
+"DEU",
+"DEU"
+],
+"deadline-receipt-tender-date-lot": [
+"2026-02-12+01:00",
+"2026-02-12+01:00"
+],
+"notice-type": "cn-standard",
+"procedure-type": "open",
+"publication-number": "17826-2026",
+"classification-cpv": [
+"90910000",
+"90910000",
+"90910000"
+],
+"publication-date": "2026-01-12+01:00",
+"buyer-name": {
+"deu": [
+"Stadt Krefeld - Zentrales Gebäudemanagement"
+]
+},
+"buyer-legal-type": [
+"la"
+],
+"notice-title": {
+"deu": "Deutschland – Reinigungsdienste – Unterhaltsreinigung und weitere Reinigungsleistungen auf Abruf in Gebäuden der Stadt Krefeld 01.04.26.30.06.27 (Verlängerungsoption 1+1), Los 3 und 12",
+"eng": "Germany – Cleaning services – Unterhaltsreinigung und weitere Reinigungsleistungen auf Abruf in Gebäuden der Stadt Krefeld 01.04.26.30.06.27 (Verlängerungsoption 1+1), Los 3 und 12"
+},
+"buyer-city": {
+"mul": [
+"Krefeld"
+]
+}
+},
+{
+"place-of-performance": [
+"DEA1F",
+"DEU",
+"DEA1F",
+"DEA1F",
+"DEU",
+"DEU"
+],
+"deadline-receipt-tender-date-lot": [
+"2026-02-12+01:00",
+"2026-02-12+01:00"
+],
+"notice-type": "cn-standard",
+"procedure-type": "open",
+"publication-number": "23017-2026",
+"classification-cpv": [
+"90911200",
+"90919300",
+"90919000",
+"90911200",
+"90911200",
+"90919300"
+],
+"publication-date": "2026-01-14+01:00",
+"buyer-name": {
+"deu": [
+"Kreis Wesel"
+]
+},
+"buyer-legal-type": [
+"body-pl-la"
+],
+"notice-title": {
+"deu": "Deutschland – Gebäudereinigung – Laufende Unterhaltsreinigung und optionale Sonder- und Grundreinigung auf Abruf für zwei Objekte",
+"eng": "Germany – Building-cleaning services – Laufende Unterhaltsreinigung und optionale Sonder- und Grundreinigung auf Abruf für zwei Objekte"
+},
+"buyer-city": {
+"mul": [
+"Wesel"
+]
+}
+},
+{
+"place-of-performance": [
+"DEA51",
+"DEU",
+"DEA51",
+"DEA51",
+"DEA51",
+"DEU",
+"DEU",
+"DEU"
+],
+"deadline-receipt-tender-date-lot": [
+"2026-02-19+01:00",
+"2026-02-19+01:00",
+"2026-02-19+01:00"
+],
+"notice-type": "cn-standard",
+"procedure-type": "open",
+"publication-number": "23850-2026",
+"classification-cpv": [
+"90911100",
+"90911100",
+"90911100",
+"90911100"
+],
+"publication-date": "2026-01-14+01:00",
+"buyer-name": {
+"deu": [
+"Stadt Bochum, Referat Zentraler Einkauf"
+]
+},
+"buyer-legal-type": [
+"la"
+],
+"notice-title": {
+"deu": "Deutschland – Reinigung von Unterkünften – Reinigung div. Unterkünfte",
+"eng": "Germany – Accommodation cleaning services – Reinigung div. Unterkünfte"
+},
+"buyer-city": {
+"mul": [
+"Bochum"
+]
+}
+},
+{
+"place-of-performance": [
+"DEA1B",
+"DEU",
+"DEA1B",
+"DEA1B",
+"DEU",
+"DEU"
+],
+"deadline-receipt-tender-date-lot": [
+"2026-02-19+01:00",
+"2026-02-19+01:00"
+],
+"notice-type": "cn-standard",
+"procedure-type": "open",
+"publication-number": "26760-2026",
+"classification-cpv": [
+"90911200",
+"90911200",
+"90911200"
+],
+"publication-date": "2026-01-14+01:00",
+"buyer-name": {
+"deu": [
+"Zweckverband Gesamtschule Mittelkreis"
+]
+},
+"buyer-legal-type": [
+"body-pl-la"
+],
+"notice-title": {
+"deu": "Deutschland – Gebäudereinigung – Ausschreibung Gebäudereinigung Gesamtschule Mittelkreis",
+"eng": "Germany – Building-cleaning services – Ausschreibung Gebäudereinigung Gesamtschule Mittelkreis"
+},
+"buyer-city": {
+"mul": [
+"Goch"
+]
+}
+},
+{
+"place-of-performance": [
+"DEA22",
+"DEU",
+"DEA22",
+"DEU"
+],
+"deadline-receipt-tender-date-lot": [
+"2026-02-16+01:00"
+],
+"notice-type": "cn-standard",
+"procedure-type": "open",
+"publication-number": "29433-2026",
+"classification-cpv": [
+"90910000",
+"90911100",
+"90911200",
+"90910000",
+"90911100",
+"90911200"
+],
+"publication-date": "2026-01-15+01:00",
+"buyer-name": {
+"deu": [
+"Deutsche Gesellschaft für Internationale Zusammenarbeit (GIZ) GmbH"
+]
+},
+"buyer-legal-type": [
+"pub-undert-cga"
+],
+"notice-title": {
+"deu": "Deutschland – Reinigungsdienste – 81322991-Gebäudereinigungsdienstleistungen am Campus Kottenforst",
+"eng": "Germany – Cleaning services – 81322991-Gebäudereinigungsdienstleistungen am Campus Kottenforst"
+},
+"buyer-city": {
+"mul": [
+"Eschborn"
+]
+}
+},
+{
+"place-of-performance": [
+"DEA2C",
+"DEU",
+"DEA2C",
+"DEA2C",
+"DEA2C",
+"DEU",
+"DEU",
+"DEU"
+],
+"deadline-receipt-tender-date-lot": [
+"2026-02-17+01:00",
+"2026-02-17+01:00",
+"2026-02-17+01:00"
+],
+"notice-type": "cn-standard",
+"procedure-type": "open",
+"publication-number": "31487-2026",
+"classification-cpv": [
+"90910000",
+"90911000",
+"90911200",
+"90911300",
+"90911200",
+"90911200",
+"90911300",
+"90911000",
+"90911000",
+"90911000"
+],
+"publication-date": "2026-01-16+01:00",
+"buyer-name": {
+"deu": [
+"Stadt Meckenheim"
+]
+},
+"buyer-legal-type": [
+"body-pl-ra"
+],
+"notice-title": {
+"deu": "Deutschland – Reinigungsdienste – Gebäudereinigung in Objekten der Stadt Meckenheim",
+"eng": "Germany – Cleaning services – Gebäudereinigung in Objekten der Stadt Meckenheim"
+},
+"buyer-city": {
+"mul": [
+"Meckenheim"
+]
+}
+},
+{
+"place-of-performance": [
+"DEA41",
+"DEU",
+"DEA41",
+"DEA41",
+"DEU",
+"DEU"
+],
+"deadline-receipt-tender-date-lot": [
+"2026-03-04+01:00",
+"2026-03-04+01:00"
+],
+"notice-type": "cn-standard",
+"procedure-type": "open",
+"publication-number": "31781-2026",
+"classification-cpv": [
+"90911200",
+"90911200",
+"90911200"
+],
+"publication-date": "2026-01-16+01:00",
+"buyer-name": {
+"deu": [
+"Stadt Bielefeld - Amt für Zentrale Leistungen"
+]
+},
+"buyer-legal-type": [
+"la"
+],
+"notice-title": {
+"deu": "Deutschland – Gebäudereinigung – Unterhalts-, Sonder- und teilweise Ergänzungsreinigung in 8 Objekten der Stadt Bielefeld für den Zeitraum vom 01.06.2026 bis zum 31.05.2027 plus drei Verlängerungsoptionen von jeweils 12 Monaten",
+"eng": "Germany – Building-cleaning services – Unterhalts-, Sonder- und teilweise Ergänzungsreinigung in 8 Objekten der Stadt Bielefeld für den Zeitraum vom 01.06.2026 bis zum 31.05.2027 plus drei Verlängerungsoptionen von jeweils 12 Monaten"
+},
+"buyer-city": {
+"mul": [
+"Bielefeld"
+]
+}
+},
+{
+"place-of-performance": [
+"DEA12",
+"DEA13",
+"DEA1C",
+"DEA1C",
+"DEA56",
+"DEA51",
+"DEA53",
+"DEU",
+"DEU",
+"DEU",
+"DEU",
+"DEU",
+"DEU",
+"DEU",
+"DEA12",
+"DEA1C",
+"DEA13",
+"DEA56",
+"DEA51",
+"DEA53",
+"DEU",
+"DEU",
+"DEU",
+"DEU",
+"DEU",
+"DEU"
+],
+"deadline-receipt-tender-date-lot": [
+"2026-01-21+01:00",
+"2026-01-14+01:00",
+"2026-01-14+01:00",
+"2026-01-14+01:00"
+],
+"notice-type": "cn-standard",
+"procedure-type": "open",
+"publication-number": "37892-2026",
+"classification-cpv": [
+"90910000",
+"90900000",
+"90910000",
+"90910000",
+"90910000",
+"90910000",
+"90900000",
+"90900000",
+"90900000",
+"90900000"
+],
+"publication-date": "2026-01-19+01:00",
+"buyer-name": {
+"deu": [
+"Ruhrverband, Abteilung Zentrale Dienste, Einkauf"
+]
+},
+"buyer-legal-type": [
+"body-pl-la"
+],
+"notice-title": {
+"deu": "Deutschland – Reinigungsdienste – Unterhalts- und Glasreinigung für den Regionalbereich West",
+"eng": "Germany – Cleaning services – Unterhalts- und Glasreinigung für den Regionalbereich West"
+},
+"buyer-city": {
+"mul": [
+"Essen"
+]
+}
+},
+{
+"place-of-performance": [
+"DEA1C",
+"DEU",
+"DEA1C",
+"DEU"
+],
+"deadline-receipt-tender-date-lot": [
+"2026-02-19+01:00"
+],
+"notice-type": "cn-standard",
+"procedure-type": "open",
+"publication-number": "38620-2026",
+"classification-cpv": [
+"90911200",
+"90919300",
+"90911200",
+"90919300"
+],
+"publication-date": "2026-01-19+01:00",
+"buyer-name": {
+"deu": [
+"Stadt Velbert, Der Bürgermeister - Fachbereich 7.2 Immobilienservice"
+]
+},
+"buyer-legal-type": [
+"la"
+],
+"notice-title": {
+"deu": "Deutschland – Gebäudereinigung – Unterhalts- und Grundreinigung GS Kastanienallee + Sporthalle",
+"eng": "Germany – Building-cleaning services – Unterhalts- und Grundreinigung GS Kastanienallee + Sporthalle"
+},
+"buyer-city": {
+"mul": [
+"Velbert"
+]
+}
+},
+{
+"place-of-performance": [
+"DEA33",
+"DEU",
+"DEA33",
+"DEU"
+],
+"deadline-receipt-tender-date-lot": [
+"2026-02-17+01:00"
+],
+"notice-type": "cn-standard",
+"procedure-type": "open",
+"publication-number": "39455-2026",
+"classification-cpv": [
+"90911200",
+"90911200"
+],
+"publication-date": "2026-01-20+01:00",
+"buyer-name": {
+"deu": [
+"Unfallkasse Nordrhein-Westfalen"
+]
+},
+"buyer-legal-type": [
+"body-pl-ra"
+],
+"notice-title": {
+"deu": "Deutschland – Gebäudereinigung – Unfallkasse NRW - Reinigungsausschreibung Standort Münster",
+"eng": "Germany – Building-cleaning services – Unfallkasse NRW - Reinigungsausschreibung Standort Münster"
+},
+"buyer-city": {
+"mul": [
+"Düsseldorf"
+]
+}
+},
+{
+"place-of-performance": [
+"DEA2D",
+"DEU",
+"DEA2D",
+"DEU"
+],
+"deadline-receipt-tender-date-lot": [
+"2026-02-20+01:00"
+],
+"notice-type": "cn-standard",
+"procedure-type": "open",
+"publication-number": "43342-2026",
+"classification-cpv": [
+"90911100",
+"90911200",
+"90911100",
+"90911200"
+],
+"publication-date": "2026-01-21+01:00",
+"buyer-name": {
+"deu": [
+"Stadt Würselen/ S30/ ZVS"
+]
+},
+"buyer-legal-type": [
+"la"
+],
+"notice-title": {
+"deu": "Deutschland – Reinigung von Unterkünften – Gebäudereinigung Flüchtlingsunterkünfte der Stadt Würselen; hier: 2026-2029",
+"eng": "Germany – Accommodation cleaning services – Gebäudereinigung Flüchtlingsunterkünfte der Stadt Würselen; hier: 2026-2029"
+},
+"buyer-city": {
+"mul": [
+"Würselen"
+]
+}
+},
+{
+"place-of-performance": [
+"DEA16",
+"DEA31",
+"DEU",
+"DEU",
+"DEA16",
+"DEA31",
+"DEA16",
+"DEA31",
+"DEA16",
+"DEA31",
+"DEA16",
+"DEA31",
+"DEU",
+"DEU",
+"DEU",
+"DEU",
+"DEU",
+"DEU",
+"DEU",
+"DEU"
+],
+"deadline-receipt-tender-date-lot": [
+"2026-02-24+01:00",
+"2026-02-24+01:00",
+"2026-02-24+01:00",
+"2026-02-24+01:00"
+],
+"notice-type": "cn-standard",
+"procedure-type": "open",
+"publication-number": "44146-2026",
+"classification-cpv": [
+"90910000",
+"90900000",
+"90911000",
+"90911200",
+"90919000",
+"90919000",
+"90910000",
+"90910000",
+"90910000",
+"90910000",
+"90900000",
+"90911000",
+"90911200",
+"90919000",
+"90919000",
+"90900000",
+"90911000",
+"90911200",
+"90919000",
+"90919000",
+"90900000",
+"90911000",
+"90911200",
+"90919000",
+"90919000",
+"90900000",
+"90911000",
+"90911200",
+"90919000",
+"90919000"
+],
+"publication-date": "2026-01-21+01:00",
+"buyer-name": {
+"deu": [
+"Hochschule Ruhr West Standort Mülheim an der Ruhr"
+]
+},
+"buyer-legal-type": [
+"body-pl-ra"
+],
+"notice-title": {
+"deu": "Deutschland – Reinigungsdienste – Gebäudereinigung HRW ab Juli 2026",
+"eng": "Germany – Cleaning services – Gebäudereinigung HRW ab Juli 2026"
+},
+"buyer-city": {
+"mul": [
+"Mülheim an der Ruhr"
+]
+}
+},
+{
+"place-of-performance": [
+"DEA13",
+"DEU",
+"DEA13",
+"DEU"
+],
+"deadline-receipt-tender-date-lot": [
+"2026-01-29+01:00"
+],
+"notice-type": "cn-standard",
+"procedure-type": "open",
+"publication-number": "45895-2026",
+"classification-cpv": [
+"90911200",
+"90910000",
+"90911300",
+"90911200",
+"90910000",
+"90911300"
+],
+"publication-date": "2026-01-21+01:00",
+"buyer-name": {
+"deu": [
+"148 - 397 TIN, Neubau Tiegelschule, hier: Bauendreinigung"
+]
+},
+"buyer-legal-type": [
+"la"
+],
+"notice-title": {
+"deu": "Deutschland – Gebäudereinigung – 148 - 397 TIN Neubau Tiegelschule, Tiegelstr. 29,45141 Essen, hier: Bauendreinigung",
+"eng": "Germany – Building-cleaning services – 148 - 397 TIN Neubau Tiegelschule, Tiegelstr. 29,45141 Essen, hier: Bauendreinigung"
+},
+"buyer-city": {
+"mul": [
+"Essen"
+]
+}
+},
+{
+"place-of-performance": [
+"DEA1A",
+"DEU",
+"DEA1A",
+"DEU"
+],
+"deadline-receipt-tender-date-lot": [
+"2026-01-30+01:00"
+],
+"notice-type": "cn-standard",
+"procedure-type": "open",
+"publication-number": "51765-2026",
+"classification-cpv": [
+"90911200",
+"90911200",
+"90911200",
+"90911200"
+],
+"publication-date": "2026-01-23+01:00",
+"buyer-name": {
+"deu": [
+"Stadt Wuppertal"
+]
+},
+"buyer-legal-type": [
+"la"
+],
+"notice-title": {
+"deu": "Deutschland – Gebäudereinigung – Unterhalts-, Grund- und Sonderreinigung und Küchenhilfdienste Wuppertal-Uellendahl- Rahmenvereinbarung",
+"eng": "Germany – Building-cleaning services – Unterhalts-, Grund- und Sonderreinigung und Küchenhilfdienste Wuppertal-Uellendahl- Rahmenvereinbarung"
+},
+"buyer-city": {
+"mul": [
+"Wuppertal"
+]
+}
+},
+{
+"place-of-performance": [
+"DEA32",
+"DEU",
+"DEA32",
+"DEA32",
+"DEU",
+"DEU"
+],
+"deadline-receipt-tender-date-lot": [
+"2026-02-23+01:00",
+"2026-02-23+01:00"
+],
+"notice-type": "cn-standard",
+"procedure-type": "open",
+"publication-number": "52952-2026",
+"classification-cpv": [
+"90911200",
+"90911300",
+"90911200",
+"90911300"
+],
+"publication-date": "2026-01-23+01:00",
+"buyer-name": {
+"deu": [
+"Deutsche Rentenversicherung Knappschaft-Bahn-See (KBS)"
+]
+},
+"buyer-legal-type": [
+"body-pl-cga"
+],
+"notice-title": {
+"deu": "Deutschland – Gebäudereinigung – Unterhalts- und Glasreinigung für die Liegenschaften in Gelsenkirchen",
+"eng": "Germany – Building-cleaning services – Unterhalts- und Glasreinigung für die Liegenschaften in Gelsenkirchen"
+},
+"buyer-city": {
+"mul": [
+"Bochum"
+]
+}
+},
+{
+"place-of-performance": [
+"DEA1A",
+"DEU",
+"DEA1A",
+"DEU"
+],
+"deadline-receipt-tender-date-lot": [
+"2026-02-24+01:00"
+],
+"notice-type": "cn-standard",
+"procedure-type": "open",
+"publication-number": "53640-2026",
+"classification-cpv": [
+"90911200",
+"90911200"
+],
+"publication-date": "2026-01-26+01:00",
+"buyer-name": {
+"deu": [
+"Berufsgenossenschaft Verkehrswirtschaft Post-Logistik Telekommunikation"
+]
+},
+"buyer-legal-type": [
+"body-pl-cga"
+],
+"notice-title": {
+"deu": "Deutschland – Gebäudereinigung – Los 5 - Unterhaltsreinigung für die Bezirksverwaltung Wuppertal der BG Verkehr",
+"eng": "Germany – Building-cleaning services – Los 5 - Unterhaltsreinigung für die Bezirksverwaltung Wuppertal der BG Verkehr"
+},
+"buyer-city": {
+"mul": [
+"Hamburg"
+]
+}
+},
+{
+"place-of-performance": [
+"DEA23",
+"DEU",
+"DEA23",
+"DEA23",
+"DEA23",
+"DEA23",
+"DEA23",
+"DEA23",
+"DEU",
+"DEU",
+"DEU",
+"DEU",
+"DEU",
+"DEU"
+],
+"deadline-receipt-tender-date-lot": [
+"2026-02-03+01:00",
+"2026-02-03+01:00",
+"2026-02-03+01:00",
+"2026-02-03+01:00",
+"2026-02-03+01:00",
+"2026-02-03+01:00"
+],
+"notice-type": "cn-standard",
+"procedure-type": "open",
+"publication-number": "56090-2026",
+"classification-cpv": [
+"90911200",
+"90911200",
+"90911200",
+"90911200",
+"90911200",
+"90911200",
+"90911200",
+"90911200"
+],
+"publication-date": "2026-01-26+01:00",
+"buyer-name": {
+"deu": [
+"Amt für Recht, Vergabe und Versicherungen"
+]
+},
+"buyer-legal-type": [
+"la"
+],
+"notice-title": {
+"deu": "Deutschland – Gebäudereinigung – AZ 25622 Paket 29 Gebäudereinigung in 24 Objekten",
+"eng": "Germany – Building-cleaning services – AZ 25622 Paket 29 Gebäudereinigung in 24 Objekten"
+},
+"buyer-city": {
+"mul": [
+"Köln"
+]
+}
+},
+{
+"place-of-performance": [
+"DEA12",
+"DEA13",
+"DEA1C",
+"DEA1C",
+"DEA56",
+"DEA51",
+"DEA53",
+"DEU",
+"DEU",
+"DEU",
+"DEU",
+"DEU",
+"DEU",
+"DEU",
+"DEA12",
+"DEA1C",
+"DEA13",
+"DEA56",
+"DEA51",
+"DEA53",
+"DEU",
+"DEU",
+"DEU",
+"DEU",
+"DEU",
+"DEU"
+],
+"deadline-receipt-tender-date-lot": [
+"2026-01-26+01:00",
+"2026-01-26+01:00",
+"2026-01-26+01:00",
+"2026-01-26+01:00"
+],
+"notice-type": "cn-standard",
+"procedure-type": "open",
+"publication-number": "56124-2026",
+"classification-cpv": [
+"90910000",
+"90900000",
+"90910000",
+"90910000",
+"90910000",
+"90910000",
+"90900000",
+"90900000",
+"90900000",
+"90900000"
+],
+"publication-date": "2026-01-26+01:00",
+"buyer-name": {
+"deu": [
+"Ruhrverband, Abteilung Zentrale Dienste, Einkauf"
+]
+},
+"buyer-legal-type": [
+"body-pl-la"
+],
+"notice-title": {
+"deu": "Deutschland – Reinigungsdienste – Unterhalts- und Glasreinigung für den Regionalbereich West",
+"eng": "Germany – Cleaning services – Unterhalts- und Glasreinigung für den Regionalbereich West"
+},
+"buyer-city": {
+"mul": [
+"Essen"
+]
+}
+},
+{
+"place-of-performance": [
+"DEA2D",
+"DEU",
+"DEA2D",
+"DEU"
+],
+"deadline-receipt-tender-date-lot": [
+"2026-02-26+01:00"
+],
+"notice-type": "cn-standard",
+"procedure-type": "open",
+"publication-number": "59931-2026",
+"classification-cpv": [
+"90911200",
+"90911200"
+],
+"publication-date": "2026-01-27+01:00",
+"buyer-name": {
+"deu": [
+"Universitätsklinikum Aachen AöR"
+]
+},
+"buyer-legal-type": [
+"body-pl-ra"
+],
+"notice-title": {
+"deu": "Deutschland – Gebäudereinigung – Unterhaltsreinigung der Etagen 3 und 4 im UBFT",
+"eng": "Germany – Building-cleaning services – Unterhaltsreinigung der Etagen 3 und 4 im UBFT"
+},
+"buyer-city": {
+"mul": [
+"Aachen"
+]
+}
+}
+],
+"totalNoticeCount": 473,
+"iterationNextToken": null,
+"timedOut": false
+}

@@ -36,6 +36,7 @@ PORT = int(os.environ.get("AUTONOMOUS_PORT", "8770"))
 STANDARD_EINSTELLUNGEN = {
     "modell_anbieter": "keiner",          # keiner | ollama (lokal, kostenlos)
     "ollama_modell": "gemma3:4b",
+    "ollama_adresse": "http://127.0.0.1:11434",  # nur lokal (127.0.0.1, localhost, [::1]) – geprüft
     "modell_max_aufrufe_tag": 50,
     "kostenpflichtig_erlaubt": False,     # bezahlte Dienste grundsätzlich gesperrt
     "max_parallel": 2,                    # begrenzte Parallelität der Agenten

@@ -1,0 +1,4866 @@
+{
+"notices": [
+{
+"place-of-performance": [
+"DEA23",
+"DEU",
+"DEA23",
+"DEU"
+],
+"notice-type": "can-standard",
+"publication-number": "774869-2025",
+"winner-city": [
+"Bonn"
+],
+"buyer-legal-type": [
+"cga"
+],
+"total-value-cur": [
+"EUR"
+],
+"winner-size": [
+"large"
+],
+"received-submissions-type-val": [
+"10",
+"10",
+"3",
+"0"
+],
+"procedure-type": "open",
+"publication-date": "2025-11-21+01:00",
+"buyer-name": {
+"deu": [
+"Bundesrepublik Deutschland, vertreten durch das Bundesministerium des Innern, vertreten durch das Beschaffungsamt des BMI"
+]
+},
+"received-submissions-type-code": [
+"tenders",
+"t-esubm",
+"t-sme",
+"t-oth-eea"
+],
+"winner-name": {
+"deu": [
+"Braun"
+]
+},
+"buyer-city": {
+"mul": [
+"Bonn"
+]
+}
+},
+{
+"place-of-performance": [
+"DEA13",
+"DEU",
+"DEA13",
+"DEU"
+],
+"notice-type": "can-standard",
+"publication-number": "775821-2025",
+"winner-city": [
+"Welver"
+],
+"buyer-legal-type": [
+"la"
+],
+"total-value-cur": [
+"EUR"
+],
+"winner-size": [
+"small"
+],
+"total-value": 10348.33,
+"received-submissions-type-val": [
+"6",
+"6",
+"0",
+"0",
+"3",
+"0"
+],
+"procedure-type": "open",
+"publication-date": "2025-11-21+01:00",
+"buyer-name": {
+"deu": [
+"Stadt Essen, vertreten durch die GVE Grundstücksverwaltung Stadt Essen GmbH"
+]
+},
+"received-submissions-type-code": [
+"tenders",
+"t-esubm",
+"t-oth-eea",
+"t-no-eea",
+"t-verif-inad",
+"t-verif-inad-low"
+],
+"winner-name": {
+"deu": [
+"J&B Gebäudeservice GmbH"
+]
+},
+"buyer-city": {
+"mul": [
+"Essen"
+]
+}
+},
+{
+"place-of-performance": [
+"DEA1C",
+"DEU",
+"DEA1C",
+"DEA1C",
+"DEU",
+"DEU"
+],
+"notice-type": "can-standard",
+"publication-number": "779125-2025",
+"winner-city": [
+"Iserlohn",
+"Leichlingen"
+],
+"buyer-legal-type": [
+"pub-undert-ra"
+],
+"total-value-cur": [
+"EUR"
+],
+"winner-size": [
+"large",
+"large"
+],
+"total-value": 349000,
+"received-submissions-type-val": [
+"12",
+"12",
+"6",
+"6",
+"6",
+"3"
+],
+"procedure-type": "open",
+"publication-date": "2025-11-24+01:00",
+"buyer-name": {
+"deu": [
+"Bildungsakademie für Gesundheits- und Sozialberufe des Kreises Mettmann GmbH"
+]
+},
+"received-submissions-type-code": [
+"tenders",
+"t-esubm",
+"t-sme",
+"tenders",
+"t-esubm",
+"t-sme"
+],
+"winner-name": {
+"deu": [
+"W+S Winkler GmbH",
+"SB Professional Cleaning GmbH"
+]
+},
+"buyer-city": {
+"mul": [
+"Mettmann"
+]
+}
+},
+{
+"place-of-performance": [
+"DEA1E",
+"DEA1F",
+"DEA12",
+"DEU",
+"DEU",
+"DEU",
+"DEA1E",
+"DEA1F",
+"DEA12",
+"DEU",
+"DEU",
+"DEU"
+],
+"notice-type": "can-standard",
+"procedure-type": "open",
+"publication-number": "782347-2025",
+"buyer-legal-type": [
+"pub-undert"
+],
+"publication-date": "2025-11-25+01:00",
+"buyer-name": {
+"deu": [
+"Bau- und Liegenschaftsbetrieb NRW Zentrale"
+]
+},
+"received-submissions-type-code": [
+"tenders"
+],
+"received-submissions-type-val": [
+"20"
+],
+"buyer-city": {
+"mul": [
+"Düsseldorf"
+]
+}
+},
+{
+"place-of-performance": [
+"DEA2C",
+"DEA2C",
+"DEU",
+"DEU",
+"DEA2C",
+"DEA2C",
+"DEU",
+"DEU"
+],
+"notice-type": "can-standard",
+"publication-number": "783508-2025",
+"winner-city": [
+"Hannover"
+],
+"buyer-legal-type": [
+"pub-undert"
+],
+"total-value-cur": [
+"EUR"
+],
+"winner-size": [
+"large"
+],
+"received-submissions-type-val": [
+"10",
+"10",
+"10",
+"10"
+],
+"procedure-type": "open",
+"publication-date": "2025-11-26+01:00",
+"buyer-name": {
+"deu": [
+"Rhein-Sieg-Verkehrsgesellschaft mbH"
+]
+},
+"received-submissions-type-code": [
+"tenders",
+"t-esubm",
+"tenders",
+"t-esubm"
+],
+"winner-name": {
+"deu": [
+"MTC Deutschland GmbH",
+"MTC Deutschland GmbH"
+]
+},
+"buyer-city": {
+"mul": [
+"Troisdorf-Sieglar"
+]
+}
+},
+{
+"place-of-performance": [
+"DEA1A",
+"DEU",
+"DEA1A",
+"DEA1A",
+"DEU",
+"DEU"
+],
+"notice-type": "can-standard",
+"publication-number": "784217-2025",
+"winner-city": [
+"Essen-Kettwig",
+"Dortmund"
+],
+"buyer-legal-type": [
+"body-pl-ra"
+],
+"total-value-cur": [
+"EUR"
+],
+"winner-size": [
+"medium",
+"medium"
+],
+"total-value": 251534.3,
+"received-submissions-type-val": [
+"11",
+"11",
+"6",
+"0",
+"0",
+"9",
+"9",
+"5",
+"0",
+"0"
+],
+"procedure-type": "open",
+"publication-date": "2025-11-26+01:00",
+"buyer-name": {
+"deu": [
+"Wupperverband"
+]
+},
+"received-submissions-type-code": [
+"tenders",
+"t-esubm",
+"t-sme",
+"t-oth-eea",
+"t-no-eea",
+"tenders",
+"t-esubm",
+"t-sme",
+"t-oth-eea",
+"t-no-eea"
+],
+"winner-name": {
+"deu": [
+"Peter Schneider Gebäudedienstleistungen GmbH & Co. KG",
+"rp Gebäudereinigung GmbH"
+]
+},
+"buyer-city": {
+"mul": [
+"Wuppertal"
+]
+}
+},
+{
+"place-of-performance": [
+"DEA54",
+"DEU",
+"DEA54",
+"DEA54",
+"DEA54",
+"DEU",
+"DEU",
+"DEU"
+],
+"notice-type": "can-standard",
+"publication-number": "785599-2025",
+"winner-city": [
+"Hamm",
+"Bönen",
+"Dortmund"
+],
+"buyer-legal-type": [
+"body-pl-la"
+],
+"total-value-cur": [
+"EUR"
+],
+"winner-size": [
+"small",
+"small",
+"small"
+],
+"total-value": 158783.4,
+"received-submissions-type-val": [
+"16",
+"16",
+"0",
+"0",
+"5",
+"0",
+"14",
+"14",
+"0",
+"0",
+"6",
+"0",
+"15",
+"15",
+"0",
+"0",
+"5",
+"0"
+],
+"procedure-type": "open",
+"publication-date": "2025-11-26+01:00",
+"buyer-name": {
+"deu": [
+"Stadt Hamm, Bauverwaltungsamt, Zentrale Submissionsstelle"
+]
+},
+"received-submissions-type-code": [
+"tenders",
+"t-esubm",
+"t-oth-eea",
+"t-no-eea",
+"t-verif-inad",
+"t-verif-inad-low",
+"tenders",
+"t-esubm",
+"t-oth-eea",
+"t-no-eea",
+"t-verif-inad",
+"t-verif-inad-low",
+"tenders",
+"t-esubm",
+"t-oth-eea",
+"t-no-eea",
+"t-verif-inad",
+"t-verif-inad-low"
+],
+"winner-name": {
+"deu": [
+"Garten und Landschaftspflege Martin Nillies",
+"Flix Dienstleistungen GmbH",
+"ISO Dienstleistungen"
+]
+},
+"buyer-city": {
+"mul": [
+"Hamm"
+]
+}
+},
+{
+"place-of-performance": [
+"DEA11",
+"DEU",
+"DEA1C",
+"DEA2D",
+"DEA22",
+"DEB18",
+"DEA1C",
+"DEA2D",
+"DEA22",
+"DEB18",
+"DEU",
+"DEU",
+"DEU",
+"DEU",
+"DEU",
+"DEU",
+"DEU",
+"DEU"
+],
+"notice-type": "can-standard",
+"publication-number": "790508-2025",
+"winner-city": [
+"Regensburg",
+"Düren",
+"Wesseling",
+"München",
+"Sankt Augustin",
+"Erkrath"
+],
+"buyer-legal-type": [
+"spec-rights-entity"
+],
+"total-value-cur": [
+"EUR"
+],
+"winner-size": [
+"large",
+"large",
+"large",
+"large",
+"large",
+"medium"
+],
+"total-value": 1,
+"received-submissions-type-val": [
+"11",
+"7",
+"7",
+"7",
+"6",
+"5",
+"4",
+"2"
+],
+"procedure-type": "open",
+"publication-date": "2025-11-28+01:00",
+"buyer-name": {
+"deu": [
+"Evangelische Kirche im Rheinland"
+]
+},
+"received-submissions-type-code": [
+"t-esubm",
+"t-esubm",
+"t-esubm",
+"t-esubm",
+"t-esubm",
+"t-esubm",
+"t-esubm",
+"t-esubm"
+],
+"winner-name": {
+"deu": [
+"Götz-Gebäudemanagement Nordwest GmbH",
+"F.J. Peterhoff GmbH",
+"GEBA Gebäudedienste Baggeler GmbH",
+"Wackler Service GroupGmbH & Co. KG",
+"REINIGUNGSTEAM BAGGELER e.K., Ralf Baggeler",
+"REINIGUNGSTEAM BAGGELER e.K., Ralf Baggeler",
+"REINIGUNGSTEAM BAGGELER e.K., Ralf Baggeler",
+"REINIGUNGSTEAM BAGGELER e.K., Ralf Baggeler",
+"REINIGUNGSTEAM BAGGELER e.K., Ralf Baggeler",
+"REINIGUNGSTEAM BAGGELER e.K., Ralf Baggeler",
+"REINIGUNGSTEAM BAGGELER e.K., Ralf Baggeler",
+"REINIGUNGSTEAM BAGGELER e.K., Ralf Baggeler",
+"REINIGUNGSTEAM BAGGELER e.K., Ralf Baggeler",
+"TR plus Gebäudereinigung GmbH"
+]
+},
+"buyer-city": {
+"mul": [
+"Düsseldorf"
+]
+}
+},
+{
+"place-of-performance": [
+"DEA28",
+"DEU",
+"DEA28",
+"DEA28",
+"DEA28",
+"DEU",
+"DEU",
+"DEU"
+],
+"notice-type": "can-standard",
+"publication-number": "790753-2025",
+"winner-city": [
+"Essen",
+"Köln"
+],
+"buyer-legal-type": [
+"la"
+],
+"total-value-cur": [
+"EUR"
+],
+"winner-size": [
+"large",
+"small"
+],
+"total-value": 1568000,
+"received-submissions-type-val": [
+"5",
+"5",
+"2",
+"0",
+"5",
+"5",
+"2",
+"0",
+"5",
+"5",
+"4",
+"0"
+],
+"procedure-type": "open",
+"publication-date": "2025-11-28+01:00",
+"buyer-name": {
+"deu": [
+"Stadt Schleiden"
+]
+},
+"received-submissions-type-code": [
+"tenders",
+"t-esubm",
+"t-sme",
+"t-oth-eea",
+"tenders",
+"t-esubm",
+"t-sme",
+"t-oth-eea",
+"tenders",
+"t-esubm",
+"t-sme",
+"t-oth-eea"
+],
+"winner-name": {
+"deu": [
+"Rudolf Weber Gebäudereinigung und Gebäudedienste GmbH & Co. KG",
+"Rudolf Weber Gebäudereinigung und Gebäudedienste GmbH & Co. KG",
+"Rudolf Weber Gebäudereinigung und Gebäudedienste GmbH & Co. KG",
+"Rudolf Weber Gebäudereinigung und Gebäudedienste GmbH & Co. KG",
+"M & N"
+]
+},
+"buyer-city": {
+"mul": [
+"Schleiden"
+]
+}
+},
+{
+"place-of-performance": [
+"DEA11",
+"DEU",
+"DEA11",
+"DEA11",
+"DEU",
+"DEU"
+],
+"notice-type": "can-standard",
+"publication-number": "792043-2025",
+"winner-city": [
+"Chemnitz"
+],
+"buyer-legal-type": [
+"spec-rights-entity"
+],
+"total-value-cur": [
+"EUR"
+],
+"winner-size": [
+"large"
+],
+"total-value": 1,
+"received-submissions-type-val": [
+"12",
+"12"
+],
+"procedure-type": "open",
+"publication-date": "2025-11-28+01:00",
+"buyer-name": {
+"deu": [
+"Evangelische Kirche im Rheinland"
+]
+},
+"received-submissions-type-code": [
+"t-esubm",
+"t-esubm"
+],
+"winner-name": {
+"deu": [
+"Wackler Service Group GmbH & Co. KG",
+"Wackler Service Group GmbH & Co. KG",
+"Wackler Service Group GmbH & Co. KG",
+"Wackler Service Group GmbH & Co. KG"
+]
+},
+"buyer-city": {
+"mul": [
+"Düsseldorf"
+]
+}
+},
+{
+"place-of-performance": [
+"DEA22",
+"DEU",
+"DEA22",
+"DEA22",
+"DEA22",
+"DEA22",
+"DEA22",
+"DEA22",
+"DEA22",
+"DEA22",
+"DEA22",
+"DEA22",
+"DEA22",
+"DEA22",
+"DEA22",
+"DEA22",
+"DEA22",
+"DEA22",
+"DEA22",
+"DEU",
+"DEU",
+"DEU",
+"DEU",
+"DEU",
+"DEU",
+"DEU",
+"DEU",
+"DEU",
+"DEU",
+"DEU",
+"DEU",
+"DEU",
+"DEU",
+"DEU",
+"DEU",
+"DEU"
+],
+"notice-type": "can-standard",
+"publication-number": "795258-2025",
+"winner-city": [
+"Krefeld",
+"Bonn",
+"Köln",
+"Düsseldorf",
+"Troisdorf"
+],
+"buyer-legal-type": [
+"la"
+],
+"total-value-cur": [
+"EUR"
+],
+"winner-size": [
+"small",
+"micro",
+"small",
+"medium",
+"micro"
+],
+"received-submissions-type-val": [
+"11",
+"11",
+"0",
+"0",
+"3",
+"0",
+"11",
+"11",
+"0",
+"0",
+"2",
+"0",
+"11",
+"11",
+"0",
+"0",
+"2",
+"0",
+"12",
+"12",
+"0",
+"0",
+"2",
+"0",
+"10",
+"10",
+"0",
+"0",
+"2",
+"0",
+"11",
+"11",
+"0",
+"0",
+"3",
+"0",
+"10",
+"10",
+"0",
+"0",
+"2",
+"0",
+"12",
+"12",
+"0",
+"0",
+"3",
+"0",
+"11",
+"11",
+"0",
+"0",
+"3",
+"0",
+"11",
+"11",
+"0",
+"0",
+"3",
+"0",
+"12",
+"12",
+"0",
+"0",
+"3",
+"0",
+"12",
+"12",
+"0",
+"0",
+"3",
+"0",
+"11",
+"11",
+"0",
+"0",
+"3",
+"0",
+"10",
+"10",
+"0",
+"0",
+"2",
+"0",
+"11",
+"11",
+"0",
+"0",
+"2",
+"0",
+"11",
+"11",
+"0",
+"0",
+"2",
+"0",
+"11",
+"11",
+"0",
+"0",
+"2",
+"0"
+],
+"procedure-type": "open",
+"publication-date": "2025-12-01+01:00",
+"buyer-name": {
+"deu": [
+"Bundesstadt Bonn - Referat Vergabedienste"
+]
+},
+"received-submissions-type-code": [
+"tenders",
+"t-esubm",
+"t-oth-eea",
+"t-no-eea",
+"t-verif-inad",
+"t-verif-inad-low",
+"tenders",
+"t-esubm",
+"t-oth-eea",
+"t-no-eea",
+"t-verif-inad",
+"t-verif-inad-low",
+"tenders",
+"t-esubm",
+"t-oth-eea",
+"t-no-eea",
+"t-verif-inad",
+"t-verif-inad-low",
+"tenders",
+"t-esubm",
+"t-oth-eea",
+"t-no-eea",
+"t-verif-inad",
+"t-verif-inad-low",
+"tenders",
+"t-esubm",
+"t-oth-eea",
+"t-no-eea",
+"t-verif-inad",
+"t-verif-inad-low",
+"tenders",
+"t-esubm",
+"t-oth-eea",
+"t-no-eea",
+"t-verif-inad",
+"t-verif-inad-low",
+"tenders",
+"t-esubm",
+"t-oth-eea",
+"t-no-eea",
+"t-verif-inad",
+"t-verif-inad-low",
+"tenders",
+"t-esubm",
+"t-oth-eea",
+"t-no-eea",
+"t-verif-inad",
+"t-verif-inad-low",
+"tenders",
+"t-esubm",
+"t-oth-eea",
+"t-no-eea",
+"t-verif-inad",
+"t-verif-inad-low",
+"tenders",
+"t-esubm",
+"t-oth-eea",
+"t-no-eea",
+"t-verif-inad",
+"t-verif-inad-low",
+"tenders",
+"t-esubm",
+"t-oth-eea",
+"t-no-eea",
+"t-verif-inad",
+"t-verif-inad-low",
+"tenders",
+"t-esubm",
+"t-oth-eea",
+"t-no-eea",
+"t-verif-inad",
+"t-verif-inad-low",
+"tenders",
+"t-esubm",
+"t-oth-eea",
+"t-no-eea",
+"t-verif-inad",
+"t-verif-inad-low",
+"tenders",
+"t-esubm",
+"t-oth-eea",
+"t-no-eea",
+"t-verif-inad",
+"t-verif-inad-low",
+"tenders",
+"t-esubm",
+"t-oth-eea",
+"t-no-eea",
+"t-verif-inad",
+"t-verif-inad-low",
+"tenders",
+"t-esubm",
+"t-oth-eea",
+"t-no-eea",
+"t-verif-inad",
+"t-verif-inad-low",
+"tenders",
+"t-esubm",
+"t-oth-eea",
+"t-no-eea",
+"t-verif-inad",
+"t-verif-inad-low"
+],
+"winner-name": {
+"deu": [
+"Blitz Clean Gebäudereinigung e. K.",
+"Blitz Clean Gebäudereinigung e. K.",
+"Blitz Clean Gebäudereinigung e. K.",
+"Blitz Clean Gebäudereinigung e. K.",
+"M & N Gebäudereinigung Sinani",
+"M & N Gebäudereinigung Sinani",
+"M & N Gebäudereinigung Sinani",
+"M & N Gebäudereinigung Sinani",
+"M & N Gebäudereinigung Sinani",
+"M & N Gebäudereinigung Sinani",
+"M & N Gebäudereinigung Sinani",
+"M & N Gebäudereinigung Sinani",
+"Blitz Clean Gebäudereinigung e. K.",
+"Blitz Clean Gebäudereinigung e. K.",
+"Blitz Clean Gebäudereinigung e. K.",
+"Blitz Clean Gebäudereinigung e. K.",
+"MK-Cleaningsolution GmbH",
+"MK-Cleaningsolution GmbH",
+"MK-Cleaningsolution GmbH",
+"MK-Cleaningsolution GmbH",
+"MK-Cleaningsolution GmbH",
+"MK-Cleaningsolution GmbH",
+"MK-Cleaningsolution GmbH",
+"MK-Cleaningsolution GmbH",
+"MK-Cleaningsolution GmbH",
+"MK-Cleaningsolution GmbH",
+"MK-Cleaningsolution GmbH",
+"MK-Cleaningsolution GmbH",
+"M & N Gebäudereinigung Sinani",
+"M & N Gebäudereinigung Sinani",
+"M & N Gebäudereinigung Sinani",
+"M & N Gebäudereinigung Sinani",
+"MK-Cleaningsolution GmbH",
+"MK-Cleaningsolution GmbH",
+"MK-Cleaningsolution GmbH",
+"MK-Cleaningsolution GmbH",
+"Blitz Clean Gebäudereinigung e. K.",
+"Blitz Clean Gebäudereinigung e. K.",
+"Blitz Clean Gebäudereinigung e. K.",
+"Blitz Clean Gebäudereinigung e. K.",
+"PUROFINO UG (haftungsbeschränkt)",
+"Blitz Clean Gebäudereinigung e. K.",
+"Blitz Clean Gebäudereinigung e. K.",
+"Blitz Clean Gebäudereinigung e. K.",
+"Blitz Clean Gebäudereinigung e. K.",
+"M & N Gebäudereinigung Sinani",
+"M & N Gebäudereinigung Sinani",
+"M & N Gebäudereinigung Sinani",
+"M & N Gebäudereinigung Sinani",
+"Stölting GmbH, Reinigung & Service",
+"Stölting GmbH, Reinigung & Service",
+"Stölting GmbH, Reinigung & Service",
+"Stölting GmbH, Reinigung & Service",
+"Stölting GmbH, Reinigung & Service",
+"Stölting GmbH, Reinigung & Service",
+"Stölting GmbH, Reinigung & Service",
+"Stölting GmbH, Reinigung & Service",
+"Stölting GmbH, Reinigung & Service",
+"Stölting GmbH, Reinigung & Service",
+"Stölting GmbH, Reinigung & Service",
+"Stölting GmbH, Reinigung & Service",
+"Stölting GmbH, Reinigung & Service",
+"Stölting GmbH, Reinigung & Service",
+"Stölting GmbH, Reinigung & Service",
+"Stölting GmbH, Reinigung & Service"
+]
+},
+"buyer-city": {
+"mul": [
+"Bonn"
+]
+}
+},
+{
+"place-of-performance": [
+"DEA51",
+"DEA51",
+"DEA51",
+"DEU",
+"DEU",
+"DEU",
+"DEA51",
+"DEA51",
+"DEA51",
+"DEU",
+"DEU",
+"DEU"
+],
+"notice-type": "can-standard",
+"publication-number": "798138-2025",
+"winner-city": [
+"Castrop-Rauxel",
+"Bochum"
+],
+"buyer-legal-type": [
+"la"
+],
+"total-value-cur": [
+"EUR"
+],
+"winner-size": [
+"medium",
+"medium"
+],
+"received-submissions-type-val": [
+"8",
+"8",
+"7",
+"2",
+"4",
+"1",
+"0",
+"0",
+"4",
+"0",
+"8",
+"8",
+"7",
+"2",
+"4",
+"1",
+"0",
+"0",
+"5",
+"0",
+"8",
+"8",
+"7",
+"2",
+"4",
+"1",
+"0",
+"0",
+"5",
+"1"
+],
+"procedure-type": "open",
+"publication-date": "2025-12-02+01:00",
+"buyer-name": {
+"deu": [
+"Stadt Bochum, Referat Zentraler Einkauf"
+]
+},
+"received-submissions-type-code": [
+"tenders",
+"t-esubm",
+"t-sme",
+"t-med",
+"t-small",
+"t-micro",
+"t-oth-eea",
+"t-no-eea",
+"t-verif-inad",
+"t-verif-inad-low",
+"tenders",
+"t-esubm",
+"t-sme",
+"t-med",
+"t-small",
+"t-micro",
+"t-oth-eea",
+"t-no-eea",
+"t-verif-inad",
+"t-verif-inad-low",
+"tenders",
+"t-esubm",
+"t-sme",
+"t-med",
+"t-small",
+"t-micro",
+"t-oth-eea",
+"t-no-eea",
+"t-verif-inad",
+"t-verif-inad-low"
+],
+"winner-name": {
+"deu": [
+"Elzet Dienstleistungs GmbH",
+"Putzteufel GmbH & Co.KG",
+"Putzteufel GmbH & Co.KG",
+"Putzteufel GmbH & Co.KG",
+"Putzteufel GmbH & Co.KG"
+]
+},
+"buyer-city": {
+"mul": [
+"Bochum"
+]
+}
+},
+{
+"place-of-performance": [
+"DEA22",
+"DEU",
+"DEA22",
+"DEA22",
+"DEA22",
+"DEA22",
+"DEA22",
+"DEA22",
+"DEA22",
+"DEU",
+"DEU",
+"DEU",
+"DEU",
+"DEU",
+"DEU",
+"DEU"
+],
+"notice-type": "can-standard",
+"publication-number": "804794-2025",
+"winner-city": [
+"Bonn"
+],
+"buyer-legal-type": [
+"body-pl-cga"
+],
+"total-value-cur": [
+"EUR"
+],
+"winner-size": [
+"large"
+],
+"total-value": 5531365.47,
+"received-submissions-type-val": [
+"20",
+"20",
+"21",
+"8",
+"7",
+"8",
+"8"
+],
+"procedure-type": "open",
+"publication-date": "2025-12-04+01:00",
+"buyer-name": {
+"deu": [
+"CLEAN Excellence GmbH"
+]
+},
+"received-submissions-type-code": [
+"t-esubm",
+"t-esubm",
+"t-esubm",
+"t-esubm",
+"t-esubm",
+"t-esubm",
+"t-esubm"
+],
+"winner-name": {
+"deu": [
+"Bundesanstalt für Immobilienaufgaben",
+"Bundesanstalt für Immobilienaufgaben",
+"Bundesanstalt für Immobilienaufgaben",
+"Bundesanstalt für Immobilienaufgaben",
+"Bundesanstalt für Immobilienaufgaben",
+"Bundesanstalt für Immobilienaufgaben",
+"Bundesanstalt für Immobilienaufgaben"
+]
+},
+"buyer-city": {
+"mul": [
+"Bonn"
+]
+}
+},
+{
+"place-of-performance": [
+"DEA2D",
+"DEU",
+"DEA2D",
+"DEU"
+],
+"notice-type": "can-standard",
+"publication-number": "809560-2025",
+"buyer-legal-type": [
+"pub-undert-ra"
+],
+"total-value-cur": [
+"EUR"
+],
+"publication-date": "2025-12-05+01:00",
+"buyer-name": {
+"deu": [
+"Aachener Parkhaus GmbH, vertreten durch die E.V.A. Energieversorgungs- und Verkehrsgesellschaft mbH Aachen"
+]
+},
+"winner-size": [
+"medium"
+],
+"total-value": 180010.5,
+"received-submissions-type-val": [
+"-1",
+"-1",
+"-1"
+],
+"buyer-city": {
+"mul": [
+"Aachen"
+]
+}
+},
+{
+"place-of-performance": [
+"DEA52",
+"DEA52",
+"DEA52",
+"DEA52",
+"DEA52",
+"DEA52",
+"DEU",
+"DEU",
+"DEU",
+"DEU",
+"DEU",
+"DEU",
+"DEA52",
+"DEA52",
+"DEA52",
+"DEA52",
+"DEA52",
+"DEA52",
+"DEU",
+"DEU",
+"DEU",
+"DEU",
+"DEU",
+"DEU"
+],
+"notice-type": "can-standard",
+"publication-number": "829295-2025",
+"winner-city": [
+"Frankfurt am Main"
+],
+"buyer-legal-type": [
+"grp-p-aut"
+],
+"total-value-cur": [
+"EUR"
+],
+"winner-size": [
+"medium"
+],
+"total-value": 425615.68,
+"received-submissions-type-val": [
+"8",
+"8",
+"0",
+"0",
+"2",
+"0"
+],
+"procedure-type": "open",
+"publication-date": "2025-12-15+01:00",
+"buyer-name": {
+"deu": [
+"Jobcenter Dortmund"
+]
+},
+"received-submissions-type-code": [
+"tenders",
+"t-esubm",
+"t-oth-eea",
+"t-no-eea",
+"t-verif-inad",
+"t-verif-inad-low"
+],
+"winner-name": {
+"deu": [
+"Kurt-Service Gebäudedienst GmbH"
+]
+},
+"buyer-city": {
+"mul": [
+"Dortmund"
+]
+}
+},
+{
+"place-of-performance": [
+"DEA2A",
+"DEU",
+"DEA2A",
+"DEA2A",
+"DEA2A",
+"DEA2A",
+"DEA2A",
+"DEA2A",
+"DEA2A",
+"DEA2A",
+"DEA2A",
+"DEA2A",
+"DEA2A",
+"DEA2A",
+"DEA2A",
+"DEU",
+"DEU",
+"DEU",
+"DEU",
+"DEU",
+"DEU",
+"DEU",
+"DEU",
+"DEU",
+"DEU",
+"DEU",
+"DEU",
+"DEU"
+],
+"notice-type": "can-standard",
+"publication-number": "832634-2025",
+"winner-city": [
+"Reichshof",
+"Krefeld",
+"Köln",
+"Bergisch Gladbach"
+],
+"buyer-legal-type": [
+"la"
+],
+"total-value-cur": [
+"EUR"
+],
+"winner-size": [
+"large",
+"small",
+"large",
+"medium"
+],
+"total-value": 3619162.45,
+"received-submissions-type-val": [
+"9",
+"9",
+"0",
+"0",
+"2",
+"9",
+"9",
+"0",
+"0",
+"2",
+"10",
+"10",
+"0",
+"0",
+"2",
+"10",
+"10",
+"0",
+"0",
+"2",
+"10",
+"10",
+"0",
+"0",
+"2",
+"8",
+"8",
+"0",
+"0",
+"1",
+"7",
+"7",
+"0",
+"0",
+"2",
+"8",
+"8",
+"0",
+"0",
+"2",
+"6",
+"6",
+"0",
+"0",
+"1",
+"11",
+"11",
+"0",
+"0",
+"2",
+"10",
+"10",
+"0",
+"0",
+"2",
+"8",
+"8",
+"0",
+"0",
+"2",
+"9",
+"9",
+"0",
+"0",
+"2"
+],
+"procedure-type": "open",
+"publication-date": "2025-12-15+01:00",
+"buyer-name": {
+"deu": [
+"Stadt Gummersbach"
+]
+},
+"received-submissions-type-code": [
+"tenders",
+"t-esubm",
+"t-oth-eea",
+"t-no-eea",
+"t-verif-inad",
+"tenders",
+"t-esubm",
+"t-oth-eea",
+"t-no-eea",
+"t-verif-inad",
+"tenders",
+"t-esubm",
+"t-oth-eea",
+"t-no-eea",
+"t-verif-inad",
+"tenders",
+"t-esubm",
+"t-oth-eea",
+"t-no-eea",
+"t-verif-inad",
+"tenders",
+"t-esubm",
+"t-oth-eea",
+"t-no-eea",
+"t-verif-inad",
+"tenders",
+"t-esubm",
+"t-oth-eea",
+"t-no-eea",
+"t-verif-inad",
+"tenders",
+"t-esubm",
+"t-oth-eea",
+"t-no-eea",
+"t-verif-inad",
+"tenders",
+"t-esubm",
+"t-oth-eea",
+"t-no-eea",
+"t-verif-inad",
+"tenders",
+"t-esubm",
+"t-oth-eea",
+"t-no-eea",
+"t-verif-inad",
+"tenders",
+"t-esubm",
+"t-oth-eea",
+"t-no-eea",
+"t-verif-inad",
+"tenders",
+"t-esubm",
+"t-oth-eea",
+"t-no-eea",
+"t-verif-inad",
+"tenders",
+"t-esubm",
+"t-oth-eea",
+"t-no-eea",
+"t-verif-inad",
+"tenders",
+"t-esubm",
+"t-oth-eea",
+"t-no-eea",
+"t-verif-inad"
+],
+"winner-name": {
+"deu": [
+"stewe Dienstleistungen GmbH",
+"PUROFINO UG (haftungsbeschränkt)",
+"OPTI Dienstleistungs GmbH",
+"TH. Kramer Gebäudereinigung GmbH",
+"TH. Kramer Gebäudereinigung GmbH",
+"TH. Kramer Gebäudereinigung GmbH",
+"stewe Dienstleistungen GmbH",
+"OPTI Dienstleistungs GmbH",
+"stewe Dienstleistungen GmbH",
+"OPTI Dienstleistungs GmbH",
+"OPTI Dienstleistungs GmbH",
+"stewe Dienstleistungen GmbH",
+"TH. Kramer Gebäudereinigung GmbH"
+]
+},
+"buyer-city": {
+"mul": [
+"Gummersbach"
+]
+}
+},
+{
+"place-of-performance": [
+"DEA1F",
+"DEU",
+"DEA1F",
+"DEA1F",
+"DEA1F",
+"DEA1F",
+"DEA1F",
+"DEA1F",
+"DEU",
+"DEU",
+"DEU",
+"DEU",
+"DEU",
+"DEU"
+],
+"notice-type": "can-standard",
+"publication-number": "833245-2025",
+"winner-city": [
+"Oberhausen",
+"Lüdenscheid"
+],
+"buyer-legal-type": [
+"la"
+],
+"total-value-cur": [
+"EUR"
+],
+"winner-size": [
+"micro",
+"medium"
+],
+"received-submissions-type-val": [
+"8",
+"8",
+"5",
+"8",
+"8",
+"5",
+"7",
+"7",
+"5"
+],
+"procedure-type": "open",
+"publication-date": "2025-12-16+01:00",
+"buyer-name": {
+"deu": [
+"Stadt Moers"
+]
+},
+"received-submissions-type-code": [
+"tenders",
+"t-esubm",
+"t-sme",
+"tenders",
+"t-esubm",
+"t-sme",
+"tenders",
+"t-esubm",
+"t-sme"
+],
+"winner-name": {
+"deu": [
+"Eichenauer Gebäudeservice GmbH & Co. KG",
+"Eichenauer Gebäudeservice GmbH & Co. KG",
+"Eco Reinigung"
+]
+},
+"buyer-city": {
+"mul": [
+"Moers"
+]
+}
+},
+{
+"place-of-performance": [
+"DEA2D",
+"DEU",
+"DEA2D",
+"DEA2D",
+"DEA2D",
+"DEA2D",
+"DEU",
+"DEU",
+"DEU",
+"DEU"
+],
+"notice-type": "can-standard",
+"publication-number": "837434-2025",
+"winner-city": [
+"Würselen",
+"Greven",
+"Würselen",
+"Münster"
+],
+"buyer-legal-type": [
+"la"
+],
+"total-value-cur": [
+"EUR"
+],
+"winner-size": [
+"medium",
+"medium",
+"large",
+"medium"
+],
+"received-submissions-type-val": [
+"3",
+"3",
+"2",
+"2",
+"0",
+"0",
+"0",
+"0",
+"0",
+"0",
+"16",
+"16",
+"16",
+"16",
+"0",
+"0",
+"0",
+"0",
+"0",
+"0",
+"3",
+"3",
+"3",
+"3",
+"0",
+"0",
+"0",
+"0",
+"0",
+"0",
+"2",
+"2",
+"2",
+"2",
+"0",
+"0",
+"0",
+"0",
+"0",
+"0"
+],
+"procedure-type": "open",
+"publication-date": "2025-12-17+01:00",
+"buyer-name": {
+"deu": [
+"Kupferstadt Stolberg (Rhld.)"
+]
+},
+"received-submissions-type-code": [
+"tenders",
+"t-esubm",
+"t-sme",
+"t-med",
+"t-small",
+"t-micro",
+"t-oth-eea",
+"t-no-eea",
+"t-no-verif",
+"t-verif-inad-low",
+"tenders",
+"t-esubm",
+"t-sme",
+"t-med",
+"t-small",
+"t-micro",
+"t-oth-eea",
+"t-no-eea",
+"t-no-verif",
+"t-verif-inad-low",
+"tenders",
+"t-esubm",
+"t-sme",
+"t-med",
+"t-small",
+"t-micro",
+"t-oth-eea",
+"t-no-eea",
+"t-no-verif",
+"t-verif-inad-low",
+"tenders",
+"t-esubm",
+"t-sme",
+"t-med",
+"t-small",
+"t-micro",
+"t-oth-eea",
+"t-no-eea",
+"t-no-verif",
+"t-verif-inad-low"
+],
+"winner-name": {
+"deu": [
+"DRK - Kreisverband Städteregion Aachen e.V.",
+"LiL Service GmbH",
+"Lavette GmbH",
+"MIN Food GmbH"
+]
+},
+"buyer-city": {
+"mul": [
+"Stolberg"
+]
+}
+},
+{
+"place-of-performance": [
+"DEA35",
+"DEU",
+"DEA35",
+"DEU"
+],
+"notice-type": "can-standard",
+"publication-number": "837447-2025",
+"winner-city": [
+"Köln"
+],
+"buyer-legal-type": [
+"pub-undert"
+],
+"total-value-cur": [
+"EUR"
+],
+"winner-size": [
+"medium"
+],
+"total-value": 475508,
+"received-submissions-type-val": [
+"7",
+"7",
+"0",
+"0"
+],
+"procedure-type": "open",
+"publication-date": "2025-12-17+01:00",
+"buyer-name": {
+"deu": [
+"Bau- und Liegenschaftsbetrieb NRW Zentrale"
+]
+},
+"received-submissions-type-code": [
+"tenders",
+"t-esubm",
+"t-oth-eea",
+"t-no-eea"
+],
+"winner-name": {
+"deu": [
+"OPTI Dienstleistungs GmbH"
+]
+},
+"buyer-city": {
+"mul": [
+"Düsseldorf"
+]
+}
+},
+{
+"place-of-performance": [
+"DEA35",
+"DEU",
+"DEA35",
+"DEU"
+],
+"notice-type": "can-standard",
+"publication-number": "841428-2025",
+"winner-city": [
+"Bochum"
+],
+"buyer-legal-type": [
+"body-pl-la"
+],
+"total-value-cur": [
+"EUR"
+],
+"winner-size": [
+"medium"
+],
+"total-value": 852614,
+"received-submissions-type-val": [
+"14",
+"14"
+],
+"procedure-type": "open",
+"publication-date": "2025-12-18+01:00",
+"buyer-name": {
+"deu": [
+"Kreis Coesfeld"
+]
+},
+"received-submissions-type-code": [
+"tenders",
+"t-esubm"
+],
+"winner-name": {
+"deu": [
+"Elzet Facility Management GmbH"
+]
+},
+"buyer-city": {
+"mul": [
+"Coesfeld"
+]
+}
+},
+{
+"place-of-performance": [
+"DEA5C",
+"DEU",
+"DEA5C",
+"DEA5C",
+"DEA5C",
+"DEA5C",
+"DEU",
+"DEU",
+"DEU",
+"DEU"
+],
+"notice-type": "can-standard",
+"publication-number": "841964-2025",
+"winner-city": [
+"Bieleifeld",
+"Dortmund"
+],
+"buyer-legal-type": [
+"body-pl-la"
+],
+"total-value-cur": [
+"EUR"
+],
+"winner-size": [
+"large",
+"large"
+],
+"total-value": 1,
+"received-submissions-type-val": [
+"11",
+"11",
+"10",
+"1"
+],
+"procedure-type": "open",
+"publication-date": "2025-12-18+01:00",
+"buyer-name": {
+"deu": [
+"KBW - Kommunalbetrieb Werne"
+]
+},
+"received-submissions-type-code": [
+"t-esubm",
+"t-esubm",
+"t-esubm",
+"t-esubm"
+],
+"winner-name": {
+"deu": [
+"Erich Niediek GmbH & Co. KG",
+"Erich Niediek GmbH & Co. KG",
+"Erich Niediek GmbH & Co. KG",
+"Erich Niediek GmbH & Co. KG",
+"Erich Niediek GmbH & Co. KG",
+"Erich Niediek GmbH & Co. KG",
+"Erich Niediek GmbH & Co. KG",
+"Erich Niediek GmbH & Co. KG",
+"Erich Niediek GmbH & Co. KG",
+"Piepenbrock Dienstleistungen GmbH + Co. KG"
+]
+},
+"buyer-city": {
+"mul": [
+"Werne"
+]
+}
+},
+{
+"place-of-performance": [
+"DEA2D",
+"DEU",
+"DEA2D",
+"DEU"
+],
+"notice-type": "can-standard",
+"procedure-type": "open",
+"publication-number": "843151-2025",
+"buyer-legal-type": [
+"la"
+],
+"publication-date": "2025-12-18+01:00",
+"buyer-name": {
+"deu": [
+"Stadt Aachen - Zentraler Vergabeservice für die Gemeinde Roetgen"
+]
+},
+"received-submissions-type-code": [
+"tenders",
+"t-esubm",
+"t-verif-inad"
+],
+"received-submissions-type-val": [
+"4",
+"4",
+"4"
+],
+"buyer-city": {
+"mul": [
+"Aachen"
+]
+}
+},
+{
+"place-of-performance": [
+"DEA14",
+"DEU",
+"DEA1E",
+"DEA1E",
+"DEA1B",
+"DEA1B",
+"DEA1B",
+"DEA14",
+"DEA14",
+"DEA14",
+"DEA14",
+"DEA1E",
+"DEA1E",
+"DEA1E",
+"DEA1B",
+"DEA1B",
+"DEA1B",
+"DEA14",
+"DEA14",
+"DEA14",
+"DEA14",
+"DEA1E",
+"DEU",
+"DEU",
+"DEU",
+"DEU",
+"DEU",
+"DEU",
+"DEU",
+"DEU",
+"DEU",
+"DEU",
+"DEU",
+"DEU",
+"DEU",
+"DEU",
+"DEU",
+"DEU",
+"DEU",
+"DEU",
+"DEU",
+"DEU"
+],
+"notice-type": "can-standard",
+"publication-number": "844214-2025",
+"winner-city": [
+"Geldern",
+"Prina",
+"Leichlingen"
+],
+"buyer-legal-type": [
+"body-pl-cga"
+],
+"total-value-cur": [
+"EUR"
+],
+"winner-size": [
+"large",
+"micro",
+"large"
+],
+"total-value": 1194606.3,
+"received-submissions-type-val": [
+"5",
+"3",
+"11",
+"6",
+"2",
+"2"
+],
+"procedure-type": "open",
+"publication-date": "2025-12-18+01:00",
+"buyer-name": {
+"deu": [
+"Bundesanstalt für Immobilienaufgaben"
+]
+},
+"received-submissions-type-code": [
+"t-esubm",
+"t-esubm",
+"t-esubm",
+"t-esubm",
+"t-esubm",
+"t-esubm"
+],
+"winner-name": {
+"deu": [
+"Winkels Servicegesellschaft mbH",
+"ReKon Reinigungskonzepte Deutschland GmbH",
+"Winkels Servicegesellschaft mbH",
+"Winkels Servicegesellschaft mbH",
+"SB Professional Cleaning GmbH",
+"SB Professional Cleaning GmbH"
+]
+},
+"buyer-city": {
+"mul": [
+"Bonn"
+]
+}
+},
+{
+"place-of-performance": [
+"DEA33",
+"DEU",
+"DEA33",
+"DEU"
+],
+"notice-type": "can-standard",
+"publication-number": "845259-2025",
+"winner-city": [
+"Münster"
+],
+"buyer-legal-type": [
+"pub-undert-ra"
+],
+"total-value-cur": [
+"EUR"
+],
+"winner-size": [
+"small"
+],
+"total-value": 22716.04,
+"received-submissions-type-val": [
+"14",
+"14",
+"0",
+"0",
+"0",
+"0"
+],
+"procedure-type": "open",
+"publication-date": "2025-12-18+01:00",
+"buyer-name": {
+"deu": [
+"Bauwerke Münster GmbH"
+]
+},
+"received-submissions-type-code": [
+"tenders",
+"t-esubm",
+"t-oth-eea",
+"t-no-eea",
+"t-verif-inad",
+"t-verif-inad-low"
+],
+"winner-name": {
+"deu": [
+"Lavette GmbH"
+]
+},
+"buyer-city": {
+"mul": [
+"Münster"
+]
+}
+},
+{
+"place-of-performance": [
+"DEA2D",
+"DEU",
+"DEA2D",
+"DEA26",
+"DE300",
+"DEU",
+"DEU",
+"DEU"
+],
+"notice-type": "can-standard",
+"publication-number": "848999-2025",
+"winner-city": [
+"Wuppertal"
+],
+"buyer-legal-type": [
+"body-pl-cga"
+],
+"total-value-cur": [
+"EUR"
+],
+"winner-size": [
+"large"
+],
+"total-value": 1,
+"received-submissions-type-val": [
+"4",
+"2",
+"2"
+],
+"procedure-type": "open",
+"publication-date": "2025-12-19+01:00",
+"buyer-name": {
+"deu": [
+"BundesInnungskrankenkasse Gesundheit, kurz BIG direkt gesund"
+]
+},
+"received-submissions-type-code": [
+"tenders",
+"tenders",
+"tenders"
+],
+"winner-name": {
+"deu": [
+"Vebego Facility Services B.V. & Co. KG",
+"Vebego Facility Services B.V. & Co. KG",
+"Vebego Facility Services B.V. & Co. KG"
+]
+},
+"buyer-city": {
+"mul": [
+"Berlin"
+]
+}
+},
+{
+"place-of-performance": [
+"DEA52",
+"DEU",
+"DEA52",
+"DEU"
+],
+"notice-type": "can-standard",
+"publication-number": "850776-2025",
+"winner-city": [
+"Essen"
+],
+"buyer-legal-type": [
+"body-pl-cga"
+],
+"total-value-cur": [
+"EUR"
+],
+"winner-size": [
+"medium"
+],
+"total-value": 1,
+"received-submissions-type-val": [
+"14"
+],
+"procedure-type": "open",
+"publication-date": "2025-12-22+01:00",
+"buyer-name": {
+"deu": [
+"BundesInnungskrankenkasse Gesundheit, kurz BIG direkt gesund"
+]
+},
+"received-submissions-type-code": [
+"tenders"
+],
+"winner-name": {
+"deu": [
+"Peter Schneider Gebäudedienstleistungen GmbH & Co. KG"
+]
+},
+"buyer-city": {
+"mul": [
+"Berlin"
+]
+}
+},
+{
+"place-of-performance": [
+"DEA36",
+"DEA36",
+"DEA36",
+"DEA36",
+"DEA36",
+"DEA36",
+"DEU",
+"DEU",
+"DEU",
+"DEU",
+"DEU",
+"DEU",
+"DEA36",
+"DEA36",
+"DEA36",
+"DEA36",
+"DEA36",
+"DEA36",
+"DEU",
+"DEU",
+"DEU",
+"DEU",
+"DEU",
+"DEU"
+],
+"notice-type": "can-standard",
+"publication-number": "851303-2025",
+"winner-city": [
+"Hamm"
+],
+"buyer-legal-type": [
+"la"
+],
+"total-value-cur": [
+"EUR"
+],
+"winner-size": [
+"small"
+],
+"total-value": 0.01,
+"received-submissions-type-val": [
+"1",
+"1",
+"0",
+"0",
+"0",
+"0"
+],
+"procedure-type": "open",
+"publication-date": "2025-12-22+01:00",
+"buyer-name": {
+"deu": [
+"Stadt Marl - Amt für Klimaschutz und Nachhaltigkeit - Zentrale Vergabestelle"
+]
+},
+"received-submissions-type-code": [
+"tenders",
+"t-esubm",
+"t-oth-eea",
+"t-no-eea",
+"t-verif-inad",
+"t-verif-inad-low"
+],
+"winner-name": {
+"deu": [
+"Arbeitsschutz Rhein-Ruhr Service GmbH"
+]
+},
+"buyer-city": {
+"mul": [
+"Marl"
+]
+}
+},
+{
+"place-of-performance": [
+"DEA46",
+"DEU",
+"DEA46",
+"DEU"
+],
+"notice-type": "can-standard",
+"publication-number": "855733-2025",
+"winner-city": [
+"Enger"
+],
+"buyer-legal-type": [
+"body-pl-ra"
+],
+"total-value-cur": [
+"EUR"
+],
+"winner-size": [
+"medium"
+],
+"total-value": 730710,
+"received-submissions-type-val": [
+"11",
+"11",
+"0",
+"8",
+"5",
+"3",
+"0",
+"0",
+"0",
+"1",
+"0",
+"0"
+],
+"procedure-type": "open",
+"publication-date": "2025-12-23+01:00",
+"buyer-name": {
+"deu": [
+"Hochschule Bielefeld"
+]
+},
+"received-submissions-type-code": [
+"tenders",
+"t-esubm",
+"part-req",
+"t-sme",
+"t-med",
+"t-small",
+"t-micro",
+"t-oth-eea",
+"t-no-eea",
+"t-verif-inad",
+"t-no-verif",
+"t-verif-inad-low"
+],
+"winner-name": {
+"deu": [
+"RWS GmbH"
+]
+},
+"buyer-city": {
+"mul": [
+"Bielefeld"
+]
+}
+},
+{
+"place-of-performance": [
+"DEA11",
+"DEU"
+],
+"notice-type": "can-standard",
+"publication-number": "858204-2025",
+"winner-city": [
+"Mönchengladbach"
+],
+"buyer-legal-type": [
+"body-pl-la"
+],
+"total-value-cur": [
+"EUR"
+],
+"winner-size": [
+"medium"
+],
+"received-submissions-type-val": [
+"5",
+"5",
+"0"
+],
+"procedure-type": "open",
+"publication-date": "2025-12-23+01:00",
+"buyer-name": {
+"deu": [
+"Bädergesellschaft Düsseldorf mbH"
+]
+},
+"received-submissions-type-code": [
+"tenders",
+"t-esubm",
+"t-sme"
+],
+"winner-name": {
+"deu": [
+"Gebäudereinigung P&M Jansen GmbH"
+]
+},
+"buyer-city": {
+"mul": [
+"Düsseldorf"
+]
+}
+},
+{
+"place-of-performance": [
+"DEA1C",
+"DEU",
+"DEA1C",
+"DEU"
+],
+"notice-type": "can-standard",
+"publication-number": "858869-2025",
+"winner-city": [
+"Troisdorf"
+],
+"buyer-legal-type": [
+"la"
+],
+"total-value-cur": [
+"EUR"
+],
+"winner-size": [
+"small"
+],
+"total-value": 56580,
+"received-submissions-type-val": [
+"4",
+"4",
+"4"
+],
+"procedure-type": "open",
+"publication-date": "2025-12-23+01:00",
+"buyer-name": {
+"deu": [
+"Stadt Ratingen, Der Bürgermeister, Rechtsamt, Zentrale Vergabestelle"
+]
+},
+"received-submissions-type-code": [
+"tenders",
+"t-esubm",
+"t-sme"
+],
+"winner-name": {
+"deu": [
+"Blitz Clean Gebäudereinigung e. K."
+]
+},
+"buyer-city": {
+"mul": [
+"Ratingen"
+]
+}
+},
+{
+"place-of-performance": [
+"DEA23",
+"DEU",
+"DEA23",
+"DEA23",
+"DEA23",
+"DEA23",
+"DEA23",
+"DEA23",
+"DEU",
+"DEU",
+"DEU",
+"DEU",
+"DEU",
+"DEU"
+],
+"notice-type": "can-standard",
+"publication-number": "860721-2025",
+"winner-city": [
+"Köln",
+"Köln",
+"Köln",
+"Köln"
+],
+"buyer-legal-type": [
+"la"
+],
+"total-value-cur": [
+"EUR"
+],
+"winner-size": [
+"small",
+"medium",
+"large",
+"medium"
+],
+"received-submissions-type-val": [
+"10",
+"10",
+"7",
+"9",
+"9",
+"7",
+"8",
+"8",
+"7",
+"10",
+"10",
+"9",
+"10",
+"10",
+"8",
+"8",
+"8",
+"6"
+],
+"procedure-type": "open",
+"publication-date": "2025-12-24+01:00",
+"buyer-name": {
+"deu": [
+"Amt für Recht, Vergabe und Versicherungen"
+]
+},
+"received-submissions-type-code": [
+"tenders",
+"t-esubm",
+"t-sme",
+"tenders",
+"t-esubm",
+"t-sme",
+"tenders",
+"t-esubm",
+"t-sme",
+"tenders",
+"t-esubm",
+"t-sme",
+"tenders",
+"t-esubm",
+"t-sme",
+"tenders",
+"t-esubm",
+"t-sme"
+],
+"winner-name": {
+"deu": [
+"Klinger Gebäudereinigung GmbH & Co. KG",
+"Klinger Gebäudereinigung GmbH & Co. KG",
+"Niederberger Köln GmbH & Co KG",
+"HS-Gebäudereinigung GmbH",
+"HS-Gebäudereinigung GmbH",
+"Manfred Linden Gebäudereinigung GmbH"
+]
+},
+"buyer-city": {
+"mul": [
+"Köln"
+]
+}
+},
+{
+"place-of-performance": [
+"DEA11",
+"DEU"
+],
+"notice-type": "can-standard",
+"publication-number": "860952-2025",
+"winner-city": [
+"Mönchengladbach"
+],
+"buyer-legal-type": [
+"body-pl-la"
+],
+"total-value-cur": [
+"EUR"
+],
+"winner-size": [
+"medium"
+],
+"received-submissions-type-val": [
+"5",
+"5",
+"0"
+],
+"procedure-type": "open",
+"publication-date": "2025-12-24+01:00",
+"buyer-name": {
+"deu": [
+"Bädergesellschaft Düsseldorf mbH"
+]
+},
+"received-submissions-type-code": [
+"tenders",
+"t-esubm",
+"t-sme"
+],
+"winner-name": {
+"deu": [
+"Gebäudereinigung P&M Jansen GmbH"
+]
+},
+"buyer-city": {
+"mul": [
+"Düsseldorf"
+]
+}
+},
+{
+"place-of-performance": [
+"DEA29",
+"DEU",
+"DEA29",
+"DEA29",
+"DEU",
+"DEU"
+],
+"notice-type": "can-standard",
+"publication-number": "1971-2026",
+"winner-city": [
+"Geilenkirchen"
+],
+"buyer-legal-type": [
+"la"
+],
+"total-value-cur": [
+"EUR"
+],
+"winner-size": [
+"medium"
+],
+"total-value": 1,
+"received-submissions-type-val": [
+"5",
+"5"
+],
+"procedure-type": "open",
+"publication-date": "2026-01-05+01:00",
+"buyer-name": {
+"deu": [
+"Stadt Geilenkirchen"
+]
+},
+"received-submissions-type-code": [
+"t-esubm",
+"t-esubm"
+],
+"winner-name": {
+"deu": [
+"Geilenkirchener Gebäudereinigung und Service GmbH",
+"Geilenkirchener Gebäudereinigung und Service GmbH",
+"Geilenkirchener Gebäudereinigung und Service GmbH",
+"Geilenkirchener Gebäudereinigung und Service GmbH"
+]
+},
+"buyer-city": {
+"mul": [
+"Geilenkirchhen"
+]
+}
+},
+{
+"place-of-performance": [
+"DEA35",
+"DEU",
+"DEA35",
+"DEA35",
+"DEA35",
+"DEA35",
+"DEU",
+"DEU",
+"DEU",
+"DEU"
+],
+"notice-type": "can-standard",
+"publication-number": "2138-2026",
+"winner-city": [
+"Ahlen"
+],
+"buyer-legal-type": [
+"la"
+],
+"total-value-cur": [
+"EUR"
+],
+"winner-size": [
+"large"
+],
+"total-value": 1,
+"received-submissions-type-val": [
+"3",
+"3",
+"3",
+"3"
+],
+"procedure-type": "open",
+"publication-date": "2026-01-05+01:00",
+"buyer-name": {
+"deu": [
+"Gemeinde Nottuln"
+]
+},
+"received-submissions-type-code": [
+"t-esubm",
+"t-esubm",
+"t-esubm",
+"t-esubm"
+],
+"winner-name": {
+"deu": [
+"R&W Gebäudereinigung Friedrich Obring GmbH & Co. KG",
+"R&W Gebäudereinigung Friedrich Obring GmbH & Co. KG",
+"R&W Gebäudereinigung Friedrich Obring GmbH & Co. KG",
+"R&W Gebäudereinigung Friedrich Obring GmbH & Co. KG",
+"R&W Gebäudereinigung Friedrich Obring GmbH & Co. KG",
+"R&W Gebäudereinigung Friedrich Obring GmbH & Co. KG",
+"R&W Gebäudereinigung Friedrich Obring GmbH & Co. KG",
+"R&W Gebäudereinigung Friedrich Obring GmbH & Co. KG",
+"R&W Gebäudereinigung Friedrich Obring GmbH & Co. KG",
+"R&W Gebäudereinigung Friedrich Obring GmbH & Co. KG",
+"R&W Gebäudereinigung Friedrich Obring GmbH & Co. KG",
+"R&W Gebäudereinigung Friedrich Obring GmbH & Co. KG",
+"R&W Gebäudereinigung Friedrich Obring GmbH & Co. KG",
+"R&W Gebäudereinigung Friedrich Obring GmbH & Co. KG",
+"R&W Gebäudereinigung Friedrich Obring GmbH & Co. KG",
+"R&W Gebäudereinigung Friedrich Obring GmbH & Co. KG"
+]
+},
+"buyer-city": {
+"mul": [
+"Nottuln"
+]
+}
+},
+{
+"place-of-performance": [
+"DEA1E",
+"DEU",
+"DEA1E",
+"DEU"
+],
+"notice-type": "can-standard",
+"publication-number": "2468-2026",
+"winner-city": [
+"Düren"
+],
+"buyer-legal-type": [
+"la"
+],
+"total-value-cur": [
+"EUR"
+],
+"winner-size": [
+"large"
+],
+"total-value": 1,
+"received-submissions-type-val": [
+"7"
+],
+"procedure-type": "open",
+"publication-date": "2026-01-05+01:00",
+"buyer-name": {
+"deu": [
+"Gemeinde Schwalmtal"
+]
+},
+"received-submissions-type-code": [
+"t-esubm"
+],
+"winner-name": {
+"deu": [
+"gepe Gebäudedienste Peterhoff GmbH"
+]
+},
+"buyer-city": {
+"mul": [
+"Schwalmtal"
+]
+}
+},
+{
+"place-of-performance": [
+"DEA5B",
+"DEU",
+"DEA5B",
+"DEA5B",
+"DEU",
+"DEU"
+],
+"notice-type": "can-standard",
+"publication-number": "2876-2026",
+"winner-city": [
+"Dortmund"
+],
+"buyer-legal-type": [
+"la"
+],
+"total-value-cur": [
+"EUR"
+],
+"winner-size": [
+"large"
+],
+"total-value": 1,
+"received-submissions-type-val": [
+"4",
+"4"
+],
+"procedure-type": "open",
+"publication-date": "2026-01-05+01:00",
+"buyer-name": {
+"deu": [
+"KBS Kommunale Betriebe Soest ebE"
+]
+},
+"received-submissions-type-code": [
+"t-esubm",
+"t-esubm"
+],
+"winner-name": {
+"deu": [
+"Piepenbrock Dienstleistungen GmbH + Co. KG",
+"Piepenbrock Dienstleistungen GmbH + Co. KG",
+"Piepenbrock Dienstleistungen GmbH + Co. KG",
+"Piepenbrock Dienstleistungen GmbH + Co. KG"
+]
+},
+"buyer-city": {
+"mul": [
+"Soest"
+]
+}
+},
+{
+"place-of-performance": [
+"DEA27",
+"DEU",
+"DEA27",
+"DEA27",
+"DEA27",
+"DEA27",
+"DEU",
+"DEU",
+"DEU",
+"DEU"
+],
+"notice-type": "can-standard",
+"publication-number": "5180-2026",
+"winner-city": [
+"Köln",
+"Leichlingen",
+"Frankfurt am Main"
+],
+"buyer-legal-type": [
+"la"
+],
+"total-value-cur": [
+"EUR"
+],
+"winner-size": [
+"large",
+"large",
+"large"
+],
+"total-value": 495607.63,
+"received-submissions-type-val": [
+"27",
+"27",
+"0",
+"0",
+"15",
+"0",
+"28",
+"28",
+"0",
+"0",
+"15",
+"0",
+"29",
+"29",
+"0",
+"0",
+"15",
+"0",
+"30",
+"30",
+"0",
+"0",
+"15",
+"0"
+],
+"procedure-type": "open",
+"publication-date": "2026-01-06+01:00",
+"buyer-name": {
+"deu": [
+"Kolpingstadt Kerpen"
+]
+},
+"received-submissions-type-code": [
+"tenders",
+"t-esubm",
+"t-oth-eea",
+"t-no-eea",
+"t-verif-inad",
+"t-verif-inad-low",
+"tenders",
+"t-esubm",
+"t-oth-eea",
+"t-no-eea",
+"t-verif-inad",
+"t-verif-inad-low",
+"tenders",
+"t-esubm",
+"t-oth-eea",
+"t-no-eea",
+"t-verif-inad",
+"t-verif-inad-low",
+"tenders",
+"t-esubm",
+"t-oth-eea",
+"t-no-eea",
+"t-verif-inad",
+"t-verif-inad-low"
+],
+"winner-name": {
+"deu": [
+"SB Professional Cleaning GmbH",
+"Piepenbrock Dienstleistungen GmbH + Co. KG",
+"Piepenbrock Dienstleistungen GmbH + Co. KG",
+"All Service",
+"Piepenbrock Dienstleistungen GmbH + Co. KG",
+"Piepenbrock Dienstleistungen GmbH + Co. KG"
+]
+},
+"buyer-city": {
+"mul": [
+"Kerpen"
+]
+}
+},
+{
+"place-of-performance": [
+"DEA53",
+"DEU"
+],
+"notice-type": "can-standard",
+"publication-number": "9513-2026",
+"winner-city": [
+"Hagen"
+],
+"buyer-legal-type": [
+"la"
+],
+"total-value-cur": [
+"EUR"
+],
+"winner-size": [
+"medium"
+],
+"received-submissions-type-val": [
+"1",
+"1",
+"1"
+],
+"procedure-type": "open",
+"publication-date": "2026-01-08+01:00",
+"buyer-name": {
+"deu": [
+"Landschaftsverband Westfalen-Lippe"
+]
+},
+"received-submissions-type-code": [
+"tenders",
+"t-esubm",
+"t-sme"
+],
+"winner-name": {
+"deu": [
+"BRENNECKE - Cleaning GmbH & Co. KG"
+]
+},
+"buyer-city": {
+"mul": [
+"Münster"
+]
+}
+},
+{
+"place-of-performance": [
+"DEA33",
+"DEU",
+"DEA33",
+"DEU"
+],
+"notice-type": "can-standard",
+"publication-number": "18730-2026",
+"winner-city": [
+"Bardowick"
+],
+"buyer-legal-type": [
+"body-pl-cga"
+],
+"total-value-cur": [
+"EUR"
+],
+"winner-size": [
+"small"
+],
+"total-value": 176691.72,
+"received-submissions-type-val": [
+"7",
+"7"
+],
+"procedure-type": "open",
+"publication-date": "2026-01-12+01:00",
+"buyer-name": {
+"deu": [
+"Bundesanstalt für Immobilienaufgaben"
+]
+},
+"received-submissions-type-code": [
+"t-esubm",
+"t-sme"
+],
+"winner-name": {
+"deu": [
+"MS Dach GmbH"
+]
+},
+"buyer-city": {
+"mul": [
+"Bonn"
+]
+}
+},
+{
+"place-of-performance": [
+"DEA43",
+"DEU",
+"DEA43",
+"DEU"
+],
+"notice-type": "can-standard",
+"publication-number": "21564-2026",
+"winner-city": [
+"Lübbecke"
+],
+"buyer-legal-type": [
+"la"
+],
+"total-value-cur": [
+"EUR"
+],
+"winner-size": [
+"medium"
+],
+"total-value": 0,
+"received-submissions-type-val": [
+"10",
+"10",
+"0",
+"0",
+"10"
+],
+"procedure-type": "open",
+"publication-date": "2026-01-13+01:00",
+"buyer-name": {
+"deu": [
+"Kreis Herford im Auftrag der Stadt Vlotho"
+]
+},
+"received-submissions-type-code": [
+"tenders",
+"t-sme",
+"t-oth-eea",
+"t-no-eea",
+"t-esubm"
+],
+"winner-name": {
+"deu": [
+"Thiemann Gebäudereinigung GmbH & Co. KG"
+]
+},
+"buyer-city": {
+"mul": [
+"Herford"
+]
+}
+},
+{
+"place-of-performance": [
+"DEA1D",
+"DEU",
+"DEA1D",
+"DEA1D",
+"DEA1D",
+"DEU",
+"DEU",
+"DEU"
+],
+"notice-type": "can-standard",
+"publication-number": "43952-2026",
+"winner-city": [
+"Leichlingen",
+"Köln"
+],
+"buyer-legal-type": [
+"la"
+],
+"total-value-cur": [
+"EUR"
+],
+"winner-size": [
+"medium",
+"medium"
+],
+"total-value": 482648,
+"received-submissions-type-val": [
+"9",
+"9",
+"9"
+],
+"procedure-type": "open",
+"publication-date": "2026-01-21+01:00",
+"buyer-name": {
+"deu": [
+"Stadt Jüchen"
+]
+},
+"received-submissions-type-code": [
+"t-esubm",
+"t-esubm",
+"t-esubm"
+],
+"winner-name": {
+"deu": [
+"SB Professionalll Cleaning GmbH",
+"PGS Gebäudereinigung GmbH",
+"SB Professionalll Cleaning GmbH"
+]
+},
+"buyer-city": {
+"mul": [
+"Jüchen"
+]
+}
+},
+{
+"place-of-performance": [
+"DEA5C",
+"DEU",
+"DEA5C",
+"DEA5C",
+"DEA5C",
+"DEA5C",
+"DEA5C",
+"DEA5C",
+"DEA5C",
+"DEU",
+"DEU",
+"DEU",
+"DEU",
+"DEU",
+"DEU",
+"DEU"
+],
+"notice-type": "can-standard",
+"publication-number": "50133-2026",
+"winner-city": [
+"Kamen",
+"Arnsberg"
+],
+"buyer-legal-type": [
+"la"
+],
+"total-value-cur": [
+"EUR"
+],
+"winner-size": [
+"medium",
+"medium"
+],
+"total-value": 1474118.61,
+"received-submissions-type-val": [
+"1",
+"1",
+"0",
+"0",
+"0",
+"0",
+"1",
+"1",
+"0",
+"0",
+"0",
+"0",
+"1",
+"1",
+"0",
+"0",
+"0",
+"0",
+"1",
+"1",
+"0",
+"0",
+"0",
+"0",
+"1",
+"1",
+"0",
+"0",
+"0",
+"0",
+"1",
+"1",
+"0",
+"0",
+"0",
+"0",
+"1",
+"1",
+"0",
+"0",
+"0",
+"0"
+],
+"procedure-type": "neg-wo-call",
+"publication-date": "2026-01-23+01:00",
+"buyer-name": {
+"deu": [
+"Kreisstadt Unna - Zentrale Vergabestelle"
+]
+},
+"received-submissions-type-code": [
+"tenders",
+"t-esubm",
+"t-oth-eea",
+"t-no-eea",
+"t-verif-inad",
+"t-verif-inad-low",
+"tenders",
+"t-esubm",
+"t-oth-eea",
+"t-no-eea",
+"t-verif-inad",
+"t-verif-inad-low",
+"tenders",
+"t-esubm",
+"t-oth-eea",
+"t-no-eea",
+"t-verif-inad",
+"t-verif-inad-low",
+"tenders",
+"t-esubm",
+"t-oth-eea",
+"t-no-eea",
+"t-verif-inad",
+"t-verif-inad-low",
+"tenders",
+"t-esubm",
+"t-oth-eea",
+"t-no-eea",
+"t-verif-inad",
+"t-verif-inad-low",
+"tenders",
+"t-esubm",
+"t-oth-eea",
+"t-no-eea",
+"t-verif-inad",
+"t-verif-inad-low",
+"tenders",
+"t-esubm",
+"t-oth-eea",
+"t-no-eea",
+"t-verif-inad",
+"t-verif-inad-low"
+],
+"winner-name": {
+"deu": [
+"aktiv Gebäudedienstleistungen",
+"aktiv Gebäudedienstleistungen",
+"aktiv Gebäudedienstleistungen",
+"aktiv Gebäudedienstleistungen",
+"aktiv Gebäudedienstleistungen",
+"aktiv Gebäudedienstleistungen",
+"aktiv Gebäudedienstleistungen",
+"aktiv Gebäudedienstleistungen",
+"aktiv Gebäudedienstleistungen",
+"aktiv Gebäudedienstleistungen",
+"aktiv Gebäudedienstleistungen",
+"aktiv Gebäudedienstleistungen",
+"aktiv Gebäudedienstleistungen",
+"aktiv Gebäudedienstleistungen",
+"aktiv Gebäudedienstleistungen",
+"aktiv Gebäudedienstleistungen",
+"aktiv Gebäudedienstleistungen",
+"aktiv Gebäudedienstleistungen",
+"Menke Gebäudeservice GmbH & Co. KG",
+"aktiv Gebäudedienstleistungen",
+"aktiv Gebäudedienstleistungen",
+"aktiv Gebäudedienstleistungen",
+"aktiv Gebäudedienstleistungen",
+"aktiv Gebäudedienstleistungen",
+"aktiv Gebäudedienstleistungen",
+"aktiv Gebäudedienstleistungen",
+"aktiv Gebäudedienstleistungen",
+"aktiv Gebäudedienstleistungen",
+"aktiv Gebäudedienstleistungen",
+"aktiv Gebäudedienstleistungen",
+"aktiv Gebäudedienstleistungen",
+"aktiv Gebäudedienstleistungen",
+"aktiv Gebäudedienstleistungen",
+"aktiv Gebäudedienstleistungen",
+"aktiv Gebäudedienstleistungen",
+"aktiv Gebäudedienstleistungen",
+"aktiv Gebäudedienstleistungen"
+]
+},
+"buyer-city": {
+"mul": [
+"Unna"
+]
+}
+},
+{
+"place-of-performance": [
+"DEA52",
+"DEU",
+"DEA52",
+"DEU"
+],
+"notice-type": "can-standard",
+"publication-number": "57393-2026",
+"winner-city": [
+"Laatzen"
+],
+"buyer-legal-type": [
+"body-pl-ra"
+],
+"total-value-cur": [
+"EUR"
+],
+"winner-size": [
+"large"
+],
+"total-value": 1,
+"received-submissions-type-val": [
+"6",
+"6",
+"1",
+"1"
+],
+"procedure-type": "open",
+"publication-date": "2026-01-27+01:00",
+"buyer-name": {
+"deu": [
+"Westdeutscher Rundfunk Köln"
+]
+},
+"received-submissions-type-code": [
+"tenders",
+"t-esubm",
+"t-sme",
+"t-small"
+],
+"winner-name": {
+"deu": [
+"PLURAL servicepool GmbH"
+]
+},
+"buyer-city": {
+"mul": [
+"Köln"
+]
+}
+},
+{
+"place-of-performance": [
+"DEA11",
+"DEU",
+"DEA11",
+"DEA11",
+"DEA11",
+"DEA11",
+"DEA11",
+"DEA11",
+"DEU",
+"DEU",
+"DEU",
+"DEU",
+"DEU",
+"DEU"
+],
+"notice-type": "can-standard",
+"publication-number": "58928-2026",
+"winner-city": [
+"Erkrath",
+"Düsseldorf",
+"Düren",
+"Bonn",
+"Düsseldorf",
+"Düsseldorf"
+],
+"buyer-legal-type": [
+"la"
+],
+"total-value-cur": [
+"EUR"
+],
+"winner-size": [
+"medium",
+"small",
+"large",
+"medium",
+"medium",
+"medium"
+],
+"received-submissions-type-val": [
+"10",
+"10",
+"0",
+"9",
+"9",
+"0",
+"9",
+"9",
+"0",
+"9",
+"9",
+"0",
+"9",
+"9",
+"0",
+"10",
+"10",
+"0"
+],
+"procedure-type": "open",
+"publication-date": "2026-01-27+01:00",
+"buyer-name": {
+"deu": [
+"Landeshauptstadt Düsseldorf, Der Oberbürgermeister, Amt für Recht, Vergabe und Versicherungen, Zentrale Vergabestelle"
+]
+},
+"received-submissions-type-code": [
+"tenders",
+"t-esubm",
+"t-sme",
+"tenders",
+"t-esubm",
+"t-sme",
+"tenders",
+"t-esubm",
+"t-sme",
+"tenders",
+"t-esubm",
+"t-sme",
+"tenders",
+"t-esubm",
+"t-sme",
+"tenders",
+"t-esubm",
+"t-sme"
+],
+"winner-name": {
+"deu": [
+"Bosa Services GmbH & Co. KG",
+"gepe Gebäudedienste Peterhoff GmbH",
+"Evers & Kregel Gebäudereinigung GmbH",
+"Kontep Dienstleistungen Inh. Ömer Güler",
+"S&M Services GmbH",
+"WSR Services GmbH",
+"S&M Services GmbH",
+"gepe Gebäudedienste Peterhoff GmbH",
+"Bosa Services GmbH & Co. KG",
+"Evers & Kregel Gebäudereinigung GmbH",
+"Kontep Dienstleistungen Inh. Ömer Güler",
+"WSR Services GmbH",
+"Bosa Services GmbH & Co. KG",
+"gepe Gebäudedienste Peterhoff GmbH",
+"Evers & Kregel Gebäudereinigung GmbH",
+"Kontep Dienstleistungen Inh. Ömer Güler",
+"S&M Services GmbH",
+"WSR Services GmbH",
+"Bosa Services GmbH & Co. KG",
+"gepe Gebäudedienste Peterhoff GmbH",
+"Evers & Kregel Gebäudereinigung GmbH",
+"Kontep Dienstleistungen Inh. Ömer Güler",
+"S&M Services GmbH",
+"WSR Services GmbH",
+"Bosa Services GmbH & Co. KG",
+"Kontep Dienstleistungen Inh. Ömer Güler",
+"gepe Gebäudedienste Peterhoff GmbH",
+"Evers & Kregel Gebäudereinigung GmbH",
+"S&M Services GmbH",
+"WSR Services GmbH",
+"Bosa Services GmbH & Co. KG",
+"Evers & Kregel Gebäudereinigung GmbH",
+"gepe Gebäudedienste Peterhoff GmbH",
+"Kontep Dienstleistungen Inh. Ömer Güler",
+"S&M Services GmbH",
+"WSR Services GmbH"
+]
+},
+"buyer-city": {
+"mul": [
+"Düsseldorf"
+]
+}
+},
+{
+"place-of-performance": [
+"DEA11",
+"DEA28",
+"DEA22",
+"DEA1F",
+"DEA19",
+"DEU",
+"DEU",
+"DEU",
+"DEU",
+"DEU",
+"DEA11",
+"DEA11",
+"DEA11",
+"DEA11",
+"DEA11",
+"DEA11",
+"DEA11",
+"DEA11",
+"DEA11",
+"DEA11",
+"DEU",
+"DEU",
+"DEU",
+"DEU",
+"DEU",
+"DEU",
+"DEU",
+"DEU",
+"DEU",
+"DEU"
+],
+"notice-type": "can-standard",
+"publication-number": "71949-2026",
+"winner-city": [
+"Köln",
+"Düsseldorf",
+"Chemnitz",
+"Bonn",
+"Gelsenkirchen",
+"Köln",
+"St. Augustin-Hangelar",
+"Oberhausen",
+"Sankt Augustin"
+],
+"buyer-legal-type": [
+"pub-undert"
+],
+"total-value-cur": [
+"EUR"
+],
+"winner-size": [
+"large",
+"medium",
+"large",
+"large",
+"large",
+"medium",
+"small",
+"large",
+"small"
+],
+"total-value": 0,
+"received-submissions-type-val": [
+"13",
+"5",
+"0",
+"0",
+"13",
+"6",
+"5",
+"0",
+"0",
+"6",
+"6",
+"1",
+"0",
+"0",
+"6",
+"3",
+"2",
+"0",
+"0",
+"3",
+"13",
+"2",
+"0",
+"0",
+"13",
+"7",
+"3",
+"0",
+"0",
+"7",
+"10",
+"3",
+"0",
+"0",
+"10",
+"9",
+"3",
+"0",
+"0",
+"9",
+"9",
+"3",
+"0",
+"0",
+"9",
+"4",
+"4",
+"0",
+"0",
+"4"
+],
+"procedure-type": "open",
+"publication-date": "2026-02-02+01:00",
+"buyer-name": {
+"deu": [
+"IKK classic"
+]
+},
+"received-submissions-type-code": [
+"tenders",
+"t-sme",
+"t-oth-eea",
+"t-no-eea",
+"t-esubm",
+"tenders",
+"t-sme",
+"t-oth-eea",
+"t-no-eea",
+"t-esubm",
+"tenders",
+"t-sme",
+"t-oth-eea",
+"t-no-eea",
+"t-esubm",
+"tenders",
+"t-sme",
+"t-oth-eea",
+"t-no-eea",
+"t-esubm",
+"tenders",
+"t-sme",
+"t-oth-eea",
+"t-no-eea",
+"t-esubm",
+"tenders",
+"t-sme",
+"t-oth-eea",
+"t-no-eea",
+"t-esubm",
+"tenders",
+"t-sme",
+"t-oth-eea",
+"t-no-eea",
+"t-esubm",
+"tenders",
+"t-sme",
+"t-oth-eea",
+"t-no-eea",
+"t-esubm",
+"tenders",
+"t-sme",
+"t-oth-eea",
+"t-no-eea",
+"t-esubm",
+"tenders",
+"t-sme",
+"t-oth-eea",
+"t-no-eea",
+"t-esubm"
+],
+"winner-name": {
+"deu": [
+"Th. Kramer Gebäudereinigung GmbH",
+"Niederberger Rhein-Berg GmbH & Co. KG",
+"Wackler Service Group GmbH & Co. KG",
+"Niederberger Bonn GmbH & Co KG",
+"Stölting GmbH, Reinigung und Service",
+"Opti Dienstleistungs GmbH",
+"Stölting GmbH, Reinigung und Service",
+"Reinigungsteam Baggeler e.K.",
+"gewa Gesellschaft für Gebäudereinigung und Wartung mbH",
+"14. Reinigungsteam Baggeler e.K."
+]
+},
+"buyer-city": {
+"mul": [
+"Erfurt"
+]
+}
+},
+{
+"place-of-performance": [
+"DEA56",
+"DEU",
+"DEA56",
+"DEA56",
+"DEA56",
+"DEA56",
+"DEA56",
+"DEA56",
+"DEA56",
+"DEA56",
+"DEA56",
+"DEA56",
+"DEU",
+"DEU",
+"DEU",
+"DEU",
+"DEU",
+"DEU",
+"DEU",
+"DEU",
+"DEU",
+"DEU"
+],
+"notice-type": "can-standard",
+"publication-number": "72651-2026",
+"winner-city": [
+"Osnabrück",
+"Köln"
+],
+"buyer-legal-type": [
+"la"
+],
+"total-value-cur": [
+"EUR"
+],
+"winner-size": [
+"large",
+"small"
+],
+"total-value": 1,
+"received-submissions-type-val": [
+"15",
+"13",
+"14",
+"15",
+"12",
+"12",
+"9",
+"5",
+"4",
+"4"
+],
+"procedure-type": "open",
+"publication-date": "2026-02-02+01:00",
+"buyer-name": {
+"deu": [
+"Ennepe-Ruhr-Kreis"
+]
+},
+"received-submissions-type-code": [
+"t-esubm",
+"t-esubm",
+"t-esubm",
+"t-esubm",
+"t-esubm",
+"t-esubm",
+"t-esubm",
+"t-small",
+"t-small",
+"t-small"
+],
+"winner-name": {
+"deu": [
+"Piepenbrock Dienstleistungen GmbH + Co. KG,",
+"Piepenbrock Dienstleistungen GmbH + Co. KG,",
+"Piepenbrock Dienstleistungen GmbH + Co. KG,",
+"Piepenbrock Dienstleistungen GmbH + Co. KG,",
+"Piepenbrock Dienstleistungen GmbH + Co. KG,",
+"Piepenbrock Dienstleistungen GmbH + Co. KG,",
+"Piepenbrock Dienstleistungen GmbH + Co. KG,",
+"Piepenbrock Dienstleistungen GmbH + Co. KG,",
+"Piepenbrock Dienstleistungen GmbH + Co. KG,",
+"Piepenbrock Dienstleistungen GmbH + Co. KG,",
+"Piepenbrock Dienstleistungen GmbH + Co. KG,",
+"Piepenbrock Dienstleistungen GmbH + Co. KG,",
+"Piepenbrock Dienstleistungen GmbH + Co. KG,",
+"Piepenbrock Dienstleistungen GmbH + Co. KG,",
+"Piepenbrock Dienstleistungen GmbH + Co. KG,",
+"Piepenbrock Dienstleistungen GmbH + Co. KG,",
+"Piepenbrock Dienstleistungen GmbH + Co. KG,",
+"Piepenbrock Dienstleistungen GmbH + Co. KG,",
+"Piepenbrock Dienstleistungen GmbH + Co. KG,",
+"Piepenbrock Dienstleistungen GmbH + Co. KG,",
+"Piepenbrock Dienstleistungen GmbH + Co. KG,",
+"Piepenbrock Dienstleistungen GmbH + Co. KG,",
+"Piepenbrock Dienstleistungen GmbH + Co. KG,",
+"Piepenbrock Dienstleistungen GmbH + Co. KG,",
+"Piepenbrock Dienstleistungen GmbH + Co. KG,",
+"Piepenbrock Dienstleistungen GmbH + Co. KG,",
+"Piepenbrock Dienstleistungen GmbH + Co. KG,",
+"Piepenbrock Dienstleistungen GmbH + Co. KG,",
+"Piepenbrock Dienstleistungen GmbH + Co. KG,",
+"Piepenbrock Dienstleistungen GmbH + Co. KG,",
+"Piepenbrock Dienstleistungen GmbH + Co. KG,",
+"Piepenbrock Dienstleistungen GmbH + Co. KG,",
+"Piepenbrock Dienstleistungen GmbH + Co. KG,",
+"Piepenbrock Dienstleistungen GmbH + Co. KG,",
+"Piepenbrock Dienstleistungen GmbH + Co. KG,",
+"Piepenbrock Dienstleistungen GmbH + Co. KG,",
+"Piepenbrock Dienstleistungen GmbH + Co. KG,",
+"Piepenbrock Dienstleistungen GmbH + Co. KG,",
+"Piepenbrock Dienstleistungen GmbH + Co. KG,",
+"Piepenbrock Dienstleistungen GmbH + Co. KG,",
+"Piepenbrock Dienstleistungen GmbH + Co. KG,",
+"Piepenbrock Dienstleistungen GmbH + Co. KG,",
+"Piepenbrock Dienstleistungen GmbH + Co. KG,",
+"Piepenbrock Dienstleistungen GmbH + Co. KG,",
+"Piepenbrock Dienstleistungen GmbH + Co. KG,",
+"Piepenbrock Dienstleistungen GmbH + Co. KG,",
+"Piepenbrock Dienstleistungen GmbH + Co. KG,",
+"Piepenbrock Dienstleistungen GmbH + Co. KG,",
+"Piepenbrock Dienstleistungen GmbH + Co. KG,",
+"M & N Gebäudereinigung Sinani",
+"M & N Gebäudereinigung Sinani",
+"M & N Gebäudereinigung Sinani",
+"M & N Gebäudereinigung Sinani",
+"M & N Gebäudereinigung Sinani",
+"M & N Gebäudereinigung Sinani",
+"M & N Gebäudereinigung Sinani",
+"M & N Gebäudereinigung Sinani",
+"M & N Gebäudereinigung Sinani"
+]
+},
+"buyer-city": {
+"mul": [
+"Schwelm"
+]
+}
+},
+{
+"place-of-performance": [
+"DEA15",
+"DEU",
+"DEA15",
+"DEA15",
+"DEA15",
+"DEA15",
+"DEU",
+"DEU",
+"DEU",
+"DEU"
+],
+"notice-type": "can-standard",
+"publication-number": "91389-2026",
+"winner-city": [
+"Leichlingen",
+"Düren",
+"Sankt Augustin",
+"Köln"
+],
+"buyer-legal-type": [
+"pub-undert-ra"
+],
+"total-value-cur": [
+"EUR"
+],
+"winner-size": [
+"medium",
+"medium",
+"small",
+"small"
+],
+"total-value": 1,
+"received-submissions-type-val": [
+"8",
+"9",
+"6",
+"6"
+],
+"procedure-type": "open",
+"publication-date": "2026-02-09+01:00",
+"buyer-name": {
+"deu": [
+"NEW AG"
+]
+},
+"received-submissions-type-code": [
+"t-esubm",
+"t-esubm",
+"t-esubm",
+"t-esubm"
+],
+"winner-name": {
+"deu": [
+"SB Professional Cleaning GmbH",
+"gepe Gebäudedienste PETERHOFF GmbH",
+"Reinigungsteam Baggeler e.K.",
+"Mehmet Sinani - M & N Gebäudereinigung"
+]
+},
+"buyer-city": {
+"mul": [
+"Mönchengladbach"
+]
+}
+},
+{
+"place-of-performance": [
+"DEA1F",
+"DEU",
+"DEA1F",
+"DEA1F",
+"DEA1F",
+"DEU",
+"DEU",
+"DEU"
+],
+"notice-type": "can-standard",
+"publication-number": "93153-2026",
+"winner-city": [
+"Geldern"
+],
+"buyer-legal-type": [
+"la"
+],
+"total-value-cur": [
+"EUR"
+],
+"winner-size": [
+"large"
+],
+"received-submissions-type-val": [
+"7",
+"7",
+"5",
+"7",
+"7",
+"5"
+],
+"procedure-type": "open",
+"publication-date": "2026-02-09+01:00",
+"buyer-name": {
+"deu": [
+"Stadt Moers"
+]
+},
+"received-submissions-type-code": [
+"tenders",
+"t-esubm",
+"t-sme",
+"tenders",
+"t-esubm",
+"t-sme"
+],
+"winner-name": {
+"deu": [
+"Winkels Servicegesellschaft mbH",
+"Winkels Servicegesellschaft mbH"
+]
+},
+"buyer-city": {
+"mul": [
+"Moers"
+]
+}
+},
+{
+"place-of-performance": [
+"DEA11",
+"DEU"
+],
+"notice-type": "can-standard",
+"publication-number": "93289-2026",
+"winner-city": [
+"Bonn",
+"Düsseldorf",
+"Düsseldorf",
+"Königswinter",
+"Düssedorf"
+],
+"buyer-legal-type": [
+"la"
+],
+"total-value-cur": [
+"EUR"
+],
+"winner-size": [
+"small",
+"small",
+"micro",
+"small",
+"micro"
+],
+"received-submissions-type-val": [
+"10",
+"10",
+"0",
+"0",
+"0"
+],
+"procedure-type": "open",
+"publication-date": "2026-02-10+01:00",
+"buyer-name": {
+"deu": [
+"Landeshauptstadt Düsseldorf, Der Oberbürgermeister, Amt für Recht, Vergabe und Versicherungen, Zentrale Vergabestelle"
+]
+},
+"received-submissions-type-code": [
+"tenders",
+"t-esubm",
+"t-sme",
+"t-oth-eea",
+"t-no-eea"
+],
+"winner-name": {
+"deu": [
+"Gebäudeservice Lieck GmbH",
+"Gebäudereinigung Ekinci",
+"Geko Clean",
+"ReinigunsPiloten",
+"Chahi-Service GmbH"
+]
+},
+"buyer-city": {
+"mul": [
+"Düsseldorf"
+]
+}
+},
+{
+"place-of-performance": [
+"DEA41",
+"DEU",
+"DEA41",
+"DEU"
+],
+"notice-type": "can-standard",
+"publication-number": "94304-2026",
+"winner-city": [
+"Bergisch Gladbach"
+],
+"buyer-legal-type": [
+"cga"
+],
+"total-value-cur": [
+"EUR"
+],
+"winner-size": [
+"large"
+],
+"total-value": 247835.4,
+"received-submissions-type-val": [
+"4",
+"4",
+"3",
+"0",
+"0"
+],
+"procedure-type": "open",
+"publication-date": "2026-02-10+01:00",
+"buyer-name": {
+"deu": [
+"Bundesrepublik Deutschland, vertreten durch das Bundesministerium des Innern, vertreten durch das Beschaffungsamt des BMI"
+]
+},
+"received-submissions-type-code": [
+"tenders",
+"t-esubm",
+"t-sme",
+"t-oth-eea",
+"t-no-eea"
+],
+"winner-name": {
+"deu": [
+"OPTI Dienstleistungs GmbH"
+]
+},
+"buyer-city": {
+"mul": [
+"Bonn"
+]
+}
+},
+{
+"place-of-performance": [
+"DEA2C",
+"DEU",
+"DEA2C",
+"DEA2C",
+"DEU",
+"DEU"
+],
+"notice-type": "can-standard",
+"publication-number": "97554-2026",
+"winner-city": [
+"Stadtallendorf",
+"Sankt Augustin"
+],
+"buyer-legal-type": [
+"ra"
+],
+"total-value-cur": [
+"EUR"
+],
+"winner-size": [
+"large",
+"small"
+],
+"total-value": 71326.26,
+"received-submissions-type-val": [
+"3",
+"3",
+"0",
+"0",
+"1",
+"0",
+"6",
+"6",
+"0",
+"0",
+"0",
+"0"
+],
+"procedure-type": "open",
+"publication-date": "2026-02-11+01:00",
+"buyer-name": {
+"deu": [
+"Bezirksregierung Köln"
+]
+},
+"received-submissions-type-code": [
+"tenders",
+"t-esubm",
+"t-oth-eea",
+"t-no-eea",
+"t-verif-inad",
+"t-verif-inad-low",
+"tenders",
+"t-esubm",
+"t-oth-eea",
+"t-no-eea",
+"t-verif-inad",
+"t-verif-inad-low"
+],
+"winner-name": {
+"deu": [
+"Gies Dienstleistungen",
+"REINIGUNGSTEAM BAGGELER e.K."
+]
+},
+"buyer-city": {
+"mul": [
+"Köln"
+]
+}
+},
+{
+"place-of-performance": [
+"DEA51",
+"DEA55",
+"DEA56",
+"DEU",
+"DEU",
+"DEU",
+"DEA51",
+"DEA55",
+"DEA56",
+"DEA51",
+"DEA55",
+"DEA56",
+"DEA51",
+"DEA55",
+"DEA56",
+"DEA51",
+"DEA55",
+"DEA56",
+"DEA51",
+"DEA55",
+"DEA56",
+"DEA51",
+"DEA55",
+"DEA56",
+"DEU",
+"DEU",
+"DEU",
+"DEU",
+"DEU",
+"DEU",
+"DEU",
+"DEU",
+"DEU",
+"DEU",
+"DEU",
+"DEU",
+"DEU",
+"DEU",
+"DEU",
+"DEU",
+"DEU",
+"DEU"
+],
+"notice-type": "can-standard",
+"publication-number": "99223-2026",
+"winner-city": [
+"Essen",
+"Berlin",
+"Essen",
+"Essen",
+"Oberhausen",
+"Oberhausen"
+],
+"buyer-legal-type": [
+"pub-undert",
+"pub-undert",
+"pub-undert"
+],
+"total-value-cur": [
+"EUR"
+],
+"winner-size": [
+"medium",
+"medium",
+"medium",
+"medium",
+"medium",
+"medium"
+],
+"received-submissions-type-val": [
+"4",
+"4",
+"21",
+"4",
+"4",
+"3",
+"3",
+"16",
+"3",
+"3",
+"5",
+"5",
+"21",
+"5",
+"5",
+"5",
+"5",
+"16",
+"5",
+"5",
+"4",
+"4",
+"21",
+"4",
+"4",
+"5",
+"5",
+"15",
+"5",
+"5"
+],
+"procedure-type": "neg-w-call",
+"publication-date": "2026-02-11+01:00",
+"buyer-name": {
+"deu": [
+"Stadtwerke Bochum Netz GmbH",
+"Stadtwerke Herne AG",
+"Stadtwerke Witten GmbH"
+]
+},
+"received-submissions-type-code": [
+"tenders",
+"t-esubm",
+"part-req",
+"t-sme",
+"t-med",
+"tenders",
+"t-esubm",
+"part-req",
+"t-sme",
+"t-med",
+"tenders",
+"t-esubm",
+"part-req",
+"t-sme",
+"t-med",
+"tenders",
+"t-esubm",
+"part-req",
+"t-sme",
+"t-med",
+"tenders",
+"t-esubm",
+"part-req",
+"t-sme",
+"t-med",
+"tenders",
+"t-esubm",
+"part-req",
+"t-sme",
+"t-med"
+],
+"winner-name": {
+"deu": [
+"Piepenbrock Dienstleistungen GmbH &CO.KG",
+"Apleona Infra Services GmbH",
+"Rudolf Weber Gebäudereinigung und Gebäudedienste GmbH & Co. KG",
+"Dussmann Service Deutschland GmbH",
+"GEWA Gesellschaft für Gebäudereinigung und Wartung GmbH",
+"HP-Service GmbH"
+]
+},
+"buyer-city": {
+"mul": [
+"Bochum",
+"Herne",
+"Witten"
+]
+}
+},
+{
+"place-of-performance": [
+"DEA33",
+"DEA38",
+"DEA33",
+"DEU",
+"DEU",
+"DEU",
+"DEA33",
+"DEA38",
+"DEA33",
+"DEA33",
+"DEA38",
+"DEA33",
+"DEU",
+"DEU",
+"DEU",
+"DEU",
+"DEU",
+"DEU"
+],
+"notice-type": "can-standard",
+"publication-number": "99893-2026",
+"winner-city": [
+"Münster",
+"Regensburg"
+],
+"buyer-legal-type": [
+"body-pl-ra"
+],
+"total-value-cur": [
+"EUR"
+],
+"winner-size": [
+"small",
+"large"
+],
+"total-value": 638785.15,
+"received-submissions-type-val": [
+"16",
+"16",
+"6",
+"4",
+"2",
+"0",
+"0",
+"0",
+"3",
+"1",
+"0",
+"11",
+"11",
+"8",
+"2",
+"6",
+"0",
+"0",
+"0",
+"5",
+"1",
+"0"
+],
+"procedure-type": "open",
+"publication-date": "2026-02-11+01:00",
+"buyer-name": {
+"deu": [
+"Institut der Feuerwehr NRW"
+]
+},
+"received-submissions-type-code": [
+"tenders",
+"t-esubm",
+"t-sme",
+"t-med",
+"t-small",
+"t-micro",
+"t-oth-eea",
+"t-no-eea",
+"t-verif-inad",
+"t-no-verif",
+"t-verif-inad-low",
+"tenders",
+"t-esubm",
+"t-sme",
+"t-med",
+"t-small",
+"t-micro",
+"t-oth-eea",
+"t-no-eea",
+"t-verif-inad",
+"t-no-verif",
+"t-verif-inad-low"
+],
+"winner-name": {
+"deu": [
+"Götz-Management-Holding AG",
+"Lavette GmbH"
+]
+},
+"buyer-city": {
+"mul": [
+"Münster"
+]
+}
+},
+{
+"place-of-performance": [
+"DEA2C",
+"DEU",
+"DEA2C",
+"DEU"
+],
+"notice-type": "can-standard",
+"publication-number": "99899-2026",
+"winner-city": [
+"Nistertal"
+],
+"buyer-legal-type": [
+"la"
+],
+"total-value-cur": [
+"EUR"
+],
+"winner-size": [
+"medium"
+],
+"total-value": 662433,
+"received-submissions-type-val": [
+"14"
+],
+"procedure-type": "open",
+"publication-date": "2026-02-11+01:00",
+"buyer-name": {
+"deu": [
+"Stadt Troisdorf"
+]
+},
+"received-submissions-type-code": [
+"tenders"
+],
+"winner-name": {
+"deu": [
+"Gebäudereinigung Kubau"
+]
+},
+"buyer-city": {
+"mul": [
+"Troisdorf"
+]
+}
+},
+{
+"place-of-performance": [
+"DEA1B",
+"DEU",
+"DEA1B",
+"DEA1B",
+"DEA1B",
+"DEA1B",
+"DEA1B",
+"DEU",
+"DEU",
+"DEU",
+"DEU",
+"DEU"
+],
+"notice-type": "can-standard",
+"publication-number": "101643-2026",
+"winner-city": [
+"Bonn"
+],
+"buyer-legal-type": [
+"body-pl-cga"
+],
+"total-value-cur": [
+"EUR"
+],
+"winner-size": [
+"large"
+],
+"total-value": 1107370,
+"received-submissions-type-val": [
+"5",
+"5",
+"5",
+"2",
+"2"
+],
+"procedure-type": "open",
+"publication-date": "2026-02-12+01:00",
+"buyer-name": {
+"deu": [
+"Bundeskartellamt, Vergabekammern des Bundes"
+]
+},
+"received-submissions-type-code": [
+"t-esubm",
+"t-esubm",
+"t-esubm",
+"t-esubm",
+"t-esubm"
+],
+"winner-name": {
+"deu": [
+"Bundesanstalt für Immobilienaufgaben",
+"Bundesanstalt für Immobilienaufgaben",
+"Bundesanstalt für Immobilienaufgaben",
+"Bundesanstalt für Immobilienaufgaben",
+"Bundesanstalt für Immobilienaufgaben"
+]
+},
+"buyer-city": {
+"mul": [
+"Bonn"
+]
+}
+},
+{
+"place-of-performance": [
+"DEA23",
+"DEU",
+"DEA23",
+"DEU"
+],
+"notice-type": "can-standard",
+"publication-number": "105205-2026",
+"winner-city": [
+"Bonn"
+],
+"buyer-legal-type": [
+"cga"
+],
+"total-value-cur": [
+"EUR"
+],
+"winner-size": [
+"large"
+],
+"received-submissions-type-val": [
+"3",
+"3",
+"2",
+"0"
+],
+"procedure-type": "open",
+"publication-date": "2026-02-13+01:00",
+"buyer-name": {
+"deu": [
+"Bundesrepublik Deutschland, vertreten durch das Bundesministerium des Innern und für Heimat, vertreten durch das Beschaffungsamt des BMI"
+]
+},
+"received-submissions-type-code": [
+"tenders",
+"t-esubm",
+"t-sme",
+"t-oth-eea"
+],
+"winner-name": {
+"deu": [
+"Braun"
+]
+},
+"buyer-city": {
+"mul": [
+"Bonn"
+]
+}
+},
+{
+"place-of-performance": [
+"DEA1A",
+"DEU",
+"DEA1A",
+"DEU"
+],
+"notice-type": "can-standard",
+"publication-number": "108048-2026",
+"winner-city": [
+"Solingen"
+],
+"buyer-legal-type": [
+"la"
+],
+"total-value-cur": [
+"EUR"
+],
+"winner-size": [
+"medium"
+],
+"total-value": 94957.84,
+"received-submissions-type-val": [
+"1"
+],
+"procedure-type": "open",
+"publication-date": "2026-02-16+01:00",
+"buyer-name": {
+"deu": [
+"Stadt Wuppertal"
+]
+},
+"received-submissions-type-code": [
+"t-esubm"
+],
+"winner-name": {
+"deu": [
+"dp Wasseraufbereitung Poschen GmbH"
+]
+},
+"buyer-city": {
+"mul": [
+"Wuppertal"
+]
+}
+},
+{
+"place-of-performance": [
+"DEA11",
+"DEU",
+"DEA11",
+"DEA11",
+"DEA11",
+"DEA11",
+"DEA11",
+"DEA11",
+"DEU",
+"DEU",
+"DEU",
+"DEU",
+"DEU",
+"DEU"
+],
+"notice-type": "can-standard",
+"publication-number": "116801-2026",
+"winner-city": [
+"Erkrath",
+"Wuppertal"
+],
+"buyer-legal-type": [
+"la"
+],
+"total-value-cur": [
+"EUR"
+],
+"winner-size": [
+"medium",
+"large"
+],
+"received-submissions-type-val": [
+"7",
+"7",
+"0",
+"0",
+"0",
+"8",
+"8",
+"0",
+"0",
+"0",
+"8",
+"8",
+"0",
+"0",
+"0",
+"8",
+"8",
+"0",
+"0",
+"0",
+"8",
+"8",
+"0",
+"0",
+"0",
+"8",
+"8",
+"0",
+"0",
+"0"
+],
+"procedure-type": "open",
+"publication-date": "2026-02-18+01:00",
+"buyer-name": {
+"deu": [
+"Landeshauptstadt Düsseldorf, Der Oberbürgermeister, Amt für Recht, Vergabe und Versicherungen, Zentrale Vergabestelle"
+]
+},
+"received-submissions-type-code": [
+"tenders",
+"t-esubm",
+"t-sme",
+"t-oth-eea",
+"t-no-eea",
+"tenders",
+"t-esubm",
+"t-sme",
+"t-oth-eea",
+"t-no-eea",
+"tenders",
+"t-esubm",
+"t-sme",
+"t-oth-eea",
+"t-no-eea",
+"tenders",
+"t-esubm",
+"t-sme",
+"t-oth-eea",
+"t-no-eea",
+"tenders",
+"t-esubm",
+"t-sme",
+"t-oth-eea",
+"t-no-eea",
+"tenders",
+"t-esubm",
+"t-sme",
+"t-oth-eea",
+"t-no-eea"
+],
+"winner-name": {
+"deu": [
+"Bosa Services GmbH & Co. KG",
+"Vebego Facility Services B.V.& Co.KG",
+"Vebego Facility Services B.V.& Co.KG",
+"Bosa Services GmbH & Co. KG",
+"Vebego Facility Services B.V.& Co.KG",
+"Vebego Facility Services B.V.& Co.KG"
+]
+},
+"buyer-city": {
+"mul": [
+"Düsseldorf"
+]
+}
+},
+{
+"place-of-performance": [
+"DEA56",
+"DEU",
+"DEA56",
+"DEU"
+],
+"notice-type": "can-standard",
+"publication-number": "121908-2026",
+"winner-city": [
+"Wetter"
+],
+"buyer-legal-type": [
+"la"
+],
+"total-value-cur": [
+"EUR"
+],
+"winner-size": [
+"medium"
+],
+"total-value": 547848.36,
+"received-submissions-type-val": [
+"3",
+"3",
+"0",
+"0",
+"1",
+"0"
+],
+"procedure-type": "open",
+"publication-date": "2026-02-20+01:00",
+"buyer-name": {
+"deu": [
+"Stadt Witten, Zentrales Vergabeamt"
+]
+},
+"received-submissions-type-code": [
+"tenders",
+"t-esubm",
+"t-oth-eea",
+"t-no-eea",
+"t-verif-inad",
+"t-verif-inad-low"
+],
+"winner-name": {
+"deu": [
+"AHE GmbH"
+]
+},
+"buyer-city": {
+"mul": [
+"Witten"
+]
+}
+},
+{
+"place-of-performance": [
+"DEA1E",
+"DEU",
+"DEA15",
+"DEA1E",
+"DEA1B",
+"DEA1E",
+"DEU",
+"DEU",
+"DEU",
+"DEU"
+],
+"notice-type": "can-standard",
+"publication-number": "131345-2026",
+"winner-city": [
+"Korschenbroich",
+"Duisburg"
+],
+"buyer-legal-type": [
+"body-pl-ra"
+],
+"total-value-cur": [
+"EUR"
+],
+"winner-size": [
+"large",
+"large"
+],
+"total-value": 183914.71,
+"received-submissions-type-val": [
+"6",
+"3",
+"4",
+"3"
+],
+"procedure-type": "open",
+"publication-date": "2026-02-25+01:00",
+"buyer-name": {
+"deu": [
+"Niersverband"
+]
+},
+"received-submissions-type-code": [
+"t-esubm",
+"t-esubm",
+"t-esubm",
+"t-esubm"
+],
+"winner-name": {
+"deu": [
+"Winkels Servicegesellschaft mbH",
+"Rudolf Weber Gebäudereinigung und Gebäudedienste SE & Co. KG",
+"Rudolf Weber Gebäudereinigung und Gebäudedienste SE & Co. KG",
+"Rudolf Weber Gebäudereinigung und Gebäudedienste SE & Co. KG"
+]
+},
+"buyer-city": {
+"mul": [
+"Viersen"
+]
+}
+}
+],
+"totalNoticeCount": 269,
+"iterationNextToken": null,
+"timedOut": false
+}
