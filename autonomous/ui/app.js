@@ -223,6 +223,8 @@
   const AUSSCHREIBUNG_SCHRITT = 20;
   const SUCHLAUF_TEXT = { ok: 'ok', fehler: 'Fehler', gesperrt: 'gesperrt' };
   const SUCHLAUF_TON = { ok: 'ok', fehler: 'fehler', gesperrt: 'warn' };
+  const KI_AUFRUF_TEXT = { ok: 'ok', fehler: 'Fehler', laufend: 'läuft', limit: 'Tageslimit erreicht' };
+  const KI_AUFRUF_TON = { ok: 'ok', fehler: 'fehler', laufend: 'blau', limit: 'warn' };
   const NACHRICHT_ANGEBOT = [
     ['google_profil', 'Google-Profil-Paket (Standard)'], ['webseite', 'Webseite'], ['reinigung', 'Reinigung (fester Auftrag)'],
   ];
@@ -354,6 +356,7 @@
     kalkPositionen: 1,
     kalkOffen: null,
     fokusStelle: null,
+    modellTest: null, // letzter Probeaufruf – bleibt nach dem Neuaufbau sichtbar, solange dasselbe Modell eingestellt ist
   };
 
   function merkeAgenten(liste) {
@@ -952,21 +955,21 @@
 
     const schritte = (kontakte || []).filter(x => x.naechster_schritt && !['gewonnen', 'verloren'].includes(x.status))
       .sort((x, y) => String(y.aktualisiert || '').localeCompare(String(x.aktualisiert || ''))).slice(0, 5);
-    z.append(h('section', { class: 'karte', 'data-pruef': 'naechste-schritte' },
-      h('h2', null, 'Nächste Schritte'),
+    const naechste = karte('Nächste Schritte',
       schritte.length
         ? h('ul', { class: 'liste' }, schritte.map(x => h('li', { class: 'eintrag' },
           h('div', { class: 'eintrag-kopf' }, h('span', { class: 'eintrag-titel' }, x.firma), tag(KONTAKT_STATUS[x.status] || x.status, KONTAKT_TON[x.status])),
           h('div', { class: 'text' }, x.naechster_schritt))))
         : leer(kontakte && kontakte.length ? 'Bei keinem Kontakt ist ein nächster Schritt eingetragen.' : 'Noch keine Kontakte. Im Vertrieb den ersten eintragen.'),
-      h('div', { class: 'knopfreihe' }, h('a', { href: '#vertrieb', class: 'knopf zweit klein' }, 'Zum Vertrieb'))));
+      h('div', { class: 'knopfreihe' }, h('a', { href: '#vertrieb', class: 'knopf zweit klein' }, 'Zum Vertrieb')));
+    naechste.dataset.pruef = 'naechste-schritte';
+    z.append(naechste);
 
     // Echtes Geld zuerst und groß; das simulierte Wallet klein daneben (nie zusammengerechnet)
     const w = d.wallet || {};
     const f = d.finanzen || {};
     z.append(h('div', { class: 'raster zwei' },
-      h('section', { class: 'karte' },
-        h('h2', null, 'Reale Finanzen', tag('REAL', 'ok')),
+      karte(['Reale Finanzen', tag('REAL', 'ok')],
         h('div', { class: 'kachel-wert' }, f.saldo || euro(f.saldo_cent)),
         h('p', { class: 'hilfe' }, 'Saldo aus echten, geprüften Buchungen.'),
         kv([
@@ -974,8 +977,7 @@
           ['Offene Forderungen', (f.offene_forderungen || euro(f.offene_forderungen_cent)) + ' (noch kein Geld)'],
         ]),
         h('div', { class: 'knopfreihe' }, h('a', { href: '#finanzen', class: 'knopf zweit klein' }, 'Zu den Finanzen'))),
-      h('section', { class: 'karte' },
-        h('h2', null, 'Internes Wallet', tag('SIMULATION', 'sim')),
+      karte(['Internes Wallet', tag('SIMULATION', 'sim')],
         kv([['Simuliertes Guthaben', w.stand || euro(w.stand_cent)]]),
         h('p', { class: 'hilfe' }, 'Kein echtes Geld. Beeinflusst den Betrieb nicht.'),
         h('div', { class: 'knopfreihe' }, h('a', { href: '#wallet', class: 'knopf zweit klein' }, 'Zum Wallet')))));
@@ -1004,8 +1006,7 @@
 
     const warnungen = (s.warnungen || []).map(t => h('li', { class: 'eintrag' }, h('span', { class: 'text' }, t)));
     const protokoll = (d.warnungen_protokoll || []).slice().sort((a, b) => (b.id || 0) - (a.id || 0)).slice(0, 8);
-    z.append(h('section', { class: 'karte', 'data-pruef': 'dash-technik-karte' },
-      h('h2', null, 'Technik und Sicherung'),
+    const technik = karte('Technik und Sicherung',
       aufklapp('Details anzeigen', 'dash-technik', false,
         h('div', { class: 'raster' },
           betriebOk ? kBetrieb() : null,
@@ -1025,7 +1026,9 @@
             h('div', { class: 'eintrag-kopf' }, h('span', { class: 'eintrag-titel' }, p.ereignis), tag(ebeneText(p.ebene), EBENE_TON[p.ebene])),
             h('div', { class: 'meta' }, zeitText(p.zeit) + ' · ' + p.quelle))))
           : leer('Keine Warnungen.'),
-        h('div', { class: 'knopfreihe' }, h('a', { href: '#aufgaben', class: 'knopf zweit klein' }, 'Zu den Aufgaben')))));
+        h('div', { class: 'knopfreihe' }, h('a', { href: '#aufgaben', class: 'knopf zweit klein' }, 'Zu den Aufgaben'))));
+    technik.dataset.pruef = 'dash-technik-karte';
+    z.append(technik);
   }
 
   /** Kachel aus echten Daten des Auftrags-Radars: neue passende Ausschreibungen und nächste Frist. */
@@ -1226,8 +1229,7 @@
       }, { 'data-pruef': 'marktbericht-recherche-einschalten' })));
 
     const kennzahlen = k => kv(Object.keys(k || {}).map(n => [MARKT_KENNZAHL[n] || schluesselText(n), typeof k[n] === 'number' ? zahl(k[n]) : String(k[n])]));
-    return h('section', { class: 'karte', 'data-pruef': 'marktbericht' },
-      h('h2', null, titel, tag(zahl(berichte.length) + (berichte.length === 1 ? ' Bericht' : ' Berichte'), 'grau')),
+    const k = karte([titel, tag(zahl(berichte.length) + (berichte.length === 1 ? ' Bericht' : ' Berichte'), 'grau')],
       h('p', { class: 'hilfe' }, 'Der Research-Agent wertet amtliche Daten aus: EU-Ausschreibungen und Zuschläge (TED) und eure gesammelten Ausschreibungen. '
         + 'Jede Zahl mit Quelle; Annahmen sind gekennzeichnet. Ist ein lokales KI-Modell eingestellt, kommt eine gekennzeichnete, ungeprüfte KI-Zusammenfassung dazu.'),
       einschalten,
@@ -1237,6 +1239,7 @@
         ? h('p', { 'data-pruef': 'marktbericht-laeuft' }, tag('Marktbericht wird erstellt …', 'blau'), ' Das kann eine Minute dauern – die Liste aktualisiert sich von selbst.')
         : null,
       fehler && !inArbeitListe.length ? h('p', { class: 'fehlertext' }, 'Letzter Versuch fehlgeschlagen: ' + (fehler.fehler || 'unbekannt')) : null,
+      berichte.length ? h('h3', null, 'Bisherige Berichte') : null,
       berichte.length
         ? h('ul', { class: 'liste', 'data-pruef': 'marktberichte-liste' }, berichte.slice(0, 5).map(b => {
           const url = sichererLink(b.bericht_url);
@@ -1250,6 +1253,8 @@
               h('a', { class: 'knopf klein', href: url, target: '_blank', rel: 'noopener noreferrer', 'data-pruef': 'marktbericht-ansehen' }, 'Bericht ansehen')) : null);
         }))
         : leer(inArbeitListe.length ? 'Der erste Bericht entsteht gerade.' : 'Noch kein Marktbericht. Zeitraum wählen und „Marktbericht erstellen“ antippen.'));
+    k.dataset.pruef = 'marktbericht';
+    return k;
   }
 
   function kennzahlenKarte(ceoAufgaben) {
@@ -1942,7 +1947,7 @@
     const zahlen = {};
     stufen.forEach(s => { zahlen[s[0]] = 0; });
     kontakte.forEach(kt => { zahlen[kt.status] = (zahlen[kt.status] || 0) + 1; });
-    return karte(['Kundenstatus', tag(kontakte.length + ' Kontakte', 'grau')],
+    return karte(['Kundenstatus', tag(zahl(kontakte.length) + (kontakte.length === 1 ? ' Kontakt' : ' Kontakte'), 'grau')],
       h('div', { class: 'chips' }, Object.entries(zahlen).map(([s, n]) =>
         h('span', { class: 'chip' }, tag((stufen.find(x => x[0] === s) || [s, KONTAKT_STATUS[s] || s])[1], KONTAKT_TON[s]), h('strong', null, zahl(n))))));
   }
@@ -2443,11 +2448,13 @@
     const offenPreis = typeof e.preis_monat_cent !== 'number';
     const stunden = n => (typeof n === 'number' && isFinite(n) ? n.toLocaleString('de-DE') : '0') + ' h';
     const stundenKachel = kachel('Stunden pro Monat', stunden(e.stunden_gesamt_monat), '', 'davon Anfahrt ' + stunden(e.anfahrt && e.anfahrt.stunden_monat));
+    const preisOffen = offenPreis
+      ? hinweis([h('strong', null, 'Preis offen'), ' – es fehlt der Stundensatz. Oben „Stundensatz festlegen“ antippen und neu rechnen.'], 'warn')
+      : null;
+    if (preisOffen) preisOffen.dataset.pruef = 'kalk-preis-monat';
     return h('div', { class: 'kalk-ergebnis' },
       offenPreis
-        ? [h('div', { class: 'raster' }, stundenKachel),
-          h('div', { class: 'hinweisbox warn', 'data-pruef': 'kalk-preis-monat' },
-            h('strong', null, 'Preis offen'), ' – es fehlt der Stundensatz. Oben „Stundensatz festlegen“ antippen und neu rechnen.')]
+        ? [h('div', { class: 'raster' }, stundenKachel), preisOffen]
         : h('div', { class: 'raster' },
           kachel('Preis pro Monat (netto)', e.preis_monat || '—', 'ok', null, 'kalk-preis-monat'),
           kachel('Preis pro Jahr (netto)', e.preis_jahr || '—', '', null, 'kalk-preis-jahr'),
@@ -2607,7 +2614,7 @@
       kv([['Rückmeldungen gesamt', zahl(e.gesamt)]]),
       Object.keys(je).length
         ? h('ul', { class: 'liste' }, Object.entries(je).map(([art, d]) => h('li', { class: 'eintrag' },
-          h('div', { class: 'eintrag-kopf' }, h('span', { class: 'eintrag-titel' }, text(listen.arten, art)), tag(zahl(d.anzahl) + ' Rückmeldungen', 'grau')),
+          h('div', { class: 'eintrag-kopf' }, h('span', { class: 'eintrag-titel' }, text(listen.arten, art)), tag(zahl(d.anzahl) + (d.anzahl === 1 ? ' Rückmeldung' : ' Rückmeldungen'), 'grau')),
           h('div', { class: 'chips' }, Object.entries(d.reaktionen || {}).filter(r => r[1]).map(([r, n]) =>
             h('span', { class: 'chip' }, tag(text(listen.reaktionen, r), REAKTION_TON[r] || 'grau'), h('strong', null, zahl(n))))),
           gruendePaare(d.gruende).length
@@ -2687,13 +2694,14 @@
     z.append(auftragssucheKarte(e));
     z.append(kiModellKarte(e, ms));
     z.append(sicherungKarte(e.sicherungen || []));
-    z.append(h('section', { class: 'karte', 'data-pruef': 'technik' },
-      h('h2', null, 'Technik (nur bei Bedarf)'),
+    const technik = karte('Technik (nur bei Bedarf)',
       h('p', { class: 'hilfe' }, 'Kosten, Betrieb, Berechtigungen und Protokoll. Im Alltag müsst ihr hier nichts ändern.'),
       aufklapp('Kosten und Betrieb', 'technik-betrieb', false, kostenBetriebFormular(e)),
       aufklapp('Berechtigungen (Aktionskatalog)', 'technik-katalog', false, katalogInhalt(e.aktionen || {})),
       aufklapp('Protokoll', 'technik-protokoll', false, await protokollInhalt()),
-      aufklapp('KI-Aufrufe (Protokoll)', 'technik-modellaufrufe', false, modellaufrufeInhalt(e.modellaufrufe || []))));
+      aufklapp('KI-Aufrufe (Protokoll)', 'technik-modellaufrufe', false, modellaufrufeInhalt(e.modellaufrufe || [])));
+    technik.dataset.pruef = 'technik';
+    z.append(technik);
   }
 
   /** Stundensatz als eigene Karte – ohne ihn gibt es keinen Preis. */
@@ -2701,11 +2709,12 @@
     const w = e.werte || {};
     if (!('stundensatz_cent' in w)) return nichtVerfuegbar('Stundensatz für Kalkulationen', 'Diese Einstellung gibt es in dieser Version des Servers noch nicht.');
     const satz = typeof w.stundensatz_cent === 'number' ? w.stundensatz_cent : 0;
-    return h('section', { class: 'karte', 'data-pruef': 'stundensatz-karte' },
-      h('h2', null, 'Stundensatz für Kalkulationen'),
+    const k = karte('Stundensatz für Kalkulationen',
       h('p', null, 'Gerade: ', satz ? h('strong', { 'data-pruef': 'stundensatz-wert' }, euro(satz) + ' pro Stunde (netto)')
         : tag('offen – noch nicht festgelegt', 'warn')),
       stundensatzFormular(satz, 'stundensatz-formular'));
+    k.dataset.pruef = 'stundensatz-karte';
+    return k;
   }
 
   function centAus(text, name) {
@@ -2770,24 +2779,37 @@
       neuLaden();
     });
 
+    // Der Probeaufruf zählt als KI-Aufruf: danach neu aufbauen, damit Zähler und Protokoll stimmen.
+    // Das Ergebnis bleibt sichtbar, solange dasselbe Modell an derselben Adresse eingestellt ist.
+    const testFuer = [ms.anbieter, ms.modell, w.ollama_adresse].join(' ');
     const ergebnis = h('div', { 'data-pruef': 'modell-test-ergebnis', 'aria-live': 'polite' });
+    const letzterTest = zustand.modellTest;
+    if (letzterTest && letzterTest.fuer === testFuer) {
+      ersetze(ergebnis, letzterTest.ok && letzterTest.antwort
+        ? hinweis([
+          h('div', null, tag(letzterTest.antwort.kennzeichnung || 'KI-Entwurf – ungeprüft', 'warn')),
+          h('p', { class: 'text' }, 'Antwort: ', h('strong', null, String(letzterTest.antwort.text || ''))),
+          h('div', { class: 'meta' }, 'getestet ' + zeitText(letzterTest.zeit) + ' · Dauer: ' + zahl(letzterTest.dauer_ms) + ' ms · ' + (letzterTest.antwort.quelle || ''))])
+        : h('p', { class: 'fehlertext' }, 'Kein Ergebnis: ' + (letzterTest.meldung || 'unbekannt')));
+    }
     const testen = aktionsKnopf('Modell testen', 'zweit', async () => {
       ersetze(ergebnis, h('p', { class: 'hilfe' }, 'Frage an das Modell läuft … (kann bis zu einer Minute dauern)'));
-      const r = await API.post('/api/modell/testen');
-      if (r && r.ok && r.antwort) {
-        ersetze(ergebnis, h('div', { class: 'hinweisbox' },
-          h('div', null, tag(r.antwort.kennzeichnung || 'KI-Entwurf – ungeprüft', 'warn')),
-          h('p', { class: 'text' }, 'Antwort: ', h('strong', null, String(r.antwort.text || ''))),
-          h('div', { class: 'meta' }, 'Dauer: ' + zahl(r.dauer_ms) + ' ms · ' + (r.antwort.quelle || ''))));
-      } else {
-        ersetze(ergebnis, h('p', { class: 'fehlertext' }, 'Kein Ergebnis: ' + ((r && r.meldung) || 'unbekannt')));
+      let r;
+      try {
+        r = await API.post('/api/modell/testen');
+      } catch (f) {
+        ersetze(ergebnis, null);
+        throw f;
       }
+      zustand.modellTest = Object.assign({ fuer: testFuer, zeit: new Date().toISOString() }, r || {});
+      meldung(r && r.ok ? 'Probeaufruf fertig – das Modell hat geantwortet.' : 'Probeaufruf ohne Ergebnis – der Grund steht in der Karte „KI-Modell“.',
+        r && r.ok ? 'ok' : 'info');
+      neuLaden();
     }, { 'data-pruef': 'modell-testen', disabled: ms.anbieter === 'keiner' || !ms.anbieter });
 
     const janein = (b, ja, nein) => tag(b ? ja : nein, b ? 'ok' : 'warn');
     const installiert = Array.isArray(ms.installierte_modelle) ? ms.installierte_modelle : [];
-    return h('section', { class: 'karte', 'data-pruef': 'ki-modell' },
-      h('h2', null, 'KI-Modell (lokal, optional)'),
+    const k = karte('KI-Modell (lokal, optional)',
       h('p', { class: 'hilfe' }, 'KI-Ausgaben sind ungeprüfte Entwürfe und werden immer so gekennzeichnet. Ohne Modell läuft alles weiter. '
         + 'Ein externer, bezahlter KI-Dienst ist nicht angebunden.'),
       kv([
@@ -2803,6 +2825,8 @@
       ergebnis,
       h('div', { class: 'trenner' }),
       form);
+    k.dataset.pruef = 'ki-modell';
+    return k;
   }
 
   /** Kosten und Betrieb (eingeklappt unter „Technik“). */
@@ -2982,9 +3006,10 @@
     return h('div', null,
       aufrufe.length
         ? h('ul', { class: 'liste' }, aufrufe.map(m => h('li', { class: 'eintrag' },
-          h('div', { class: 'eintrag-kopf' }, h('span', { class: 'eintrag-titel' }, m.anbieter + ' · ' + m.modell), tag(m.ergebnis, m.ergebnis === 'ok' ? 'ok' : 'warn')),
+          h('div', { class: 'eintrag-kopf' }, h('span', { class: 'eintrag-titel' }, m.anbieter + ' · ' + m.modell),
+            tag(KI_AUFRUF_TEXT[m.ergebnis] || m.ergebnis, KI_AUFRUF_TON[m.ergebnis] || 'grau')),
           h('div', { class: 'meta' }, zeitText(m.zeit) + ' · ' + agentName(m.agent) + ' · Kosten ' + euro(m.kosten_cent)))))
-        : leer('Noch keine Modellaufrufe.'));
+        : leer('Noch keine KI-Aufrufe.'));
   }
 
   // ===========================================================================

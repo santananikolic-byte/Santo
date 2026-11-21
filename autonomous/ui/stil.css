@@ -819,6 +819,6 @@ progress.ueber::-moz-progress-bar { background: var(--err); }
 .sprungleiste { margin: 0 0 16px; }
 /* Überschrift, auf die der Fokus nach dem Speichern zurückkehrt */
 .karte h2[tabindex="-1"]:focus { outline: none; }
-.karte h2[tabindex="-1"]:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; border-radius: 4px; }
-/* Technik-Teil des Dashboards */
-.aufklapp.technik > .raster { margin-top: 12px; }
+.karte h2[tabindex="-1"]:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; border-radius: 6px; }
+/* Kacheln im aufgeklappten Technik-Teil (Dashboard): Abstand wie bei Formularen im Aufklapper */
+details.aufklapp[open] > .raster { margin-top: 8px; }
