@@ -72,6 +72,6 @@ Preis, den ihr eingebt.
 ## Prüfen, ob alles funktioniert
 
 ```
-python3 -m autonomous test               # 105 automatische Tests
+python3 -m autonomous test               # alle automatischen Tests (Stand und Zahlen: docs/PHASENBERICHT.md)
 python3 autonomous/tests/ui_server.py    # Oberfläche im Browser (braucht Node.js + Playwright, nur für Entwickler)
 ```
