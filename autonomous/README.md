@@ -1,14 +1,28 @@
 # AUTONOMOUS – Anleitung
 
 Ein lokales Unternehmenssystem mit Agenten, Aufgaben, Freigaben, Simulations-Wallet und echten Finanzen.
-Es läuft auf dem eigenen Mac, **ohne Installation von Zusatzpaketen** (nur Python 3) und **ohne
+Es läuft auf dem eigenen Mac, **ohne Installation von Zusatzpaketen** (nur Python 3.9 oder neuer) und **ohne
 kostenpflichtige Dienste**.
+
+## Auf den Mac holen (einmalig)
+
+1. Auf GitHub das Repository `santananikolic-byte/Santo` öffnen, oben den Branch **`claude/elegant-meitner-ho9kqz`**
+   wählen, dann **Code → Download ZIP** und die ZIP-Datei per Doppelklick entpacken.
+2. Python: Auf dem Mac wird Python 3.9 oder neuer gebraucht. Fehlt es, meldet das Startskript genau das – dann im
+   Terminal einmal `xcode-select --install` ausführen (Apple-Entwicklerwerkzeuge, kostenlos).
+3. Meldet macOS beim Doppelklick „keine Berechtigung“: im Terminal einmal
+   `chmod +x ~/Downloads/Santo-*/AUTONOMOUS-*.command` eingeben (Pfad ggf. anpassen).
+
+Geprüft in der Entwicklungsumgebung mit **Python 3.9** (wie auf dem Mac vorinstalliert) und Python 3.13: alle
+automatischen Tests, Oberfläche und ein echter Suchlauf. Auf einem echten Mac: **noch nicht verifiziert**.
 
 ## Starten und Stoppen
 
 1. Doppelklick auf **`AUTONOMOUS-starten.command`** (im Hauptordner).
    - Beim ersten Mal sperrt macOS die Datei eventuell. Dann Rechtsklick → *Öffnen* → *Öffnen*.
    - Der Browser öffnet sich mit der Oberfläche. Der Link enthält einen geheimen Zugangsschlüssel. Danach merkt sich der Browser den Zugang.
+   - Das Skript prüft vorher: Ist Python eingerichtet und neu genug? Ist der Port frei? Bei einem Problem steht
+     dort in einem Satz, was zu tun ist.
 2. Beenden: Doppelklick auf **`AUTONOMOUS-stoppen.command`**. Aufgaben und Buchungen bleiben gespeichert.
 
 Kommandozeile (im Hauptordner):

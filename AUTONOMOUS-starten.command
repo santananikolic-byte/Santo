@@ -1,29 +1,54 @@
 #!/bin/bash
 # Doppelklick: startet AUTONOMOUS im Hintergrund und öffnet die Oberfläche im Browser.
-# Braucht nur Python 3 (auf dem Mac vorhanden oder über die Apple-Entwicklerwerkzeuge).
+# Braucht nur Python 3.9 oder neuer (auf dem Mac über die Apple-Entwicklerwerkzeuge vorhanden).
 cd "$(dirname "$0")" || exit 1
 PORT="${AUTONOMOUS_PORT:-8770}"
-if ! command -v python3 >/dev/null 2>&1; then
-    echo "Python 3 fehlt. Bitte einmal im Terminal 'xcode-select --install' ausführen und danach erneut doppelklicken."
+
+ende_mit_fehler() {
+    echo ""
+    echo "$1"
     read -r -p "Enter zum Schließen ..." _
     exit 1
+}
+
+# 1) Python wirklich ausführbar? (Auf dem Mac gibt es /usr/bin/python3 auch ohne Entwicklerwerkzeuge –
+#    dann startet es nicht, sondern bietet die Installation an.)
+VERSION="$(python3 -c 'import sys; print("%d.%d" % sys.version_info[:2])' 2>/dev/null)"
+if [ -z "$VERSION" ]; then
+    ende_mit_fehler "Python 3 ist nicht eingerichtet. Bitte im Terminal einmal 'xcode-select --install' ausführen
+(Apple-Entwicklerwerkzeuge, kostenlos), danach erneut doppelklicken."
 fi
+if ! python3 -c 'import sys; sys.exit(0 if sys.version_info >= (3, 9) else 1)' 2>/dev/null; then
+    ende_mit_fehler "Python $VERSION ist zu alt – AUTONOMOUS braucht Python 3.9 oder neuer."
+fi
+
+# 2) Läuft AUTONOMOUS schon? (Antwort muss wirklich von AUTONOMOUS kommen, nicht von einem anderen Programm.)
+ist_autonomous() {
+    curl -s --max-time 2 "http://127.0.0.1:$PORT/status" 2>/dev/null | grep -q '"system": *"AUTONOMOUS"'
+}
+port_belegt() {
+    curl -s -o /dev/null --max-time 2 "http://127.0.0.1:$PORT/" 2>/dev/null
+}
+
 mkdir -p autonomous/daten
-if ! curl -s --max-time 2 "http://127.0.0.1:$PORT/status" >/dev/null 2>&1; then
-    echo "AUTONOMOUS wird gestartet ..."
+if ! ist_autonomous; then
+    if port_belegt; then
+        ende_mit_fehler "Port $PORT ist von einem anderen Programm belegt. Entweder das Programm beenden oder
+AUTONOMOUS mit anderem Port starten:  AUTONOMOUS_PORT=8771 ./AUTONOMOUS-starten.command"
+    fi
+    echo "AUTONOMOUS wird gestartet (Python $VERSION) ..."
     nohup python3 -m autonomous start >> autonomous/daten/server.log 2>&1 &
-    for _ in $(seq 1 30); do
+    for _ in $(seq 1 40); do
         sleep 0.5
-        curl -s --max-time 1 "http://127.0.0.1:$PORT/status" >/dev/null 2>&1 && break
+        ist_autonomous && break
     done
 fi
-if ! curl -s --max-time 2 "http://127.0.0.1:$PORT/status" >/dev/null 2>&1; then
-    echo "Start fehlgeschlagen. Letzte Meldungen:"
+if ! ist_autonomous; then
+    echo "Start fehlgeschlagen. Letzte Meldungen aus autonomous/daten/server.log:"
     tail -n 20 autonomous/daten/server.log
-    read -r -p "Enter zum Schließen ..." _
-    exit 1
+    ende_mit_fehler "Bitte diese Meldungen an den Entwickler weitergeben."
 fi
 LINK="$(python3 -m autonomous link)"
 echo "AUTONOMOUS läuft: $LINK"
-echo "(Auf dem iPhone: siehe ANLEITUNG in autonomous/README.md)"
+echo "Beenden: Doppelklick auf AUTONOMOUS-stoppen.command (Daten bleiben gespeichert)."
 if command -v open >/dev/null 2>&1; then open "$LINK"; fi
