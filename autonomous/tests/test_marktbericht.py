@@ -185,6 +185,23 @@ class TestTeilausfall(MarktTest):
         super().setUp()
         self.einschalten()
 
+    def test_marktbewertung_ceo_an_research_laeuft_durch(self):
+        """Regression: eine zweite Funktion namens _zahl überschrieb die Punktwert-Prüfung → TypeError."""
+        from autonomous.agenten import research
+        self.assertEqual(research._zahl(5), 5)          # Punktwert bleibt Zahl
+        self.assertIsNone(research._zahl("5"))          # Text ist kein Punktwert
+        self.assertIsNone(research._zahl(7))            # außerhalb 0–5
+        self.kern.aufgaben.anlegen("Chancen", "chancen_bewerten", "ceo", "eigentuemer")
+        self.orch.alle_abarbeiten()
+        aufgaben = {a["typ"]: a for a in self.kern.aufgaben.liste()}
+        self.assertEqual(aufgaben["chancen_bewerten"]["status"], "abgeschlossen")
+        mb = aufgaben["marktbewertung"]
+        self.assertEqual(mb["status"], "abgeschlossen", mb["fehler"])
+        rangliste = mb["ergebnis"]["rangliste"]
+        self.assertTrue(rangliste)
+        self.assertTrue(all(isinstance(r["wert"], float) for r in rangliste if r["wert"] is not None))
+        self.assertEqual(mb["ergebnis"]["spitze_nach_gewichtung"], "digitale_dienstleistungen")
+
     def test_angebotszahl_nur_bei_passenden_listen(self):
         """Passen Codes und Werte von TED nicht zusammen, wird nicht falsch zugeordnet, sondern nicht gezählt."""
         from autonomous.agenten.research import zuschlaege_auswerten

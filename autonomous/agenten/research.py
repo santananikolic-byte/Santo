@@ -542,7 +542,7 @@ def _tabelle(zeilen, kopf_links, kopf_rechts="Anzahl", mit_balken=True):
     return "".join(teile)
 
 
-def _zahl(wert):
+def _zahl_text(wert):
     """Deutsche Schreibweise: 8.0 → „8“, 31.5 → „31,5“, None → „–“."""
     if wert is None:
         return "–"
@@ -592,7 +592,7 @@ def bericht_html(d):
                         ("Angebote je Los (Median)", kz.get("angebote_je_los_median")),
                         ("Angebotsfrist (Median, Tage)", kz.get("angebotsfrist_median_tage")),
                         ("Gesammelte Ausschreibungen", kz.get("gesammelte_ausschreibungen"))):
-        t.append('<div class="kachel"><span class="leise">%s</span><b>%s</b></div>' % (esc(titel), esc(_zahl(wert))))
+        t.append('<div class="kachel"><span class="leise">%s</span><b>%s</b></div>' % (esc(titel), esc(_zahl_text(wert))))
     t.append("</div>")
     if d.get("ki_zusammenfassung"):
         ki = d["ki_zusammenfassung"]
@@ -609,7 +609,7 @@ def bericht_html(d):
         t.append("<h3>Nach Regierungsbezirk</h3>" + _tabelle(list(n["nach_region"].items()), "Region"))
         t.append("<h3>Verfahrensart</h3>" + _tabelle(list(n["verfahren"].items()), "Verfahren"))
         t.append('<p>Angebotsfrist im Median: <b>%s Tage</b> (aus %d Ausschreibungen mit Frist).</p>'
-                 % (esc(_zahl(n.get("angebotsfrist_median_tage"))), n.get("angebotsfrist_anzahl", 0)))
+                 % (esc(_zahl_text(n.get("angebotsfrist_median_tage"))), n.get("angebotsfrist_anzahl", 0)))
 
     w = ab["wettbewerber"]
     t.append("<h2>2. Wettbewerber (Zuschläge)</h2>%s<p class=\"leise\">%s</p>"
@@ -622,7 +622,7 @@ def bericht_html(d):
              for g, a in w["groessen"].items()], "Größe"))
         al = w["angebote_je_los"]
         t.append("<h3>Angebote je Los</h3><p>Median: <b>%s</b> (aus %d Losen mit Angabe).</p>"
-                 % (esc(_zahl(al["median"])), al["lose_mit_angabe"]) +
+                 % (esc(_zahl_text(al["median"])), al["lose_mit_angabe"]) +
                  _tabelle(list(al["verteilung"].items()), "Angebote je Los", "Lose"))
         wt = w["werte"]
         t.append("<h3>Auftragswerte</h3><p>Veröffentlicht: <b>%d</b> · nicht veröffentlicht (Platzhalter oder "
