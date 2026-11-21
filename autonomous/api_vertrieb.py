@@ -13,6 +13,7 @@ from .db import jetzt, neue_id
 from .produkte import datei_schreiben, produkt_hole, produkte_liste, sicherer_pfad
 from .produkte import angebot as angebot_vorlage
 from .produkte import google_profil, verkaufsseite, webseite
+from .produkte import kalkulation as kalkulation_modul
 from .wallet import euro
 
 STUFEN = ["neu", "kontaktiert", "interessiert", "angebot", "gewonnen", "verloren"]
@@ -148,7 +149,9 @@ def _angebot_aufbereiten(z):
         z["inhalt"] = json.loads(z.get("inhalt") or "{}")
     except ValueError:
         z["inhalt"] = {}
-    z["betrag"] = euro(z["betrag_cent"])
+    z["art"] = (z["inhalt"] or {}).get("art") or "einmalig"
+    z["abrechnung"] = "monatlich" if z["art"] == "reinigung_dauerauftrag" else "einmalig"
+    z["betrag"] = euro(z["betrag_cent"]) + (" pro Monat (netto)" if z["abrechnung"] == "monatlich" else "")
     z["ansehen_url"] = "/produkte/" + z["datei"] if z.get("datei") else None
     return z
 
@@ -164,14 +167,49 @@ def r_angebote(kern, a):
 def r_angebot_anlegen(kern, a):
     b = a["body"]
     eingabe = _felder(b, ("kontakt_id", "produkt_id", "titel", "betrag", "leistungen", "lieferzeit", "gueltig_bis",
-                          "preis_hinweis", "anbieter", "anbieter_anschrift", "anbieter_kontakt"))
-    d = angebot_vorlage.eingabe_pruefen(eingabe)
+                          "preis_hinweis", "anbieter", "anbieter_anschrift", "anbieter_kontakt", "art", "positionen",
+                          "kalkulation_aufgabe_id", "objekt", "vertragsbeginn", "laufzeit", "kuendigungsfrist"))
+    kalk = None
+    if eingabe.get("kalkulation_aufgabe_id") not in (None, ""):
+        kid = eingabe["kalkulation_aufgabe_id"]
+        if not isinstance(kid, str) or len(kid) > 64:
+            raise ApiFehler(400, "kalkulation_aufgabe_id ungültig")
+        try:
+            kalk = kalkulation_modul.aus_aufgabe(kern.aufgaben.hole(kid))
+        except KeyError:
+            raise ApiFehler(404, "Kalkulation nicht gefunden")
+        except ValueError as fehler:
+            raise ApiFehler(400, str(fehler))
+    try:
+        d = angebot_vorlage.eingabe_pruefen(eingabe, kalk)
+    except ValueError as fehler:
+        raise ApiFehler(400, str(fehler))
     if d["kontakt_id"] and not kern.db.eins("SELECT id FROM kontakte WHERE id=?", (d["kontakt_id"],)):
         raise ApiFehler(404, "Kontakt nicht gefunden")
     if d["produkt_id"] and not produkt_hole(kern, d["produkt_id"]):
         raise ApiFehler(404, "Produkt nicht gefunden")
-    aid = kern.aufgaben.anlegen("Angebot entwerfen (%s)" % euro(d["betrag_cent"]), "angebot_entwurf", "sales",
-                                EIGENTUEMER, eingabe, ganzzahl(b, "prioritaet", 2, 1, 5))
+    titel = ("Angebot entwerfen (%s pro Monat, Dauerauftrag)" % euro(d["betrag_cent"])
+             if d["art"] == "reinigung_dauerauftrag" else "Angebot entwerfen (%s)" % euro(d["betrag_cent"]))
+    aid = kern.aufgaben.anlegen(titel, "angebot_entwurf", "sales", EIGENTUEMER, eingabe,
+                                ganzzahl(b, "prioritaet", 2, 1, 5))
+    return {"aufgabe_id": aid}
+
+
+# ---------------------------------------------------------------- Kalkulation
+@route("POST", "/api/kalkulation/reinigung")
+def r_kalkulation_reinigung(kern, a):
+    """Monatspreis für einen Reinigungs-Dauerauftrag rechnen (Finance-Agent). Ohne Stundensatz bleibt er OFFEN."""
+    eingabe = _felder(a["body"], ("positionen", "stundensatz", "material_prozent", "anfahrten_pro_monat",
+                                  "anfahrt_minuten", "zuschlag_prozent"))
+    try:
+        d = kalkulation_modul.eingabe_pruefen(eingabe)  # Fehler sofort melden (400)
+    except ValueError as fehler:
+        raise ApiFehler(400, str(fehler))
+    titel = "Reinigung kalkulieren: %s" % ", ".join(p["bezeichnung"] for p in d["positionen"][:3])
+    if len(d["positionen"]) > 3:
+        titel += " …"
+    aid = kern.aufgaben.anlegen(titel[:200], "kalkulation_reinigung", "finance", EIGENTUEMER, eingabe,
+                                ganzzahl(a["body"], "prioritaet", 2, 1, 5))
     return {"aufgabe_id": aid}
 
 
@@ -227,9 +265,12 @@ def r_nachricht(kern, a):
     kontakt = kern.db.eins("SELECT id, firma FROM kontakte WHERE id=?", (kid,))
     if not kontakt:
         raise ApiFehler(404, "Kontakt nicht gefunden")
+    angebot = text(b, "angebot", False, 20) or "google_profil"
+    if angebot not in ("google_profil", "webseite", "reinigung"):
+        raise ApiFehler(400, "angebot muss google_profil, webseite oder reinigung sein")
     aid = kern.aufgaben.anlegen("Nachricht entwerfen: %s" % kontakt["firma"], "nachricht_entwurf", "sales",
-                                EIGENTUEMER, {"kontakt_id": kid, "anlass": text(b, "anlass", False, 200) or "Erstkontakt"},
-                                2)
+                                EIGENTUEMER, {"kontakt_id": kid, "anlass": text(b, "anlass", False, 200) or "Erstkontakt",
+                                              "angebot": angebot}, 2)
     return {"aufgabe_id": aid}
 
 

@@ -17,9 +17,11 @@ from . import Agent
 from ..db import jetzt, neue_id
 from ..produkte import bereinigen, datei_schreiben, datum_deutsch, produkt_hole, sicherer_pfad
 from ..produkte import angebot as angebot_vorlage
+from ..produkte import kalkulation as kalkulation_modul
 from ..wallet import euro
 
 STUFEN = ("neu", "kontaktiert", "interessiert", "angebot", "gewonnen", "verloren")
+NACHRICHT_ANGEBOTE = ("google_profil", "webseite", "reinigung")
 ANGEBOT_STATUS = ("entwurf", "geprueft", "versendet", "angenommen", "abgelehnt")
 KEIN_KANAL = ("Kein Versandkanal angebunden (Version 1). Angebot liegt als Datei bereit – bitte selbst senden "
               "und danach als versendet markieren.")
@@ -37,16 +39,29 @@ class SalesAgent(Agent):
                         "kundenkontakt", "externe_nachricht"})
     aufgabentypen = {
         "angebot_entwurf": "Angebot als druckbaren Entwurf erstellen (Eingabe: betrag, kontakt_id?, produkt_id?, "
-                           "titel?, leistungen?, lieferzeit?)",
+                           "titel?, leistungen?, lieferzeit?; für Daueraufträge: art = reinigung_dauerauftrag, "
+                           "positionen oder kalkulation_aufgabe_id, objekt?, vertragsbeginn?, laufzeit?, "
+                           "kuendigungsfrist?)",
         "nachricht_entwurf": "Nachricht an einen Kontakt entwerfen – wird nicht versendet (Eingabe: kontakt_id, anlass, "
-                             "angebot? = google_profil (Standard) | webseite)",
+                             "angebot? = google_profil (Standard) | webseite | reinigung)",
         "pipeline_auswertung": "Interessenten und Angebote nach Status auswerten",
         "angebot_versenden": "Geprüftes Angebot versenden – nur nach Freigabe des Eigentümers (Eingabe: angebot_id)",
     }
 
     # ------------------------------------------------------------------ Angebot
+    @staticmethod
+    def kalkulation_laden(k, eingabe):
+        """Abgeschlossene Kalkulation für ein Dauerauftrags-Angebot laden (oder None)."""
+        kid = eingabe.get("kalkulation_aufgabe_id")
+        if kid in (None, ""):
+            return None
+        if not isinstance(kid, str) or len(kid) > 64:
+            raise ValueError("kalkulation_aufgabe_id ungültig.")
+        return kalkulation_modul.aus_aufgabe(k.aufgaben.hole(kid))
+
     def aufgabe_angebot_entwurf(self, aufgabe, k):
-        d = angebot_vorlage.eingabe_pruefen(aufgabe["eingabe"])
+        kalk = self.kalkulation_laden(k, aufgabe["eingabe"])
+        d = angebot_vorlage.eingabe_pruefen(aufgabe["eingabe"], kalk)
         kontakt = produkt = None
         if d["kontakt_id"]:
             kontakt = k.db.eins("SELECT * FROM kontakte WHERE id=?", (d["kontakt_id"],))
@@ -68,11 +83,17 @@ class SalesAgent(Agent):
                         " erstellt, aktualisiert) VALUES (?,?,?,?,?,?,?,?,?,?)",
                         (angebot_id, inhalt["kontakt_id"], inhalt["produkt_id"], inhalt["titel"],
                          inhalt["betrag_cent"], "entwurf", json.dumps(inhalt, ensure_ascii=False), datei, z, z))
-        k.protokoll.info("sales", "Angebotsentwurf erstellt", {"angebot": angebot_id})
-        return {"angebot_id": angebot_id, "nr": inhalt["nr"], "status": "entwurf", "betrag": euro(inhalt["betrag_cent"]),
-                "dateien": [pfad], "ansehen_url": "/produkte/" + datei,
-                "hinweis": "ENTWURF – vor Versand prüfen. Gelbe Felder (z. B. Anbieter, Umsatzsteuer, Gültigkeit) "
-                           "ergänzt der Inhaber. Ein Angebot ist keine Einnahme."}
+        k.protokoll.info("sales", "Angebotsentwurf erstellt", {"angebot": angebot_id, "art": inhalt["art"]})
+        ergebnis = {"angebot_id": angebot_id, "nr": inhalt["nr"], "status": "entwurf", "art": inhalt["art"],
+                    "betrag": angebot_vorlage.betrag_text(inhalt), "dateien": [pfad], "ansehen_url": "/produkte/" + datei,
+                    "hinweis": "ENTWURF – vor Versand prüfen. Gelbe Felder (z. B. Anbieter, Umsatzsteuer, Gültigkeit) "
+                               "ergänzt der Inhaber. Ein Angebot ist keine Einnahme."}
+        if inhalt["art"] == "reinigung_dauerauftrag":
+            ergebnis["preis_quelle"] = inhalt["preis_quelle"]
+            ergebnis["hinweis"] = ("ENTWURF – vor Versand prüfen. Vertragsbeginn, Laufzeit, Kündigungsfrist, "
+                                   "Umsatzsteuer und Preisanpassung ergänzt der Inhaber (gelbe Felder). Ein Angebot "
+                                   "ist keine Einnahme.")
+        return ergebnis
 
     def aufgabe_angebot_versenden(self, aufgabe, k):
         angebot_id = aufgabe["eingabe"].get("angebot_id")
@@ -107,7 +128,7 @@ class SalesAgent(Agent):
         if not kontakt:
             raise KeyError("Kontakt nicht gefunden.")
         anlass = bereinigen(e.get("anlass"), 200) or "Erstkontakt"
-        angebot_art = e.get("angebot") if e.get("angebot") in ("google_profil", "webseite") else "google_profil"
+        angebot_art = e.get("angebot") if e.get("angebot") in NACHRICHT_ANGEBOTE else "google_profil"
         self.darf(k, "entwurf_erstellen", "nachricht:" + kontakt["id"], aufgabe)
 
         einwilligung = kontakt["einwilligung"] == "ja" and bool((kontakt["einwilligung_nachweis"] or "").strip())
@@ -123,6 +144,16 @@ class SalesAgent(Agent):
             betreff = "Unser Angebot: %s" % letztes["titel"]
             kern_text = ("vor einiger Zeit haben wir Ihnen unser Angebot „%s“ geschickt. Haben Sie dazu noch Fragen? "
                          "Gern besprechen wir es mit Ihnen – telefonisch oder persönlich." % letztes["titel"])
+        elif angebot_art == "reinigung":
+            # Feste Reinigungsaufträge (Hausverwaltungen, Gewerbe). Keine Referenzen, keine Zahlen, keine
+            # Eigenschaften behaupten – nur, was das Angebot tatsächlich enthält. Ort nur aus dem Kontakt.
+            betreff = "Regelmäßige Reinigung für Ihre Objekte – kurze Vorstellung"
+            gebiet = (" in %s und Umgebung" % kontakt["ort"]) if kontakt["ort"] else \
+                " [Einsatzgebiet – vom Inhaber ergänzen]"
+            kern_text = ("wir übernehmen die regelmäßige Reinigung von Treppenhäusern, Büros und Gewerbeflächen%s. "
+                         "Gern sehen wir uns Ihr Objekt an und machen Ihnen ein schriftliches Angebot: mit einem "
+                         "Leistungsverzeichnis (was, wie oft) und einem festen Monatspreis.\n\n"
+                         "[Kurz vorstellen, wer wir sind – vom Inhaber ergänzen]" % gebiet)
         elif angebot_art == "webseite":
             betreff = "Ihre eigene Webseite – kurze Information"
             kern_text = ("wir erstellen für kleine Betriebe%s eine übersichtliche eigene Webseite: mit Ihren "
@@ -176,11 +207,18 @@ class SalesAgent(Agent):
         kontakte = {s: 0 for s in STUFEN}
         for z in k.db.alle("SELECT status, COUNT(*) AS n FROM kontakte GROUP BY status"):
             kontakte[z["status"]] = z["n"]
-        angebote = {s: {"anzahl": 0, "summe_cent": 0} for s in ANGEBOT_STATUS}
-        for z in k.db.alle("SELECT status, COUNT(*) AS n, COALESCE(SUM(betrag_cent),0) AS s FROM angebote "
-                           "GROUP BY status"):
-            angebote[z["status"]] = {"anzahl": z["n"], "summe_cent": z["s"]}
+        angebote = {s: {"anzahl": 0, "summe_cent": 0, "monatlich_cent": 0} for s in ANGEBOT_STATUS}
+        for z in k.db.alle("SELECT status, betrag_cent, inhalt FROM angebote"):
+            try:
+                art = (json.loads(z["inhalt"] or "{}") or {}).get("art")
+            except ValueError:
+                art = None
+            eintrag = angebote[z["status"]]
+            eintrag["anzahl"] += 1
+            # Daueraufträge (Monatspreis) nie mit Einmalpreisen addieren
+            eintrag["monatlich_cent" if art == "reinigung_dauerauftrag" else "summe_cent"] += z["betrag_cent"]
         offen = sum(angebote[s]["summe_cent"] for s in ("entwurf", "geprueft", "versendet"))
+        offen_monatlich = sum(angebote[s]["monatlich_cent"] for s in ("entwurf", "geprueft", "versendet"))
         entschieden_k = kontakte["gewonnen"] + kontakte["verloren"]
         entschieden_a = angebote["angenommen"]["anzahl"] + angebote["abgelehnt"]["anzahl"]
         ohne = [z["firma"] for z in k.db.alle(
@@ -190,11 +228,17 @@ class SalesAgent(Agent):
             "kontakte_nach_status": kontakte,
             "kontakte_gesamt": sum(kontakte.values()),
             "mit_einwilligung": k.db.wert("SELECT COUNT(*) FROM kontakte WHERE einwilligung='ja'"),
-            "angebote_nach_status": {s: {"anzahl": v["anzahl"], "summe": euro(v["summe_cent"])}
+            "angebote_nach_status": {s: {"anzahl": v["anzahl"], "summe": euro(v["summe_cent"]),
+                                         "monatlich": euro(v["monatlich_cent"]) + " pro Monat"}
                                      for s, v in angebote.items()},
             "angebote_offen_summe": euro(offen) + " (POTENZIAL – keine Einnahme)",
+            "angebote_offen_monatlich": euro(offen_monatlich) + " pro Monat (POTENZIAL aus Daueraufträgen – keine "
+                                                                "Einnahme)",
             "angebote_angenommen_summe": euro(angebote["angenommen"]["summe_cent"]) +
                                          " (ANGENOMMEN – Einnahme erst nach verifiziertem Zahlungseingang)",
+            "angebote_angenommen_monatlich": euro(angebote["angenommen"]["monatlich_cent"]) +
+                                             " pro Monat (ANGENOMMEN – Einnahme erst nach verifiziertem "
+                                             "Zahlungseingang)",
             "abschlussquote_kontakte_prozent": round(100 * kontakte["gewonnen"] / entschieden_k) if entschieden_k else None,
             "annahmequote_angebote_prozent": round(100 * angebote["angenommen"]["anzahl"] / entschieden_a)
             if entschieden_a else None,
