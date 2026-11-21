@@ -90,6 +90,15 @@ class TestKalkulation(KalkTest):
         self.assertTrue(e["netto"])
         self.assertTrue(any("§ 13b" in h for h in e["hinweise"]))
 
+    def test_deutsche_zahlenschreibweise(self):
+        from decimal import Decimal
+        from autonomous.produkte.kalkulation import zahl
+        for eingabe, erwartet in (("1.000", Decimal(1000)), ("1.234,5", Decimal("1234.5")), ("12,5", Decimal("12.5")),
+                                  ("12.5", Decimal("12.5")), ("400", Decimal(400)), (250, Decimal(250))):
+            self.assertEqual(zahl(eingabe, "Fläche"), erwartet, eingabe)
+        with self.assertRaises(ValueError):
+            zahl("1.2.3", "Fläche")
+
     def test_woche_wird_nachvollziehbar_in_monat_umgerechnet(self):
         d = kalkulation.eingabe_pruefen({"positionen": [{"bezeichnung": "Büro", "flaeche_m2": "150",
                                                          "leistungswert_m2_h": "150", "reinigungen_pro_woche": "1"}],

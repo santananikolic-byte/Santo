@@ -23,6 +23,7 @@ Grundsätze:
 """
 
 import datetime
+import re
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 
 from . import bereinigen
@@ -58,7 +59,9 @@ def zahl(wert, name, minimum=None, maximum=None, ganz=False, null_erlaubt=False)
     elif isinstance(wert, str):
         text = wert.strip().replace(" ", "").replace(" ", "")
         if "," in text:
-            text = text.replace(".", "").replace(",", ".")
+            text = text.replace(".", "").replace(",", ".")      # 1.234,5 → 1234.5
+        elif re.fullmatch(r"\d{1,3}(\.\d{3})+", text):
+            text = text.replace(".", "")                        # 1.000 → 1000 (deutsche Tausenderpunkte)
     else:
         raise ValueError("%s muss eine Zahl sein." % name)
     try:
