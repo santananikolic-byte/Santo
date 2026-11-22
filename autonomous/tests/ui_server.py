@@ -65,6 +65,18 @@ def testdaten_anlegen(daten):
         ("ui_test_5", "evergabe_nrw", "TEST-5", "TESTDATEN – Abgelaufene Fensterreinigung (UI-Prüfung)",
          "Teststadt (Testdaten)", "Bonn", "53111", None, tag(-1, "09:00"), tag(-20), "Öffentliche Ausschreibung", 90,
          ["Suchbegriff „fensterreinigung“ im Titel"], "neu"),
+        # Dieselbe Ausschreibung wie ui_test_2, so wie TED sie meldet (Vorspann „Deutschland – Leistungsart – “,
+        # Sitz der Vergabestelle in Klammern, Frist ohne Uhrzeit): mögliche Doppelte, standardmäßig ausgeblendet
+        ("ui_test_6", "ted", "TEST-6", "Deutschland – Gebäudereinigung – TESTDATEN – Glasreinigung Schulzentrum (UI-Prüfung)",
+         "Testkreis (Testdaten) (Köln)", None, None, "DEA23", tag(10), tag(-1), "Offenes Verfahren", 80,
+         ["Reinigungsleistung (CPV)", "Region NRW (NUTS DEA23)"], "neu"),
+        # Fristen heute und morgen (wenig Punkte, darum nur mit „alle Punktzahlen“ sichtbar)
+        ("ui_test_7", "service_bund", "TEST-7", "TESTDATEN – Treppenhausreinigung, Frist heute (UI-Prüfung)",
+         "Testgemeinde (Testdaten)", "Bremen", "28195", None, tag(0), tag(-4), "Öffentliche Ausschreibung", 30,
+         ["Region außerhalb"], "neu"),
+        ("ui_test_8", "service_bund", "TEST-8", "TESTDATEN – Büroreinigung, Frist morgen (UI-Prüfung)",
+         "Testgemeinde (Testdaten)", "Bremen", "28195", None, tag(1), tag(-4), "Öffentliche Ausschreibung", 30,
+         ["Region außerhalb"], "neu"),
     ]
     con = sqlite3.connect(pfad)
     try:
@@ -83,6 +95,14 @@ def testdaten_anlegen(daten):
                 ("evergabe_nrw", "fehler", 0, 0, 0, "TESTDATEN – Quelle nicht erreichbar (simuliert für die UI-Prüfung)")):
             con.execute("INSERT INTO suchlaeufe (zeit, quelle, ergebnis, gefunden, neu, passend, meldung) "
                         "VALUES (?,?,?,?,?,?,?)", (jetzt, quelle, ergebnis, gefunden, neu, passend, meldung))
+        # KI-Protokoll: ein Eintrag eines bekannten Agenten und einer mit unbekanntem Namen (muss als reiner Text
+        # erscheinen). Von gestern, damit sie nicht in das heutige Tageslimit zählen. Den Eintrag „Modell testen“
+        # erzeugt die Prüfung selbst über den echten Knopf.
+        gestern = (datetime.datetime.now() - datetime.timedelta(days=1)).astimezone().isoformat(timespec="seconds")
+        for agent in ("research", "<i>unbekannt</i>"):
+            con.execute("INSERT INTO modellaufrufe (zeit, anbieter, modell, agent, aufgabe_id, zeichen_ein, zeichen_aus,"
+                        " kosten_cent, ergebnis) VALUES (?,?,?,?,?,?,?,?,?)",
+                        (gestern, "TESTDATEN", "testmodell", agent, None, 10, 0, 0, "fehler"))
         # Ein erkennbarer TESTDATEN-Marktbericht (echtes Schema der Tabelle „aufgaben“, Ergebnis wie vom
         # Research-Agenten) – so lässt sich die Berichtsliste ohne Internet prüfen.
         ergebnis = {"zeitraum_tage": 90, "bericht_url": "/produkte/marktberichte/ui_test_mb/bericht.html",

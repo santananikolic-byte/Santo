@@ -397,6 +397,30 @@ async function neueFunktionenPruefen(seite) {
   await seite.click('[data-id="ui_test_1"] summary');
   pruefe(/Frist sehr knapp/.test((await seite.textContent('[data-id="ui_test_1"]')) || ''), 'Vertrieb: Begründung der Punkte nicht aufklappbar');
 
+  // Mögliche Doppelte: ui_test_6 ist dieselbe Ausschreibung wie ui_test_2, nur von TED gemeldet
+  pruefe(!(await seite.isVisible('[data-id="ui_test_6"]')), 'Vertrieb: mögliche Doppelte (ui_test_6) ohne Schalter sichtbar');
+  const auchBei = await seite.$eval('[data-id="ui_test_2"] [data-pruef="auch-gefunden-bei"]', el => ({
+    text: el.textContent.replace(/\s+/g, ' ').trim(),
+    links: Array.from(el.querySelectorAll('a')).map(a => [a.textContent, a.getAttribute('href'), a.getAttribute('target'), a.getAttribute('rel')].join(' | ')),
+  })).catch(() => null);
+  pruefe(auchBei && auchBei.text === 'Auch gefunden bei: TED (EU-Amtsblatt)'
+    && auchBei.links.join() === 'TED (EU-Amtsblatt) | https://example.invalid/testdaten/TEST-6 | _blank | noopener noreferrer',
+  'Vertrieb: „Auch gefunden bei: TED (EU-Amtsblatt)“ mit sicherem Link fehlt: ' + JSON.stringify(auchBei));
+  await seite.check('[data-pruef="ausschreibungen-filter-dubletten"]', { timeout: 5000 }).catch(() => null);
+  await seite.waitForSelector('[data-id="ui_test_6"]', { timeout: 10000 }).catch(() => null);
+  const mitDoppelten = await seite.$$eval('[data-pruef="ausschreibung"]', els => els.map(e => e.dataset.id));
+  pruefe(mitDoppelten.join(',') === 'ui_test_1,ui_test_2,ui_test_6,ui_test_3',
+    'Vertrieb: „Mögliche Doppelte zeigen“ zeigt ui_test_6 nicht direkt unter ui_test_2: ' + mitDoppelten.join(','));
+  const doppelt = ((await seite.textContent('[data-id="ui_test_6"]', { timeout: 5000 }).catch(() => '')) || '').replace(/\s+/g, ' ');
+  pruefe(/möglicherweise doppelt/.test(doppelt) && /Auch gefunden bei: service\.bund\.de/.test(doppelt),
+    'Vertrieb: mögliche Doppelte ohne „möglicherweise doppelt“ / „Auch gefunden bei“: ' + doppelt.slice(0, 160));
+  const ted6 = ((await api(seite, 'GET', '/api/ausschreibungen?alle=1&dubletten=1')).inhalt.ausschreibungen || []).find(a => a.id === 'ui_test_6');
+  pruefe(ted6 && ted6.status === 'neu' && ted6.vermutlich_gleich_wie === 'ui_test_2',
+    'Vertrieb: Status der möglichen Doppelten verändert oder falsch zugeordnet: ' + JSON.stringify(ted6 && [ted6.status, ted6.vermutlich_gleich_wie]));
+  await seite.uncheck('[data-pruef="ausschreibungen-filter-dubletten"]', { timeout: 5000 }).catch(() => null);
+  await seite.waitForSelector('[data-id="ui_test_6"]', { state: 'detached', timeout: 10000 }).catch(() => null);
+  pruefe(!(await seite.isVisible('[data-id="ui_test_6"]')), 'Vertrieb: „Mögliche Doppelte zeigen“ lässt sich nicht wieder ausschalten');
+
   // Recherche aus → kein „Jetzt suchen“ (würde sicher scheitern), sondern „Internet-Recherche einschalten“ mit Bestätigung
   pruefe(!(await seite.isVisible('[data-pruef="ausschreibungen-suchen"]')), 'Vertrieb: „Jetzt suchen“ trotz ausgeschalteter Recherche angeboten');
   const ein = '[data-pruef="recherche-einschalten"]';
@@ -423,6 +447,9 @@ async function neueFunktionenPruefen(seite) {
   await seite.selectOption('[data-pruef="ausschreibungen-filter-min"]', '0');
   await seite.waitForSelector('[data-id="ui_test_4"]', { timeout: 10000 }).catch(() => null);
   pruefe(await seite.isVisible('[data-id="ui_test_4"]'), 'Vertrieb: Filter „alle Punktzahlen“ zeigt niedrige Treffer nicht');
+  const fristWorte = await seite.$$eval('[data-id="ui_test_7"] [data-pruef="frist"], [data-id="ui_test_8"] [data-pruef="frist"]',
+    els => els.map(e => e.textContent.trim().replace(/^.*– /, '')));
+  pruefe(fristWorte.join(',') === 'heute,morgen', 'Vertrieb: Fristen heute/morgen nicht in Worten: ' + fristWorte.join(','));
   pruefe(!(await seite.isVisible('[data-id="ui_test_5"]')), 'Vertrieb: abgelaufene Ausschreibung ohne Filter sichtbar');
   await seite.check('[data-pruef="ausschreibungen-filter-alle"]');
   await seite.waitForSelector('[data-id="ui_test_5"]', { timeout: 10000 }).catch(() => null);
@@ -552,6 +579,18 @@ async function neueFunktionenPruefen(seite) {
   pruefe(testErgebnis, 'KI-Modell: „Modell testen“ zeigt bei nicht erreichbarem Modell kein ehrliches Ergebnis');
   await api(seite, 'POST', '/api/einstellungen', { schluessel: 'modell_anbieter', wert: 'keiner' });
   await api(seite, 'POST', '/api/einstellungen', { schluessel: 'ollama_adresse', wert: 'http://127.0.0.1:11434' });
+  // KI-Protokoll: lesbare Namen statt interner Kennungen („Modell testen“ oben hat einen echten Eintrag erzeugt);
+  // unbekannte Namen erscheinen unverändert als reiner Text
+  await bereichOeffnen(seite, 'einstellungen');
+  const kiProt = '[data-schluessel="technik-modellaufrufe"]';
+  if (!(await seite.$eval(kiProt, d => d.open).catch(() => true))) await seite.click(kiProt + ' > summary');
+  const kiText = ((await seite.textContent(kiProt)) || '').replace(/\s+/g, ' ');
+  pruefe(/Modell testen \(Einstellungen\)/.test(kiText) && !/einstellungen-test/.test(kiText),
+    'KI-Protokoll: interne Kennung statt lesbarem Namen: ' + kiText.slice(0, 200));
+  const researchName = (((await api(seite, 'GET', '/api/agenten')).inhalt.agenten || []).find(x => x.rolle === 'research') || {}).name;
+  pruefe(!!researchName && kiText.includes(researchName), 'KI-Protokoll: bekannter Agent nicht mit seinem Namen (' + researchName + ')');
+  const kursiv = await seite.$$eval(kiProt + ' i', els => els.length);
+  pruefe(kiText.includes('<i>unbekannt</i>') && kursiv === 0, 'KI-Protokoll: unbekannter Name nicht als reiner Text angezeigt');
 
   // --- Kalkulation: ohne Stundensatz → OFFEN, mit 35,00 € → 400,40 € -------------------
   await bereichOeffnen(seite, 'vertrieb');
@@ -585,6 +624,23 @@ async function neueFunktionenPruefen(seite) {
   });
   pruefe(offenZahl === 1, 'Kalkulation: „offen“ steht ' + offenZahl + '-mal in der Anzeige (soll einmal deutlich stehen)');
   pruefe(/10 h/.test((await seite.textContent('[data-pruef="kalk-ergebnis"]')) || ''), 'Kalkulation: Stunden (8 h + 2 h Anfahrt = 10 h) fehlen');
+  // Ohne Preis kein „Angebot Dauerauftrag daraus erstellen“ – stattdessen klar, was fehlt, mit direktem Weg zum Stundensatz
+  const kalkOffen = '[data-pruef="kalk-ergebnis"][open]';
+  pruefe(!(await seite.isVisible(kalkOffen + ' [data-pruef="dauerauftrag-oeffnen"]')), 'Kalkulation: „Angebot Dauerauftrag daraus erstellen“ trotz offenem Preis angeboten');
+  const fehltText = ((await seite.textContent(kalkOffen + ' [data-pruef="dauerauftrag-preis-fehlt"]', { timeout: 5000 }).catch(() => '')) || '').replace(/\s+/g, ' ');
+  pruefe(/fehlt der Preis/.test(fehltText) && /Erst Stundensatz festlegen/.test(fehltText),
+    'Kalkulation: bei offenem Preis fehlt der Hinweis „Erst Stundensatz festlegen“: ' + fehltText.slice(0, 160));
+  await seite.click(kalkOffen + ' [data-pruef="dauerauftrag-stundensatz"]', { timeout: 5000 }).catch(() => null);
+  const imSatzFeld = await seite.waitForFunction(() => {
+    const el = document.querySelector('[data-pruef="stundensatz-kalk"] input[name="stundensatz"]');
+    return !!el && document.activeElement === el;
+  }, null, { timeout: 5000 }).then(() => true, () => false);
+  pruefe(imSatzFeld, 'Kalkulation: „Erst Stundensatz festlegen“ führt nicht direkt ins Stundensatz-Feld');
+  await seite.click('[data-pruef="stundensatz-kalk"] button:has-text("Abbrechen")', { timeout: 5000 }).catch(() => null);
+  await seite.click(kalkOffen + ' [data-pruef="dauerauftrag-eigener-preis"]', { timeout: 5000 }).catch(() => null);
+  const eigenerPreis = await seite.$eval('[data-pruef="dauerauftrag-formular"] input[name="betrag"]', el => el.required).catch(() => false);
+  pruefe(eigenerPreis, 'Kalkulation: „Angebot mit eigenem Monatspreis erstellen“ fragt den Monatspreis nicht als Pflichtfeld ab');
+  await seite.click('[data-pruef="dauerauftrag-formular"] button:has-text("Abbrechen")', { timeout: 5000 }).catch(() => null);
   // Die Eingaben bleiben nach dem Neuaufbau stehen; jetzt mit Stundensatz
   if (!(await seite.isVisible(kf + ' input[name="stundensatz"]'))) await seite.click('[data-schluessel="kalkulation-neu"] > summary');
   pruefe((await seite.inputValue(kf + ' [data-feld="flaeche"]')) === '400', 'Kalkulation: Eingaben gehen beim Neuaufbau verloren');
@@ -710,8 +766,14 @@ async function neueFunktionenPruefen(seite) {
   await bereichOeffnen(seite, 'dashboard');
   const passend = await api(seite, 'GET', '/api/ausschreibungen?min_punkte=60');
   const erwartet = (passend.inhalt.ausschreibungen || []).filter(a => a.status === 'neu').length;
+  const erwartetText = erwartet === 0 ? 'keine neuen' : erwartet === 1 ? '1 neue' : erwartet + ' neue';
   const wert = ((await seite.textContent('[data-pruef="ausschreibungen-kachel"]')) || '').trim();
-  pruefe(wert === String(erwartet), 'Dashboard: Kachel „Ausschreibungen“ zeigt ' + wert + ' statt ' + erwartet);
+  pruefe(wert === erwartetText, 'Dashboard: Kachel „Ausschreibungen“ zeigt „' + wert + '“ statt „' + erwartetText + '“');
+  // Eine knappe Frist färbt nicht die Anzahl rot (früher: rote „0“), sondern steht in Worten daneben
+  const kachelKlasse = await seite.$eval('[data-pruef="ausschreibungen-kachel"]', el => el.closest('.kachel').className).catch(() => '');
+  pruefe(!/ton-fehler/.test(kachelKlasse), 'Dashboard: Anzahl der Ausschreibungen wegen der Frist rot gefärbt (' + kachelKlasse + ')');
+  const fristKachel = await seite.$eval('[data-pruef="ausschreibungen-kachel-frist"]', el => [el.textContent.trim(), el.className].join(' | ')).catch(() => null);
+  pruefe(fristKachel === 'Nächste Frist: noch 2 Tage | tag fehler', 'Dashboard: knappe Frist nicht in Worten markiert: ' + fristKachel);
 }
 
 async function freigabeAblauf(seite) {
@@ -826,6 +888,16 @@ async function ansichtPruefen(browser, startUrl, g, bilder) {
     if (id === 'vertrieb') {
       pruefe(await seite.isVisible('[data-pruef="ausschreibungen"]'), g.name + ': Vertrieb ohne Auftrags-Radar');
       pruefe(await seite.isVisible('[data-pruef="kalkulation"]'), g.name + ': Vertrieb ohne Kalkulation');
+      // Die Auswahlfelder der Ausschreibungs-Filter zeigen ihren gewählten Text ganz (nicht von weiteren Filtern zusammengedrückt)
+      const abgeschnitten = await seite.$$eval('[data-pruef="ausschreibungen"] select', felder => felder.map(s => {
+        const st = getComputedStyle(s);
+        const mass = document.createElement('canvas').getContext('2d');
+        mass.font = st.fontStyle + ' ' + st.fontWeight + ' ' + st.fontSize + ' ' + st.fontFamily;
+        const text = s.options[s.selectedIndex] ? s.options[s.selectedIndex].text : '';
+        const platz = s.clientWidth - parseFloat(st.paddingLeft) - parseFloat(st.paddingRight);
+        return mass.measureText(text).width > platz ? text + ' (' + Math.round(mass.measureText(text).width) + ' > ' + Math.round(platz) + ' px)' : null;
+      }).filter(Boolean));
+      pruefe(abgeschnitten.length === 0, g.name + ': Vertrieb – Filter-Auswahl abgeschnitten: ' + abgeschnitten.join('; '));
     }
     if (id === 'einstellungen') {
       pruefe(await seite.isVisible('[data-pruef="auftragssuche"]'), g.name + ': Einstellungen ohne Auftragssuche');

@@ -224,6 +224,8 @@
   const SUCHLAUF_TEXT = { ok: 'ok', fehler: 'Fehler', gesperrt: 'gesperrt' };
   const SUCHLAUF_TON = { ok: 'ok', fehler: 'fehler', gesperrt: 'warn' };
   const KI_AUFRUF_TEXT = { ok: 'ok', fehler: 'Fehler', laufend: 'läuft', limit: 'Tageslimit erreicht' };
+  // Aufrufer im KI-Protokoll, die kein Agent sind: interne Kennung → lesbarer Name (Unbekanntes bleibt reiner Text)
+  const KI_AUFRUF_VON = { 'einstellungen-test': 'Modell testen (Einstellungen)' };
   const KI_AUFRUF_TON = { ok: 'ok', fehler: 'fehler', laufend: 'blau', limit: 'warn' };
   const NACHRICHT_ANGEBOT = [
     ['google_profil', 'Google-Profil-Paket (Standard)'], ['webseite', 'Webseite'], ['reinigung', 'Reinigung (fester Auftrag)'],
@@ -351,7 +353,7 @@
     filter: { status: '', rolle: '' },
     protokollEbene: '',
     gedaechtnisArt: '',
-    ausschreibungFilter: { status: '', min: '60', alle: false },
+    ausschreibungFilter: { status: '', min: '60', alle: false, dubletten: false },
     ausschreibungAnzahl: AUSSCHREIBUNG_SCHRITT,
     kalkPositionen: 1,
     kalkOffen: null,
@@ -634,7 +636,7 @@
     if (typeof t !== 'number' || !isFinite(t)) return '';
     if (t < 0) return 'abgelaufen';
     if (t === 0) return 'heute';
-    return t === 1 ? 'noch 1 Tag' : 'noch ' + t + ' Tage';
+    return t === 1 ? 'morgen' : 'noch ' + t + ' Tage';
   }
   /** Auswahlliste aus Backend-Werten: Texte, [id, text] oder {id, name}. */
   function wahlListe(liste, texte) {
@@ -1040,12 +1042,21 @@
       && typeof a.tage_bis_frist === 'number' && a.tage_bis_frist >= 0)
       .sort((x, y) => String(x.frist).localeCompare(String(y.frist)));
     const naechste = offen[0];
+    // Eine knappe Frist steht in Worten als eigener Hinweis – sie färbt nicht die Anzahl
+    // (früher stand dann eine rote „0“ da, wenn nichts Neues dabei war)
+    const dringend = !!naechste && naechste.tage_bis_frist <= 3;
     const recherche = !!(aus.einstellungen && aus.einstellungen.internet_recherche_erlaubt);
     const zusatz = 'neu und passend (ab 60 Punkten) · '
-      + (naechste ? 'nächste Frist ' + fristText(naechste.frist) + ' (' + tageText(naechste.tage_bis_frist) + ')' : 'keine offene Frist')
+      + (naechste ? 'nächste Frist ' + fristText(naechste.frist) + (dringend ? '' : ' (' + tageText(naechste.tage_bis_frist) + ')') : 'keine offene Frist')
       + (recherche ? '' : ' · Internet-Recherche aus');
-    const ton = naechste && naechste.tage_bis_frist <= 3 ? 'fehler' : (neu ? 'warn' : '');
-    const k = kachel('Ausschreibungen', zahl(neu), ton, zusatz, 'ausschreibungen-kachel');
+    let fristHinweis = null;
+    if (dringend) {
+      const t = tag('Nächste Frist: ' + tageText(naechste.tage_bis_frist), 'fehler');
+      t.dataset.pruef = 'ausschreibungen-kachel-frist';
+      fristHinweis = h('p', { class: 'frist-zeile' }, t);
+    }
+    const anzahl = neu === 0 ? 'keine neuen' : neu === 1 ? '1 neue' : zahl(neu) + ' neue';
+    const k = kachel('Ausschreibungen', anzahl, neu ? 'warn' : '', zusatz, 'ausschreibungen-kachel', fristHinweis);
     k.append(h('a', { href: '#vertrieb', class: 'knopf zweit klein kachel-link' }, 'Ansehen'));
     return k;
   }
@@ -2141,6 +2152,7 @@
     if (f.status) q.push('status=' + enc(f.status));
     if (f.min && f.min !== '0') q.push('min_punkte=' + enc(f.min));
     if (f.alle) q.push('alle=1');
+    if (f.dubletten) q.push('dubletten=1');
     return '/api/ausschreibungen' + (q.length ? '?' + q.join('&') : '');
   }
 
@@ -2173,12 +2185,13 @@
     const filterMin = auswahl('filter_min', [['0', 'alle Punktzahlen'], ['40', 'ab 40 Punkten'], ['60', 'ab 60 Punkten (passend)'], ['80', 'ab 80 Punkten']],
       f.min, { 'data-pruef': 'ausschreibungen-filter-min' });
     const abgelaufen = h('input', { type: 'checkbox', id: 'filter-abgelaufen', checked: !!f.alle, 'data-pruef': 'ausschreibungen-filter-alle' });
+    const doppelte = h('input', { type: 'checkbox', id: 'filter-dubletten', checked: !!f.dubletten, 'data-pruef': 'ausschreibungen-filter-dubletten' });
     const filterNeu = () => {
-      zustand.ausschreibungFilter = { status: filterStatus.value, min: filterMin.value, alle: abgelaufen.checked };
+      zustand.ausschreibungFilter = { status: filterStatus.value, min: filterMin.value, alle: abgelaufen.checked, dubletten: doppelte.checked };
       zustand.ausschreibungAnzahl = AUSSCHREIBUNG_SCHRITT;
       neuLaden();
     };
-    [filterStatus, filterMin, abgelaufen].forEach(el => el.addEventListener('change', filterNeu));
+    [filterStatus, filterMin, abgelaufen, doppelte].forEach(el => el.addEventListener('change', filterNeu));
 
     const rechercheAn = !!e.internet_recherche_erlaubt;
     // Ist die Recherche aus, führt „Suchen“ sicher in eine Fehlermeldung – darum steht dann „Einschalten“ da
@@ -2211,10 +2224,13 @@
       rechercheStand,
       h('div', { class: 'knopfreihe' }, hauptKnopf),
       mitListe ? suchlaeufeAnzeige(aus.letzte_suche || []) : null,
-      mitListe ? h('div', { class: 'felder-3 filter' },
+      // Zwei Zeilen: Auswahl oben, Schalter darunter – vier Filter nebeneinander würden die Auswahltexte abschneiden
+      mitListe ? h('div', { class: 'felder-2 filter' },
         feld('Status', filterStatus),
-        feld('Punkte', filterMin),
-        h('label', { class: 'schalter filter-schalter', for: 'filter-abgelaufen' }, abgelaufen, h('span', null, 'Abgelaufene Fristen zeigen'))) : null,
+        feld('Punkte', filterMin)) : null,
+      mitListe ? h('div', { class: 'felder-2 filter' },
+        h('label', { class: 'schalter filter-schalter', for: 'filter-abgelaufen' }, abgelaufen, h('span', null, 'Abgelaufene Fristen zeigen')),
+        h('label', { class: 'schalter filter-schalter', for: 'filter-dubletten' }, doppelte, h('span', null, 'Mögliche Doppelte zeigen'))) : null,
       liste.length
         ? h('ul', { class: 'liste', 'data-pruef': 'ausschreibungen-liste' },
           liste.slice(0, anzahl).map(a => ausschreibungZeile(a, stufen, laufendeMappen.has(a.id))))
@@ -2246,6 +2262,8 @@
   function ausschreibungZeile(a, stufen, mappeLaeuft) {
     const link = sichererLink(a.link);
     const mappe = sichererLink(a.unterlagen_url);
+    // Dieselbe Ausschreibung aus anderen Quellen (vom Server erkannt; ausgeblendete Doppelte zeigt der Schalter)
+    const auchBei = (Array.isArray(a.auch_gefunden_bei) ? a.auch_gefunden_bei : []).filter(x => x && typeof x === 'object');
     const statusSetzen = async (status, notiz, mitNotiz) => {
       const daten = { status: status };
       if (mitNotiz) daten.notiz = notiz || '';
@@ -2265,7 +2283,8 @@
     const endgueltig = ['abgelehnt', 'gewonnen', 'verloren'].includes(a.status);
     return h('li', { class: 'eintrag', 'data-pruef': 'ausschreibung', 'data-id': a.id },
       h('div', { class: 'eintrag-kopf' }, h('span', { class: 'eintrag-titel' }, a.titel),
-        h('span', { class: 'chips' }, punkteTag(a.punkte), tag(AUSSCHREIBUNG_STATUS[a.status] || a.status, AUSSCHREIBUNG_TON[a.status]))),
+        h('span', { class: 'chips' }, punkteTag(a.punkte), tag(AUSSCHREIBUNG_STATUS[a.status] || a.status, AUSSCHREIBUNG_TON[a.status]),
+          a.vermutlich_gleich_wie ? tag('möglicherweise doppelt', 'grau') : null)),
       h('p', { class: 'frist-zeile' }, fristTag(a)),
       h('div', { class: 'meta' },
         h('span', null, a.quelle_name || a.quelle),
@@ -2274,6 +2293,13 @@
         a.region ? h('span', null, 'Region ' + a.region) : null,
         a.verfahren ? h('span', null, a.verfahren) : null,
         a.veroeffentlicht ? h('span', null, 'veröffentlicht ' + tagText(a.veroeffentlicht)) : null),
+      auchBei.length
+        ? h('p', { class: 'hilfe', 'data-pruef': 'auch-gefunden-bei' }, 'Auch gefunden bei: ', auchBei.map((x, i) => {
+          const ziel = sichererLink(x.link);
+          const name = String(x.quelle_name || x.quelle || 'unbekannte Quelle');
+          return [i ? ', ' : null, ziel ? h('a', { href: ziel, target: '_blank', rel: 'noopener noreferrer' }, name) : name];
+        }))
+        : null,
       (a.begruendung || []).length
         ? h('details', { class: 'aufklapp klein', 'data-schluessel': 'begruendung-' + a.id },
           h('summary', null, 'Warum ' + zahl(a.punkte) + ' Punkte?'),
@@ -2477,9 +2503,23 @@
       dauerauftragTeil(e, aufgabeId, kontakte));
   }
 
+  /** Direkter Weg zum Stundensatz oben in der Kalkulation: öffnet „Stundensatz festlegen“ und setzt den Fokus ins Feld. */
+  function zumStundensatz(von) {
+    const karteEl = von.closest('[data-pruef="kalkulation"]');
+    const auf = karteEl && karteEl.querySelector('[data-pruef="stundensatz-festlegen"]');
+    if (auf && !auf.hidden) {
+      auf.click();
+      return;
+    }
+    const feldEl = karteEl && karteEl.querySelector('[data-pruef="stundensatz-kalk"] input[name="stundensatz"]');
+    if (feldEl) feldEl.focus();
+  }
+
   function dauerauftragTeil(e, aufgabeId, kontakte) {
     const offenPreis = typeof e.preis_monat_cent !== 'number';
-    const teile = umschaltBereich('Angebot Dauerauftrag daraus erstellen', 'klein', zu => formular({ 'data-pruef': 'dauerauftrag-formular' }, [
+    // Ohne Preis gibt es nichts, woraus ein Angebot „daraus“ entstehen könnte – nur der eigene Monatspreis bleibt
+    const teile = umschaltBereich(offenPreis ? 'Angebot mit eigenem Monatspreis erstellen' : 'Angebot Dauerauftrag daraus erstellen',
+      offenPreis ? 'zweit klein' : 'klein', zu => formular({ 'data-pruef': 'dauerauftrag-formular' }, [
       h('div', { class: 'felder-2' },
         feld('Kontakt (optional)', auswahl('kontakt_id', [['', '— ohne Kontakt —']].concat(kontakte.map(k => [k.id, k.firma])), '')),
         feld('Objekt (optional)', eingabe('objekt', { maxlength: 200, placeholder: 'z. B. Musterstraße 5, Leverkusen' }))),
@@ -2502,8 +2542,14 @@
       const r = await API.post('/api/angebote', daten);
       auftragGemeldet(r, 'den Sales-Agenten');
     }));
-    teile[0].dataset.pruef = 'dauerauftrag-oeffnen';
-    return h('div', { class: 'knopfreihe' }, teile[0], teile[1]);
+    teile[0].dataset.pruef = offenPreis ? 'dauerauftrag-eigener-preis' : 'dauerauftrag-oeffnen';
+    if (!offenPreis) return h('div', { class: 'knopfreihe' }, teile[0], teile[1]);
+    return h('div', { 'data-pruef': 'dauerauftrag-preis-fehlt' },
+      h('p', null, h('strong', null, 'Angebot Dauerauftrag: '), 'dafür fehlt der Preis. Erst den Stundensatz festlegen, dann neu rechnen.'),
+      h('div', { class: 'knopfreihe' },
+        h('button', { type: 'button', class: 'knopf klein', 'data-pruef': 'dauerauftrag-stundensatz', onclick: ev => zumStundensatz(ev.currentTarget) },
+          'Erst Stundensatz festlegen'),
+        teile[0], teile[1]));
   }
 
   // ===========================================================================
@@ -3008,7 +3054,7 @@
         ? h('ul', { class: 'liste' }, aufrufe.map(m => h('li', { class: 'eintrag' },
           h('div', { class: 'eintrag-kopf' }, h('span', { class: 'eintrag-titel' }, m.anbieter + ' · ' + m.modell),
             tag(KI_AUFRUF_TEXT[m.ergebnis] || m.ergebnis, KI_AUFRUF_TON[m.ergebnis] || 'grau')),
-          h('div', { class: 'meta' }, zeitText(m.zeit) + ' · ' + agentName(m.agent) + ' · Kosten ' + euro(m.kosten_cent)))))
+          h('div', { class: 'meta' }, zeitText(m.zeit) + ' · ' + (KI_AUFRUF_VON[m.agent] || agentName(m.agent)) + ' · Kosten ' + euro(m.kosten_cent)))))
         : leer('Noch keine KI-Aufrufe.'));
   }
 

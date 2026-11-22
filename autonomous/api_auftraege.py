@@ -9,7 +9,7 @@ import json
 
 from .api import EIGENTUEMER, ApiFehler, ganzzahl, route, text
 from . import auftraege
-from .auftraege import QUELLEN_NAMEN, STUFEN, tage_bis
+from .auftraege import QUELLEN_NAMEN, STUFEN, dubletten, tage_bis
 from .agenten.akquise import mappe_vorhanden
 from .db import jetzt
 
@@ -30,29 +30,53 @@ def _aufbereiten(z):
     return z
 
 
+def _nach_haupteintrag(liste):
+    """Mögliche Doppelte direkt unter ihren Haupteintrag stellen (sonst bleibt die Reihenfolge, wie sie ist)."""
+    ids = {z["id"] for z in liste}
+    folgen = {}
+    for z in liste:
+        if z["vermutlich_gleich_wie"] in ids:
+            folgen.setdefault(z["vermutlich_gleich_wie"], []).append(z)
+    ergebnis = []
+    for z in liste:
+        if z["vermutlich_gleich_wie"] not in ids:
+            ergebnis.append(z)
+            ergebnis.extend(folgen.get(z["id"], []))
+    return ergebnis
+
+
 @route("GET", "/api/ausschreibungen")
 def r_liste(kern, a):
     q = a["query"]
-    sql, p = "SELECT * FROM ausschreibungen WHERE 1=1", []
     status = q.get("status")
-    if status:
-        if status not in STUFEN:
-            raise ApiFehler(400, "Unbekannter Status – erlaubt: %s" % ", ".join(STUFEN))
-        sql += " AND status=?"
-        p.append(status)
-    if q.get("min_punkte"):
-        sql += " AND punkte >= ?"
-        p.append(ganzzahl(q, "min_punkte", 0, 0, 100))
+    if status and status not in STUFEN:
+        raise ApiFehler(400, "Unbekannter Status – erlaubt: %s" % ", ".join(STUFEN))
+    min_punkte = ganzzahl(q, "min_punkte", 0, 0, 100) if q.get("min_punkte") else None
+    # Dubletten werden über ALLE (nicht abgelaufenen) Einträge ermittelt – erst danach wird gefiltert,
+    # damit eine Gruppe nicht durch einen Filter auseinanderfällt.
+    sql, p = "SELECT * FROM ausschreibungen WHERE 1=1", []
     if q.get("alle") != "1":
         sql += " AND (frist IS NULL OR substr(frist,1,10) >= ?)"
         p.append(auftraege.heute().isoformat())
-    sql += " ORDER BY punkte DESC, CASE WHEN frist IS NULL THEN 1 ELSE 0 END, frist LIMIT 500"
+    sql += " ORDER BY punkte DESC, CASE WHEN frist IS NULL THEN 1 ELSE 0 END, frist LIMIT 2000"
+    liste = dubletten.anreichern([_aufbereiten(z) for z in kern.db.alle(sql, p)])
+    if status:
+        liste = [z for z in liste if z["status"] == status]
+    if min_punkte is not None:
+        liste = [z for z in liste if (z["punkte"] or 0) >= min_punkte]
+    if q.get("dubletten") != "1":
+        # Ausgeblendet wird nur, was noch unbearbeitet ist und dessen Haupteintrag in derselben Liste steht –
+        # so verschwindet nie eine Ausschreibung ganz und nie etwas, das der Eigentümer schon bearbeitet hat.
+        sichtbar = {z["id"] for z in liste}
+        liste = [z for z in liste if not (z["vermutlich_gleich_wie"] and z["status"] == "neu"
+                                          and z["vermutlich_gleich_wie"] in sichtbar)]
+    liste = _nach_haupteintrag(liste)
     letzte = kern.db.alle("SELECT quelle, zeit, ergebnis, gefunden, neu, passend, meldung FROM suchlaeufe s WHERE "
                           "id = (SELECT MAX(id) FROM suchlaeufe WHERE quelle = s.quelle) ORDER BY quelle")
     for z in letzte:
         z["quelle_name"] = QUELLEN_NAMEN.get(z["quelle"], z["quelle"])
     e = kern.einstellungen.alle()
-    return {"ausschreibungen": [_aufbereiten(z) for z in kern.db.alle(sql, p)],
+    return {"ausschreibungen": liste[:500],
             "stufen": list(STUFEN),
             "letzte_suche": letzte,
             "einstellungen": {"internet_recherche_erlaubt": e["internet_recherche_erlaubt"],
