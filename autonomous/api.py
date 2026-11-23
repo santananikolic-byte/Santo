@@ -296,12 +296,48 @@ def einstellungen(kern, a):
             "modellaufrufe": kern.modell.protokoll_liste(30), "sicherungen": sicherung.liste()}
 
 
+def _wlan_schalten(kern, erlaubt):
+    """Einziger Weg, den WLAN-Zugriff zu schalten – Einstellung und Lauschen bleiben immer gleich."""
+    if not isinstance(erlaubt, bool):
+        raise ApiFehler(400, "erlaubt muss true oder false sein")
+    zugang = getattr(kern, "wlan", None)
+    if zugang is None:
+        raise ApiFehler(409, "Der Server läuft nicht – WLAN-Zugriff kann nur bei laufendem AUTONOMOUS geschaltet werden")
+    if erlaubt:
+        try:
+            zugang.an()
+        except ValueError as fehler:
+            raise ApiFehler(400, str(fehler))
+        kern.einstellungen.setze("wlan_zugriff", True, EIGENTUEMER)
+    else:
+        kern.einstellungen.setze("wlan_zugriff", False, EIGENTUEMER)
+        zugang.aus()
+    return zugang.status()
+
+
+@route("GET", "/api/iphone")
+def iphone_status(kern, a):
+    zugang = getattr(kern, "wlan", None)
+    if zugang is None:
+        return {"erlaubt": bool(kern.einstellungen.hole("wlan_zugriff")), "aktiv": False,
+                "hinweis": "Der Server läuft nicht."}
+    return zugang.status()
+
+
+@route("POST", "/api/iphone")
+def iphone_schalten(kern, a):
+    return _wlan_schalten(kern, a["body"].get("erlaubt"))
+
+
 @route("POST", "/api/einstellungen")
 def einstellung_setzen(kern, a):
     b = a["body"]
     schluessel = text(b, "schluessel", laenge=60)
     if "wert" not in b:
         raise ApiFehler(400, "Feld fehlt: wert")
+    if schluessel == "wlan_zugriff":
+        _wlan_schalten(kern, b["wert"])
+        return {"ok": True, "werte": kern.einstellungen.alle()}
     kern.einstellungen.setze(schluessel, b["wert"], EIGENTUEMER)
     return {"ok": True, "werte": kern.einstellungen.alle()}
 

@@ -329,10 +329,84 @@ async function funktionenPruefen(browser, startUrl) {
   }
 
   await neueFunktionenPruefen(seite);
+  await iphonePruefen(seite);
 
   await cspPruefen(seite, 'funktionen');
   konsoleOk();
   await kontext.close();
+}
+
+// ---------------------------------------------------------------------------
+// 1a. Einstellungen → „iPhone verbinden“: Schalter (Standard aus), QR-Code und Link, Hinweise, wieder aus.
+//     Echter Schalter, echtes Backend: der Server lauscht danach wirklich auf der WLAN-Adresse dieses Rechners.
+// ---------------------------------------------------------------------------
+async function iphonePruefen(seite) {
+  const karte = '[data-pruef="iphone"]';
+  const schalter = karte + ' [data-pruef="iphone-schalter"]';
+  const r0 = await api(seite, 'GET', '/api/iphone');
+  if (!pruefe(r0.status === 200, 'iPhone: /api/iphone antwortet nicht (' + r0.status + ')')) return;
+  const stand0 = r0.inhalt || {};
+  pruefe(stand0.erlaubt === false && stand0.aktiv === false, 'iPhone: WLAN-Zugriff ist nicht standardmäßig aus');
+  await bereichOeffnen(seite, 'einstellungen');
+  if (!pruefe(await seite.isVisible(karte), 'Einstellungen: Karte „iPhone verbinden“ fehlt')) return;
+  pruefe(!(await seite.isChecked(schalter)), 'iPhone: Schalter steht nicht auf aus');
+  pruefe(/Zugriff aus dem eigenen WLAN erlauben/.test((await seite.textContent(karte + ' label.schalter')) || ''),
+    'iPhone: Schalter „Zugriff aus dem eigenen WLAN erlauben“ fehlt');
+  pruefe(!(await seite.isVisible(karte + ' [data-pruef="iphone-qr"]')), 'iPhone: QR-Code sichtbar, obwohl der Zugriff aus ist');
+  const text0 = ((await seite.textContent(karte)) || '').replace(/\s+/g, ' ');
+  for (const [muster, was] of [[/selben WLAN/, 'gleiches WLAN'], [/„Erlauben“/, 'macOS-Frage „Erlauben“'],
+    [/geheim/, 'Link geheim halten'], [/unverschlüsselt/, 'unverschlüsselt – nur im eigenen WLAN'],
+    [/Zum Home-Bildschirm/, '„Zum Home-Bildschirm“']]) {
+    pruefe(muster.test(text0), 'iPhone: Hinweis fehlt – ' + was);
+  }
+
+  const moeglich = stand0.moegliche_adressen || [];
+  if (!moeglich.length) {
+    // Rechner ohne privates Netz (z. B. Prüfrechner ohne WLAN): klare Meldung statt QR-Code
+    ERWARTETE_ABLEHNUNGEN.push({ status: 400, route: /\/api\/iphone$/, grund: 'WLAN-Zugriff ohne erkanntes eigenes WLAN' });
+    pruefe(await seite.isVisible(karte + ' [data-pruef="iphone-kein-wlan"]'), 'iPhone: Hinweis „kein WLAN erkannt“ fehlt');
+    await seite.check(schalter);
+    await seite.click('[data-pruef="iphone-speichern"]');
+    pruefe(await meldungMit(seite, /WLAN/), 'iPhone: ohne WLAN keine verständliche Meldung');
+    hinweise.add('iPhone: kein privates Netz auf diesem Rechner – nur die Meldung geprüft, nicht QR-Code und Zugriff');
+    return;
+  }
+
+  await seite.check(schalter);
+  await seite.click('[data-pruef="iphone-speichern"]');
+  const an = await warteAuf(seite, 'iPhone: WLAN-Zugriff lässt sich nicht einschalten', async () => {
+    const s = (await api(seite, 'GET', '/api/iphone')).inhalt || {};
+    return s.erlaubt === true && s.aktiv === true ? s : null;
+  });
+  if (!an) return;
+  const qrDa = await seite.waitForSelector(karte + ' [data-pruef="iphone-qr"] svg path', { timeout: 10000 }).then(() => true, () => false);
+  if (!pruefe(qrDa, 'iPhone: nach dem Einschalten kein QR-Code')) return;
+  const qr = await seite.$eval(karte + ' [data-pruef="iphone-qr"] svg', svg => ({
+    viewBox: svg.getAttribute('viewBox'),
+    d: svg.querySelector('path').getAttribute('d'),
+    mitStil: svg.hasAttribute('style') || svg.querySelectorAll('[style]').length > 0,
+    breite: svg.getBoundingClientRect().width,
+  }));
+  const kante = an.qr.groesse + 2 * an.qr.rand;
+  pruefe(qr.viewBox === '0 0 ' + kante + ' ' + kante && qr.d === an.qr.pfad && !qr.mitStil,
+    'iPhone: QR-Code nicht genau aus den Daten des Servers gezeichnet (' + qr.viewBox + ')');
+  pruefe(qr.breite >= 180, 'iPhone: QR-Code zu klein zum Scannen (' + Math.round(qr.breite) + ' px)');
+  const linkText = ((await seite.textContent(karte + ' [data-pruef="iphone-link"]')) || '').trim();
+  pruefe(linkText === an.link && new RegExp('^http://' + an.adressen[0].replace(/\./g, '\\.') + ':\\d+/\\?k=.+').test(an.link),
+    'iPhone: Link als Text fehlt oder stimmt nicht (' + linkText.slice(0, 40) + ' …)');
+  pruefe(await seite.isChecked(schalter), 'iPhone: Schalter zeigt nach dem Einschalten nicht „an“');
+  await cspPruefen(seite, 'iPhone-Karte');
+  if (process.env.UI_BILDER) await seite.screenshot({ path: process.env.UI_BILDER + '/iphone-verbinden.png', fullPage: false });
+
+  await seite.uncheck(schalter);
+  await seite.click('[data-pruef="iphone-speichern"]');
+  const aus = await warteAuf(seite, 'iPhone: WLAN-Zugriff lässt sich nicht wieder ausschalten', async () => {
+    const s = (await api(seite, 'GET', '/api/iphone')).inhalt || {};
+    return s.erlaubt === false && s.aktiv === false ? s : null;
+  });
+  pruefe(!!aus, 'iPhone: WLAN-Zugriff nicht wieder aus');
+  const qrWeg = await seite.waitForSelector(karte + ' [data-pruef="iphone-qr"]', { state: 'detached', timeout: 10000 }).then(() => true, () => false);
+  pruefe(qrWeg, 'iPhone: QR-Code bleibt nach dem Ausschalten sichtbar');
 }
 
 // ---------------------------------------------------------------------------

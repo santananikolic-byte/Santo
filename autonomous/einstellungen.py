@@ -18,6 +18,7 @@ ERLAUBTE_WERTE = {
     "wallet_warnschwelle_cent": lambda w: isinstance(w, int) and 0 <= w <= 10_000_000,
     "sicherung_behalten": lambda w: isinstance(w, int) and 1 <= w <= 365,
     "internet_recherche_erlaubt": lambda w: isinstance(w, bool),
+    "wlan_zugriff": lambda w: isinstance(w, bool),
     "auftragssuche_taeglich": lambda w: isinstance(w, bool),
     "region_plz": lambda w: _liste(w, 1, 60, lambda x: re.fullmatch(r"\d{2}", x)),
     "region_nuts": lambda w: _liste(w, 1, 40, lambda x: re.fullmatch(r"DE[A-Z0-9]{0,3}", x)),

@@ -238,15 +238,93 @@ class Handler(BaseHTTPRequestHandler):
             return self._senden(200, f.read(), typ, csp=PRODUKT_CSP)
 
 
+class WlanZugang:
+    """iPhone im eigenen WLAN: lauscht ZUSÄTZLICH auf den privaten Adressen dieses Rechners (kein Neustart).
+
+    Ausgeschaltet (Standard) ist AUTONOMOUS nur über 127.0.0.1 erreichbar. Eingeschaltet werden genau die
+    eigenen privaten Adressen und der Bonjour-Name (…​.local) als Host und Herkunft erlaubt – sonst nichts.
+    Schalten darf nur der Eigentümer (über die Oberfläche bzw. die API mit Zugangsschlüssel)."""
+
+    def __init__(self, kern, port):
+        self.kern = kern
+        self.port = port
+        self._server = []
+        self.adressen = []
+        self.name = None
+        self._sperre = threading.Lock()
+
+    @property
+    def aktiv(self):
+        return bool(self._server)
+
+    def an(self):
+        from . import wlan
+        with self._sperre:
+            if self._server:
+                return
+            adressen = wlan.private_adressen()
+            if not adressen:
+                raise ValueError("Kein eigenes WLAN erkannt (keine private Adresse wie 192.168.x.x). "
+                                 "Bitte den Mac mit dem WLAN verbinden und erneut versuchen.")
+            gestartet = []
+            try:
+                for adresse in adressen:
+                    srv = ThreadingHTTPServer((adresse, self.port), Handler)
+                    srv.daemon_threads = True
+                    threading.Thread(target=srv.serve_forever, name="wlan-%s" % adresse, daemon=True).start()
+                    gestartet.append(srv)
+            except OSError as fehler:
+                for srv in gestartet:
+                    srv.shutdown()
+                    srv.server_close()
+                raise ValueError("WLAN-Zugriff konnte nicht gestartet werden: %s" % fehler)
+            self._server, self.adressen, self.name = gestartet, adressen, wlan.lokaler_name()
+            namen = list(adressen) + ([self.name] if self.name else [])
+            # neue Mengen zuweisen (nicht verändern) – laufende Anfragen sehen immer einen vollständigen Stand
+            Handler.hosts = set(Handler.hosts) | {"%s:%d" % (n, self.port) for n in namen}
+            Handler.herkuenfte = set(Handler.herkuenfte) | {"http://%s:%d" % (n, self.port) for n in namen}
+            self.kern.protokoll.audit("wlan", "WLAN-Zugriff eingeschaltet", {"adressen": adressen})
+
+    def aus(self):
+        with self._sperre:
+            server, self._server = self._server, []
+            Handler.hosts = erlaubte_hosts(self.port)
+            Handler.herkuenfte = erlaubte_herkuenfte(self.port)
+            for srv in server:
+                srv.shutdown()
+                srv.server_close()
+            if server:
+                self.kern.protokoll.audit("wlan", "WLAN-Zugriff ausgeschaltet")
+
+    def status(self):
+        from . import wlan
+        ergebnis = {"erlaubt": bool(self.kern.einstellungen.hole("wlan_zugriff")), "aktiv": self.aktiv,
+                    "port": self.port}
+        if self.aktiv:
+            link = "http://%s:%d/?k=%s" % (self.adressen[0], self.port, Handler.schluessel)
+            ergebnis.update({"adressen": list(self.adressen), "name": self.name, "link": link,
+                             "qr": wlan.qr_daten(link)})
+        else:
+            ergebnis["moegliche_adressen"] = wlan.private_adressen()
+        return ergebnis
+
+
 def starten(kern, host=None, port=None):
     host = host or konfig.HOST
-    port = port or konfig.PORT
+    port = konfig.PORT if port is None else port
     Handler.kern = kern
     Handler.schluessel = zugangsschluessel()
-    Handler.hosts = erlaubte_hosts(port)
-    Handler.herkuenfte = erlaubte_herkuenfte(port)
     server = ThreadingHTTPServer((host, port), Handler)
     server.daemon_threads = True
+    port = server.server_address[1]  # bei Port 0 erst nach dem Binden bekannt
+    Handler.hosts = erlaubte_hosts(port)
+    Handler.herkuenfte = erlaubte_herkuenfte(port)
+    kern.wlan = WlanZugang(kern, port)
+    if kern.einstellungen.hole("wlan_zugriff"):
+        try:
+            kern.wlan.an()
+        except ValueError as fehler:  # z. B. Mac gerade nicht im WLAN – AUTONOMOUS läuft trotzdem lokal
+            kern.protokoll.warnung("wlan", "WLAN-Zugriff beim Start nicht möglich", str(fehler))
     return server
 
 

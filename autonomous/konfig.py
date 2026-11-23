@@ -54,6 +54,7 @@ STANDARD_EINSTELLUNGEN = {
     "ausschlussbegriffe": ["straßenreinigung", "straßenkehr", "kanal", "biotonne", "behälter", "tank", "abwasser",
                            "entwässerung", "fahrzeug", "kehrmaschine"],
     "stundensatz_cent": 0,                # 0 = OFFEN (noch nicht festgelegt) – wird nie erfunden
+    "wlan_zugriff": False,                # iPhone im eigenen WLAN – standardmäßig AUS, schaltet nur der Eigentümer
 }
 
 # Öffentliche Quellen, die Agenten lesen dürfen (nur lesen, nur https, nur diese Hosts)

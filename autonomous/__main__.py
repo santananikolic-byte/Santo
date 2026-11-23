@@ -57,6 +57,8 @@ def main(argv=None):
             httpd.serve_forever()
         finally:
             stopp.set()
+            if getattr(kern, "wlan", None):
+                kern.wlan.aus()
             httpd.server_close()
             kern.schliessen()
             if os.path.exists(pid_datei):
