@@ -359,6 +359,15 @@ main {
 .karte.anmeldung ol { padding-left: 22px; }
 .karte.anmeldung li { margin: 6px 0; }
 
+/* iPhone verbinden: Schritte wie in der Anmeldekarte; QR-Code immer auf Weiß (Kontrast zum Scannen, auch im dunklen Design) */
+.schritte { padding-left: 22px; margin: 0 0 16px; }
+.schritte li { margin: 6px 0; }
+.iphone-qr { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 16px; margin: 12px 0 16px; }
+.iphone-link { flex: 1 1 220px; min-width: 0; }
+.iphone-link p { margin: 0 0 8px; }
+.qr-rahmen { flex: 0 0 auto; width: min(100%, 260px); padding: 10px; background: #ffffff; border-radius: var(--radius-s); }
+.qr-code { display: block; width: 100%; height: auto; }
+
 @media (min-width: 900px) {
   .karte { padding: 20px; }
 }

@@ -2733,11 +2733,12 @@
   // Bereich: Einstellungen
   // ===========================================================================
   async function ansichtEinstellungen(z) {
-    const [e, ms] = await Promise.all([API.get('/api/einstellungen'), optional('/api/modell/status')]);
+    const [e, ms, ip] = await Promise.all([API.get('/api/einstellungen'), optional('/api/modell/status'), optional('/api/iphone')]);
     zustand.katalog = e.aktionen || {};
     z.append(h('p', { class: 'einleitung' }, 'Hier legt ihr die wenigen Werte fest, mit denen AUTONOMOUS rechnet und sucht. Technik steht unten eingeklappt.'));
     z.append(stundensatzKarte(e));
     z.append(auftragssucheKarte(e));
+    z.append(iphoneKarte(ip));
     z.append(kiModellKarte(e, ms));
     z.append(sicherungKarte(e.sicherungen || []));
     const technik = karte('Technik (nur bei Bedarf)',
@@ -2980,6 +2981,79 @@
       form);
   }
 
+  /** iPhone im eigenen WLAN: Schalter (Standard aus); eingeschaltet QR-Code und Link zum Anmelden. */
+  function iphoneKarte(st) {
+    const titel = 'iPhone verbinden';
+    if (!st || st.fehlt) return nichtVerfuegbar(titel, 'Diese Funktion gibt es in dieser Version des Servers noch nicht.');
+    const an = !!st.aktiv;
+    const schalter = h('input', { type: 'checkbox', name: 'erlaubt', checked: !!st.erlaubt, id: 'iphone-schalter', 'data-pruef': 'iphone-schalter' });
+    const form = formular({ 'data-pruef': 'iphone-formular' }, [
+      h('label', { class: 'schalter', for: 'iphone-schalter' }, schalter,
+        h('span', null, h('strong', null, 'Zugriff aus dem eigenen WLAN erlauben'), h('br'),
+          h('span', { class: 'hilfe' }, 'Dann öffnet ihr AUTONOMOUS auch auf dem iPhone – nur im selben WLAN wie dieser Mac und nur mit dem geheimen Link. '
+            + 'Ausschalten sperrt das WLAN sofort wieder aus. Standard: aus.'))),
+      h('div', { class: 'knopfreihe' }, absendeKnopf('iPhone-Zugriff speichern', { 'data-pruef': 'iphone-speichern' })),
+    ], async (werte) => {
+      const neu = !!werte.erlaubt;
+      if (neu === !!st.erlaubt && neu === an) {
+        meldung('Nichts geändert.', 'info');
+        return;
+      }
+      await API.post('/api/iphone', { erlaubt: neu });
+      meldung(neu ? 'WLAN-Zugriff ist jetzt an. Jetzt den QR-Code mit dem iPhone scannen.' : 'WLAN-Zugriff ist jetzt aus. Über das WLAN kommt niemand mehr hinein.', 'ok');
+      neuLaden();
+    });
+    let keinWlan = null;
+    if (!an && !(st.moegliche_adressen || []).length) {
+      keinWlan = hinweis('Gerade ist kein eigenes WLAN erkannt. Bitte den Mac mit eurem WLAN verbinden und diese Seite neu laden.', 'warn');
+      keinWlan.dataset.pruef = 'iphone-kein-wlan';
+    }
+    const qrTeil = an && st.qr && st.link ? h('div', { class: 'iphone-qr', 'data-pruef': 'iphone-qr' },
+      h('div', { class: 'qr-rahmen' }, qrBild(st.qr)),
+      h('div', { class: 'iphone-link' },
+        h('p', { class: 'hilfe' }, 'Mit der Kamera des iPhones scannen – oder diesen Link auf dem iPhone öffnen:'),
+        h('p', null, h('code', { 'data-pruef': 'iphone-link' }, st.link)),
+        h('p', { class: 'hilfe' }, 'Ändert sich die Adresse (z. B. nach einem Neustart des Routers), hier einfach den neuen QR-Code scannen.'))) : null;
+    return h('section', { class: 'karte', 'data-pruef': 'iphone' },
+      h('h2', null, titel),
+      kv([
+        ['WLAN-Zugriff', an ? tag('an', 'ok') : (st.erlaubt ? tag('eingeschaltet, aber gerade nicht erreichbar', 'warn') : tag('aus', 'grau'))],
+        an ? ['Adresse im WLAN', (st.adressen || []).join(', ')] : null,
+      ]),
+      qrTeil,
+      keinWlan,
+      h('ol', { class: 'schritte', 'data-pruef': 'iphone-schritte' },
+        h('li', null, 'iPhone und Mac müssen im selben WLAN sein.'),
+        h('li', null, 'Schalter einschalten und speichern. Fragt der Mac, ob „python3“ eingehende Verbindungen annehmen darf: „Erlauben“ wählen.'),
+        h('li', null, 'Den QR-Code mit der iPhone-Kamera scannen und den Link öffnen.'),
+        h('li', null, 'In Safari auf das Teilen-Symbol tippen und „Zum Home-Bildschirm“ wählen – dann startet AUTONOMOUS dort wie eine App.')),
+      hinweis('Wichtig: Der Link ist wie ein Schlüssel – geheim halten und nicht weiterschicken. Die Verbindung im WLAN ist unverschlüsselt (http). '
+        + 'Darum nur im eigenen WLAN nutzen, nie in fremden oder öffentlichen Netzen wie Café oder Hotel.', 'warn'),
+      h('div', { class: 'trenner' }),
+      form);
+  }
+
+  /** QR-Code als SVG – nur Attribute, keine Inline-Stile (strenge CSP). Der weiße Rand ist die vorgeschriebene Ruhezone. */
+  function qrBild(qr) {
+    if (!Number.isInteger(qr.groesse) || !Number.isInteger(qr.rand) || typeof qr.pfad !== 'string') return leer('QR-Code nicht verfügbar.');
+    const kante = qr.groesse + 2 * qr.rand;
+    const svg = document.createElementNS(SVG_NS, 'svg');
+    svg.setAttribute('viewBox', '0 0 ' + kante + ' ' + kante);
+    svg.setAttribute('class', 'qr-code');
+    svg.setAttribute('role', 'img');
+    svg.setAttribute('aria-label', 'QR-Code mit dem Anmeldelink für das iPhone');
+    svg.setAttribute('shape-rendering', 'crispEdges');
+    const grund = document.createElementNS(SVG_NS, 'rect');
+    grund.setAttribute('width', kante);
+    grund.setAttribute('height', kante);
+    grund.setAttribute('fill', '#ffffff');
+    const punkte = document.createElementNS(SVG_NS, 'path');
+    punkte.setAttribute('d', qr.pfad);
+    punkte.setAttribute('fill', '#000000');
+    svg.append(grund, punkte);
+    return svg;
+  }
+
   function katalogInhalt(aktionen) {
     const gruppen = { auto: [], freigabe: [], verboten: [] };
     Object.keys(aktionen).forEach(name => {
@@ -3178,7 +3252,8 @@
       h('ol', null,
         h('li', null, 'Doppelklick auf „AUTONOMOUS-starten.command“ – das Fenster zeigt den Startlink.'),
         h('li', null, 'Den Link öffnen. Er beginnt mit http://127.0.0.1 und enthält „?k=“.'),
-        h('li', null, 'Danach merkt sich dieser Browser den Zugang.')),
+        h('li', null, 'Danach merkt sich dieser Browser den Zugang.'),
+        h('li', null, 'Auf dem iPhone: am Mac unter Einstellungen → „iPhone verbinden“ den QR-Code neu scannen.')),
       h('p', { class: 'hilfe' }, 'Im Terminal geht es auch: python3 -m autonomous link')));
   }
 
