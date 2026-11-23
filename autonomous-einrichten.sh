@@ -7,8 +7,11 @@
 #   1. prüft, ob Python 3.9 oder neuer eingerichtet ist (sonst klare Meldung, nichts wird installiert)
 #   2. lädt AUTONOMOUS von GitHub nach ~/AUTONOMOUS (öffentliches Repository, kein Konto nötig)
 #   3. bei einer Aktualisierung bleiben eure Daten erhalten (Ordner autonomous/daten wird nie überschrieben)
-#   4. legt auf dem Schreibtisch „AUTONOMOUS starten.command“ und „AUTONOMOUS stoppen.command“ an
-#   5. startet AUTONOMOUS und öffnet die Oberfläche im Browser
+#   4. Dauerbetrieb auf dem Mac: AUTONOMOUS läuft wie ein eigener Server – startet bei jeder Anmeldung von selbst
+#      und nach einem Absturz neu (LaunchAgent ~/Library/LaunchAgents/de.autonomous.server.plist, nur euer Benutzer)
+#   5. legt auf dem Schreibtisch „AUTONOMOUS starten“, „AUTONOMOUS stoppen“ und „AUTONOMOUS Autostart aus“ an
+#   6. startet AUTONOMOUS und öffnet die Oberfläche im Browser
+#   7. falls vorhanden: richtet die lokale KI ein (autonomous-ki-einrichten.sh)
 # Kein sudo, keine Zusatzpakete, keine bezahlten Dienste.
 
 # Alles in einer Funktion: ein abgebrochener Download führt nichts halb aus.
@@ -33,9 +36,14 @@ haupt() {
     fi
     echo "Python $VERSION gefunden."
 
-    # 2) Laufende Fassung vor dem Aktualisieren sauber beenden
+    # 2) Laufende Fassung vor dem Aktualisieren sauber beenden (auch den Dauerbetrieb)
     if [ -x "$ZIEL/AUTONOMOUS-stoppen.command" ]; then
         "$ZIEL/AUTONOMOUS-stoppen.command" </dev/null >/dev/null 2>&1
+    fi
+    LABEL="de.autonomous.server"
+    PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
+    if command -v launchctl >/dev/null 2>&1; then
+        launchctl bootout "gui/$(id -u)/$LABEL" >/dev/null 2>&1  # alte Fassung entladen – wird unten neu geladen
     fi
 
     # 3) Herunterladen und entpacken (Python statt unzip – überall vorhanden)
@@ -58,16 +66,33 @@ haupt() {
     cp -R "$QUELLE/." "$ZIEL/" || { echo "Kopieren fehlgeschlagen."; return 1; }
     chmod +x "$ZIEL"/*.command "$ZIEL"/*.sh 2>/dev/null
 
-    # 5) Start-Symbole auf dem Schreibtisch (kleine Startdateien, die die echten Skripte aufrufen)
+    # 5) Dauerbetrieb (nur Mac): LaunchAgent schreiben – geladen wird er beim Starten (Schritt 7)
+    if command -v launchctl >/dev/null 2>&1; then
+        if (cd "$ZIEL" && python3 -m autonomous.autostart schreiben "$(command -v python3)" "$ZIEL" "$PLIST" >/dev/null) \
+            && { ! command -v plutil >/dev/null 2>&1 || plutil -lint "$PLIST" >/dev/null; }; then
+            echo "Dauerbetrieb eingerichtet: AUTONOMOUS startet bei jeder Anmeldung am Mac von selbst."
+        else
+            rm -f "$PLIST"
+            echo "Dauerbetrieb konnte nicht eingerichtet werden – AUTONOMOUS startet dann nur per Doppelklick."
+        fi
+    fi
+
+    # 6) Start-Symbole auf dem Schreibtisch (kleine Startdateien, die die echten Skripte aufrufen)
     if [ -d "$HOME/Desktop" ]; then
         printf '#!/bin/bash\nexec "%s/AUTONOMOUS-starten.command"\n' "$ZIEL" > "$HOME/Desktop/AUTONOMOUS starten.command"
         printf '#!/bin/bash\nexec "%s/AUTONOMOUS-stoppen.command"\n' "$ZIEL" > "$HOME/Desktop/AUTONOMOUS stoppen.command"
         chmod +x "$HOME/Desktop/AUTONOMOUS starten.command" "$HOME/Desktop/AUTONOMOUS stoppen.command"
         echo "Auf dem Schreibtisch liegen jetzt 'AUTONOMOUS starten' und 'AUTONOMOUS stoppen'."
+        if [ -f "$PLIST" ]; then
+            printf '#!/bin/bash\nexec "%s/AUTONOMOUS-autostart-aus.command"\n' "$ZIEL" > "$HOME/Desktop/AUTONOMOUS Autostart aus.command"
+            chmod +x "$HOME/Desktop/AUTONOMOUS Autostart aus.command"
+            echo "Dazu 'AUTONOMOUS Autostart aus' – schaltet den Dauerbetrieb ganz ab."
+        fi
     fi
 
-    # 6) Starten (öffnet den Browser)
-    "$ZIEL/AUTONOMOUS-starten.command" </dev/null
+    # 7) Starten (mit Dauerbetrieb über macOS, sonst im Hintergrund) und Browser öffnen
+    "$ZIEL/AUTONOMOUS-starten.command" </dev/null || return 1
+    if [ -f "$ZIEL/autonomous-ki-einrichten.sh" ]; then bash "$ZIEL/autonomous-ki-einrichten.sh"; fi
 }
 
 haupt "$@"

@@ -6,6 +6,18 @@ kostenpflichtige Dienste**.
 
 ## Auf den Mac holen (einmalig)
 
+**Am einfachsten – eine Zeile im Terminal** (Programme → Dienstprogramme → Terminal), auch für jede Aktualisierung:
+
+```
+curl -fsSL https://raw.githubusercontent.com/santananikolic-byte/Santo/claude/elegant-meitner-ho9kqz/autonomous-einrichten.sh | bash
+```
+
+Sie prüft Python, lädt AUTONOMOUS nach `~/AUTONOMOUS`, behält bei einer Aktualisierung eure Daten, richtet den
+Dauerbetrieb ein (siehe unten), legt drei Symbole auf den Schreibtisch und öffnet die Oberfläche. Kein sudo,
+nichts Bezahltes.
+
+Oder von Hand:
+
 1. Auf GitHub das Repository `santananikolic-byte/Santo` öffnen, oben den Branch **`claude/elegant-meitner-ho9kqz`**
    wählen, dann **Code → Download ZIP** und die ZIP-Datei per Doppelklick entpacken.
 2. Python: Auf dem Mac wird Python 3.9 oder neuer gebraucht. Fehlt es, meldet das Startskript genau das – dann im
@@ -25,6 +37,29 @@ automatischen Tests, Oberfläche und ein echter Suchlauf. Auf einem echten Mac: 
      dort in einem Satz, was zu tun ist.
 2. Beenden: Doppelklick auf **`AUTONOMOUS-stoppen.command`**. Aufgaben und Buchungen bleiben gespeichert.
 
+### Dauerbetrieb: der Mac als eigener Server
+
+Mit der Einrichtungszeile läuft AUTONOMOUS auf dem Mac wie ein eigener Server: Es startet bei jeder Anmeldung von
+selbst und nach einem Absturz neu – ohne offenes Fenster. Dafür legt die Einrichtung eine kleine Datei für macOS an
+(`~/Library/LaunchAgents/de.autonomous.server.plist`, nur für euren Benutzer, kein sudo). Meldungen landen in
+`autonomous/daten/server.log`.
+
+| Symbol auf dem Schreibtisch | Was passiert |
+|---|---|
+| **AUTONOMOUS starten** | startet AUTONOMOUS (läuft es schon: öffnet nur den Browser) |
+| **AUTONOMOUS stoppen** | beendet AUTONOMOUS sauber. Beim nächsten Anmelden startet es wieder von selbst. |
+| **AUTONOMOUS Autostart aus** | beendet AUTONOMOUS und schaltet den Dauerbetrieb ganz ab. Wieder an: Einrichtungszeile erneut ausführen. |
+
+Gut zu wissen:
+- Der Mac muss eingeschaltet und angemeldet sein. Im Ruhezustand (MacBook zugeklappt) ist AUTONOMOUS in der Regel nicht erreichbar.
+- macOS meldet eventuell „Hintergrundobjekt hinzugefügt“ (Absender: python3). Das ist AUTONOMOUS. Abschalten ginge
+  auch unter Systemeinstellungen → Allgemein → Anmeldeobjekte.
+- Den Ordner `~/AUTONOMOUS` bitte nicht in „Schreibtisch“, „Dokumente“ oder „Downloads“ verschieben. Auf diese
+  Ordner darf ein Hintergrunddienst unter macOS nur mit extra Erlaubnis zugreifen. Nach einem Umzug: Einrichtungszeile
+  erneut ausführen.
+- Stand: Die Skripte sind in der Entwicklungsumgebung mit einem **nachgebauten** launchctl geprüft (Linux). Ob macOS
+  den Dienst genauso startet und nach einem Absturz neu startet: auf einem echten Mac **noch nicht verifiziert**.
+
 Kommandozeile (im Hauptordner):
 
 ```
@@ -38,16 +73,27 @@ python3 -m autonomous export       # wichtigste Daten als JSON
 python3 -m autonomous test         # alle automatischen Tests
 ```
 
-### Auf dem iPhone (optional, nur im eigenen WLAN)
+## Auf dem iPhone benutzen
 
-Standardmäßig ist AUTONOMOUS nur auf dem Mac selbst erreichbar. Fürs iPhone im Heimnetz:
+Standardmäßig ist AUTONOMOUS nur auf dem Mac selbst erreichbar. Fürs iPhone im eigenen WLAN:
 
-```
-AUTONOMOUS_HOST=0.0.0.0 AUTONOMOUS_ERLAUBTE_HOSTS=DEIN-MAC.local python3 -m autonomous start
-```
+1. iPhone und Mac ins **selbe WLAN**. AUTONOMOUS läuft auf dem Mac.
+2. Am Mac: **Einstellungen → iPhone verbinden** → „Zugriff aus dem eigenen WLAN erlauben“ anhaken →
+   **iPhone-Zugriff speichern**. Fragt der Mac, ob „python3“ eingehende Verbindungen annehmen darf: **Erlauben**.
+3. Den **QR-Code** mit der iPhone-Kamera scannen und den Link öffnen.
+4. In Safari auf das Teilen-Symbol tippen → **Zum Home-Bildschirm**. Ab dann startet AUTONOMOUS dort wie eine App.
 
-Dann auf dem iPhone `http://DEIN-MAC.local:8770/?k=SCHLÜSSEL` öffnen. Den Schlüssel zeigt `python3 -m autonomous link`.
-**Achtung:** Die Verbindung ist unverschlüsselt. Nur im eigenen WLAN nutzen, nie in fremden Netzen.
+Wichtig:
+- Der Link ist wie ein Schlüssel: geheim halten, nicht weiterschicken.
+- Die Verbindung im WLAN ist **unverschlüsselt** (http). Nur im eigenen WLAN nutzen, nie in fremden oder öffentlichen
+  Netzen (Café, Hotel).
+- Ausschalten: Haken weg → speichern. Dann kommt über das WLAN sofort niemand mehr hinein.
+- Bekommt der Mac eine neue Adresse (z. B. nach einem Neustart des Routers): den neuen QR-Code scannen.
+
+Stand: In der Entwicklungsumgebung echt geprüft. Die Safari-Engine (WebKit 26.6) in iPhone-13-Emulation öffnete den
+Link über die Netzwerkadresse (nicht 127.0.0.1). Der QR-Code wurde aus der Oberfläche fotografiert und mit einem
+unabhängigen Leser dekodiert. Eine Einstellung wurde gespeichert, eine fremde Herkunft abgelehnt (403), und nach dem
+Ausschalten war die Adresse nicht mehr erreichbar. Mit echtem iPhone und echtem Mac: **noch nicht verifiziert**.
 
 ## Was wo liegt
 
@@ -105,4 +151,6 @@ Probeaufruf und ein Marktbericht mit KI-Zusammenfassung über den laufenden Serv
 ```
 python3 -m autonomous test               # alle automatischen Tests (Stand und Zahlen: docs/PHASENBERICHT.md)
 python3 autonomous/tests/ui_server.py    # Oberfläche im Browser (braucht Node.js + Playwright, nur für Entwickler)
+python3 autonomous/tests/iphone_pruefung.py   # iPhone im WLAN mit Safari-Engine und QR-Gegenprobe (nur für Entwickler:
+                                              # Node.js, Playwright mit WebKit, zxing-cpp und Pillow)
 ```

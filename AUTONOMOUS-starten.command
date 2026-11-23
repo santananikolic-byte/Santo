@@ -30,16 +30,33 @@ port_belegt() {
     curl -s -o /dev/null --max-time 2 "http://127.0.0.1:$PORT/" 2>/dev/null
 }
 
+# Dauerbetrieb (nur Mac): Ist der LaunchAgent eingerichtet, startet macOS AUTONOMOUS – sonst wie bisher hier.
+DIENST="gui/$(id -u)/de.autonomous.server"
+PLIST="$HOME/Library/LaunchAgents/de.autonomous.server.plist"
+mit_dauerbetrieb() {
+    command -v launchctl >/dev/null 2>&1 && [ -f "$PLIST" ]
+}
+
 umask 077  # Datenordner und Protokoll nur für den eigenen Benutzer lesbar
 mkdir -p autonomous/daten
+touch autonomous/daten/server.log
 chmod -R go-rwx autonomous/daten 2>/dev/null  # auch Dateien älterer Fassungen nachträglich schützen
 if ! ist_autonomous; then
     if port_belegt; then
         ende_mit_fehler "Port $PORT ist von einem anderen Programm belegt. Entweder das Programm beenden oder
 AUTONOMOUS mit anderem Port starten:  AUTONOMOUS_PORT=8771 ./AUTONOMOUS-starten.command"
     fi
-    echo "AUTONOMOUS wird gestartet (Python $VERSION) ..."
-    nohup python3 -m autonomous start >> autonomous/daten/server.log 2>&1 &
+    if mit_dauerbetrieb; then
+        echo "AUTONOMOUS wird gestartet (Dauerbetrieb über macOS, Python $VERSION) ..."
+        if launchctl print "$DIENST" >/dev/null 2>&1; then
+            launchctl kickstart "$DIENST" >/dev/null 2>&1                     # geladen, aber gerade beendet
+        else
+            launchctl bootstrap "gui/$(id -u)" "$PLIST" >/dev/null 2>&1       # laden – startet sofort
+        fi
+    else
+        echo "AUTONOMOUS wird gestartet (Python $VERSION) ..."
+        nohup python3 -m autonomous start >> autonomous/daten/server.log 2>&1 &
+    fi
     for _ in $(seq 1 40); do
         sleep 0.5
         ist_autonomous && break
