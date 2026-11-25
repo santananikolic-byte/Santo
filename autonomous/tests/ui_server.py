@@ -117,6 +117,20 @@ def testdaten_anlegen(daten):
                     ("ui_test_mb", "TESTDATEN – Marktbericht (UI-Prüfung)", "marktbericht", "eigentuemer", "research",
                      "abgeschlossen", 3, jetzt, jetzt, jetzt, jetzt, json.dumps({"zeitraum_tage": 90}),
                      json.dumps(ergebnis, ensure_ascii=False), 1))
+        # Ein erkennbarer TESTDATEN-Lauf des KI-Prüfstands (Ergebnis wie von ki/pruefstand.py) – so lässt sich die
+        # Anzeige ohne echtes Modell prüfen. „fehler“ je Modell ist die Zahl der Fälle ohne Antwort.
+        pruefstand = {"modelle": [
+            {"modell": "TESTDATEN-modell-a", "punkte": 100, "max": 120, "prozent": 83, "kritisch": 1, "fehler": 0,
+             "dauer_s": 61.5, "faelle": []},
+            {"modell": "TESTDATEN-modell-b", "punkte": 60, "max": 120, "prozent": 50, "kritisch": 6, "fehler": 2,
+             "dauer_s": 90.0, "faelle": []}],
+            "bestes_modell": "TESTDATEN-modell-a", "empfehlung": "TESTDATEN – Empfehlung nur für die UI-Prüfung.",
+            "faelle_anzahl": 15, "regeln_eigenes_modell": None, "hinweis": "TESTDATEN – nur für die UI-Prüfung"}
+        con.execute("INSERT INTO aufgaben (id, titel, typ, ersteller, verantwortlich, status, prioritaet, erstellt,"
+                    " aktualisiert, gestartet, beendet, eingabe, ergebnis, versuche) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    ("ui_test_ps", "TESTDATEN – KI-Prüfstand (UI-Prüfung)", "ki_pruefstand", "eigentuemer", "research",
+                     "abgeschlossen", 3, jetzt, jetzt, jetzt, jetzt, json.dumps({}),
+                     json.dumps(pruefstand, ensure_ascii=False), 1))
         con.commit()
     finally:
         con.close()

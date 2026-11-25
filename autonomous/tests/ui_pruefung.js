@@ -757,6 +757,23 @@ async function neueFunktionenPruefen(seite) {
   pruefe(await seite.isVisible('[data-pruef="ki-modell"]'), 'Einstellungen: Karte „KI-Modell“ fehlt');
   pruefe(/Kein Modell/.test((await seite.textContent('[data-pruef="ki-modell"]')) || ''), 'KI-Modell: Status „Kein Modell“ fehlt');
   pruefe(await seite.isDisabled('[data-pruef="modell-testen"]'), 'KI-Modell: „Modell testen“ ohne Modell nicht gesperrt');
+  // Prüfstand: ohne Modell gesperrt; der TESTDATEN-Lauf aus ui_server.py erscheint mit Prozent, Punkten, Verstößen,
+  // Fällen ohne Antwort und Empfehlung – das beste Modell ist hervorgehoben
+  const ps = '[data-pruef="pruefstand"]';
+  if (pruefe(await seite.isVisible(ps), 'KI-Modell: Prüfstand fehlt')) {
+    pruefe(await seite.isDisabled('[data-pruef="pruefstand-starten"]'), 'Prüfstand: ohne Modell nicht gesperrt');
+    const psModelle = await seite.$$eval(ps + ' [data-pruef="pruefstand-modell"]', els => els.map(e => e.textContent.replace(/\s+/g, ' ')));
+    pruefe(psModelle.length === 2, 'Prüfstand: ' + psModelle.length + ' Modelle statt 2');
+    pruefe(/TESTDATEN-modell-a/.test(psModelle[0] || '') && /83 %/.test(psModelle[0] || '') && /100 von 120 Punkten/.test(psModelle[0] || '')
+      && /1 kritischer Verstoß/.test(psModelle[0] || '') && !/ohne Antwort/.test(psModelle[0] || ''),
+    'Prüfstand: erstes Modell nicht mit Prozent, Punkten und Verstoß: ' + psModelle[0]);
+    pruefe(/6 kritische Verstöße/.test(psModelle[1] || '') && /2 Fälle ohne Antwort/.test(psModelle[1] || ''),
+      'Prüfstand: zweites Modell ohne Verstöße oder Fälle ohne Antwort: ' + psModelle[1]);
+    const toene = await seite.$$eval(ps + ' [data-pruef="pruefstand-modell"] .eintrag-kopf .tag', t => t.map(x => x.className));
+    pruefe(/\bok\b/.test(toene[0] || '') && /\bgrau\b/.test(toene[1] || ''), 'Prüfstand: bestes Modell nicht hervorgehoben (' + toene.join(' | ') + ')');
+    pruefe(/TESTDATEN – Empfehlung nur für die UI-Prüfung/.test((await seite.textContent(ps)) || ''), 'Prüfstand: Empfehlung fehlt');
+    pruefe(!(await seite.isVisible('[data-pruef="pruefstand-fehler"]')), 'Prüfstand: Fehlermeldung ohne gescheiterten Lauf');
+  }
   const kf0 = '[data-pruef="ki-formular"]';
   await seite.check(kf0 + ' [data-pruef="anbieter-ollama"]');
   await seite.fill(kf0 + ' input[name="ollama_adresse"]', 'http://example.com:11434');
@@ -779,6 +796,22 @@ async function neueFunktionenPruefen(seite) {
     return el && /Kein Ergebnis/.test(el.textContent);
   }, null, { timeout: 30000 }).then(() => true, () => false);
   pruefe(testErgebnis, 'KI-Modell: „Modell testen“ zeigt bei nicht erreichbarem Modell kein ehrliches Ergebnis');
+  // Prüfstand echt starten: Ollama ist hier nicht erreichbar → die Aufgabe scheitert sofort (ohne sinnlose
+  // Wiederholung), und der Grund steht danach in der Karte; starten lässt er sich wieder
+  await bereichOeffnen(seite, 'einstellungen');
+  await seite.click('[data-pruef="pruefstand-starten"]');
+  pruefe(await meldungMit(seite, /Research-Agenten übergeben/), 'Prüfstand: keine Meldung nach dem Start');
+  const psFehler = await warteAuf(seite, 'Prüfstand: gescheiterter Lauf wird nicht gemeldet', async () => {
+    const r = (await api(seite, 'GET', '/api/modell/pruefstand')).inhalt || {};
+    return r.letzter_fehler && !(r.in_arbeit || []).length ? r.letzter_fehler : null;
+  }, 30);
+  if (psFehler) {
+    pruefe(/nicht erreichbar/.test(psFehler.fehler || ''), 'Prüfstand: Grund nicht „nicht erreichbar“: ' + psFehler.fehler);
+    await bereichOeffnen(seite, 'einstellungen');
+    const psText = ((await seite.textContent('[data-pruef="pruefstand-fehler"]').catch(() => '')) || '').replace(/\s+/g, ' ');
+    pruefe(/Letzter Versuch fehlgeschlagen: .*nicht erreichbar/.test(psText), 'Prüfstand: Fehler nicht in der Karte (' + psText.slice(0, 80) + ')');
+    pruefe(!(await seite.isDisabled('[data-pruef="pruefstand-starten"]')), 'Prüfstand: nach dem Fehler nicht wieder startbar');
+  }
   await api(seite, 'POST', '/api/einstellungen', { schluessel: 'modell_anbieter', wert: 'keiner' });
   await api(seite, 'POST', '/api/einstellungen', { schluessel: 'ollama_adresse', wert: 'http://127.0.0.1:11434' });
   // KI-Protokoll: lesbare Namen statt interner Kennungen („Modell testen“ oben hat einen echten Eintrag erzeugt);

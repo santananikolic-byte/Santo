@@ -6,7 +6,7 @@ GET  /api/research/marktberichte                  → {berichte:[...], in_arbeit
 GET  /api/modell/status                           → {anbieter, modell, erreichbar, modell_vorhanden, ...}
 POST /api/modell/testen                           → kurzer Probeaufruf (nur wenn ein Modell eingestellt ist)
 POST /api/modell/pruefstand {modelle?}            → {aufgabe_id} – Prüfstand als Aufgabe des Research-Agenten
-GET  /api/modell/pruefstand                       → {laeufe:[...], in_arbeit:[...]}
+GET  /api/modell/pruefstand                       → {laeufe:[...], in_arbeit:[...], letzter_fehler: {…}|null}
 """
 
 import json
@@ -102,4 +102,9 @@ def r_modell_pruefstaende(kern, a):
                                    for m in e.get("modelle") or [] if isinstance(m, dict)]})
     in_arbeit = kern.db.alle("SELECT id AS aufgabe_id, status, erstellt, fehler FROM aufgaben WHERE typ='ki_pruefstand' "
                              "AND status IN ('geplant','bereit','laufend','wartet_auf_freigabe') ORDER BY erstellt DESC")
-    return {"laeufe": laeufe, "in_arbeit": in_arbeit}
+    # Ist der jüngste beendete Lauf gescheitert, steht der Grund in der Übersicht (sonst bliebe die Karte leer)
+    z = kern.db.eins("SELECT id, status, aktualisiert, fehler FROM aufgaben WHERE typ='ki_pruefstand' AND "
+                     "status IN ('abgeschlossen','fehlgeschlagen') ORDER BY erstellt DESC, rowid DESC LIMIT 1")
+    letzter_fehler = ({"aufgabe_id": z["id"], "zeit": z["aktualisiert"], "fehler": z["fehler"] or "unbekannt"}
+                      if z and z["status"] == "fehlgeschlagen" else None)
+    return {"laeufe": laeufe, "in_arbeit": in_arbeit, "letzter_fehler": letzter_fehler}

@@ -306,6 +306,20 @@ class TestAgentUndApi(PruefstandTest):
         self.assertIn("prozent", u["laeufe"][0]["modelle"][0])
         self.assertEqual(u["in_arbeit"], [])
 
+    def test_letzter_fehler_wird_gemeldet_bis_ein_neuer_lauf_klappt(self):
+        # Ohne diese Angabe bliebe die Prüfstand-Karte nach einem gescheiterten Lauf einfach leer
+        with ErsatzOllama(modelle=["gemma3:1b"], antwort=self.ANTWORT) as o:
+            self.ollama_einstellen(o.adresse)
+            self.assertIsNone(self.api("GET", "/api/modell/pruefstand")["letzter_fehler"])
+            a = self.starten({"modelle": ["nicht-installiert:1b"]})
+            self.assertEqual(a["status"], "fehlgeschlagen")
+            u = self.api("GET", "/api/modell/pruefstand")
+            self.assertEqual(u["letzter_fehler"]["aufgabe_id"], a["id"])
+            self.assertIn("nicht-installiert:1b", u["letzter_fehler"]["fehler"])
+            b = self.starten({"modelle": ["gemma3:1b"]})
+            self.assertEqual(b["status"], "abgeschlossen", b["fehler"])
+        self.assertIsNone(self.api("GET", "/api/modell/pruefstand")["letzter_fehler"])
+
     def test_aufgabentyp_beim_research_agenten(self):
         agent = self.kern.register.hole("research")
         self.assertIn("ki_pruefstand", agent.aufgabentypen)

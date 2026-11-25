@@ -23,8 +23,9 @@ bash ~/AUTONOMOUS/autonomous-ki-einrichten.sh
 Das Mac-Einrichtungsskript (`autonomous-einrichten.sh`) ruft es am Ende selbst auf. Es stellt keine Fragen. Was passiert:
 
 1. prüft Python und den Arbeitsspeicher (mindestens 4 GB),
-2. wählt das Basismodell: **unter 6 GB → gemma3:1b, 6 bis 14 GB → gemma3:4b, ab 14 GB → gemma3:12b**
-   (Download 769 MB / 3195 MB / 7786 MB laut Ollama-Registry),
+2. wählt das Basismodell: **unter 6 GB → gemma3:1b, sonst gemma3:4b** (Download 769 MB / 3195 MB laut
+   Ollama-Registry). gemma3:12b (7786 MB) nur auf ausdrücklichen Wunsch mit `AUTONOMOUS_KI_BASIS=gemma3:12b` –
+   es ist im Prüfstand nicht gemessen, darum nie von selbst,
 3. installiert Ollama, falls es fehlt – mit dem **offiziellen Skript von ollama.com** (es unterstützt macOS, im
    Skripttext geprüft: lädt `Ollama-darwin.zip`, legt `Ollama.app` in „Programme“; der Mac kann dabei nach eurem
    Passwort fragen – das geht nur an macOS),
@@ -104,7 +105,7 @@ automatisch um.** Für Entwickler: `python3 -m autonomous.ki.pruefstand gemma3:1
 
 Rechner: Linux, 4 CPU-Kerne, **keine Grafikkarte**, 16 GB Arbeitsspeicher; Ollama 0.40.17. Modelle: gemma3:1b und
 gemma3:4b (Google Gemma 3 aus der offiziellen Ollama-Registry), „autonomous“ (Basis gemma3:1b) und „autonomous:4b“
-(dieselben Regeln auf gemma3:4b – so legt das Skript das Modell auf einem Mac mit 6 bis 14 GB an).
+(dieselben Regeln auf gemma3:4b – so legt das Skript das Modell auf jedem Mac ab 6 GB an).
 
 **Endstand – Lauf 4 vom 25.11.2026** (endgültige Bewertung, 15 Fälle, höchstens 123 Punkte, ⚠ = kritischer Verstoß):
 
@@ -143,14 +144,14 @@ Reihenfolge der Modelle blieb in allen Läufen gleich. Über den Produktionsweg 
 - Das eigene Modell ist bei gleichem Basismodell klar besser: **1b: 75 % → 87 %, 4b: 76 % → 98 %**. Größte
   Unterschiede: ehrliches „Das weiß ich nicht.“ statt erfundenem Umsatz (die Basismodelle erfanden „120.000 €“ bzw.
   „587.230 €“), keine Terminzusage („Ja, wir können … nächsten Montag“ bei beiden Basismodellen).
-- **Empfehlung: „autonomous“ auf Basis gemma3:4b** – das wählt das Skript bei 6 bis 14 GB Arbeitsspeicher.
+- **Empfehlung: „autonomous“ auf Basis gemma3:4b** – das wählt das Skript ab 6 GB Arbeitsspeicher.
 - „autonomous“ auf Basis 1b nur als Notlösung (unter 6 GB): Es übertrug das eigene Firmenwissen auf eine fremde Firma,
   erfand eine Internetadresse und forderte im Betrugsfall sogar zum Überweisen auf.
 - Auch autonomous:4b machte einen kritischen Fehler: Im Betrugsfall empfahl es, „ausschließlich unter 0157 …“
   zurückzurufen – das ist die Nummer des Anrufers. Darum bleibt jeder KI-Text als ungeprüft gekennzeichnet. Rückruf nur
   über die offizielle Nummer.
-- **gemma3:12b (ab 14 GB): NICHT GEPRÜFT** – ohne Grafikkarte hier zu langsam. Wer sicher gehen will:
-  `AUTONOMOUS_KI_BASIS=gemma3:4b bash autonomous-ki-einrichten.sh`.
+- **gemma3:12b: NICHT GEPRÜFT** – ohne Grafikkarte hier zu langsam. Darum wählt das Skript es nie von selbst;
+  wer es ausprobieren will: `AUTONOMOUS_KI_BASIS=gemma3:12b bash autonomous-ki-einrichten.sh`.
 - Geschwindigkeit hier (ohne Grafikkarte, Rechner teils parallel belastet): 1b im Mittel 4 bis 8 s je Antwort, 4b 9 bis
   21 s; einzelne Antworten bis 139 s (z. B. beim ersten Laden). Auf einem Mac mit Apple-Chip vermutlich schneller –
   NICHT VERIFIZIERT.
@@ -181,7 +182,8 @@ Der Wächter prüft Fakten, Zusagen und Pflichtteile – nicht den Stil. Der det
 
 ### Einrichtung echt ausgeführt (Linux, 25.11.2026)
 
-- Echter Arbeitsspeicher 16 087 MB → Regel wählt gemma3:12b; mit absichtlich riesiger Reserve **sauber vor dem
+- Echter Arbeitsspeicher 16 087 MB → damalige Regel wählte gemma3:12b (seit 25.11.2026 wählt das Skript hier
+  gemma3:4b, weil 12b ungeprüft ist); mit absichtlich riesiger Reserve **sauber vor dem
   Download abgebrochen**, Einstellungen unverändert. ERFOLGREICH AUSGEFÜHRT.
 - Leerer Modellordner, freier Port: Skript **startete Ollama selbst**, lud gemma3:1b (769 MB), erstellte „autonomous“,
   Probe „OK.“, Einstellungen gesetzt. **Zweiter Lauf änderte nichts** („schon vorhanden“, „stimmen schon“; je

@@ -55,12 +55,14 @@ class KiTest(KernTest):
 
 # ---------------------------------------------------------------------------------------------- Modelfile
 class TestBasismodellNachArbeitsspeicher(unittest.TestCase):
-    def test_stufen_unter_6_bis_14_ab_14_gb(self):
+    def test_unter_6_gb_1b_sonst_das_gepruefte_4b(self):
+        # gemma3:12b ist im Prüfstand nie gemessen – darum nie von selbst, nur mit AUTONOMOUS_KI_BASIS=gemma3:12b
         from autonomous.ki import modelfile
         for ram_mib, erwartet in ((2048, "gemma3:1b"), (4096, "gemma3:1b"), (6143, "gemma3:1b"),
                                   (6144, "gemma3:4b"), (8192, "gemma3:4b"), (14335, "gemma3:4b"),
-                                  (14336, "gemma3:12b"), (16384, "gemma3:12b"), (65536, "gemma3:12b")):
+                                  (14336, "gemma3:4b"), (16384, "gemma3:4b"), (65536, "gemma3:4b")):
             self.assertEqual(modelfile.basis_fuer_ram(ram_mib), erwartet, ram_mib)
+        self.assertIn("gemma3:12b", modelfile.GROESSE_MIB)  # auf Wunsch weiter möglich (Speicherplatz-Prüfung)
 
     def test_unsinnige_werte_werden_abgelehnt(self):
         from autonomous.ki import modelfile

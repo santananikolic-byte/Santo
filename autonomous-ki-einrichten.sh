@@ -5,7 +5,8 @@
 #
 # Was passiert (sonst nichts):
 #   1. prüft Python (3.9 oder neuer) und den Arbeitsspeicher (mindestens 4 GB)
-#   2. wählt das Basismodell nach Arbeitsspeicher: unter 6 GB gemma3:1b, 6 bis 14 GB gemma3:4b, ab 14 GB gemma3:12b
+#   2. wählt das Basismodell nach Arbeitsspeicher: unter 6 GB gemma3:1b, sonst gemma3:4b (im Prüfstand gemessen);
+#      gemma3:12b nur auf ausdrücklichen Wunsch (AUTONOMOUS_KI_BASIS=gemma3:12b) – nicht geprüft
 #   3. installiert Ollama, falls es fehlt – mit dem offiziellen Installationsskript von ollama.com (kostenlos)
 #   4. startet Ollama, falls es nicht läuft
 #   5. lädt das Basismodell, falls es fehlt (vorher: genug Speicherplatz?)

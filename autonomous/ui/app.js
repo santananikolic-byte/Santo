@@ -2849,14 +2849,15 @@
   // Bereich: Einstellungen
   // ===========================================================================
   async function ansichtEinstellungen(z) {
-    const [e, ms, ip] = await Promise.all([API.get('/api/einstellungen'), optional('/api/modell/status'), optional('/api/iphone')]);
+    const [e, ms, ip, ps] = await Promise.all([API.get('/api/einstellungen'), optional('/api/modell/status'), optional('/api/iphone'),
+      optional('/api/modell/pruefstand')]);
     zustand.katalog = e.aktionen || {};
     z.append(h('p', { class: 'einleitung' }, 'Hier legt ihr die wenigen Werte fest, mit denen AUTONOMOUS rechnet und sucht. Technik steht unten eingeklappt.'));
     z.append(stundensatzKarte(e));
     z.append(auftragssucheKarte(e));
     z.append(ueberlebensplanKarte(e));
     z.append(iphoneKarte(ip));
-    z.append(kiModellKarte(e, ms));
+    z.append(kiModellKarte(e, ms, ps));
     z.append(sicherungKarte(e.sicherungen || []));
     const technik = karte('Technik (nur bei Bedarf)',
       h('p', { class: 'hilfe' }, 'Kosten, Betrieb, Berechtigungen und Protokoll. Im Alltag müsst ihr hier nichts ändern.'),
@@ -2896,7 +2897,7 @@
   }
 
   /** KI-Modell (lokal, optional): Status, Einstellungen und ein echter Probeaufruf. */
-  function kiModellKarte(e, ms) {
+  function kiModellKarte(e, ms, ps) {
     const w = e.werte || {};
     if (!ms || ms.fehlt) {
       return nichtVerfuegbar('KI-Modell (lokal, optional)', 'Die Modell-Schnittstelle gibt es in dieser Version des Servers noch nicht.');
@@ -2987,10 +2988,49 @@
       h('div', { class: 'knopfreihe' }, testen),
       ms.anbieter === 'keiner' || !ms.anbieter ? h('p', { class: 'hilfe' }, '„Modell testen“ geht, sobald ihr unten „Ollama“ wählt und speichert.') : null,
       ergebnis,
+      pruefstandTeil(ps, ms),
       h('div', { class: 'trenner' }),
       form);
     k.dataset.pruef = 'ki-modell';
     return k;
+  }
+
+  /** Prüfstand: 15 Fälle aus dem Alltag, Bewertung nur nach festen Regeln – Ergebnis ist ein Vorschlag, nie ein Umschalten. */
+  function pruefstandTeil(ps, ms) {
+    if (!ps || ps.fehlt) return null;
+    const laeufe = ps.laeufe || [];
+    const inArbeit = (ps.in_arbeit || []).length > 0;
+    const ohneModell = ms.anbieter === 'keiner' || !ms.anbieter;
+    if (inArbeit) spaeterNeuLaden(5000); // Fortschritt sichtbar, ohne dass jemand neu laden muss
+    const l = laeufe[0];
+    const verstoesse = n => zahl(n) + (n === 1 ? ' kritischer Verstoß' : ' kritische Verstöße');
+    const starten = aktionsKnopf(inArbeit ? 'Prüfstand läuft …' : 'Prüfstand starten', 'zweit', async () => {
+      const r = await API.post('/api/modell/pruefstand', {});
+      auftragGemeldet(r, 'den Research-Agenten');
+    }, { 'data-pruef': 'pruefstand-starten', disabled: ohneModell || inArbeit });
+    return h('div', { 'data-pruef': 'pruefstand' },
+      h('h3', null, 'Prüfstand: Welches Modell hält sich am besten an eure Regeln?'),
+      h('p', { class: 'hilfe' }, '15 Fälle aus eurem Alltag, z. B. Umsatz-Fangfrage, Betrugsanruf und Terminzusage. Bewertet wird nur nach festen Regeln. '
+        + 'Das Ergebnis ist ein Vorschlag: Umgeschaltet wird nie automatisch. Braucht 15 KI-Aufrufe je Modell.'),
+      h('div', { class: 'knopfreihe' }, starten),
+      ohneModell ? h('p', { class: 'hilfe' }, 'Der Prüfstand geht, sobald ihr unten „Ollama“ wählt und speichert.') : null,
+      inArbeit
+        ? h('p', { 'data-pruef': 'pruefstand-laeuft' }, tag('Prüfstand läuft …', 'blau'), ' Je Modell einige Minuten – die Anzeige aktualisiert sich von selbst.')
+        : null,
+      ps.letzter_fehler && !inArbeit
+        ? h('p', { class: 'fehlertext', 'data-pruef': 'pruefstand-fehler' }, 'Letzter Versuch fehlgeschlagen: ' + ps.letzter_fehler.fehler)
+        : null,
+      l ? h('div', { 'data-pruef': 'pruefstand-ergebnis' },
+        h('div', { class: 'meta' }, 'Letzter Lauf ' + zeitText(l.erstellt) + ' · ' + zahl(l.faelle_anzahl || 0) + ' Fälle'),
+        h('ul', { class: 'liste' }, (l.modelle || []).map(m => h('li', { class: 'eintrag', 'data-pruef': 'pruefstand-modell' },
+          h('div', { class: 'eintrag-kopf' },
+            h('span', { class: 'eintrag-titel' }, m.modell),
+            tag(zahl(m.prozent) + ' %', m.modell === l.bestes_modell ? 'ok' : 'grau')),
+          h('div', { class: 'meta' }, zahl(m.punkte) + ' von ' + zahl(m.max) + ' Punkten · ' + verstoesse(m.kritisch || 0)
+            + ' · ' + zahl(m.dauer_s) + ' s' + (m.fehler ? ' · ' + zahl(m.fehler) + (m.fehler === 1 ? ' Fall' : ' Fälle') + ' ohne Antwort' : ''))))),
+        l.empfehlung ? hinweis(l.empfehlung) : null,
+        h('div', { class: 'knopfreihe' }, h('a', { href: '#aufgaben', class: 'knopf zweit klein' }, 'Alle Antworten unter „Aufgaben“')))
+        : (inArbeit ? null : leer('Noch kein Prüfstand-Lauf.')));
   }
 
   /** Kosten und Betrieb (eingeklappt unter „Technik“). */

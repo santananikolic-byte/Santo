@@ -18,8 +18,9 @@ MODELLNAME = "autonomous"
 FASSUNG = 1
 KENNUNG = "AUTONOMOUS-Regeln (Fassung %d)" % FASSUNG
 
-# Basismodell nach Arbeitsspeicher (MiB): unter 6 GB → 1b, 6 bis unter 14 GB → 4b, ab 14 GB → 12b
-BASIS_STUFEN = ((6 * 1024, "gemma3:1b"), (14 * 1024, "gemma3:4b"), (None, "gemma3:12b"))
+# Basismodell nach Arbeitsspeicher (MiB): unter 6 GB → 1b, sonst 4b (im Prüfstand gemessen: autonomous auf 4b = 98 %).
+# gemma3:12b ist nie gemessen – darum nie von selbst, nur auf ausdrücklichen Wunsch: AUTONOMOUS_KI_BASIS=gemma3:12b
+BASIS_STUFEN = ((6 * 1024, "gemma3:1b"), (None, "gemma3:4b"))
 # Download-Größe in MiB (Summe der Schichten laut registry.ollama.ai, abgerufen am 23.11.2026)
 GROESSE_MIB = {"gemma3:1b": 769, "gemma3:4b": 3195, "gemma3:12b": 7786}
 PARAMETER = (("temperature", "0.2"), ("top_p", "0.9"))

@@ -11,8 +11,11 @@
 #      und nach einem Absturz neu (LaunchAgent ~/Library/LaunchAgents/de.autonomous.server.plist, nur euer Benutzer)
 #   5. legt auf dem Schreibtisch „AUTONOMOUS starten“, „AUTONOMOUS stoppen“ und „AUTONOMOUS Autostart aus“ an
 #   6. startet AUTONOMOUS und öffnet die Oberfläche im Browser
-#   7. falls vorhanden: richtet die lokale KI ein (autonomous-ki-einrichten.sh)
-# Kein sudo, keine Zusatzpakete, keine bezahlten Dienste.
+#   7. richtet die lokale KI ein (autonomous-ki-einrichten.sh): installiert das kostenlose Programm Ollama, falls es
+#      fehlt (offizielles Skript von ollama.com – der Mac kann dabei nach eurem Passwort fragen, das geht nur an
+#      macOS), lädt einmalig ein Basismodell (0,8 GB bei unter 6 GB Arbeitsspeicher, sonst 3,2 GB) und erstellt das
+#      eigene Modell „autonomous“. Scheitert das, läuft AUTONOMOUS trotzdem – nur ohne KI.
+# AUTONOMOUS selbst braucht kein sudo und keine Zusatzpakete. Keine bezahlten Dienste.
 
 # Alles in einer Funktion: ein abgebrochener Download führt nichts halb aus.
 haupt() {
