@@ -7,6 +7,9 @@
 - Versand eines Angebots braucht die Freigabe des Eigentümers. Auch mit Freigabe gibt es in
   Version 1 keinen Versandkanal – der Agent sagt das ehrlich und behauptet nie, etwas gesendet zu haben.
 - Der Agent ändert den Kundenstatus nicht selbst; das entscheidet der Inhaber.
+- Nur wenn ein lokales Modell eingestellt und erreichbar ist, kommt zum Nachrichtenentwurf ein zusätzlicher,
+  gekennzeichneter KI-Feinschliff dazu – geprüft vom Faktenwächter (ki/vorschlag.py). Der Entwurf selbst bleibt
+  immer deterministisch und maßgeblich.
 """
 
 import datetime
@@ -15,6 +18,8 @@ import re
 
 from . import Agent
 from ..db import jetzt, neue_id
+from ..ki import faktenwaechter, vorlagen
+from ..ki import vorschlag as ki_vorschlag
 from ..produkte import bereinigen, datei_schreiben, datum_deutsch, produkt_hole, sicherer_pfad
 from ..produkte import angebot as angebot_vorlage
 from ..produkte import kalkulation as kalkulation_modul
@@ -29,6 +34,7 @@ RECHT_OHNE_EINWILLIGUNG = (
     "Werbe-E-Mails brauchen eine vorherige ausdrückliche Einwilligung (§ 7 UWG) – auch gegenüber Firmen. "
     "Werbeanrufe bei Firmen nur mit zumindest mutmaßlicher Einwilligung; im Zweifel nicht anrufen. "
     "Empfehlung: Brief oder persönliches Gespräch. Keine Rechtsberatung.")
+ABMELDUNG = "Sie möchten keine weiteren Nachrichten von uns? Eine kurze Antwort genügt."
 
 
 class SalesAgent(Agent):
@@ -36,7 +42,7 @@ class SalesAgent(Agent):
     name = "Sales-Agent"
     beschreibung = "Bereitet Angebote und Kundenkommunikation vor; versendet nichts ohne Freigabe."
     rechte = frozenset({"entwurf_erstellen", "datei_erstellen", "interne_auswertung", "gedaechtnis_vorschlag",
-                        "kundenkontakt", "externe_nachricht"})
+                        "kundenkontakt", "externe_nachricht", "lokales_modell"})
     aufgabentypen = {
         "angebot_entwurf": "Angebot als druckbaren Entwurf erstellen (Eingabe: betrag, kontakt_id?, produkt_id?, "
                            "titel?, leistungen?, lieferzeit?; für Daueraufträge: art = reinigung_dauerauftrag, "
@@ -169,10 +175,11 @@ class SalesAgent(Agent):
                          "können. Sie bleiben selbst Inhaber des Profils. Gern zeigen wir Ihnen ein Beispiel." % branche)
         schluss = ("Wenn Sie Interesse haben, erreichen Sie uns unter [Telefon / E-Mail des Absenders].\n\n"
                    "Mit freundlichen Grüßen\n[Name, Firma und Anschrift des Absenders – vom Inhaber ergänzen]")
+        brieftext = "%s\n\n%s\n\n%s" % (anrede, kern_text, schluss)   # Anrede bis Gruß
         if einwilligung:
             kanal = "email"
-            text = "%s\n\n%s\n\n%s\n\nSie möchten keine weiteren Nachrichten von uns? Eine kurze Antwort genügt." % (
-                anrede, kern_text, schluss)
+            brieftext += "\n\n" + ABMELDUNG
+            text = brieftext
             recht = ("Einwilligung dokumentiert (%s). Abmeldemöglichkeit ist im Text enthalten. Versand nur nach "
                      "Freigabe; in Version 1 ist kein Versandkanal angebunden. Keine Rechtsberatung."
                      % kontakt["einwilligung_nachweis"])
@@ -183,8 +190,7 @@ class SalesAgent(Agent):
                                             "[Straße, Hausnummer]",
                                             "[PLZ] %s" % (kontakt["ort"] or "[Ort]")) if z)
             datum = datum_deutsch(datetime.date.today().isoformat())
-            text = "%s\n\n[Ort des Absenders], %s\n\nBetreff: %s\n\n%s\n\n%s\n\n%s" % (
-                adresse, datum, betreff, anrede, kern_text, schluss)
+            text = "%s\n\n[Ort des Absenders], %s\n\nBetreff: %s\n\n%s" % (adresse, datum, betreff, brieftext)
             recht = RECHT_OHNE_EINWILLIGUNG
             schritt = "Entwurf prüfen, Platzhalter ergänzen, ausdrucken und per Post senden oder persönlich übergeben."
         ergebnis = {
@@ -199,6 +205,13 @@ class SalesAgent(Agent):
         if will_nachfassen and not nachfassen:
             ergebnis["hinweis"] = ("Für diesen Kontakt ist kein versendetes Angebot erfasst – deshalb ein Erstkontakt "
                                    "statt einer Nachfrage.")
+        if k.modell.verfuegbar():  # ohne Modell bleibt das Ergebnis exakt wie bisher
+            self.darf(k, "lokales_modell", "nachricht:" + kontakt["id"], aufgabe)
+            # Platzhalter und Abmeldehinweis müssen im Vorschlag bleiben – sonst verworfen
+            pflicht = faktenwaechter.platzhalter(brieftext) + ([ABMELDUNG] if einwilligung else [])
+            ergebnis.update(ki_vorschlag.erstellen(
+                k.modell, k.protokoll, self.rolle, aufgabe["id"], *vorlagen.nachricht_feinschliff(betreff, brieftext),
+                eingabe=betreff + "\n" + brieftext, pflicht=pflicht, original=brieftext))
         return ergebnis
 
     # ------------------------------------------------------------------ Auswertung

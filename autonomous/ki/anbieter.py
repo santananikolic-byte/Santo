@@ -11,9 +11,13 @@ import urllib.error
 import urllib.request
 from urllib.parse import urlsplit
 
+from . import modelfile, vorlagen
+
 LOKALE_HOSTS = ("127.0.0.1", "localhost", "::1")
 MAX_ANTWORT_BYTES = 2_000_000
 STATUS_ZEITLIMIT = 3
+TEMPERATUR = 0.2
+SEED = 42  # fester Startwert: gleiche Anfrage → meist gleiche Antwort (nicht garantiert, siehe docs/KI.md)
 
 
 class AnbieterFehler(Exception):
@@ -105,13 +109,39 @@ class OllamaAnbieter(Anbieter):
         hinweis = "Ollama erreichbar, Modell %s vorhanden." % self.modell if vorhanden else (
             "Ollama erreichbar, aber Modell %s ist nicht installiert – auf dem Mac im Terminal: "
             "ollama pull %s" % (self.modell, self.modell))
-        return {"erreichbar": True, "modell_vorhanden": vorhanden, "installierte_modelle": modelle[:20],
-                "hinweis": hinweis}
+        st = {"erreichbar": True, "modell_vorhanden": vorhanden, "installierte_modelle": modelle[:20],
+              "hinweis": hinweis}
+        if vorhanden and modelfile.ist_eigenes_modell(self.modell):
+            st["eigene_regeln"] = self._regeln_eingebaut()
+            st["hinweis"] += (" Eigenes Modell mit %s." % modelfile.KENNUNG if st["eigene_regeln"] else
+                              " Im Modell fehlen die aktuellen AUTONOMOUS-Regeln – bitte autonomous-ki-einrichten.sh "
+                              "erneut ausführen.")
+        return st
+
+    def _regeln_eingebaut(self):
+        """Steckt der aktuelle AUTONOMOUS-Systemtext im Modell? (POST /api/show liefert das Feld „system“)"""
+        anfrage = urllib.request.Request(self.adresse + "/api/show", data=json.dumps({"model": self.modell}).encode(
+            "utf-8"), headers={"Content-Type": "application/json"})
+        try:
+            d = self._lesen(anfrage, STATUS_ZEITLIMIT)
+        except (AnbieterFehler, urllib.error.URLError, OSError, ValueError):
+            return False
+        system = d.get("system") if isinstance(d, dict) else None
+        return isinstance(system, str) and modelfile.KENNUNG in system
+
+    def nachrichten(self, system, nutzer):
+        """Das eigene Modell bringt die Grundregeln fest eingebaut mit. Eine System-Nachricht würde sie samt
+        Firmenwissen ERSETZEN (gemessen mit Ollama 0.40.17) – darum geht sie dort nicht mit. Besondere Regeln (jeder
+        andere Systemtext) gehen immer mit; eine leere System-Nachricht nie."""
+        system = system or ""
+        weglassen = not system.strip() or (modelfile.ist_eigenes_modell(self.modell)
+                                           and system.strip() == vorlagen.GRUNDREGELN)
+        return ([] if weglassen else [{"role": "system", "content": system}]) + [{"role": "user", "content": nutzer}]
 
     def erzeugen(self, system, nutzer, max_zeichen, zeitlimit):
-        koerper = {"model": self.modell, "stream": False,
-                   "messages": [{"role": "system", "content": system}, {"role": "user", "content": nutzer}],
-                   "options": {"num_predict": max(32, int(max_zeichen) // 3), "temperature": 0.2}}
+        koerper = {"model": self.modell, "stream": False, "messages": self.nachrichten(system, nutzer),
+                   "options": {"num_predict": max(32, int(max_zeichen) // 3), "temperature": TEMPERATUR,
+                               "seed": SEED}}
         anfrage = urllib.request.Request(self.adresse + "/api/chat", data=json.dumps(koerper).encode("utf-8"),
                                          headers={"Content-Type": "application/json"})
         try:

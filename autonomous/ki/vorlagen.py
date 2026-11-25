@@ -26,3 +26,26 @@ def marktbericht_zusammenfassung(kennzahlen):
 
 def modelltest():
     return GRUNDREGELN, "Antworte nur mit dem Wort: OK"
+
+
+def nachricht_feinschliff(betreff, text):
+    """Sales: zusätzlicher Feinschliff eines fertigen, deterministischen Entwurfs (der Entwurf bleibt maßgeblich)."""
+    nutzer = ("Verbessere den folgenden Entwurf einer Nachricht an einen Geschäftskunden sprachlich: freundlich, klar "
+              "und kurz. Regeln: Behalte jeden Platzhalter in eckigen Klammern wörtlich bei. Füge keine neuen Angaben "
+              "hinzu – keine Zahlen, Preise, Namen, Firmen, Telefonnummern, E-Mail- oder Internetadressen, Referenzen "
+              "und keine Zusagen zu Preisen, Terminen oder Leistungen. Gib nur den verbesserten Text der Nachricht aus, "
+              "ohne Betreffzeile und ohne Erklärung.\n" + _daten({"betreff": betreff, "text": text}))
+    return GRUNDREGELN, nutzer
+
+
+def tagesplan_kurzfassung(plan_text):
+    """CEO: kurze Zusammenfassung des deterministischen Tagesplans (der Plan bleibt maßgeblich)."""
+    nutzer = ("Fasse den folgenden Tagesplan in höchstens 3 kurzen Sätzen zusammen: Was ist heute am wichtigsten? "
+              "Nenne nur, was im Plan steht – keine neuen Zahlen, Namen, Termine oder Bewertungen.\n"
+              + _daten({"tagesplan": plan_text}))
+    return GRUNDREGELN, nutzer
+
+
+def pruefstand_anfrage(aufgabe, daten=None):
+    """Prüfstand: Aufgabe plus (optional) Daten – Fremdtext steht nur als markierte Daten darin."""
+    return GRUNDREGELN, aufgabe if daten is None else "%s\n%s" % (aufgabe, _daten(daten))

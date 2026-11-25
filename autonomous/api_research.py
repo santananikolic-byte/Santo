@@ -5,6 +5,8 @@ POST /api/research/marktbericht {zeitraum_tage?}  → {aufgabe_id}
 GET  /api/research/marktberichte                  → {berichte:[...], in_arbeit:[...]}
 GET  /api/modell/status                           → {anbieter, modell, erreichbar, modell_vorhanden, ...}
 POST /api/modell/testen                           → kurzer Probeaufruf (nur wenn ein Modell eingestellt ist)
+POST /api/modell/pruefstand {modelle?}            → {aufgabe_id} – Prüfstand als Aufgabe des Research-Agenten
+GET  /api/modell/pruefstand                       → {laeufe:[...], in_arbeit:[...]}
 """
 
 import json
@@ -12,7 +14,7 @@ import time
 
 from .agenten.research import zeitraum_pruefen
 from .api import EIGENTUEMER, ApiFehler, route
-from .ki import vorlagen
+from .ki import modelfile, pruefstand, vorlagen
 from .modell import ModellNichtVerfuegbar
 
 RECHERCHE_AUS = ("Internet-Recherche ist ausgeschaltet – in den Einstellungen unter „Auftragssuche“ einmal "
@@ -65,3 +67,39 @@ def r_modell_testen(kern, a):
     except ModellNichtVerfuegbar as f:
         return {"ok": False, "meldung": str(f)}
     return {"ok": True, "antwort": antwort, "dauer_ms": int((time.monotonic() - beginn) * 1000)}
+
+
+@route("POST", "/api/modell/pruefstand")
+def r_modell_pruefstand(kern, a):
+    if not kern.modell.verfuegbar():
+        raise ApiFehler(400, "Kein Modell eingestellt – zuerst in den Einstellungen „ollama“ wählen.")
+    modelle = a["body"].get("modelle")
+    if modelle is not None and not (
+            isinstance(modelle, list) and 1 <= len(modelle) <= pruefstand.MAX_MODELLE
+            and all(modelfile.modellname_ok(m) for m in modelle) and len(set(modelle)) == len(modelle)):
+        raise ApiFehler(400, "modelle: Liste mit 1 bis %d verschiedenen Modellnamen, z. B. [\"gemma3:1b\", "
+                             "\"autonomous\"]." % pruefstand.MAX_MODELLE)
+    aid = kern.aufgaben.anlegen("KI-Prüfstand", "ki_pruefstand", "research", EIGENTUEMER,
+                                {"modelle": modelle} if modelle else {}, 3)
+    return {"aufgabe_id": aid,
+            "hinweis": "Der Prüfstand läuft im Hintergrund (je Modell einige Minuten). Ergebnis: Aufgabe „KI-Prüfstand“ "
+                       "und als Vorschlag im Gedächtnis. Umgeschaltet wird nie automatisch."}
+
+
+@route("GET", "/api/modell/pruefstand")
+def r_modell_pruefstaende(kern, a):
+    laeufe = []
+    for z in kern.db.alle("SELECT id, beendet, ergebnis FROM aufgaben WHERE typ='ki_pruefstand' AND "
+                          "status='abgeschlossen' ORDER BY beendet DESC LIMIT 20"):
+        try:
+            e = json.loads(z["ergebnis"] or "{}")
+        except ValueError:
+            continue
+        laeufe.append({"aufgabe_id": z["id"], "erstellt": z["beendet"], "bestes_modell": e.get("bestes_modell"),
+                       "empfehlung": e.get("empfehlung"), "faelle_anzahl": e.get("faelle_anzahl"),
+                       "modelle": [{s: m.get(s) for s in ("modell", "punkte", "max", "prozent", "kritisch", "fehler",
+                                                         "dauer_s")}
+                                   for m in e.get("modelle") or [] if isinstance(m, dict)]})
+    in_arbeit = kern.db.alle("SELECT id AS aufgabe_id, status, erstellt, fehler FROM aufgaben WHERE typ='ki_pruefstand' "
+                             "AND status IN ('geplant','bereit','laufend','wartet_auf_freigabe') ORDER BY erstellt DESC")
+    return {"laeufe": laeufe, "in_arbeit": in_arbeit}

@@ -2,12 +2,16 @@
 """CEO-Agent: Ziele, Prioritäten, Tagesplan, Kennzahlen, Aufgabenverteilung.
 
 Arbeitet deterministisch aus echten Daten. Erfindet keine Ergebnisse: alles im Plan stammt aus
-der Datenbank; Empfehlungen werden als VORSCHLAG gespeichert, Entscheidungen trifft der Eigentümer."""
+der Datenbank; Empfehlungen werden als VORSCHLAG gespeichert, Entscheidungen trifft der Eigentümer.
+Nur wenn ein lokales Modell eingestellt und erreichbar ist, kommt zum Tagesplan eine zusätzliche, gekennzeichnete
+KI-Kurzfassung dazu – geprüft vom Faktenwächter (ki/vorschlag.py). Plan und Gedächtnis-Eintrag bleiben deterministisch."""
 
 import datetime
 
 from . import Agent
 from ..auftraege import PASSEND_AB, datum_deutsch, tage_bis
+from ..ki import vorlagen
+from ..ki import vorschlag as ki_vorschlag
 from ..wallet import euro
 
 
@@ -93,6 +97,10 @@ class CeoAgent(Agent):
         self.darf(k, "gedaechtnis_vorschlag", "tagesplan", aufgabe)
         k.gedaechtnis.merken("vorschlag", "Tagesplan " + plan["datum"], text, "ceo:tagesplan", self.rolle,
                              aufgabe["id"])
+        if punkte and k.modell.verfuegbar():  # ohne Modell bleibt das Ergebnis exakt wie bisher
+            self.darf(k, "lokales_modell", "tagesplan", aufgabe)
+            plan.update(ki_vorschlag.erstellen(k.modell, k.protokoll, self.rolle, aufgabe["id"],
+                                               *vorlagen.tagesplan_kurzfassung(text), eingabe=text, max_zeichen=600))
         return plan
 
     def aufgabe_auftrag_verteilen(self, aufgabe, k):

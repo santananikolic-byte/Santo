@@ -82,7 +82,13 @@ class ResearchAgent(Agent):
         "marktbericht": "Markt selbst untersuchen aus amtlichen Daten (TED) und gesammelten Ausschreibungen: "
                         "Nachfrage, Wettbewerber, Zielgruppen, Anforderungen (Eingabe optional: zeitraum_tage "
                         "30–730)",
+        "ki_pruefstand": "Lokale KI-Modelle mit Fällen aus dem Arbeitsalltag prüfen und das beste als Vorschlag "
+                         "ablegen – schaltet nie selbst um (Eingabe optional: modelle = Liste von Modellnamen)",
     }
+
+    def aufgabe_ki_pruefstand(self, aufgabe, k):
+        from ..ki import pruefstand  # Logik und Fälle: ki/pruefstand.py
+        return pruefstand.aufgabe_ausfuehren(self, aufgabe, k)
 
     def _laden(self):
         pfad = os.path.join(konfig.VORLAGEN, "marktbewertung.json")
