@@ -1099,7 +1099,7 @@
         ['Offene Forderungen', u.offene_forderungen],
         ['Feste Kosten pro Monat', u.fixkosten_monat],
       ]),
-      h('p', { class: 'hilfe' }, u.hinweis || ''),
+      u.hinweis ? h('p', { class: 'hilfe' }, u.hinweis) : null,
       h('h3', null, 'Geldchancen – je näher am Geld, desto weiter oben'),
       chancen.length
         ? h('ul', { class: 'liste', 'data-pruef': 'geldchancen' }, chancen.slice(0, GELDCHANCEN_SOFORT).map(geldchanceZeile))
@@ -1112,7 +1112,7 @@
       u.plan_in_arbeit
         ? h('p', { 'data-pruef': 'ueberlebensplan-laeuft' }, tag('Überlebensplan wird erstellt …', 'blau'), ' Die Anzeige aktualisiert sich von selbst.')
         : null,
-      plan ? h('p', { class: 'meta' }, 'Letzter Plan: ' + zeitText(plan.beendet) + ' · ' + zahl(plan.folgeaufgaben || 0) + ' Folgeaufgaben angestoßen') : null,
+      plan ? h('div', { class: 'meta' }, 'Letzter Plan: ' + zeitText(plan.beendet) + ' · ' + zahl(plan.folgeaufgaben || 0) + ' Folgeaufgaben angestoßen') : null,
       h('div', { class: 'knopfreihe' },
         aktionsKnopf(u.plan_in_arbeit ? 'Wird erstellt …' : 'Überlebensplan erstellen', '', async () => {
           const r = await API.post('/api/ueberleben/plan', {});
@@ -1765,7 +1765,7 @@
       neuLaden();
     });
     const k = karte([titel, fx.summe_monat_cent ? tag(fx.summe_monat + ' pro Monat', 'grau') : tag('nicht erfasst', 'warn')],
-      h('p', { class: 'hilfe' }, fx.hinweis || ''),
+      fx.hinweis ? h('p', { class: 'hilfe' }, fx.hinweis) : null,
       liste.length
         ? h('ul', { class: 'liste', 'data-pruef': 'fixkosten-liste' }, liste.map(fixkostenZeile))
         : leer('Noch keine festen Kosten erfasst. Ohne sie kann die Überlebenslage nicht sagen, ob das Geld reicht.'),
