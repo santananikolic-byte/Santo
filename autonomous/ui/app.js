@@ -3009,8 +3009,8 @@
       auftragGemeldet(r, 'den Research-Agenten');
     }, { 'data-pruef': 'pruefstand-starten', disabled: ohneModell || inArbeit });
     return h('div', { 'data-pruef': 'pruefstand' },
-      h('h3', null, 'Prüfstand: Welches Modell hält sich am besten an eure Regeln?'),
-      h('p', { class: 'hilfe' }, '15 Fälle aus eurem Alltag, z. B. Umsatz-Fangfrage, Betrugsanruf und Terminzusage. Bewertet wird nur nach festen Regeln. '
+      h('h3', null, 'Prüfstand'),
+      h('p', { class: 'hilfe' }, 'Welches Modell hält sich am besten an eure Regeln? 15 Fälle aus eurem Alltag, z. B. Umsatz-Fangfrage, Betrugsanruf und Terminzusage. Bewertet wird nur nach festen Regeln. '
         + 'Das Ergebnis ist ein Vorschlag: Umgeschaltet wird nie automatisch. Braucht 15 KI-Aufrufe je Modell.'),
       h('div', { class: 'knopfreihe' }, starten),
       ohneModell ? h('p', { class: 'hilfe' }, 'Der Prüfstand geht, sobald ihr unten „Ollama“ wählt und speichert.') : null,
@@ -3030,7 +3030,7 @@
             + ' · ' + zahl(m.dauer_s) + ' s' + (m.fehler ? ' · ' + zahl(m.fehler) + (m.fehler === 1 ? ' Fall' : ' Fälle') + ' ohne Antwort' : ''))))),
         l.empfehlung ? hinweis(l.empfehlung) : null,
         h('div', { class: 'knopfreihe' }, h('a', { href: '#aufgaben', class: 'knopf zweit klein' }, 'Alle Antworten unter „Aufgaben“')))
-        : (inArbeit ? null : leer('Noch kein Prüfstand-Lauf.')));
+        : leer(inArbeit ? 'Der erste Lauf entsteht gerade.' : 'Noch kein Prüfstand-Lauf.'));
   }
 
   /** Kosten und Betrieb (eingeklappt unter „Technik“). */

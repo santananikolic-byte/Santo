@@ -2,7 +2,7 @@
 
 Ein lokales Unternehmenssystem mit Agenten, Aufgaben, Freigaben, Simulations-Wallet und echten Finanzen.
 Es läuft auf dem eigenen Mac, **ohne Installation von Zusatzpaketen** (nur Python 3.9 oder neuer) und **ohne
-kostenpflichtige Dienste**.
+kostenpflichtige Dienste**. Nur die zusätzliche, lokale KI braucht das kostenlose Programm Ollama.
 
 ## Auf den Mac holen (einmalig)
 
@@ -13,8 +13,11 @@ curl -fsSL https://raw.githubusercontent.com/santananikolic-byte/Santo/claude/el
 ```
 
 Sie prüft Python, lädt AUTONOMOUS nach `~/AUTONOMOUS`, behält bei einer Aktualisierung eure Daten, richtet den
-Dauerbetrieb ein (siehe unten), legt drei Symbole auf den Schreibtisch und öffnet die Oberfläche. Kein sudo,
-nichts Bezahltes.
+Dauerbetrieb ein (siehe unten), legt drei Symbole auf den Schreibtisch und öffnet die Oberfläche. Zum Schluss
+richtet sie das eigene KI-Modell „autonomous“ ein (siehe „KI-Modell“ unten): Dafür installiert sie das kostenlose
+Programm Ollama, falls es fehlt – der Mac kann dabei nach eurem Passwort fragen, das geht nur an macOS – und lädt
+einmalig ein Basismodell (3,2 GB, bei weniger als 6 GB Arbeitsspeicher 0,8 GB). Klappt das nicht, läuft
+AUTONOMOUS trotzdem, nur ohne KI. Nichts Bezahltes.
 
 Oder von Hand:
 
@@ -129,22 +132,37 @@ Preis: Die Recherche schlägt 199–349 € netto vor, die Anbieterpreise dazu s
 Nachprüfung in der Marktanalyse). Erst selbst prüfen, dann festlegen. Auf Verkaufsseite und Angebot steht nur ein
 Preis, den ihr eingebt.
 
-## KI-Modell (optional, lokal auf dem Mac, kostenlos)
+## Überlebens-Agent: Reicht das Geld?
 
-AUTONOMOUS läuft ohne KI vollständig. Mit einem **lokalen** Modell schreiben die Agenten zusätzlich Zusammenfassungen
-(z. B. im Marktbericht). Es wird **kein** externer KI-Dienst genutzt – nichts geht an Anthropic, OpenAI oder andere.
+- **Dashboard, ganz oben:** Ampel ROT/GELB/GRÜN mit Begründung – nur aus euren echten, geprüften Buchungen. Dazu
+  Reichweite, Einnahmen und Ausgaben der letzten 30 Tage und die **Geldchancen**, je näher am Geld, desto weiter oben
+  (Zahlung anmahnen → Rechnung schreiben → Nachfassen → Interessenten → Ausschreibungen).
+- Damit die Ampel urteilen kann: **Finanzen → Feste Kosten** eintragen (z. B. „Claude-Abo, 22 €, pro Monat“). Ohne
+  Kosten bleibt sie ehrlich auf GELB „Kosten nicht erfasst“.
+- Jeden Tag erstellt der Agent selbst einen **Überlebensplan** (druckbare Seite) und stößt intern Arbeit an: Suche
+  (nur bei erlaubter Internet-Recherche), Bewerbungs-Mappen, Nachfass-**Entwürfe**. Er sendet, bezahlt und
+  unterschreibt nichts – das entscheidet ihr. Abschalten: **Einstellungen → Überlebens-Agent**.
+- Einzelheiten: `docs/UEBERLEBEN.md`.
 
-1. Ollama von **ollama.com** herunterladen (Download für macOS) und wie ein normales Programm installieren.
-2. Im Terminal ein Modell laden, z. B. `ollama pull gemma3:4b` (Mac mit 8 GB Arbeitsspeicher; mit 16 GB oder mehr
-   geht auch ein größeres Modell). Das sind einige Gigabyte Download.
-3. In AUTONOMOUS: **Einstellungen → KI-Modell** → Anbieter „ollama“, Modellname wie geladen → **Modell testen**.
+## KI-Modell: das eigene Modell „autonomous“ (lokal, kostenlos)
 
-Wichtig: Jede KI-Ausgabe ist als **„KI-Entwurf – ungeprüft“** gekennzeichnet. Ein kleines Modell macht Fehler – Zahlen
-und Fakten stehen deshalb immer gezählt und mit Quelle daneben, die KI-Zusammenfassung ist nur ein Zusatz. Die KI kann
-keine Aktion auslösen, nichts versenden und keine Rechte ändern.
+AUTONOMOUS läuft ohne KI vollständig. Die Einrichtungszeile richtet zusätzlich das eigene Modell **„autonomous“** ein.
+Ehrlich gesagt: Es ist **angepasst, nicht neu trainiert** – ein frei nutzbares Basismodell (Google Gemma 3) mit fest
+eingebauten Arbeitsregeln (Deutsch, nichts erfinden, keine Zusagen an Kunden), Firmenwissen (nur Geschäftliches)
+und wenig „Fantasie“. Es läuft nur auf eurem Mac über **Ollama** – nichts geht an Anthropic, OpenAI oder andere.
 
-Echt geprüft in der Entwicklungsumgebung (21.11.2026) mit **Ollama 0.40.17 und dem Modell gemma3:1b**: Status,
-Probeaufruf und ein Marktbericht mit KI-Zusammenfassung über den laufenden Server. Auf dem Mac: noch nicht verifiziert.
+- **Gemessen im Prüfstand** (15 Fälle aus eurem Alltag, Bewertung nur nach festen Regeln): „autonomous“ auf Basis
+  gemma3:4b hielt 98 % der Prüfpunkte ein, das Basismodell allein 76 %. Selbst prüfen: **Einstellungen → KI-Modell →
+  Prüfstand starten**. Das Ergebnis ist ein Vorschlag – umgeschaltet wird nie automatisch.
+- Wofür die KI genutzt wird: Zusammenfassungen (z. B. Marktbericht), Feinschliff von Anschreiben, Kurzfassung des
+  Tagesplans. Ein **Faktenwächter** verwirft jeden KI-Text, der neue Zahlen, Preise, Telefonnummern, Adressen,
+  Firmen oder Zusagen enthält.
+- Wichtig: Jede KI-Ausgabe ist als **„KI-Entwurf – ungeprüft“** gekennzeichnet und kann keine Aktion auslösen. Auch
+  das beste Modell machte im Prüfstand einen kritischen Fehler (im Betrugsfall: Rückruf unter der Nummer des
+  Anrufers). Darum gilt: Rückruf nur über die offizielle Nummer – und jeden KI-Text selbst prüfen.
+- Einzeln einrichten oder erneuern: `bash ~/AUTONOMOUS/autonomous-ki-einrichten.sh`. Ausschalten: **Einstellungen →
+  KI-Modell** → Anbieter „keiner“.
+- Einzelheiten, Messwerte und Grenzen: `docs/KI.md`. Auf dem Mac: **noch nicht verifiziert**.
 
 ## Prüfen, ob alles funktioniert
 
