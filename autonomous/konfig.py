@@ -55,6 +55,9 @@ STANDARD_EINSTELLUNGEN = {
                            "entwässerung", "fahrzeug", "kehrmaschine"],
     "stundensatz_cent": 0,                # 0 = OFFEN (noch nicht festgelegt) – wird nie erfunden
     "wlan_zugriff": False,                # iPhone im eigenen WLAN – standardmäßig AUS, schaltet nur der Eigentümer
+    # Überlebens-Agent: einmal am Tag selbstständig ein Plan aus echten Zahlen – stößt nur interne Aufgaben an
+    # (Suche nur bei erlaubter Internet-Recherche, Bewerbungs-Mappen, Nachfass-ENTWÜRFE). Sendet/bezahlt nichts.
+    "ueberlebensplan_taeglich": True,
 }
 
 # Öffentliche Quellen, die Agenten lesen dürfen (nur lesen, nur https, nur diese Hosts)

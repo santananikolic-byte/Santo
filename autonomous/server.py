@@ -35,6 +35,10 @@ try:  # Marktbericht (Research-Agent) und lokales Modell (eigenes Modul)
     from . import api_research  # noqa: F401
 except ImportError:
     pass
+try:  # Überlebens-Agent: Lage aus echten Zahlen, Geldchancen, feste Kosten (eigenes Modul)
+    from . import api_ueberleben  # noqa: F401
+except ImportError:
+    pass
 
 MAX_KOERPER = 512 * 1024
 # Erzeugte Seiten: keine Skripte, kein Netz, keine Formulare, eigene (abgeschottete) Herkunft
@@ -375,8 +379,31 @@ def taegliche_auftragssuche(kern, stopp):
         stopp.wait(3600)
 
 
+def ueberlebensplan_anstossen(kern):
+    """Legt höchstens einen Überlebensplan je Tag an – nur wenn der Eigentümer ihn nicht ausgeschaltet hat
+    (Einstellung „ueberlebensplan_taeglich“, Standard: an). Gibt die Aufgaben-ID oder None zurück.
+    Der Plan liest nur echte Zahlen und stößt nur interne Folgeaufgaben an – er sendet und bezahlt nichts."""
+    if not kern.einstellungen.hole("ueberlebensplan_taeglich"):
+        return None
+    try:
+        from . import ueberleben
+    except ImportError:  # Modul nicht vorhanden – der Rest läuft weiter
+        return None
+    return ueberleben.zeitplan_pruefen(kern)
+
+
+def taeglicher_ueberlebensplan(kern, stopp):
+    """Prüft einmal pro Stunde, ob der tägliche Überlebensplan fällig ist."""
+    while not stopp.is_set():
+        try:
+            ueberlebensplan_anstossen(kern)
+        except Exception as fehler:
+            kern.protokoll.fehler("zeitplan", "Überlebensplan konnte nicht angelegt werden", str(fehler))
+        stopp.wait(3600)
+
+
 def hintergrund(kern):
     stopp = threading.Event()
-    for ziel in (taegliche_sicherung, taegliche_auftragssuche):
+    for ziel in (taegliche_sicherung, taegliche_auftragssuche, taeglicher_ueberlebensplan):
         threading.Thread(target=ziel, args=(kern, stopp), daemon=True).start()
     return stopp

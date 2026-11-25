@@ -80,6 +80,10 @@ def testdaten_anlegen(daten):
     ]
     con = sqlite3.connect(pfad)
     try:
+        # Täglicher Überlebensplan aus: Er würde beim Start sofort Bewerbungs-Mappen für die Testdaten anstoßen und
+        # deren Status ändern. Den Knopf „Überlebensplan erstellen“ prüft die UI-Prüfung am Ende selbst.
+        con.execute("INSERT INTO einstellungen (schluessel, wert, geaendert) VALUES (?,?,?)",
+                    ("ueberlebensplan_taeglich", "false", jetzt))
         for (aid, quelle, extern, titel, stelle, ort, plz, region, frist, veroeffentlicht, verfahren, punkte, gruende,
              status) in zeilen:
             con.execute(

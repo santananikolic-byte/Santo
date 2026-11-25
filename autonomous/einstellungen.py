@@ -20,6 +20,7 @@ ERLAUBTE_WERTE = {
     "internet_recherche_erlaubt": lambda w: isinstance(w, bool),
     "wlan_zugriff": lambda w: isinstance(w, bool),
     "auftragssuche_taeglich": lambda w: isinstance(w, bool),
+    "ueberlebensplan_taeglich": lambda w: isinstance(w, bool),
     "region_plz": lambda w: _liste(w, 1, 60, lambda x: re.fullmatch(r"\d{2}", x)),
     "region_nuts": lambda w: _liste(w, 1, 40, lambda x: re.fullmatch(r"DE[A-Z0-9]{0,3}", x)),
     "suchbegriffe": lambda w: _liste(w, 1, 40, _begriff),

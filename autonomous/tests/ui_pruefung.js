@@ -330,6 +330,7 @@ async function funktionenPruefen(browser, startUrl) {
 
   await neueFunktionenPruefen(seite);
   await iphonePruefen(seite);
+  await ueberlebenPruefen(seite); // zuletzt: der echte Überlebensplan stößt Folgeaufgaben für die Testdaten an
 
   await cspPruefen(seite, 'funktionen');
   konsoleOk();
@@ -407,6 +408,133 @@ async function iphonePruefen(seite) {
   pruefe(!!aus, 'iPhone: WLAN-Zugriff nicht wieder aus');
   const qrWeg = await seite.waitForSelector(karte + ' [data-pruef="iphone-qr"]', { state: 'detached', timeout: 10000 }).then(() => true, () => false);
   pruefe(qrWeg, 'iPhone: QR-Code bleibt nach dem Ausschalten sichtbar');
+}
+
+// ---------------------------------------------------------------------------
+// 1c. Überlebens-Agent: Lage im Dashboard (Ampel aus echten Zahlen), feste Kosten in den Finanzen,
+//     Schalter in den Einstellungen und der echte Knopf „Überlebensplan erstellen“ (läuft wirklich durch).
+// ---------------------------------------------------------------------------
+async function ueberlebenPruefen(seite) {
+  const r0 = await api(seite, 'GET', '/api/ueberleben');
+  if (!pruefe(r0.status === 200, 'Überleben: /api/ueberleben antwortet nicht (' + r0.status + ')')) return;
+  const l0 = r0.inhalt || {};
+  pruefe(l0.druck === 'GELB' && l0.regel === 'kosten_fehlen' && l0.kosten_erfasst === false,
+    'Überleben: ohne feste Kosten nicht GELB „Kosten nicht erfasst“ (' + l0.druck + ' / ' + l0.regel + ')');
+  const karte = '[data-pruef="ueberleben"]';
+
+  // Dashboard: die Karte steht ganz oben (nach offenen Entscheidungen) und zeigt genau die Zahlen der Schnittstelle
+  await bereichOeffnen(seite, 'dashboard');
+  if (!pruefe(await seite.isVisible(karte), 'Dashboard: Karte „Überlebenslage“ fehlt')) return;
+  const erste = await seite.$eval('main', m => {
+    const k = Array.from(m.querySelectorAll('section.karte')).find(x => !x.classList.contains('hervorgehoben'));
+    return k ? k.dataset.pruef : null;
+  });
+  pruefe(erste === 'ueberleben', 'Dashboard: „Überlebenslage“ ist nicht die erste Karte (' + erste + ')');
+  const titel0 = ((await seite.textContent(karte + ' h2')) || '').replace(/\s+/g, ' ');
+  pruefe(/Überlebenslage/.test(titel0) && /GELB/.test(titel0), 'Dashboard: Titel ohne Ampel GELB (' + titel0 + ')');
+  const text0 = ((await seite.textContent(karte)) || '').replace(/\s+/g, ' ');
+  pruefe(text0.includes(l0.begruendung.replace(/\s+/g, ' ').slice(0, 60)), 'Dashboard: Begründung der Ampel fehlt');
+  pruefe(text0.includes(l0.reichweite) && text0.includes(l0.einnahmen_30_tage) && text0.includes(l0.fixkosten_monat),
+    'Dashboard: Reichweite, Einnahmen oder feste Kosten nicht wie von der Schnittstelle');
+  pruefe(await seite.isVisible(karte + ' [data-pruef="fixkosten-eintragen-link"]'), 'Dashboard: Verweis „Feste Kosten eintragen“ fehlt');
+  const chancen = l0.geldchancen || [];
+  const sichtbar = await seite.$$eval(karte + ' [data-pruef="geldchancen"] > [data-pruef="geldchance"] .eintrag-titel', t => t.map(x => x.textContent));
+  pruefe(sichtbar.length === Math.min(5, chancen.length), 'Dashboard: ' + sichtbar.length + ' Geldchancen sichtbar statt ' + Math.min(5, chancen.length));
+  pruefe(!chancen.length || sichtbar[0] === chancen[0].was, 'Dashboard: erste Geldchance nicht die der Schnittstelle');
+  if (chancen.length > 5) {
+    pruefe(await seite.isVisible(karte + ' [data-schluessel="dash-geldchancen"]'), 'Dashboard: weitere Geldchancen nicht aufklappbar');
+  }
+
+  // Einstellungen: Schalter „täglicher Überlebensplan“ (in der Prüfung aus, siehe ui_server.py) – an und wieder aus
+  const schalter = '[data-pruef="ueberleben-schalter"]';
+  await bereichOeffnen(seite, 'einstellungen');
+  if (pruefe(await seite.isVisible('[data-pruef="ueberleben-einstellung"]'), 'Einstellungen: Karte „Überlebens-Agent“ fehlt')) {
+    pruefe(!(await seite.isChecked(schalter)), 'Einstellungen: Überlebensplan-Schalter steht nicht wie gespeichert (aus)');
+    for (const [an, wort] of [[true, 'an'], [false, 'aus']]) {
+      if (an) await seite.check(schalter); else await seite.uncheck(schalter);
+      await seite.click('[data-pruef="ueberleben-speichern"]');
+      const ok = await warteAuf(seite, 'Einstellungen: Überlebensplan lässt sich nicht auf „' + wort + '“ stellen', async () => {
+        const e = (await api(seite, 'GET', '/api/einstellungen')).inhalt || {};
+        return (e.werte || {}).ueberlebensplan_taeglich === an;
+      });
+      if (ok) pruefe(await meldungMit(seite, new RegExp('Überlebensplan ist jetzt ' + wort)), 'Einstellungen: keine Meldung „' + wort + '“');
+    }
+  }
+
+  // Finanzen: feste Kosten eintragen (monatlich und jährlich), Summe je Monat, eins entfernen (zweimal tippen)
+  const fk = '[data-pruef="fixkosten"]';
+  const form = '[data-pruef="fixkosten-formular"]';
+  await bereichOeffnen(seite, 'finanzen');
+  if (!pruefe(await seite.isVisible(fk), 'Finanzen: Karte „Feste Kosten“ fehlt')) return;
+  pruefe(/nicht erfasst/.test((await seite.textContent(fk + ' h2')) || ''), 'Finanzen: leere feste Kosten nicht als „nicht erfasst“ gekennzeichnet');
+  pruefe(await seite.isVisible(form + ' input[name="bezeichnung"]'), 'Finanzen: Formular „Feste Kosten eintragen“ ist bei leerer Liste nicht offen');
+  for (const [bezeichnung, betrag, intervall, anzahl] of [['Claude-Abo (TESTDATEN)', '22,00', 'monat', 1], ['Versicherung (TESTDATEN)', '120', 'jahr', 2]]) {
+    if (!(await seite.isVisible(form + ' input[name="bezeichnung"]'))) await seite.click('[data-schluessel="fin-fixkosten"] > summary');
+    await seite.fill(form + ' input[name="bezeichnung"]', bezeichnung);
+    await seite.fill(form + ' input[name="betrag"]', betrag);
+    await seite.selectOption(form + ' select[name="intervall"]', intervall);
+    await seite.click(form + ' button[type="submit"]');
+    pruefe(await meldungMit(seite, /Feste Kosten gespeichert/), 'Finanzen: keine Meldung nach „' + bezeichnung + '“');
+    await warteAuf(seite, 'Finanzen: „' + bezeichnung + '“ erscheint nicht in der Liste', async () =>
+      (await seite.$$(fk + ' [data-pruef="fixkosten-eintrag"]')).length === anzahl);
+  }
+  const fx = (await api(seite, 'GET', '/api/fixkosten')).inhalt || {};
+  pruefe(fx.summe_monat_cent === 3200, 'Finanzen: Summe je Monat nicht 22 € + 120 €/12 = 32 € (' + fx.summe_monat_cent + ' Cent)');
+  pruefe(/32,00\s€ pro Monat/.test((await seite.textContent(fk + ' h2')) || ''), 'Finanzen: Summe „32,00 € pro Monat“ nicht im Titel');
+  const fkText = ((await seite.textContent(fk)) || '').replace(/\s+/g, ' ');
+  pruefe(/120,00 € pro Jahr/.test(fkText) && /entspricht 10,00 € pro Monat/.test(fkText), 'Finanzen: Jahresbetrag nicht mit Monatsanteil angezeigt');
+
+  // Mit festen Kosten gilt die feste Regel (siehe ueberleben.druck_bestimmen) – nachgerechnet aus den echten Zahlen
+  // der Schnittstelle (die Prüfung hat vorher echte Test-Einnahmen gebucht), und das Dashboard zeigt dieselbe Ampel
+  const l1 = (await api(seite, 'GET', '/api/ueberleben')).inhalt || {};
+  const kosten = l1.fixkosten_monat_cent;
+  const erwartet = !kosten ? 'GELB'
+    : (!l1.einnahmen_30_tage_cent || (l1.saldo_cent !== null && l1.saldo_cent < kosten)) ? 'ROT'
+      : l1.einnahmen_30_tage_cent >= kosten ? 'GRÜN' : 'GELB';
+  pruefe(kosten === 3200 && l1.kosten_erfasst === true && l1.druck === erwartet,
+    'Überleben: Ampel ' + l1.druck + ' statt ' + erwartet + ' (Einnahmen 30 Tage ' + l1.einnahmen_30_tage_cent + ', Saldo ' + l1.saldo_cent + ', Kosten ' + kosten + ')');
+  await bereichOeffnen(seite, 'dashboard');
+  const titel1 = ((await seite.textContent(karte + ' h2')) || '');
+  pruefe(titel1.includes(l1.druck), 'Dashboard: Ampel zeigt nach dem Eintragen nicht ' + l1.druck + ' (' + titel1.replace(/\s+/g, ' ') + ')');
+  pruefe(/32,00 €/.test((await seite.textContent(karte)) || ''), 'Dashboard: feste Kosten 32,00 € nicht in der Überlebenslage');
+  pruefe(!(await seite.isVisible(karte + ' [data-pruef="fixkosten-eintragen-link"]')), 'Dashboard: „Feste Kosten eintragen“ bleibt, obwohl Kosten erfasst sind');
+
+  await bereichOeffnen(seite, 'finanzen');
+  const entfernen = fk + ' [data-pruef="fixkosten-eintrag"]:first-child button.gefahr';
+  await seite.click(entfernen);
+  pruefe(/Wirklich entfernen\?/.test((await seite.textContent(entfernen)) || ''), 'Finanzen: Entfernen fragt nicht nach (zweites Tippen)');
+  pruefe((await seite.$$(fk + ' [data-pruef="fixkosten-eintrag"]')).length === 2, 'Finanzen: Eintrag schon nach dem ersten Tippen entfernt');
+  await seite.click(entfernen);
+  pruefe(await meldungMit(seite, /Eintrag entfernt/), 'Finanzen: keine Meldung nach dem Entfernen');
+  await warteAuf(seite, 'Finanzen: entfernter Eintrag bleibt in der Liste', async () =>
+    (await seite.$$(fk + ' [data-pruef="fixkosten-eintrag"]')).length === 1);
+  const fx2 = (await api(seite, 'GET', '/api/fixkosten')).inhalt || {};
+  pruefe((fx2.fixkosten || []).length === 1 && (fx2.entfernt || []).length === 1 && fx2.summe_monat_cent === 1000,
+    'Finanzen: nach dem Entfernen nicht 1 aktiv / 1 entfernt / 10 € je Monat');
+
+  // Der echte Knopf: Überlebens-Agent erstellt den Plan (HTML-Seite unter /produkte, abgeschottet wie Produktseiten)
+  const l2 = (await api(seite, 'GET', '/api/ueberleben')).inhalt || {};
+  await bereichOeffnen(seite, 'dashboard');
+  await seite.click(karte + ' [data-pruef="ueberlebensplan-erstellen"]');
+  pruefe(await meldungMit(seite, /Überlebens-Agenten übergeben|schon in Arbeit/), 'Dashboard: keine Meldung nach „Überlebensplan erstellen“');
+  const plan = await warteAuf(seite, 'Überleben: Plan wird nicht fertig', async () => {
+    const l = (await api(seite, 'GET', '/api/ueberleben')).inhalt || {};
+    return l.letzter_plan && l.letzter_plan.plan_url ? l.letzter_plan : null;
+  }, 60);
+  if (!plan) return;
+  pruefe(plan.druck === l2.druck, 'Überleben: Plan nicht mit der Ampel der Lage erstellt (' + plan.druck + ' statt ' + l2.druck + ')');
+  await bereichOeffnen(seite, 'dashboard');
+  const href = await seite.getAttribute(karte + ' [data-pruef="ueberlebensplan-ansehen"]', 'href').catch(() => null);
+  pruefe(href === plan.plan_url && /^\/produkte\//.test(href || ''), 'Dashboard: „Plan ansehen“ fehlt oder zeigt woandershin (' + href + ')');
+  if (href) {
+    const seitePlan = await seite.evaluate(async url => {
+      const r = await fetch(url, { credentials: 'same-origin' });
+      return { status: r.status, csp: r.headers.get('content-security-policy') || '', text: await r.text() };
+    }, href);
+    pruefe(seitePlan.status === 200 && /sandbox/.test(seitePlan.csp) && /Überlebensplan/.test(seitePlan.text),
+      'Überleben: Planseite nicht erreichbar oder nicht abgeschottet (' + seitePlan.status + ')');
+  }
+  await cspPruefen(seite, 'Überlebenslage');
 }
 
 // ---------------------------------------------------------------------------

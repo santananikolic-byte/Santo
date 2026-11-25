@@ -929,8 +929,8 @@
   // Bereich: Dashboard
   // ===========================================================================
   async function ansichtDashboard(z) {
-    const [d, aus, k, an, zi] = await Promise.all([API.get('/api/dashboard'), optional('/api/ausschreibungen?min_punkte=60'),
-      optional('/api/kontakte'), optional('/api/angebote'), API.get('/api/ziele')]);
+    const [d, aus, k, an, zi, ub] = await Promise.all([API.get('/api/dashboard'), optional('/api/ausschreibungen?min_punkte=60'),
+      optional('/api/kontakte'), optional('/api/angebote'), API.get('/api/ziele'), optional('/api/ueberleben')]);
     const s = d.status || {};
     aktualisiereKopfMit(s);
     const freigaben = d.offene_freigaben || [];
@@ -939,6 +939,9 @@
         h('h2', null, 'Wartet auf eure Entscheidung', tag(String(freigaben.length), 'warn')),
         h('div', { class: 'liste' }, freigaben.map(f => freigabeKarte(f, false)))));
     }
+
+    // Geld zuerst: Reicht es? Was bringt am schnellsten Geld? (Überlebens-Agent, nur echte Zahlen)
+    z.append(ueberlebenKarte(ub));
 
     // Zuerst eure Aufträge: Kontakte, Angebote, Ausschreibungen, Ziele
     const kontakte = k.fehlt ? null : (k.kontakte || []);
@@ -1058,6 +1061,71 @@
     const anzahl = neu === 0 ? 'keine neuen' : neu === 1 ? '1 neue' : zahl(neu) + ' neue';
     const k = kachel('Ausschreibungen', anzahl, neu ? 'warn' : '', zusatz, 'ausschreibungen-kachel', fristHinweis);
     k.append(h('a', { href: '#vertrieb', class: 'knopf zweit klein kachel-link' }, 'Ansehen'));
+    return k;
+  }
+
+  // ---- Überlebenslage (Überlebens-Agent) ----------------------------------------
+  const DRUCK_TON = { 'ROT': 'fehler', 'GELB': 'warn', 'GRÜN': 'ok' };
+  const GELDCHANCE_TON = { mahnung: 'fehler', rechnung: 'warn', nachfassen: 'blau', interessent: 'akzent', ausschreibung: 'grau' };
+  const GELDCHANCEN_SOFORT = 5;
+
+  function geldchanceZeile(c) {
+    const link = sichererLink(c.link);
+    return h('li', { class: 'eintrag', 'data-pruef': 'geldchance' },
+      h('div', { class: 'eintrag-kopf' }, h('span', { class: 'eintrag-titel' }, c.was), tag(c.art_name || c.art, GELDCHANCE_TON[c.art])),
+      h('div', { class: 'meta' }, h('span', null, 'Frist: ' + (c.frist || 'keine erfasst')), h('span', null, 'Wert: ' + (c.wert || 'unbekannt'))),
+      c.warum ? h('p', { class: 'text' }, c.warum) : null,
+      c.naechster_schritt ? h('p', { class: 'text' }, h('strong', null, 'Nächster Schritt: '), c.naechster_schritt) : null,
+      link ? h('div', { class: 'knopfreihe' },
+        h('a', { class: 'knopf zweit klein', href: link, target: '_blank', rel: 'noopener noreferrer' }, c.quelle_name || 'Ansehen')) : null);
+  }
+
+  /** Überlebenslage aus echten, geprüften Zahlen: Ampel mit Begründung, Reichweite, Geldchancen, Tagesplan. */
+  function ueberlebenKarte(u) {
+    const titel = 'Überlebenslage';
+    if (!u || u.fehlt) return nichtVerfuegbar(titel, 'Der Überlebens-Agent ist in dieser Version des Servers noch nicht eingebaut.');
+    const chancen = u.geldchancen || [];
+    const gesamt = u.geldchancen_gesamt || chancen.length;
+    const plan = u.letzter_plan;
+    const planUrl = plan ? sichererLink(plan.plan_url) : null;
+    if (u.plan_in_arbeit) spaeterNeuLaden(5000); // Fortschritt sichtbar, ohne dass jemand neu laden muss
+    const k = karte([titel, tag(u.druck || 'unbekannt', DRUCK_TON[u.druck] || 'grau')],
+      u.druck === 'GRÜN' ? h('p', null, u.begruendung) : hinweis(u.begruendung, 'warn'),
+      kv([
+        ['Reichweite', u.reichweite],
+        ['Geprüfte Einnahmen (30 Tage)', u.einnahmen_30_tage],
+        ['Ausgaben (30 Tage)', u.ausgaben_30_tage],
+        ['Saldo (erfasste Buchungen)', u.saldo],
+        ['Offene Forderungen', u.offene_forderungen],
+        ['Feste Kosten pro Monat', u.fixkosten_monat],
+      ]),
+      h('p', { class: 'hilfe' }, u.hinweis || ''),
+      h('h3', null, 'Geldchancen – je näher am Geld, desto weiter oben'),
+      chancen.length
+        ? h('ul', { class: 'liste', 'data-pruef': 'geldchancen' }, chancen.slice(0, GELDCHANCEN_SOFORT).map(geldchanceZeile))
+        : leer('In euren Daten ist gerade keine Geldchance: keine offene Forderung, kein offenes Angebot, keine passende Ausschreibung.'),
+      chancen.length > GELDCHANCEN_SOFORT
+        ? aufklapp('Weitere ' + zahl(chancen.length - GELDCHANCEN_SOFORT) + ' Geldchancen anzeigen', 'dash-geldchancen', false,
+          h('ul', { class: 'liste' }, chancen.slice(GELDCHANCEN_SOFORT).map(geldchanceZeile)))
+        : null,
+      gesamt > chancen.length ? h('p', { class: 'hilfe' }, 'Angezeigt: ' + zahl(chancen.length) + ' von ' + zahl(gesamt) + ' – alle stehen im Überlebensplan.') : null,
+      u.plan_in_arbeit
+        ? h('p', { 'data-pruef': 'ueberlebensplan-laeuft' }, tag('Überlebensplan wird erstellt …', 'blau'), ' Die Anzeige aktualisiert sich von selbst.')
+        : null,
+      plan ? h('p', { class: 'meta' }, 'Letzter Plan: ' + zeitText(plan.beendet) + ' · ' + zahl(plan.folgeaufgaben || 0) + ' Folgeaufgaben angestoßen') : null,
+      h('div', { class: 'knopfreihe' },
+        aktionsKnopf(u.plan_in_arbeit ? 'Wird erstellt …' : 'Überlebensplan erstellen', '', async () => {
+          const r = await API.post('/api/ueberleben/plan', {});
+          if (r.hinweis) {
+            meldung(r.hinweis, 'info');
+            spaeterNeuLaden(1500);
+            return;
+          }
+          auftragGemeldet(r, 'den Überlebens-Agenten');
+        }, { 'data-pruef': 'ueberlebensplan-erstellen', disabled: !!u.plan_in_arbeit }),
+        planUrl ? h('a', { class: 'knopf zweit klein', href: planUrl, target: '_blank', rel: 'noopener noreferrer', 'data-pruef': 'ueberlebensplan-ansehen' }, 'Plan ansehen') : null,
+        u.kosten_erfasst ? null : h('a', { href: '#finanzen', class: 'knopf zweit klein', 'data-pruef': 'fixkosten-eintragen-link' }, 'Feste Kosten eintragen')));
+    k.dataset.pruef = 'ueberleben';
     return k;
   }
 
@@ -1554,7 +1622,7 @@
   // Bereich: Finanzen (REAL)
   // ===========================================================================
   async function ansichtFinanzen(z) {
-    const f = await API.get('/api/finanzen');
+    const [f, fx] = await Promise.all([API.get('/api/finanzen'), optional('/api/fixkosten')]);
     const liq = f.liquiditaet || {};
     z.append(h('section', { class: 'banner real', role: 'note', 'data-pruef': 'finanzen-banner' },
       h('div', { class: 'gross' }, 'REAL – tatsächliche Geschäftsfinanzen'),
@@ -1628,6 +1696,7 @@
     const forderungen = f.forderungen || [];
     z.append(karte('Forderungen',
       forderungen.length ? h('ul', { class: 'liste' }, forderungen.map(forderungZeile)) : leer('Keine Forderungen.')));
+    z.append(fixkostenKarte(fx));
 
     const buchungen = f.buchungen || [];
     const ausgeglichen = new Set(buchungen.filter(b => b.gegenbuchung_zu).map(b => b.gegenbuchung_zu));
@@ -1673,6 +1742,53 @@
         teile[1]));
     }
     return zeile;
+  }
+
+  // ---- Feste Kosten (Grundlage der Überlebenslage) -----------------------------
+  const INTERVALL_WAHL = [['monat', 'pro Monat'], ['jahr', 'pro Jahr']];
+
+  function fixkostenKarte(fx) {
+    const titel = 'Feste Kosten';
+    if (!fx || fx.fehlt) return nichtVerfuegbar(titel, 'Die festen Kosten sind in dieser Version des Servers noch nicht eingebaut.');
+    const liste = fx.fixkosten || [];
+    const form = formular({ 'data-pruef': 'fixkosten-formular' }, [
+      h('div', { class: 'felder-2' },
+        feld('Bezeichnung', eingabe('bezeichnung', { required: true, maxlength: 120, placeholder: 'z. B. Claude-Abo' })),
+        feld('Betrag in €', betragFeld('betrag', { required: true })),
+        feld('Wie oft', auswahl('intervall', INTERVALL_WAHL, 'monat')),
+        feld('Gilt ab (optional)', eingabe('seit', { type: 'date' }))),
+      h('div', { class: 'knopfreihe' }, absendeKnopf('Feste Kosten speichern')),
+    ], async (w, form) => {
+      await API.post('/api/fixkosten', ohneLeere(Object.assign({}, w, { betrag: betragPflicht(w.betrag) })));
+      form.reset();
+      meldung('Feste Kosten gespeichert. Die Überlebenslage rechnet ab jetzt damit.', 'ok');
+      neuLaden();
+    });
+    const k = karte([titel, fx.summe_monat_cent ? tag(fx.summe_monat + ' pro Monat', 'grau') : tag('nicht erfasst', 'warn')],
+      h('p', { class: 'hilfe' }, fx.hinweis || ''),
+      liste.length
+        ? h('ul', { class: 'liste', 'data-pruef': 'fixkosten-liste' }, liste.map(fixkostenZeile))
+        : leer('Noch keine festen Kosten erfasst. Ohne sie kann die Überlebenslage nicht sagen, ob das Geld reicht.'),
+      aufklapp('Feste Kosten eintragen', 'fin-fixkosten', !liste.length, form));
+    k.dataset.pruef = 'fixkosten';
+    return k;
+  }
+
+  function fixkostenZeile(fk) {
+    return h('li', { class: 'eintrag', 'data-pruef': 'fixkosten-eintrag' },
+      h('div', { class: 'eintrag-kopf' },
+        h('span', { class: 'eintrag-titel' }, fk.bezeichnung),
+        h('span', { class: 'betrag' }, fk.betrag + ' ' + (fk.intervall_name || fk.intervall))),
+      h('div', { class: 'meta' },
+        fk.intervall === 'jahr' ? h('span', null, 'entspricht ' + fk.monatlich + ' pro Monat') : null,
+        fk.seit ? h('span', null, (fk.zaehlt_schon ? 'seit ' : 'zählt ab ') + tagText(fk.seit)) : null,
+        h('span', null, 'eingetragen ' + zeitText(fk.erstellt))),
+      h('div', { class: 'knopfreihe' },
+        sicherheitsKnopf('Entfernen', 'Wirklich entfernen?', 'gefahr klein', async () => {
+          await API.post('/api/fixkosten/' + enc(fk.id) + '/entfernen');
+          meldung('Eintrag entfernt. Er bleibt im Protokoll nachvollziehbar.', 'ok');
+          neuLaden();
+        })));
   }
 
   // ===========================================================================
@@ -2738,6 +2854,7 @@
     z.append(h('p', { class: 'einleitung' }, 'Hier legt ihr die wenigen Werte fest, mit denen AUTONOMOUS rechnet und sucht. Technik steht unten eingeklappt.'));
     z.append(stundensatzKarte(e));
     z.append(auftragssucheKarte(e));
+    z.append(ueberlebensplanKarte(e));
     z.append(iphoneKarte(ip));
     z.append(kiModellKarte(e, ms));
     z.append(sicherungKarte(e.sicherungen || []));
@@ -2977,6 +3094,36 @@
         ['Internet-Recherche', w.internet_recherche_erlaubt ? 'an' : 'aus'],
         ['Tägliche Suche', w.auftragssuche_taeglich ? 'an' : 'aus'],
       ]),
+      h('div', { class: 'trenner' }),
+      form);
+  }
+
+  /** Täglicher Überlebensplan des Überlebens-Agenten: Schalter (Standard an) – nur interne Schritte. */
+  function ueberlebensplanKarte(e) {
+    const titel = 'Überlebens-Agent';
+    const w = e.werte || {};
+    if (!('ueberlebensplan_taeglich' in w)) return nichtVerfuegbar(titel, 'Diese Einstellung gibt es in dieser Version des Servers noch nicht.');
+    const an = !!w.ueberlebensplan_taeglich;
+    const schalter = h('input', { type: 'checkbox', name: 'ueberlebensplan_taeglich', checked: an, id: 'ueberleben-schalter', 'data-pruef': 'ueberleben-schalter' });
+    const form = formular({ 'data-pruef': 'ueberleben-formular' }, [
+      h('label', { class: 'schalter', for: 'ueberleben-schalter' }, schalter,
+        h('span', null, h('strong', null, 'Jeden Tag selbstständig einen Überlebensplan erstellen'), h('br'),
+          h('span', { class: 'hilfe' }, 'Höchstens einmal am Tag, solange AUTONOMOUS läuft. Der Agent rechnet nur mit euren echten Zahlen und stößt nur interne Aufgaben an: '
+            + 'Suche (nur wenn die Internet-Recherche erlaubt ist), Bewerbungs-Mappen und Nachfass-Entwürfe. Er sendet nichts, bezahlt nichts und gibt nichts ab. Standard: an.'))),
+      h('div', { class: 'knopfreihe' }, absendeKnopf('Überlebensplan speichern', { 'data-pruef': 'ueberleben-speichern' })),
+    ], async (werte) => {
+      const neu = !!werte.ueberlebensplan_taeglich;
+      if (neu === an) {
+        meldung('Nichts geändert.', 'info');
+        return;
+      }
+      await API.post('/api/einstellungen', { schluessel: 'ueberlebensplan_taeglich', wert: neu });
+      meldung(neu ? 'Täglicher Überlebensplan ist jetzt an.' : 'Täglicher Überlebensplan ist jetzt aus – Pläne gibt es nur noch auf Knopfdruck im Dashboard.', 'ok');
+      neuLaden();
+    });
+    return h('section', { class: 'karte', 'data-pruef': 'ueberleben-einstellung' },
+      h('h2', null, titel),
+      kv([['Täglicher Überlebensplan', an ? tag('an', 'ok') : tag('aus', 'grau')]]),
       h('div', { class: 'trenner' }),
       form);
   }
