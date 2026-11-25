@@ -1,16 +1,23 @@
 # AUTONOMOUS – Bericht je Phase (PDF Abschnitt 14)
 
-Grundlage: „AUTONOMOUS – Master Development Directive v3.0“ (20.11.2026). Stand dieses Berichts: 21.11.2026.
+Grundlage: „AUTONOMOUS – Master Development Directive v3.0“ (20.11.2026). Stand dieses Berichts: 25.11.2026.
 
 Status-Begriffe (Strict Execution Protocol): **GEPLANT · IMPLEMENTIERT · ERFOLGREICH AUSGEFÜHRT · ERFOLGREICH GETESTET ·
 FEHLGESCHLAGEN · NICHT VERIFIZIERT**. „Getestet“ heißt: automatische Tests in der Entwicklungsumgebung (Linux,
 Python 3.13). **Auf dem Mac ist nichts verifiziert** – das gilt für jede Zeile unten.
 
-Letzter vollständiger Lauf (22.11.2026): Kompilieren fehlerfrei · **248 von 248 Unit-Tests bestanden unter Python 3.13
-und unter Python 3.9** (wie auf dem Mac vorinstalliert), 0 Warnungen über hängende Prozesse · Prüfwerkzeug `ruff`
-(Fehlerregeln): keine Fehler · **252 von 252 Oberflächen-Prüfungen bestanden unter Python 3.13 und 3.9** (Chromium,
-iPhone 390 px und Desktop 1280 px) · **Safari-Engine WebKit 26.6** (iPhone-13-Emulation, mit echten Ausschreibungen):
-keine Fehler · fehlgeschlagen: keine.
+Letzter vollständiger Lauf (25.11.2026, Stand `b90c1eb`/`278d51c`, saubere Kopie): Kompilieren fehlerfrei unter
+Python 3.13 und 3.9 · **395 von 395 Unit-Tests bestanden unter Python 3.13, unter Python 3.9 395 mit 1 übersprungenem**
+(QR-Gegenprobe, braucht Zusatzpakete) · `ruff` (Fehlerregeln) und `shellcheck` (5 Skripte): keine Befunde ·
+**318 von 318 Oberflächen-Prüfungen bestanden unter Python 3.13 und 3.9** · **iPhone-Prüfung 25 von 25** (WebKit,
+echte WLAN-Adresse, QR-Code fotografiert und unabhängig gelesen) · **Safari-Engine WebKit 26.6**: alle 9 Bereiche
+und die Überlebensplan-Seite ohne Fehler · fehlgeschlagen: keine.
+
+**Echter Gesamtlauf der Einrichtungszeile** (25.11.2026): `curl … | bash` direkt von GitHub, Python 3.9, leerer
+Benutzerordner → AUTONOMOUS läuft, Schreibtisch-Symbole da, KI-Einrichtung wählte bei 16 GB gemma3:4b, erstellte
+„autonomous“, Probeaufruf „OK“, dann umgestellt (Exit-Code 0). Danach über den laufenden Server: echte Suche
+(24 s, 239 Ausschreibungen angezeigt) und Tagesplan mit KI-Kurzfassung (17 s). **ERFOLGREICH AUSGEFÜHRT** – in der
+Entwicklungsumgebung (Linux; Ollama war schon installiert). Auf dem Mac: NICHT VERIFIZIERT.
 
 **Echter Gesamtlauf über den laufenden Server** (21.11.2026, echte Internet-Recherche, echtes lokales KI-Modell
 Ollama 0.40.17/gemma3:1b): Ausschreibungssuche (3 Quellen ok, 289 gefunden, 59 passend) → Bewerbungsmappe für die
@@ -89,6 +96,8 @@ Geschäftschancen bewerten → Tagesplan: **6 von 6 Aufgaben abgeschlossen, 0 fe
 | Nachgeliefert (21.11.2026) | **Sicherheitsprüfung** mit den Skills `securitymaxxing:audit/injection/api` (unabhängiger Prüfer, nur lesend): 0 kritisch, 0 hoch, 1 mittel, 7 niedrig – alle **behoben** mit `securitymaxxing:fix` und je einem Test (`tests/test_haertung.py`), Prüfskripte danach ohne Befund. **HawkScan** (DAST): NICHT AUSGEFÜHRT – Programm `hawk`, StackHawk-Konto/Schlüssel und Docker fehlen. **3 Code-Fehler** mit `ruff` gefunden und behoben (u. a. falsche Zuordnung von Angebotszahlen im Marktbericht, Test beweist: vorher 5,5 statt 8). **2 weitere Fehler** behoben: doppelt definierte Funktion `_zahl` ließ „Geschäftschancen bewerten“ abbrechen (gefunden von der Oberflächen-Prüfung, jetzt mit Unit-Test); Testhilfsprozesse wurden nicht abgewartet (Warnung unter Python 3.9, jetzt 0). **Oberfläche**: Marktbericht (CEO-Zentrale), KI-Modell mit „Modell testen“ (Einstellungen, echt mit gemma3:1b geprüft) und die 10 wichtigsten Punkte des Design-Reviews umgesetzt (Skills `ui-consistency`, `ui-design-review`). **Mac-Lauffähigkeit**: alle Tests, echter Suchlauf und Oberfläche unter Python 3.9; Startskript prüft Python-Version und belegten Port (4 Fälle ERFOLGREICH AUSGEFÜHRT). |
 | Nachgeliefert (22.11.2026) | **Dubletten-Erkennung** (`auftraege/dubletten.py`): gleiche Ausschreibung aus mehreren Quellen wird vorsichtig erkannt, Doppelte standardmäßig ausgeblendet, „Auch gefunden bei …“ – ERFOLGREICH GETESTET; an echten Daten vom 22.11.2026: 9 Gruppen, alle von Hand als echte Dubletten bestätigt, 0 Fehlgriffe. **3 Schwächen der Oberfläche behoben** (missverständliche rote „0“, „Angebot daraus erstellen“ bei offenem Preis, interne Namen im KI-Protokoll). |
 | Nicht fertig | Hausverwaltungen automatisch finden: NICHT IMPLEMENTIERT (keine verlässliche, erlaubte Quelle). Dubletten zwischen Vergabemarktplatz NRW und anderen Quellen: an echten Daten noch nicht vorgekommen, daher dort nicht erprobt. Safari: mit der **echten Safari-Engine WebKit 26.6 in iPhone-13-Emulation ERFOLGREICH GETESTET** (22.11.2026: alle 9 Bereiche ohne Darstellungs- und Skriptfehler, keine waagerechte Scrollleiste; erzeugte Seiten unter der neuen Sicherheitsrichtlinie korrekt, Telefon- und E-Mail-Links vorhanden; Skript `tests/ui_safari_pruefung.js`). Auf einem echten iPhone/Mac: NICHT VERIFIZIERT. |
+| Nachgeliefert (23.–25.11.2026) | **MacBook Air als eigener Server**: Dauerbetrieb über macOS (LaunchAgent: startet bei jeder Anmeldung, nach Absturz neu), Symbole „starten/stoppen/Autostart aus“, Daten bleiben bei Aktualisierung (echt geprüft: Schlüssel unverändert). **iPhone im eigenen WLAN**: Schalter (Standard aus), QR-Code, nur mit geheimem Link. **Überlebens-Agent**: Ampel ROT/GELB/GRÜN nur aus echten, geprüften Buchungen, feste Kosten (nur der Eigentümer trägt ein), Geldchancen nach Nähe zum Geld, täglicher Plan mit begrenzten internen Folgeaufgaben (Standard an, abschaltbar); echter Lauf: 285 Ausschreibungen → 43 Geldchancen → 3 echte Bewerbungs-Mappen, 0 Freigaben, 0 Buchungen. **Eigenes KI-Modell „autonomous“** (angepasst, nicht trainiert: Gemma 3 + eingebaute Arbeitsregeln): Prüfstand mit 15 Fällen, Bewertung nur nach festen Regeln – „autonomous“ auf gemma3:4b 98 %, Basismodell 76 % (echter Lauf, Linux ohne Grafikkarte); Faktenwächter für KI-Vorschläge in Sales und CEO; Einrichtungsskript ohne Fragen. Unabhängige UI-Prüfung (Skill `ui-consistency:verifying`, Kalibrierung mit eingebauter Abweichung gefunden): 0 Abweichungen nach 2 Runden. Sicherheitsprüfung (`securitymaxxing:diff`) des Überlebens-Agenten: keine Befunde. |
+| Grenzen der KI (echt beobachtet) | Im echten Lauf vom 25.11.2026 drehte die KI-Kurzfassung einen Satz um: Plan „Noch keine Ziele festgelegt – bitte anlegen“, KI „Bitte legen Sie noch keine Ziele fest“. Der Faktenwächter prüft Zahlen, Kontakte, Preise und Zusagen, nicht den Sinn. Darum bleibt der Plan maßgeblich und jeder KI-Text als ungeprüft gekennzeichnet. Im Prüfstand empfahl auch das beste Modell einmal den Rückruf unter der Nummer eines Betrugsanrufers. gemma3:12b ist nicht gemessen und wird deshalb nie automatisch gewählt. |
 | Probleme/Risiken | Fremdseiten können ihr Format ändern → die Suche dieser Quelle schlägt dann fehl (wird angezeigt, andere Quellen laufen weiter). Vergabemarktplatz NRW: nur die 20 neuesten Einträge der Startseite. |
 | Dateien | `netz.py`, `auftraege/*`, `agenten/akquise.py`, `api_auftraege.py`, `produkte/kalkulation.py`, `server.py`, `db.py` (Migration 2 und 3), `ui/*`, `docs/ZAHLUNGEN.md`, `docs/BEDROHUNGSMODELL.md` |
 | Nächster Schritt | Entscheidung A/B/C (KI-Modell und eigene Marktrecherche); danach erster echter Start auf dem Mac |
@@ -104,3 +113,5 @@ Geschäftschancen bewerten → Tagesplan: **6 von 6 Aufgaben abgeschlossen, 0 fe
 4. **Hausverwaltungen automatisch finden** wurde angekündigt, aber nicht umgesetzt.
 5. **Berichte je Phase** wurden erst nachträglich in diesem Format erstellt, nicht nach jeder Phase.
 6. **HawkScan** (dynamischer Sicherheitstest) konnte nicht laufen (Programm, Konto und Docker fehlen); ersetzt durch eine unabhängige Prüfung gegen den laufenden Server mit den Skills `securitymaxxing`.
+7. **Ungenaue Commit-Nachricht:** Der Zwischenstand-Commit `e9b8dbc` (23.11.2026) sagt „alle Tests grün“. In dem Moment waren die Unit-Tests grün, die Oberflächen-Prüfung aber rot (der neue Test war absichtlich zuerst geschrieben). Der fertige Stand (`8917eb9`) ist vollständig grün.
+8. **Basismodell:** Der KI-Agent hatte ab 14 GB Arbeitsspeicher gemma3:12b vorgesehen. Weil 12b nie gemessen wurde, wählt das Skript jetzt ab 6 GB das gemessene gemma3:4b; 12b nur auf ausdrücklichen Wunsch.
