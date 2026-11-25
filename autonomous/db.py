@@ -329,6 +329,20 @@ def _migration_gegenbuchung_einmal(con):
 
 MIGRATIONEN.append(_migration_gegenbuchung_einmal)
 
+# 5 – Feste Kosten für die Überlebenslage (ueberleben.py). Nur der Eigentümer trägt ein, nichts ist vorbelegt.
+#     Entfernen setzt aktiv=0 (bleibt nachvollziehbar). Jahresbeträge zählen mit 1/12 je Monat.
+MIGRATIONEN.append("""
+CREATE TABLE fixkosten (
+    id TEXT PRIMARY KEY,
+    bezeichnung TEXT NOT NULL CHECK (length(trim(bezeichnung)) BETWEEN 1 AND 120),
+    betrag_cent INTEGER NOT NULL CHECK (betrag_cent > 0),
+    intervall TEXT NOT NULL CHECK (intervall IN ('monat','jahr')),
+    seit TEXT CHECK (seit IS NULL OR seit GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'),
+    erstellt TEXT NOT NULL,
+    aktiv INTEGER NOT NULL DEFAULT 1 CHECK (aktiv IN (0,1))
+);
+""")
+
 
 def jetzt():
     return datetime.datetime.now().astimezone().isoformat(timespec="seconds")

@@ -88,8 +88,10 @@ def standard_register():
     from .finance import FinanceAgent
     from .learning import LearningAgent
     from .akquise import AkquiseAgent
+    from .ueberleben import UeberlebensAgent
 
     r = Register()
-    for klasse in (CeoAgent, ResearchAgent, ProductAgent, SalesAgent, FinanceAgent, LearningAgent, AkquiseAgent):
+    for klasse in (CeoAgent, ResearchAgent, ProductAgent, SalesAgent, FinanceAgent, LearningAgent, AkquiseAgent,
+                   UeberlebensAgent):
         r.registrieren(klasse())
     return r
